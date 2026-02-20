@@ -1,0 +1,10 @@
+# Microservice Folder
+
+This folder contains the backend service code for the app.
+Typically includes:
+- Dockerfile
+- package.json
+- src/index.js
+- Service manifest
+
+Use the service template from packages/descix-cli/templates/scaffolds/microservice/ as a starting point.

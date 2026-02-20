@@ -1,0 +1,12 @@
+node_modules
+dist
+.env
+*.tgz
+.DS_Store
+*.log
+coverage
+.nyc_output
+
+# Credentials and test artifacts
+**/.descix/wallet.json
+**/login_output*.txt

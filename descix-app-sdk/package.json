@@ -1,0 +1,39 @@
+{
+  "name": "@descix/app-sdk",
+  "version": "0.1.0",
+  "description": "DeSciX App Shell - init-to-READY logic, core API, Powch integration, dev proxy config",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./dev": "./src/dev/index.js",
+    "./powch-client": "./src/powch/PowchClient.js"
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "lint": "eslint src/"
+  },
+  "dependencies": {
+    "@discord/embedded-app-sdk": "^1.9.0",
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.0",
+    "@fontsource/roboto": "^5.2.5",
+    "@mui/icons-material": "^6.4.8",
+    "@mui/material": "^6.4.8",
+    "@reown/appkit": "^1.7.2",
+    "@reown/appkit-adapter-wagmi": "^1.7.2",
+    "github-markdown-css": "^5.8.1",
+    "marked": "^15.0.7",
+    "react": "^18.0.0 || ^19.0.0",
+    "react-dom": "^18.0.0 || ^19.0.0",
+    "viem": "^2.26.0",
+    "wagmi": "^2.14.16"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0 || ^19.0.0",
+    "react-dom": "^18.0.0 || ^19.0.0"
+  },
+  "license": "UNLICENSED"
+}

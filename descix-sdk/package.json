@@ -1,0 +1,39 @@
+{
+  "name": "@descix/sdk",
+  "version": "1.0.0",
+  "description": "DeSciX SDK - Shared runtime libraries for Node.js and Browser",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./node": "./src/index.js",
+    "./browser": "./browser/index.js",
+    "./mcp": "./mcp/mcp-server.js",
+    "./mcp/transports": "./mcp/transports/index.js",
+    "./mcp/transports/stdio": "./mcp/transports/stdio-transport.js",
+    "./mcp/transports/http-sse": "./mcp/transports/http-sse-transport.js",
+    "./integrations/git": "./src/integrations/gitUtils.js",
+    "./orchestrators/wizard": "./src/orchestrators/wizardOrchestrator.js",
+    "./managers/community": "./src/managers/communityManager.js",
+    "./managers/app": "./src/managers/appManager.js"
+  },
+  "keywords": [
+    "descix",
+    "sdk",
+    "mcp",
+    "rag",
+    "git",
+    "wizard"
+  ],
+  "author": "DeSciX",
+  "license": "@Daita_DeSci_Community_License_v1/Daita_DeSci_Community_License_v1.pdf",
+  "scripts": {
+    "pack": "npm pack"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.1"
+  }
+}

@@ -1,0 +1,243 @@
+---
+alwaysApply: true
+---
+
+# DeSciX SDK Agent Instructions
+
+You have SDK agent assets available locally at `{{SDK_ASSETS_PATH}}/`.
+
+## Key Architecture Concepts
+
+### Configuration: workspace.json is the Config File
+
+- **`workspace.json`** at `.descix/workspace.json` is the configuration file
+- **Context auto-detection** - CLI commands detect community/app from current working directory
+
+### CLI = Git Mode ONLY
+
+- The CLI only supports **git-mode** operations (local processing with Git version control)
+- **Drive-mode** apps are managed via PWA only (server-side processing)
+- All content starts on Drive - developers pull it locally, then manage with Git
+
+### App Folder Structure (Convention-Based)
+
+```
+my-app/
+├── assets/          # App metadata (icon.png, app_description.md, system_instructions.md)
+├── kb/              # Knowledge base
+│   ├── staging/     # Files to push TO Drive
+│   ├── General/     # Text files pulled FROM Drive
+│   └── chunks/      # Generated JSON chunks (Git-tracked)
+├── site/            # CodeSite static files (optional)
+└── microservice/    # Backend service code (optional)
+```
+
+## Post-Setup Initialization
+
+**IMPORTANT**: Check `.descix/workspace.json` for `_needsAgentSetup: true`.
+
+When this flag is set, the user has just completed `descix setup` and needs your help configuring their workspace:
+
+1. **Greet the user** and confirm MCP is working: "I can see your DeSciX setup is complete. Let me help you configure your workspace."
+2. **Show their entitlements** from the cached JSON below (communities and apps they own)
+3. **Ask**: "Which app would you like to configure first?" or "Would you like me to scan your folders and suggest mappings?"
+4. **For each app folder**:
+   - Analyze the folder structure using heuristics from `{{SDK_ASSETS_PATH}}/instructions/folder-analysis.md`
+   - Recommend a packaging type using the decision tree from `{{SDK_ASSETS_PATH}}/instructions/packaging-types.md`
+   - Register the app in `workspace.json` with its localPath and absolutePath
+5. **When done**, set `_needsAgentSetup: false` in workspace.json
+
+If user asks "Help me configure my workspace" or similar, follow this flow.
+
+## Entitlements-First Principle
+
+**CRITICAL**: Users purchase apps/communities in the PWA first. Your role is to help configure local folders for apps they already own.
+
+### On First Interaction
+
+1. Check `.descix/workspace.json` for existing configuration
+2. If `_needsAgentSetup: true`, follow the Post-Setup Initialization flow above
+3. If unconfigured, read `{{SDK_ASSETS_PATH}}/instructions/onboarding-flow.md`
+4. For fresh entitlements: `execute_remote_command({ command: "fetch_my_purchases" })`
+5. Guide user through folder-to-app mapping in `workspace.json`
+
+## Local Asset References
+
+For quick decisions, read these local files (no network required):
+
+| File | Purpose |
+|------|---------|
+| `{{SDK_ASSETS_PATH}}/instructions/packaging-types.md` | App type taxonomy and decision tree |
+| `{{SDK_ASSETS_PATH}}/instructions/folder-analysis.md` | Detect project type from files |
+| `{{SDK_ASSETS_PATH}}/instructions/conversation-guides.md` | Dialogue templates |
+| `{{SDK_ASSETS_PATH}}/instructions/onboarding-flow.md` | Full onboarding workflow |
+
+## Template Usage
+
+When scaffolding apps, use templates from `{{SDK_ASSETS_PATH}}/templates/`:
+
+| Packaging Type | Templates Available |
+|----------------|---------------------|
+| `knowledge-only` | Assets folder only |
+| `static-site` | Site folder scaffold |
+| `microservice` | `manifest.json.template`, `SERVICE_README.template` |
+| `dynamic-site` | Site + microservice scaffolds |
+
+Replace `{{PLACEHOLDER}}` values with actual data from user input.
+
+## User Entitlements (Cached at Setup)
+
+```json
+{{ENTITLEMENTS_JSON}}
+```
+
+**Primary Community**: {{PRIMARY_COMMUNITY}}
+
+Use this cached data for quick checks. For fresh data, call `fetch_my_purchases`.
+
+## Tiered Access Pattern
+
+Use the appropriate tier based on what you need:
+
+### Tier 1: Local Files (Instant)
+```javascript
+// Read instructions directly
+Read("{{SDK_ASSETS_PATH}}/instructions/packaging-types.md")
+```
+**Use for**: Quick lookups, decision trees, templates
+
+### Tier 2: tell_me_how (Semantic Discovery)
+```javascript
+tell_me_how({ 
+  question: "How do I scaffold a microservice?",
+  scope: "entitlements"
+})
+```
+**Use for**: Finding the right tool for a task
+
+### Tier 3: chat_with_kb (Rich Context)
+```javascript
+chat_with_kb({
+  communityId: "descix",
+  appId: "docs",
+  kbId: "sdk",
+  message: "Explain the deployment workflow for dynamic sites"
+})
+```
+**Use for**: Complex questions requiring reasoning
+
+### Tier 4: execute_remote_command (Action)
+```javascript
+execute_remote_command({
+  command: "scaffold_app_type",
+  params: { type: "microservice", app_id: "myapp", ... }
+})
+```
+**Use for**: Actually creating/modifying things
+
+## Tool Discovery
+
+Use `tell_me_how` to discover platform capabilities:
+
+```javascript
+// Discover tools for a task
+tell_me_how({ question: "How do I deploy my app?", scope: "entitlements" })
+
+// Then execute the recommended command
+execute_remote_command({ command: "discovered_command", params: {...} })
+```
+
+**Scope Options**:
+- `project`: Only tools for apps in workspace.json
+- `entitlements`: Tools for all apps user owns (default)
+- `discovery`: All platform tools (may show purchasable)
+
+## App Configuration Workflow
+
+When user wants to configure a folder:
+
+1. **Analyze folder** using heuristics from `folder-analysis.md`
+2. **Recommend packaging type** using decision tree from `packaging-types.md`
+3. **Present options** using dialogue from `conversation-guides.md`
+4. **Register app** in `workspace.json` with localPath and absolutePath
+5. **Guide CLI commands** based on packaging type
+
+## Primary CLI Commands
+
+Guide users to these git-mode commands:
+
+### Knowledge Base Commands
+| Command | Purpose |
+|---------|---------|
+| `descix kb pull` | Pull text-converted content from Drive |
+| `descix kb push` | Push staging files to Drive |
+| `descix kb chunk` | Generate JSON chunks from text files |
+| `descix kb sync` | Push chunks to Pinecone |
+| `descix kb build` | Full pipeline: pull → chunk → sync |
+| `descix kb status` | Show local vs Pinecone sync status |
+
+### Site Commands
+| Command | Purpose |
+|---------|---------|
+| `descix site init` | Copy site scaffold to app |
+| `descix site upload` | Deploy CodeSite to GCS |
+| `descix site servelocal [port]` | Register local dev server port |
+| `descix site list` | List deployed site files |
+| `descix site status` | Get deployment status |
+
+### Microservice Commands
+| Command | Purpose |
+|---------|---------|
+| `descix microservice init` | Copy microservice scaffold to app |
+| `descix microservice register` | Register microservice with gateway |
+| `descix microservice vectorize` | Vectorize README for discovery |
+| `descix microservice list` | List registered microservices |
+| `descix microservice health <name>` | Check microservice health |
+| `descix microservice reload` | Reload manifests (admin) |
+
+**Context Auto-Detection**: When run from within an app directory, these commands auto-detect community/app from `workspace.json`. Otherwise use `-c` and `-a` flags.
+
+## SDK Tools Available (Remote)
+
+These tools are auto-registered and discoverable via `tell_me_how`:
+
+| Tool | Purpose |
+|------|---------|
+| `scaffold_app_type` | Create boilerplate for chosen packaging type |
+| `analyze_folder_structure` | Detect project type from folder contents |
+| `get_app_sync_status` | Check what's synced (KB, site, service) |
+| `fetch_my_purchases` | Get user's entitlements |
+| `register_service` | Register microservice with gateway |
+| `vectorize_service_readme` | Enable tell_me_how discovery |
+
+## Key Principles
+
+1. **Never assume** - Always ask before creating mappings
+2. **Entitlements are truth** - Can't configure apps user doesn't own
+3. **Local first** - Read local assets before making network calls
+4. **Guide, don't dictate** - Present options, let user choose
+5. **workspace.json is truth** - All configuration goes here
+
+## Error Recovery
+
+If commands fail:
+1. Check authentication: Is `wallet.json` valid?
+2. Check entitlements: Does user own the app?
+3. Check configuration: Is app registered in `workspace.json`?
+4. Check location: Are you in the app directory or using `-c/-a` flags?
+5. Use `tell_me_how` to find alternative approaches
+
+### Common Errors
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| "Workspace not configured" | No workspace.json | Run `descix init` |
+| "Could not determine app context" | Not in app directory | `cd` to app or use `-c/-a` flags |
+| "ADC not configured" | Missing Google auth | Run `gcloud auth application-default login` |
+| "App not found in workspace" | App not registered | Run `descix setup` or add to workspace.json |
+
+---
+
+*Generated by DeSciX SDK Setup*
+*SDK Version: {{SDK_VERSION}}*
+*Workspace: {{WORKSPACE_PATH}}*

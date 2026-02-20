@@ -1,0 +1,29 @@
+{
+  "name": "@descix/service-starter",
+  "version": "1.0.0",
+  "description": "DeSciX Add-on Service Starter Template (MCP-Native)",
+  "main": "app.js",
+  "type": "module",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "nodemon app.js",
+    "register": "node scripts/register.js",
+    "gen-jwt-secret": "node -e 'console.log(require(\"crypto\").randomBytes(32).toString(\"hex\"))'"
+  },
+  "dependencies": {
+    "@descix/cloud-core": "^1.0.0",
+    "@google-cloud/firestore": "^7.1.0",
+    "@google-cloud/secret-manager": "^5.0.1",
+    "@google-cloud/storage": "^7.7.0",
+    "axios": "^1.6.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "google-auth-library": "^9.4.1",
+    "@descix/sdk": "^1.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  },
+  "license": "@Daita_DeSci_Community_License_v1/Daita_DeSci_Community_License_v1.pdf"
+}

@@ -1,0 +1,418 @@
+/**
+ * CloudConfig - Universal Service Configuration
+ * Shared bootstrap for DeSciX platform microservices (Core, Powch, Discord, etc.)
+ *
+ * Uses rootPath to resolve .env, defaults-config.json, dev-overrides.json.
+ * Loads from Secret Manager via config-schema.json key definitions.
+ */
+
+import { fileURLToPath } from 'url';
+import { GoogleAuth } from 'google-auth-library';
+import dotenv from 'dotenv';
+import path from 'path';
+import { SecretManagerServiceClient } from '@google-cloud/secret-manager';
+import fs from 'fs';
+import { createRequire } from 'module';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const require = createRequire(import.meta.url);
+
+const configSchemaPath = path.resolve(__dirname, '../config-schema.json');
+const configSchema = require(configSchemaPath);
+
+// Constants exported for consumers
+class ProductTypes {
+    static COMMUNITY = "COMMUNITY";
+    static APP = "APP";
+    static KNOWLEDGEBASE = "KNOWLEDGEBASE";
+    static ROLE = "ROLE";
+    static IPDOC = "IPDOC";
+}
+
+const LoginStatus = {
+    GUEST: 'GUEST',
+    NOT_AUTHENTICATED: 'NOT_AUTHENTICATED',
+    AUTHENTICATED: 'AUTHENTICATED',
+    CONNECTED: 'CONNECTED',
+    NOT_STAKED: 'CONNECTED',
+    STAKED: 'STAKED',
+    AUTH_FAILED: 'AUTH_FAILED',
+};
+
+const NetworkStatus = { OK: 'OK', ERROR: 'ERROR' };
+
+const PERMISSIONS = {
+    AIRDROP_ELIGIBLE: 'AIRDROP_ELIGIBLE',
+    PLATFORM_MANAGE_COMMUNITIES: 'PLATFORM_MANAGE_COMMUNITIES',
+    PLATFORM_MANAGE_APPS: 'PLATFORM_MANAGE_APPS',
+    PLATFORM_MANAGE_ROLES: 'PLATFORM_MANAGE_ROLES',
+    PLATFORM_MANAGE_USERS: 'PLATFORM_MANAGE_USERS',
+    COMMUNITY_MANAGE_APPS: 'COMMUNITY_MANAGE_APPS',
+    COMMUNITY_MANAGE_ROLES: 'COMMUNITY_MANAGE_ROLES',
+    COMMUNITY_MANAGE_TOKENS: 'COMMUNITY_MANAGE_TOKENS',
+    APP_MANAGE_ROLES: 'APP_MANAGE_ROLES',
+    APP_MANAGE_USERS: 'APP_MANAGE_USERS',
+    ACCESS_PRIVATE_KB: 'ACCESS_PRIVATE_KB',
+};
+
+const GUEST_ALLOWED_COMMANDS = [
+    'find_communities', 'get_community_details', 'get_community', 'list_apps_for_community',
+    'get_token_contract_addresses', 'fetch_my_purchases', 'log_content_event',
+    'create_stripe_checkout_session', 'get_crypto_deposit_info', 'get_stripe_status',
+    'powch_register_begin', 'powch_register_finish', 'powch_login_begin', 'powch_login_finish',
+    'powch_write_wallet_begin', 'powch_send_verification_code', 'powch_verify_code',
+    'powch_check_verification_proof', 'check_onboarding_status', 'register_powch_wallet_address',
+    'get_token_purchase_info', 'get_token_price',
+    'estimate_token_purchase', 'authenticate_by_signature', 'get_purchase_status',
+    'get_crypto_price', 'get_all_crypto_prices', 'get_supported_chains', 'crypto_to_usd',
+    'usd_to_crypto', 'create_crypto_quote', 'get_quote_status', 'get_claim_details',
+    'auth_discord', 'auth_google', 'get_google_config', 'get_discord_config', 'get_stripe_config',
+    'get_wallet_config', 'send_email_verification', 'verify_email_code', 'register_email_tos',
+    'register_native_user', 'reconnect_by_wallet', 'login_wallet_session', 'device_request_login',
+    'device_check_status', 'device_validate', 'device_complete', 'get_platform_holdings',
+    'get_market_overview', 'get_user_nfts', 'get_pool_state', 'get_pool_liquidity',
+    'submit_transaction', 'submit_meta_transaction',
+    'get_pool_market_overview', 'get_price_history', 'get_pool_token_info', 'get_migration_status',
+    'list_services', 'get_service', 'service_health_check'
+];
+
+function networkResponse(netStatus, authStatus, message) {
+    const validAuthStatuses = Object.values(LoginStatus);
+    const finalAuthStatus = validAuthStatuses.includes(authStatus) ? authStatus : LoginStatus.CONNECTED;
+    if (typeof message === 'object' && message !== null && message.status) {
+        if (message.status === NetworkStatus.ERROR) {
+            return { status: NetworkStatus.ERROR, auth_status: finalAuthStatus, message: message.message, code: message.code };
+        }
+        if (message.status === NetworkStatus.OK) {
+            return { status: NetworkStatus.OK, auth_status: finalAuthStatus, message: message.message || message };
+        }
+    }
+    return { status: netStatus, auth_status: finalAuthStatus, message: message };
+}
+
+function stripInvalidAndLower(username) {
+    const disallowed_chars = " #%&*+/=?^`{|}~";
+    const trans = new RegExp(`[${disallowed_chars}]`, 'g');
+    return username.replace(/ /g, "_").toLowerCase().replace(trans, "");
+}
+
+let _instance = null;
+let _rootPath = null;
+
+/**
+ * Create or get CloudConfig singleton.
+ * Call with rootPath before any other config access. rootPath is the directory
+ * containing .env, defaults-config.json, dev-overrides.json.
+ * @param {{ rootPath: string }} options
+ * @returns {CloudConfig}
+ */
+export function createCloudConfig(options = {}) {
+    const rootPath = options.rootPath ? path.resolve(options.rootPath) : null;
+    if (_instance) {
+        return _instance;
+    }
+    if (!rootPath) {
+        throw new Error('[CloudConfig] rootPath is required on first call: createCloudConfig({ rootPath: "path/to/app" })');
+    }
+    _rootPath = rootPath;
+    _instance = new CloudConfig(rootPath);
+    return _instance;
+}
+
+/**
+ * Get the current CloudConfig instance (must have been created via createCloudConfig).
+ */
+export function getCloudConfig() {
+    if (!_instance) {
+        throw new Error('[CloudConfig] Must call createCloudConfig({ rootPath }) before getCloudConfig()');
+    }
+    return _instance;
+}
+
+class CloudConfig {
+    constructor(rootPath) {
+        this.__rootPath = path.resolve(rootPath);
+        this.__appDir = this.__rootPath;
+        this.__servicesDir = path.resolve(this.__appDir, 'services');
+
+        if (process.env.DEPLOY_ENV !== 'production') {
+            dotenv.config({ path: path.resolve(this.__appDir, '.env'), override: false });
+        } else {
+            console.log("Running in production mode. Skipping .env file load.");
+        }
+
+        this._loadBootstrapKeys();
+
+        this.secretClient = null;
+        this.__googleApplicationCredentials = null;
+        this.DAITA_ABI = null;
+
+        this._loadDefaults();
+
+        this.__port = process.env.PORT || this.DEFAULT_PORT;
+        this.PORT = this.__port;
+        console.error("PORT: ", this.__port);
+    }
+
+    get expressPort() { return this.__port; }
+
+    get expressOptions() {
+        if (this.DEBUG_LOCAL) {
+            process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+            try {
+                return {
+                    key: fs.readFileSync(path.resolve(this.__appDir, 'key.pem')),
+                    cert: fs.readFileSync(path.resolve(this.__appDir, 'cert.pem')),
+                };
+            } catch (e) {
+                console.warn("[Config] SSL certs not found, continuing without HTTPS options locally");
+                return {};
+            }
+        }
+        return {};
+    }
+
+    get appDir() { return this.__appDir; }
+    get servicesDir() { return this.__servicesDir; }
+    servicesFilePath(filename) { return path.resolve(this.__servicesDir, filename); }
+    get HTTP_WORKER() { return this.servicesFilePath('httpWorker.js'); }
+    get isDebug() { return this.DEBUG_PROXY || this.DEPLOY_ENV === 'dev'; }
+
+    get GOOGLE_APPLICATION_CREDENTIALS() {
+        return this.__googleApplicationCredentials;
+    }
+
+    formatString(template, replacements) {
+        return template.replace(/{(\w+)}/g, (match, key) => replacements[key] || match);
+    }
+
+    generateGuid() {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+            const r = Math.random() * 16 | 0;
+            const v = c === 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
+    }
+
+    _loadBootstrapKeys() {
+        const { bootstrap_keys, boolean_keys } = configSchema;
+        
+        // 1. Load from process.env first (Production priority)
+        bootstrap_keys.keys.forEach(key => {
+            const value = process.env[key];
+            if (value !== undefined) {
+                this[key] = boolean_keys.keys.includes(key) ? value === 'true' : value;
+                console.log(`[Config] Bootstrap (Env) ${key}=${this[key]}`);
+            }
+        });
+
+        // 2. Fallback to workspace.json (Local Dev priority)
+        // Only if DEPLOY_ENV is not set by environment
+        if (!this.DEPLOY_ENV) {
+            this._tryLoadWorkspaceConfig();
+        }
+
+        // 3. Set derived values
+        if (process.env.DEPLOY_ENV) this.DEPLOY_ENV = process.env.DEPLOY_ENV;
+        if (process.env.DEBUG_LOCAL !== undefined) this.DEBUG_LOCAL = process.env.DEBUG_LOCAL === 'true';
+        if (process.env.LOCAL_PORT) this.LOCAL_PORT = process.env.LOCAL_PORT;
+    }
+
+    _tryLoadWorkspaceConfig() {
+        try {
+            // Walk up to find .descix/workspace.json
+            let currentDir = this.__appDir;
+            let workspacePath = null;
+            for (let i = 0; i < 5; i++) {
+                const checkPath = path.resolve(currentDir, '.descix/workspace.json');
+                if (fs.existsSync(checkPath)) {
+                    workspacePath = checkPath;
+                    break;
+                }
+                const parent = path.dirname(currentDir);
+                if (parent === currentDir) break;
+                currentDir = parent;
+            }
+
+            if (workspacePath) {
+                const workspace = JSON.parse(fs.readFileSync(workspacePath, 'utf8'));
+                if (workspace.environment === 'development') {
+                    console.log('[Config] Auto-detected development workspace');
+                    this.DEPLOY_ENV = 'dev';
+                    this.DEBUG_LOCAL = true;
+                    this.CONFIG_SECRET_NAME = 'descix_config'; // Default for dev
+                    this.CONFIG_SECRET_VERSION = 'DEBUG';      // Default for dev
+                    
+                    // Auto-detect port from workspace apps
+                    this._autoDetectPort(workspace);
+                }
+            }
+        } catch (e) {
+            // Ignore errors in production/CI where workspace.json might be missing
+        }
+    }
+
+    _autoDetectPort(workspace) {
+        // Try to match current directory to an app in workspace
+        // This is a heuristic based on path suffix
+        try {
+            const relPath = path.relative(path.dirname(path.dirname(workspace.workspaceRoot || this.__rootPath)), this.__appDir);
+            
+            // Search communities for matching app
+            if (workspace.communities) {
+                for (const comm of Object.values(workspace.communities)) {
+                    if (comm.apps) {
+                        for (const app of Object.values(comm.apps)) {
+                            // Check if this app's path matches our current directory
+                            // Handle both absolute and relative paths
+                            const appAbsPath = app.absolutePath || path.resolve(workspace.workspaceRoot, app.localPath);
+                            if (this.__appDir === appAbsPath || this.__appDir.endsWith(app.localPath)) {
+                                if (app.service && app.service.port) {
+                                    this.LOCAL_PORT = app.service.port;
+                                    console.log(`[Config] Auto-detected port ${this.LOCAL_PORT} from workspace`);
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (e) {
+            // Ignore path resolution errors
+        }
+    }
+
+    _mergeConfig(config) {
+        const { boolean_keys } = configSchema;
+        for (const [key, value] of Object.entries(config)) {
+            if (key.startsWith('_')) continue;
+            if (this[key] === undefined || this[key] === null) {
+                this[key] = boolean_keys.keys.includes(key) && typeof value === 'string'
+                    ? value === 'true'
+                    : value;
+            }
+        }
+    }
+
+    _loadDefaults() {
+        const defaultsPath = path.resolve(this.__appDir, 'defaults-config.json');
+        if (fs.existsSync(defaultsPath)) {
+            try {
+                this._mergeConfig(require(defaultsPath));
+                console.log('[Config] Loaded defaults-config.json');
+            } catch (e) {
+                console.error('[Config] Error loading defaults-config.json:', e.message);
+            }
+        }
+    }
+
+    _loadDevOverrides() {
+        if (this.DEPLOY_ENV !== 'dev') return;
+        const overridesPath = path.resolve(this.__appDir, 'dev-overrides.json');
+        if (fs.existsSync(overridesPath)) {
+            try {
+                const overrides = JSON.parse(fs.readFileSync(overridesPath, 'utf8'));
+                console.log('[Config] Applying dev-overrides.json');
+                this._mergeConfig(overrides);
+            } catch (e) {
+                console.error('[Config] Error loading dev-overrides.json:', e.message);
+            }
+        }
+        const { boolean_keys, dev_override_keys } = configSchema;
+        dev_override_keys.keys.forEach(key => {
+            const envValue = process.env[key];
+            if (envValue !== undefined) {
+                console.log(`[Config] Dev override from .env: ${key}`);
+                this[key] = boolean_keys.keys.includes(key) ? envValue === 'true' : envValue;
+            }
+        });
+    }
+
+    async accessSecretVersion(secretname, tag) {
+        if (!tag) tag = 'DEBUG';
+        if (!this.secretClient) this.secretClient = new SecretManagerServiceClient();
+        const name = `projects/${this.GOOGLE_PROJECT_ID}/secrets/${secretname}/versions/${tag}`;
+        const [version] = await this.secretClient.accessSecretVersion({ name });
+        return version.payload.data.toString('utf8');
+    }
+
+    async initialize() {
+        const auth = new GoogleAuth();
+        this.GOOGLE_PROJECT_ID = await auth.getProjectId();
+        console.error("***** INITIALIZING Project ID: ", this.GOOGLE_PROJECT_ID);
+
+        if (!this.GEMINI_API_KEY && this.CONFIG_SECRET_NAME) {
+            try {
+                const secretPayload = await this.accessSecretVersion(
+                    this.CONFIG_SECRET_NAME,
+                    this.CONFIG_SECRET_VERSION
+                );
+                this._mergeConfig(JSON.parse(secretPayload));
+                console.log(`[Config] Loaded from Secret Manager: ${this.CONFIG_SECRET_NAME}`);
+            } catch (error) {
+                console.warn(`[Config] Secret Manager unavailable or failed:`, error.message);
+            }
+
+            this._loadDevOverrides();
+
+            if (this.DEBUG_LOCAL && this.DEBUG_STREAMING && !this.DEBUG_PROXY) {
+                this.DISCORD_BOT_URL = `https://localhost:${this.__port}`;
+            }
+
+            const shouldLoadElevated = this.REQUIRE_ELEVATED_CREDS === true ||
+                (this.REQUIRE_ELEVATED_CREDS === null && this.CONTRACT_SECRET_NAME);
+
+            if (shouldLoadElevated) {
+                try {
+                    if (!this.__googleApplicationCredentials) {
+                        const serviceAccountFileStr = await this.accessSecretVersion('elevated_credentials_descix', 'LIVE');
+                        this.__googleApplicationCredentials = JSON.parse(serviceAccountFileStr);
+                        console.log('[Config] Loaded Elevated Credentials');
+                    }
+                    if (process.env.CONTRACT_SECRET_NAME) {
+                        const abiSecret = await this.accessSecretVersion(process.env.CONTRACT_SECRET_NAME, 'LIVE');
+                        this.DAITA_ABI = JSON.parse(abiSecret);
+                        console.log('[Config] Loaded Contract ABI');
+                    }
+                } catch (e) {
+                    console.error('[Config] Failed to load elevated credentials:', e.message);
+                }
+            }
+
+            if (this.PUB_SUB_DISCORD_BOT_REPLY && this.CONFIG_SECRET_VERSION) {
+                this.PUB_SUB_DISCORD_BOT_REPLY = this.PUB_SUB_DISCORD_BOT_REPLY + this.CONFIG_SECRET_VERSION.toLowerCase();
+            }
+        }
+    }
+}
+
+function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+export async function initializeCloudConfig() {
+    const config = getCloudConfig();
+    let backoff = 1000;
+    const maxBackoff = 180000;
+    while (true) {
+        try {
+            await config.initialize();
+            return config;
+        } catch (error) {
+            console.error('Error initializing CloudConfig:', error, `Retrying in ${backoff / 1000} seconds...`);
+            await delay(backoff);
+            backoff = Math.min(backoff * 2, maxBackoff);
+        }
+    }
+}
+
+export {
+    ProductTypes,
+    LoginStatus,
+    NetworkStatus,
+    PERMISSIONS,
+    GUEST_ALLOWED_COMMANDS,
+    networkResponse,
+    stripInvalidAndLower,
+};

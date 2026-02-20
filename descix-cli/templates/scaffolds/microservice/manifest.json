@@ -1,0 +1,49 @@
+{
+  "service": {
+    "name": "sample-service",
+    "version": "1.0.0",
+    "domain": "sample-service.descix.net",
+    "description": "Sample DeSciX Add-on Service",
+    "healthEndpoint": "/health",
+    "debugPort": 3003,
+    "app_id": "sample-app",
+    "community_id": "descix"
+  },
+  "commands": {
+    "sample_hello": {
+      "handler": "sampleCommands.hello",
+      "guestAllowed": true,
+      "description": "Echoes back the message and context",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "Message to echo"
+          }
+        },
+        "required": ["message"]
+      }
+    },
+    "sample_analyze": {
+      "handler": "sampleCommands.analyze",
+      "guestAllowed": false,
+      "description": "Analyzes input using Core RAG (demonstrates loopback)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Topic to analyze"
+          }
+        },
+        "required": ["query"]
+      }
+    }
+  },
+  "webhooks": [],
+  "permissions": {
+    "requires": [],
+    "grants": []
+  }
+}

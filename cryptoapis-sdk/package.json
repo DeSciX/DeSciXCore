@@ -1,0 +1,17 @@
+{
+  "name": "cryptoapis-sdk",
+  "version": "1.0.0",
+  "description": "Node.js SDK for CryptoAPIs - Generated from OpenAPI specification",
+  "main": "dist/api.js",
+  "types": "dist/api.d.ts",
+  "files": ["dist"],
+  "keywords": ["cryptoapis", "crypto", "api", "sdk", "blockchain", "bitcoin", "ethereum", "openapi"],
+  "license": "MIT",
+  "dependencies": {
+    "bluebird": "^3.7.2",
+    "request": "^2.88.2"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}

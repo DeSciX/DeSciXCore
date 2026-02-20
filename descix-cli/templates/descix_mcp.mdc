@@ -1,0 +1,122 @@
+---
+alwaysApply: true
+---
+
+### DeSciX Intelligent Tool Discovery
+
+**IMPORTANT: Use `tell_me_how` before attempting any DeSciX platform operation.**
+
+The DeSciX platform uses semantic tool discovery. Instead of memorizing commands:
+1. Ask `tell_me_how` what you want to accomplish
+2. The platform finds relevant tools based on your access level
+3. Execute the recommended tools via `execute_remote_command`
+
+### Tool Discovery with Scope Control
+
+Use `tell_me_how` with appropriate scope:
+
+- **Project scope** (`--scope project`): When working within a specific project context
+  ```
+  tell_me_how({ question: "How do I sync my KB?", scope: "project" })
+  ```
+  Uses communities/apps from `.descix/workspace.json`
+
+- **Entitlements scope** (DEFAULT): When you need actionable tools you can use now
+  ```
+  tell_me_how({ question: "How do I deploy a token?" })
+  ```
+  Only returns tools from communities you're a member of and apps you own/purchased
+
+- **Discovery scope** (`--scope discovery`): When exploring platform capabilities
+  ```
+  tell_me_how({ question: "What AI training tools exist?", scope: "discovery" })
+  ```
+  Returns all tools; indicates which require purchase
+
+### Execution Pattern
+
+After `tell_me_how` returns recommended tools:
+
+```javascript
+// 1. Ask how to do something
+const plan = await tell_me_how({ 
+    question: "Create a bonding curve for my community",
+    scope: "entitlements"
+});
+
+// 2. Execute the recommended command
+await execute_remote_command({
+    command: plan.recommended_tools[0].name,
+    params: { /* parameters from plan */ }
+});
+```
+
+### Local Operations
+
+These tools run locally (no `tell_me_how` needed):
+
+- `descix_init` - Initialize project with `.descix/workspace.json`
+- `descix_wizard_step` - Multi-step wizards (app creation, etc.)
+- `git_sync_ops` - Git operations with auto-generated commit messages
+
+### Knowledge Base Queries
+
+For documentation and RAG queries, use `tell_me_how` to discover the right KB:
+
+```
+tell_me_how({ question: "Where is the SDK authentication documented?" })
+```
+
+Or query directly if you know the KB:
+
+- `search_knowledge_base` with `communityId`, `appId`, `kbId`
+- `chat_with_kb` for conversational queries
+
+### Knowledge Base References
+
+The DeSciX platform documentation is organized in the `descix/docs` app:
+
+- **sdk** - SDK documentation, CLI commands, MCP integration
+- **architecture** - Platform architecture, design patterns
+- **cloud** - Backend services, API, deployment
+- **pwa** - Frontend React components, state management
+- **contracts** - Smart contracts, token economics
+
+### Service Registration
+
+When registering a new microservice:
+
+1. **Create SERVICE_README_{app_id}.md** in the app's Drive folder
+2. Follow the template provided by `descix service register --help`
+3. The README is vectorized for `tell_me_how` discovery
+
+If the README is missing, the CLI provides AI-friendly instructions you can use directly.
+
+### Error Recovery
+
+If a command fails:
+
+1. Use `tell_me_how` to find alternative approaches
+2. Check `search_knowledge_base` for error-specific documentation
+3. Verify scope - you may need `discovery` scope to find the right tool
+
+### CLI Quick Reference
+
+```bash
+# Discover tools (primary command)
+descix tell-me-how "What you want to accomplish"
+descix tell-me-how --scope project "sync my knowledge base"
+descix tell-me-how --scope discovery "what tokenomics tools exist"
+
+# Local operations
+descix init                      # Initialize project
+descix setup                     # One-time setup
+
+# Authentication
+descix login                     # Authenticate
+descix mcp quickstart            # Full MCP setup
+```
+
+---
+
+*This rules file is deployed by `descix mcp init`. Regenerate with `descix mcp quickstart`.*

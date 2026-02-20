@@ -1,0 +1,18 @@
+{
+  "serviceName": "sample-service",
+  "description": "DeSciX Add-on Service",
+  "configChecks": [
+    {
+      "key": "CONFIG_SECRET_NAME",
+      "source": ".env",
+      "required": true,
+      "description": "Secret Manager secret name"
+    },
+    {
+        "key": "CONFIG_SECRET_VERSION",
+        "source": ".env",
+        "required": true,
+        "description": "Secret Manager version"
+    }
+  ]
+}

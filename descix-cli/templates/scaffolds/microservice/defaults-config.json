@@ -1,0 +1,5 @@
+{
+  "DEBUG_LOCAL": true,
+  "LOCAL_PORT": "auto",
+  "CORE_API_URL": "https://localhost:4000/apifront"
+}

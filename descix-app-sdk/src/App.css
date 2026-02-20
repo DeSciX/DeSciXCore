@@ -1,0 +1,138 @@
+/* Font imports must be at top of file */
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+
+/* DeSciX Trading Dashboard Theme */
+:root {
+  /* Dark Navy Theme Colors */
+  --dashboard-bg: #0D1117;
+  --dashboard-card: #161B22;
+  --dashboard-border: #30363D;
+  --dashboard-text: #E6EDF3;
+  --dashboard-heading: #E6EDF3;
+  --dashboard-muted: #8B949E;
+  
+  /* Accent Colors */
+  --dashboard-accent: #58A6FF;
+  --dashboard-accent-hover: #4A90E2;
+  --dashboard-positive: #3FB950;
+  --dashboard-negative: #F85149;
+  --dashboard-warning: #D29922;
+  
+  /* Gradients */
+  --gradient-accent: linear-gradient(135deg, #58A6FF 0%, #A371F7 100%);
+  --gradient-card: linear-gradient(180deg, rgba(88, 166, 255, 0.05) 0%, transparent 100%);
+}
+
+#root {
+  width: 100%;
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+  background-color: var(--dashboard-bg);
+}
+
+/* Trading Dashboard specific overrides */
+body {
+  background-color: var(--dashboard-bg);
+}
+
+/* Scrollbar styling for dashboard */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--dashboard-card);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--dashboard-border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--dashboard-muted);
+}
+
+/* Price flash animations */
+@keyframes flashGreen {
+  0% { background-color: transparent; }
+  50% { background-color: rgba(63, 185, 80, 0.3); }
+  100% { background-color: transparent; }
+}
+
+@keyframes flashRed {
+  0% { background-color: transparent; }
+  50% { background-color: rgba(248, 81, 73, 0.3); }
+  100% { background-color: transparent; }
+}
+
+.price-up {
+  animation: flashGreen 0.5s ease-out;
+}
+
+.price-down {
+  animation: flashRed 0.5s ease-out;
+}
+
+/* Skeleton loader styling */
+.MuiSkeleton-root {
+  background-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+/* Card hover effects */
+.dashboard-card {
+  transition: all 0.2s ease-in-out;
+}
+
+.dashboard-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(88, 166, 255, 0.1);
+}
+
+/* Tabular numbers for consistent alignment */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Monospace numbers */
+.mono-numbers {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.logo {
+  height: 6em;
+  padding: 1.5em;
+  will-change: filter;
+  transition: filter 300ms;
+}
+.logo:hover {
+  filter: drop-shadow(0 0 2em #646cffaa);
+}
+.logo.react:hover {
+  filter: drop-shadow(0 0 2em #61dafbaa);
+}
+
+@keyframes logo-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  a:nth-of-type(2) .logo {
+    animation: logo-spin infinite 20s linear;
+  }
+}
+
+.card {
+  padding: 2em;
+}
+
+.read-the-docs {
+  color: #888;
+}

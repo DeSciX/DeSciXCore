@@ -1,0 +1,5 @@
+# Local dev overrides - DO NOT COMMIT
+# Rename to dev-overrides.json
+{
+    "SERVICE_SECRET": "local-dev-secret"
+}

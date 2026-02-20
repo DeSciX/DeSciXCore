@@ -1,0 +1,8 @@
+runtime: nodejs20
+instance_class: F1
+automatic_scaling:
+  max_instances: 1
+env_variables:
+  DEPLOY_ENV: "production"
+  CONFIG_SECRET_NAME: "descix_config"
+  CONFIG_SECRET_VERSION: "latest"
