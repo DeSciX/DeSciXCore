@@ -15,6 +15,9 @@ import chalk from 'chalk';
 import { WorkspaceConfig } from '../workspace-config.js';
 import { createViteProxyConfig, getViteHttpsConfig, watchWorkspaceConfig } from '@descix/app-sdk/dev';
 
+import fs from 'fs';
+import path from 'path';
+
 /**
  * Build the Vite `define` map from workspace config.
  * These globals are injected into any frontend code served through the gateway.
@@ -35,6 +38,14 @@ function buildDefines(wsConfig) {
     '__STANDALONE_APP_URL__': 'null',
     '__POWCH_APP_URL__': JSON.stringify(powchAppUrl),
     '__API_GATEWAY_URL__': JSON.stringify(apiGatewayUrl),
+    '__WORKSPACE_PRODUCTS__': JSON.stringify({
+      daita: `https://localhost:${wsConfig.env?.platform?.site?.port || 5174}`,
+      powch: powchAppUrl.replace(/\/$/, ''), // Remove trailing slash
+      ...(wsConfig.products ? Object.entries(wsConfig.products).reduce((acc, [id, prod]) => {
+        if (prod.site?.port) acc[id] = `https://localhost:${prod.site.port}`;
+        return acc;
+      }, {}) : {})
+    }),
     'global': 'globalThis',
   };
 }
@@ -43,12 +54,19 @@ export async function runServe(options = {}) {
   const port = options.port || 5173;
   const workspaceRoot = options.workspaceRoot || process.cwd();
 
+  // Ensure we are looking for the workspace root correctly
   let wsConfig;
   try {
+    // If running from a subdirectory (like DeSciX_PWA), findWorkspaceRoot should walk up
     wsConfig = await WorkspaceConfig.load(workspaceRoot);
   } catch (e) {
-    console.error(chalk.red(e.message));
-    process.exit(1);
+    // If load fails, try one level up explicitly as a fallback for common monorepo structure
+    try {
+      wsConfig = await WorkspaceConfig.load(path.resolve(workspaceRoot, '..'));
+    } catch (e2) {
+      console.error(chalk.red(e.message));
+      process.exit(1);
+    }
   }
 
   const env = wsConfig.env || {};
@@ -56,6 +74,7 @@ export async function runServe(options = {}) {
 
   console.log(chalk.cyan('\n  descix-serve') + chalk.dim(' — Unified Local Gateway\n'));
   console.log(chalk.dim('  Workspace: ') + wsConfig.workspaceRoot);
+  console.log(chalk.dim('  Root:      ') + workspaceRoot);
   console.log(chalk.dim('  API:       ') + apiGatewayUrl);
   console.log(chalk.dim('  Port:      ') + port);
   console.log();
@@ -67,8 +86,11 @@ export async function runServe(options = {}) {
 
   const { createServer } = await import('vite');
 
+  // Check for existing vite config to avoid overriding defines
+  const hasConfigFile = fs.existsSync(path.join(workspaceRoot, 'vite.config.js')) || 
+                        fs.existsSync(path.join(workspaceRoot, 'vite.config.ts'));
+
   let server = await createServer({
-    configFile: false,
     root: workspaceRoot,
     server: {
       port,
@@ -76,8 +98,8 @@ export async function runServe(options = {}) {
       host: true,
       proxy: proxyRules,
     },
-    define: buildDefines(wsConfig),
-    optimizeDeps: {
+    define: hasConfigFile ? undefined : buildDefines(wsConfig),
+    optimizeDeps: hasConfigFile ? undefined : {
       noDiscovery: true,
     },
   });
@@ -96,7 +118,6 @@ export async function runServe(options = {}) {
     await server.close();
 
     server = await createServer({
-      configFile: false,
       root: workspaceRoot,
       server: {
         port,
@@ -104,8 +125,8 @@ export async function runServe(options = {}) {
         host: true,
         proxy: newProxy,
       },
-      define: buildDefines(wsConfig),
-      optimizeDeps: {
+      define: hasConfigFile ? undefined : buildDefines(wsConfig),
+      optimizeDeps: hasConfigFile ? undefined : {
         noDiscovery: true,
       },
     });

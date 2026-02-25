@@ -2,7 +2,9 @@
 
 
 const queryParams = new URLSearchParams(window.location.search);
-export const isEmbedded = Boolean(queryParams.get('frame_id'));
+// isEmbedded is strictly for Discord embedded apps (where .proxy/ prefix is needed)
+// We check for frame_id AND ensure we are NOT in standalone app mode (internal iframe)
+export const isEmbedded = Boolean(queryParams.get('frame_id')) && !window.__STANDALONE_APP_ID__;
 const apiDebugPostfix = '_debug';
 
 export class ProductTypes {
@@ -34,6 +36,18 @@ export class AppData {
   static _isSetupMode = false; // Flag for device setup mode
   static _existingWorkspace = null; // CLI's existing workspace for pre-population
   static _appModeConfig = null; // NEW: Config for standalone app mode (appId, url)
+  static _workspaceProducts = typeof __WORKSPACE_PRODUCTS__ !== 'undefined' ? __WORKSPACE_PRODUCTS__ : null;
+
+  static get workspaceProducts() {
+    return AppData._workspaceProducts;
+  }
+
+  static getProductUrl(product) {
+    if (AppData._workspaceProducts && AppData._workspaceProducts[product.id]) {
+      return AppData._workspaceProducts[product.id];
+    }
+    return product.ip_site_gcs_path_url;
+  }
 
   static reset() {
     AppData._sessionInfo = null;
@@ -734,7 +748,13 @@ async function makeCommandRequestInternal(command, params, isGuestAllowed, sendC
     return { streaming: true, generator: streamGenerator() };
   }
 
-  const data = await res.json();
+  const text = await res.text();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch (_) {
+    data = { status: 'ERROR', message: text || `Server error (${res.status})` };
+  }
   return { streaming: false, data, status: res.status };
 }
 

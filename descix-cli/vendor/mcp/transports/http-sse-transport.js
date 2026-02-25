@@ -7,7 +7,7 @@
  * Authentication: X-DeSciX-Signature header (wallet signature as API key)
  */
 
-import { User } from '../../../lib/api-client.js';
+import { User } from '../../../descix-cli/lib/api-client.js';
 
 export class HttpSseTransport {
     constructor(mcpServer, options = {}) {

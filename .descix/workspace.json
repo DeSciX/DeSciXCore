@@ -1,0 +1,57 @@
+{
+  "version": "2.0",
+  "workspaceRoot": "/Users/essam/Documents/Code/DaitaERC20",
+  "type": "workspace",
+  "directoryMappings": {},
+  "additionalContexts": [],
+  "apiUrl": "https://localhost:4000",
+  "environment": "development",
+  "env": {
+    "apiUrl": "https://localhost:4000",
+    "pwaUrl": "https://localhost:5173",
+    "powchUrl": "https://localhost:5174"
+  },
+  "communities": {
+    "descix": {
+      "localPath": "descix",
+      "tokenSymbol": "DAITA",
+      "apps": {
+        "agent": {
+          "localPath": "descix/agent",
+          "kbId": "General",
+          "absolutePath": "/Users/essam/Documents/Code/DaitaERC20/descix/agent"
+        },
+        "appsdk": {
+          "localPath": "descix/appsdk",
+          "kbId": "General",
+          "absolutePath": "/Users/essam/Documents/Code/DaitaERC20/descix/appsdk",
+          "site": {
+            "port": 3501,
+            "devCommand": "npm run docs:dev"
+          },
+          "service": {
+            "port": 3502,
+            "devCommand": "npm run start"
+          }
+        },
+        "powch": {
+          "localPath": "DeSciX_Powch/service",
+          "absolutePath": "/Users/essam/Documents/Code/DaitaERC20/DeSciX_Powch/service",
+          "service": {
+            "port": 3002,
+            "devCommand": "npm run dev"
+          },
+          "pwa": {
+            "port": 5174,
+            "devCommand": "npm run dev:powch"
+          },
+          "isolation": "strict"
+        }
+      },
+      "absolutePath": "/Users/essam/Documents/Code/DaitaERC20/descix"
+    }
+  },
+  "driveConfig": {
+    "base_folder_id": "1zPaEJqF235YuO1YUFsynl-mGp60YOlhH"
+  }
+}

@@ -1,0 +1,73 @@
+# DeSciX Ignore Patterns
+# Similar to .gitignore syntax
+# Files matching these patterns won't be synced to DeSciX RAG
+
+# Dependencies
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Build outputs
+dist/
+build/
+.next/
+out/
+artifacts/
+cache/
+
+# Environment & credentials
+.env
+.env.*
+*.pem
+*.key
+*credentials*.json
+*serviceaccount*.json
+
+# IDE & Editor
+.vscode/
+.cursor/
+.idea/
+
+# DeSciX config folders (workspace and app-level)
+.descix/
+.descix.app/
+
+# VitePress (docs site build config)
+.vitepress*
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Version Control
+.git/
+
+# Logs & temp
+*.log
+logs/
+temp/
+tmp/
+*.tmp
+
+# Test artifacts
+coverage/
+.nyc_output/
+__pycache__/
+*.pyc
+
+# Deprecated/Archive
+deprecated/
+Deprecated/
+archive/
+
+# Smart contracts build
+cache/
+artifacts/
+typechain/
+
+# Large media (if not needed for docs)
+# *.mp4
+# *.mov
+# *.zip
+

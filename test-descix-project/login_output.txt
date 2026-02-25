@@ -1,0 +1,16 @@
+
+🔐 DeSciX Device Login
+
+- Requesting device login...
+[WorkspaceConfig] Warning: .descix/workspace.json not found, using defaults
+   API: http://localhost:4000
+
+✖ Login failed
+Parse Error: Expected HTTP/, RTSP/ or ICE/
+💡 Tip: Make sure you:
+   - Have an internet connection
+   - Can access the DeSciX platform
+   - Complete all steps in the browser
+   - API URL is correct: http://localhost:4000
+   - Local backend server is running
+

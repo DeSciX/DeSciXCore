@@ -1116,7 +1116,7 @@ appCommand
       const response = await apiClient.invoke('update_app_metadata', {
         community_id: communityId,
         app_id: appId,
-        ip_site_gcs_path: options.url
+        ip_site_gcs_path_url: options.url
       });
       const result = response.message || response;
       
