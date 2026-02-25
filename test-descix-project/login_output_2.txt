@@ -1,0 +1,21 @@
+
+🔐 DeSciX Device Login
+
+- Requesting device login...
+[WorkspaceConfig] Warning: .descix/workspace.json not found, using defaults
+   API: https://localhost:4000
+
+✔ Device login request created
+
+📱 Browser will open automatically...
+
+In the browser, you will need to:
+  1. Enter your email address
+  2. Verify your email with the code sent
+  3. Accept the Terms of Service
+  4. Connect your crypto wallet
+  5. Sign the message to prove wallet ownership
+
+- Opening browser...
+✔ Browser opened
+- Waiting for authentication...

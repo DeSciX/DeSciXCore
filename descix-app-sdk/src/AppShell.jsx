@@ -53,7 +53,11 @@ export default function AppShell({ appId, config = {}, children }) {
   const powchProviderConfig = {
     ...(config.powch ?? {}),
     brand: config.powch?.brand ?? { name: 'DeSciX', logo: null },
-    bridgeUrl: config.powch?.bridgeUrl ?? (typeof __POWCH_APP_URL__ !== 'undefined' ? __POWCH_APP_URL__ : 'https://powch.descix.net/'),
+    // Use __POWCH_APP_URL__ if available (injected by descix-serve), otherwise fallback to workspace map or default
+    bridgeUrl: config.powch?.bridgeUrl ?? (
+      typeof __POWCH_APP_URL__ !== 'undefined' ? __POWCH_APP_URL__ : 
+      (typeof __WORKSPACE_PRODUCTS__ !== 'undefined' && __WORKSPACE_PRODUCTS__?.powch ? __WORKSPACE_PRODUCTS__.powch : 'https://powch.descix.net/')
+    ),
   };
 
   const innerContent = (

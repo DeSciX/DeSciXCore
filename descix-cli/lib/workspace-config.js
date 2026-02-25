@@ -28,6 +28,9 @@ export class WorkspaceConfig {
     
     // V2 community tracking (root workspace)
     this.communities = config.communities || {};
+
+    // V2.1 Product tracking (Unified Registry)
+    this.products = config.products || {};
     
     // Environment URLs for descix-serve gateway routing
     this.env = config.env || {};
@@ -92,8 +95,12 @@ export class WorkspaceConfig {
    */
   static async load(startDir = process.cwd()) {
     // First, find workspace root by searching upward
+    // If startDir is provided, use it. If not, use process.cwd()
     const workspaceRoot = await WorkspaceConfig.findWorkspaceRoot(startDir);
     if (!workspaceRoot) {
+      // Fallback: Check if we are running from within a package in the repo
+      // and try to find the root by looking for .descix in parent directories
+      // This is redundant with findWorkspaceRoot but let's be explicit about the error
       throw new Error(
         'Workspace not configured.\n' +
         'Run "npx descix init" first to initialize your workspace.'
@@ -162,9 +169,10 @@ export class WorkspaceConfig {
     };
     
     // Include communities for v2 root workspace
-    if (this.version === '2.0' || Object.keys(this.communities).length > 0) {
+    if (this.version === '2.0' || Object.keys(this.communities).length > 0 || Object.keys(this.products).length > 0) {
       configData.version = '2.0';
-      configData.communities = this.communities;
+      if (Object.keys(this.communities).length > 0) configData.communities = this.communities;
+      if (Object.keys(this.products).length > 0) configData.products = this.products;
     }
     
     // Include env block for descix-serve gateway routing
@@ -201,6 +209,13 @@ export class WorkspaceConfig {
         if (app.localPath) {
           app.absolutePath = path.join(absWorkspaceRoot, app.localPath);
         }
+      }
+    }
+
+    // Compute absolute paths for products
+    for (const [productId, product] of Object.entries(this.products || {})) {
+      if (product.localPath) {
+        product.absolutePath = path.join(absWorkspaceRoot, product.localPath);
       }
     }
   }
@@ -352,6 +367,58 @@ export class WorkspaceConfig {
   }
   
   /**
+   * Register a product (Unified Registry)
+   * @param {string} productId - Global product identifier
+   * @param {Object} productConfig - Product configuration
+   * @returns {boolean} Success status
+   */
+  registerProduct(productId, productConfig) {
+    if (!productId || !productConfig.localPath) {
+      throw new Error('productId and localPath are required');
+    }
+    
+    this.products[productId] = {
+      type: productConfig.type || 'APP',
+      localPath: productConfig.localPath,
+      context: productConfig.context || {},
+      registeredAt: new Date().toISOString()
+    };
+    
+    this.version = '2.0';
+    return true;
+  }
+
+  /**
+   * Get product configuration
+   * @param {string} productId 
+   * @returns {Object|null}
+   */
+  getProduct(productId) {
+    return this.products[productId] || null;
+  }
+
+  /**
+   * List all registered products
+   * @returns {Array} Array of product IDs
+   */
+  listProducts() {
+    return Object.keys(this.products);
+  }
+
+  /**
+   * Remove a product registration
+   * @param {string} productId 
+   * @returns {boolean}
+   */
+  unregisterProduct(productId) {
+    if (this.products[productId]) {
+      delete this.products[productId];
+      return true;
+    }
+    return false;
+  }
+
+  /**
    * Resolve context based on file path
    * 
    * Maps file paths to appropriate community/app/kb based on directory mappings.
@@ -411,6 +478,25 @@ export class WorkspaceConfig {
             kbId: app.kbId || 'General'
           };
         }
+      }
+    }
+
+    // Check products
+    for (const [productId, product] of Object.entries(this.products || {})) {
+      let productPath = product.absolutePath;
+      if (!productPath && product.localPath && wsRoot) {
+        productPath = path.join(wsRoot, product.localPath);
+      }
+
+      if (productPath && cwd.startsWith(productPath)) {
+        // Return context compatible with legacy if possible, or new product context
+        return {
+          productId,
+          // Legacy compat if context is defined
+          communityId: product.context?.community || null,
+          appId: product.context?.app || null, // Or derive from productId?
+          kbId: product.kbId || 'General'
+        };
       }
     }
     

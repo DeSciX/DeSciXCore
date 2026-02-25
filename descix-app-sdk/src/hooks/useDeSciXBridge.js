@@ -8,6 +8,10 @@ import { AppContextState } from '../util/AppData';
  * Exposes the PWA-owned Powch bridge to window.DeSciX.powch for embedded apps (CodeSite, etc.).
  * Uses only postMessage protocol - no Powch internals.
  *
+ * Session update (loginWithSessionToken) lives on window.DeSciX and is set by AppContext,
+ * not by this hook. The bridge exposes login, sign, etc.; session update is an App Shell
+ * responsibility.
+ *
  * Runs only in host mode (PowchBridgeProvider mounted). In Case 3 (Powch standalone),
  * PowchBridgeProvider is not mounted; bridge is null and we do not set window.DeSciX.powch.
  */

@@ -58,6 +58,21 @@ export function createViteProxyConfig(workspacePath, options = {}) {
     });
   }
 
+  if (config.products) {
+    Object.entries(config.products).forEach(([productId, productData]) => {
+      if (productData.site?.port) {
+        localAppRoutes[productId] = {
+          port: productData.site.port,
+        };
+      }
+      if (productData.service?.port) {
+        serviceRoutes[productId] = {
+          port: productData.service.port,
+        };
+      }
+    });
+  }
+
   const proxy = {};
 
   // Core API routes
@@ -77,6 +92,24 @@ export function createViteProxyConfig(workspacePath, options = {}) {
     secure: false,
   };
 
+  // Embedded App API Proxy (for Powch in iframe)
+  // REMOVED: Powch/Internal iframes should NOT use .proxy/ prefix.
+  // The client-side isEmbedded check now correctly excludes standalone apps.
+  // proxy['/.proxy/api'] = {
+  //   target: apiGatewayUrl,
+  //   changeOrigin: true,
+  //   secure: false,
+  //   rewrite: (p) => p.replace(/^\/\.proxy\/api/, ''),
+  // };
+  
+  // Debug Proxy (if VITE_DEBUG_PROXY is set)
+  proxy['/.proxy/api_debug'] = {
+    target: apiGatewayUrl,
+    changeOrigin: true,
+    secure: false,
+    rewrite: (p) => p.replace(/^\/\.proxy\/api_debug/, ''),
+  };
+
   // Powch PWA route (local port or production URL)
   if (powchUrl) {
     proxy['/powch'] = {
@@ -91,7 +124,7 @@ export function createViteProxyConfig(workspacePath, options = {}) {
   Object.entries(serviceRoutes).forEach(([routeKey, route]) => {
     const prefix = `/s/${routeKey}`;
     proxy[prefix] = {
-      target: `http://localhost:${route.port}`,
+      target: `http://localhost:${route.port}`, // Services are usually HTTP
       changeOrigin: true,
       ws: true,
       rewrite: (p) => p.replace(new RegExp(`^${prefix}`), ''),
@@ -99,22 +132,40 @@ export function createViteProxyConfig(workspacePath, options = {}) {
   });
 
   // Site dev server routes: /Community/{c}/Apps/{a}/site -> localhost:{site.port}
+  // OR /p/{productId} -> localhost:{site.port}
   Object.entries(localAppRoutes).forEach(([routeKey, route]) => {
-    const [community, appId] = routeKey.split('/');
-    const pathPrefix = `/Community/${community}/Apps/${appId}/site`;
-    const localBase = `/s/${appId}`;
+    if (routeKey.includes('/')) {
+      const [community, appId] = routeKey.split('/');
+      const pathPrefix = `/Community/${community}/Apps/${appId}/site`;
+      const localBase = `/s/${appId}`;
 
-    proxy[pathPrefix] = {
-      target: `http://localhost:${route.port}`,
-      changeOrigin: true,
-      ws: true,
-      rewrite: (p) => p.replace(new RegExp(`^${pathPrefix}`), localBase),
-    };
-    proxy[localBase] = {
-      target: `http://localhost:${route.port}`,
-      changeOrigin: true,
-      ws: true,
-    };
+      proxy[pathPrefix] = {
+        target: `https://localhost:${route.port}`,
+        changeOrigin: true,
+        secure: false,
+        ws: true,
+        rewrite: (p) => p.replace(new RegExp(`^${pathPrefix}`), ''),
+      };
+      proxy[localBase] = {
+        target: `https://localhost:${route.port}`,
+        changeOrigin: true,
+        secure: false,
+        ws: true,
+      };
+    } else {
+      // Global Product Route
+      const productId = routeKey;
+      const pathPrefix = `/p/${productId}`;
+      
+      proxy[pathPrefix] = {
+        target: `https://localhost:${route.port}`,
+        changeOrigin: true,
+        secure: false,
+        ws: true,
+        // Do NOT rewrite path. The target app must handle the /p/{productId} base.
+        // rewrite: (p) => p.replace(new RegExp(`^${pathPrefix}`), ''),
+      };
+    }
   });
 
   // GCS fallback for remote Community assets

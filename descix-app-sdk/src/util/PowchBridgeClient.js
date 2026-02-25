@@ -58,11 +58,21 @@ export class PowchBridgeClient {
     } catch (e) {
       return;
     }
-    if (!this.iframe) return;
-    if (event.source !== this.iframe.contentWindow) return;
 
     const data = event.data || {};
     const { type, requestId, success, payload, error: errorMsg } = data;
+
+    if (type === 'POWCH_RESPONSE' && requestId && this.pendingRequests.has(requestId)) {
+      const { resolve, reject } = this.pendingRequests.get(requestId);
+      this.pendingRequests.delete(requestId);
+      if (success) resolve(payload);
+      else reject(new Error(errorMsg || 'Request failed'));
+      return;
+    }
+
+    if (!this.iframe) return;
+    if (event.source !== this.iframe.contentWindow) return;
+
     if (!type) return;
 
     if (type === 'POWCH_READY') {

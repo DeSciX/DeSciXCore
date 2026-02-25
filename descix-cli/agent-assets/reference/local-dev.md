@@ -28,16 +28,17 @@ Instead of exposing implementation details (like GCS bucket URLs or specific por
 
 ### 2.1. Route Patterns
 
-| Resource Type | Canonical Path | Production Target (LB) | Local Target (Proxy) |
+| Resource Type | Canonical Path | Production Target (LB) | Local Target (Gateway Proxy) |
 | :--- | :--- | :--- | :--- |
-| **CodeSite** | `/apps/{community}/{app_id}/*` | `gs://bucket/...` | `http://localhost:{port}/*` |
-| **Microservice** | `/api/apps/{community}/{app_id}/*` | `k8s-service:8080` | `http://localhost:{port}/*` |
-| **Core API** | `/api/core/*` | `core-service:4000` | `https://api.descix.net/*` |
-| **PWA Assets** | `/*` | `gs://pwa-bucket/*` | `https://app.descix.net/*` |
+| **Core API** | `/apifront`, `/api`, `/mcp` | Core API | `https://localhost:4000` |
+| **Powch PWA** | `/powch` | Powch PWA | `https://localhost:5174` |
+| **Microservice** | `/s/{community}/{appId}` | k8s-service | `http://localhost:{service.port}` |
+| **CodeSite / App Site** | `/Community/{c}/Apps/{a}/site`, `/s/{appId}` | GCS / service | `http://localhost:{site.port}` |
+| **PWA** | `/*` | PWA bucket | Served from gateway root (when run from DeSciX_PWA) |
 
 ## 3. The "Local Mesh" Proxy
 
-The `descix dev` command (or `vite` in Platform Dev) spins up a **Local Proxy** on port `5173`. This proxy acts as the router, intercepting traffic and directing it based on the **Workspace Configuration**.
+The `descix serve` command spins up a **Local Gateway** on port `5173`. This gateway acts as the router, serving the PWA (when run from `DeSciX_PWA`) and proxying traffic based on the **Workspace Configuration**. Run `npm run dev:serve` from `DeSciX_PWA` or `npx descix serve` with PWA as cwd for Platform Dev.
 
 ### 3.1. Configuration: `.descix/workspace.json`
 The `workspace.json` file is the **single source of truth** for local routing and app configuration. This is the only configuration methodology - `.descix.app/context.json` files are no longer used.
@@ -76,21 +77,22 @@ The `workspace.json` file is the **single source of truth** for local routing an
 }
 ```
 
-### 3.2. Proxy Logic (Pattern Matching)
-The Proxy applies the following logic to every request:
+### 3.2. Proxy Logic (createViteProxyConfig)
+The gateway uses `createViteProxyConfig` from `@descix/app-sdk/dev` to generate Vite proxy rules from `workspace.json`:
 
-1.  **Parse Path**: Extract `community` and `app_id` from the URL (e.g., `/apps/descix/appsdk/...`).
-2.  **Check Config**: Look up the app in `workspace.json`.
-3.  **Route**:
-    *   **Match Found**: Proxy the request to `http://localhost:{port}`.
-    *   **No Match**: Proxy the request to the Production upstream (e.g., `app.descix.net` or `api.descix.net`).
+- **`/apifront`, `/api`, `/mcp`** → `env.apiUrl` or `https://localhost:4000`
+- **`/powch`** → `env.powchUrl` or Powch PWA port from `communities.descix.apps.powch.pwa.port`
+- **`/s/{community}/{appId}`** → `localhost:{service.port}` for each app in `workspace.json`
+- **`/Community/{c}/Apps/{a}/site`** → `localhost:{site.port}` for local app dev
+- **`/Community`** → GCS fallback
+- **`/.proxy/gcs_media`** → GCS media proxy
 
 ## 4. Scenarios
 
 ### Scenario 1: Platform Dev ("Dogfooding")
 *   **User**: Core Team.
-*   **Setup**: Full repo checkout. `workspace.json` maps core apps to local ports.
-*   **Result**: The Proxy routes `/apps/descix/appsdk` to the local VitePress instance, and `/api/core` to the local Node server.
+*   **Setup**: Full repo checkout. Run `npm run dev:serve` from `DeSciX_PWA` plus Core, Powch PWA, Powch service. `workspace.json` maps Powch and apps to local ports.
+*   **Result**: The gateway serves the PWA at `/` and routes `/apifront` to Core, `/powch` to Powch PWA, `/s/*` to microservices. Local app sites are proxied via `/Community/{c}/Apps/{a}/site`.
 
 ### Scenario 2: End-User Dev (Hybrid)
 *   **User**: App Developer.

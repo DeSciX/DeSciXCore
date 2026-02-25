@@ -1,0 +1,30 @@
+{
+  "version": "2.0",
+  "communities": {
+    "egpt_research": {
+      "localPath": "egpt_research",
+      "tokenSymbol": "EGPT",
+      "apps": {
+        "agent": {
+          "localPath": "egpt_research/agent",
+          "kbId": "General"
+        }
+      }
+    },
+    "descix": {
+      "localPath": "descix",
+      "tokenSymbol": "DAITA",
+      "apps": {
+        "agent": {
+          "localPath": "descix/agent",
+          "kbId": "General"
+        }
+      }
+    }
+  },
+  "environment": "development",
+  "apiUrl": "https://localhost:4000",
+  "driveConfig": {
+    "base_folder_id": "1zPaEJqF235YuO1YUFsynl-mGp60YOlhH"
+  }
+}

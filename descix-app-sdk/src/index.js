@@ -10,3 +10,4 @@ export { default as ChatWidget } from './components/ChatWidget.jsx';
 export { default as PowchSideBarWidget } from './components/PowchSideBarWidget.jsx';
 export { PowchBridgeProvider, usePowchBridge } from './providers/PowchBridgeProvider.jsx';
 export { PowchClient } from './powch/PowchClient.js';
+export { NetworkLoadingProvider, useNetworkLoading } from './util/NetworkAPI.jsx';

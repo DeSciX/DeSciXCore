@@ -43,12 +43,10 @@ export const AppProvider = ({ children }) => {
   const [custodialBalance, _setCustodialBalance] = useState(AppData.custodialBalance || 0);
   // --- End NEW State ---
 
-  // --- REMOVED: Login Modal State (all auth flows use OnboardingWidget) ---
-  // OnboardingWidget is a self-contained wizard that handles the entire auth flow
+  // --- REMOVED: Login Modal State (all auth flows use SignInButton + usePowchBridge) ---
   // --- End Login Modal State ---
 
-  // --- REMOVED: TOS Modal State (now handled by useOnboardingFlow hook) ---
-  // TOS modal is owned by OnboardingWidget, not AppContext
+  // --- REMOVED: TOS Modal State (bridge-based auth; makeCommandRequestJSON hydrates session) ---
   // --- End TOS Modal State ---
 
   const isDebugWallet = (import.meta.env.VITE_DEBUG_KEY && !isEmbedded);
@@ -165,7 +163,7 @@ export const AppProvider = ({ children }) => {
     // User has identity but no wallet connected (regardless of cached status).
     // This catches both AUTHENTICATED users AND users who incorrectly got
     // CONNECTED status without actually having a wallet.
-    // OnboardingBlocker will overlay, but we need app state correct.
+    // User needs wallet - redirect to Dashboard; SignInButton handles auth.
     // ============================================================
     const currentAuthStatus = AppData.loginStatus;
     const hasSession = AppData.sessionInfo?.id;
@@ -180,11 +178,11 @@ export const AppProvider = ({ children }) => {
         AppData.loginStatus = LoginStatus.AUTHENTICATED;
         _setLoginStatus(LoginStatus.AUTHENTICATED);
       }
-      // Ensure appState is READY so OnboardingBlocker can render properly
+      // Ensure appState is READY so UI can render properly
       if (appState !== AppContextState.READY) {
         setAppState(AppContextState.READY);
       }
-      // Navigate to Trading Dashboard - OnboardingBlocker will overlay
+      // Navigate to Trading Dashboard
       // Only redirect if not already going there (avoid infinite loop)
       if (targetView !== AppContextView.TRADING_DASHBOARD) {
         console.log('AppContext: Redirecting user without wallet to TRADING_DASHBOARD for onboarding');
@@ -216,7 +214,7 @@ export const AppProvider = ({ children }) => {
 
 
 
-    // WALLET view REMOVED - auth flows now handled by OnboardingWidget
+    // WALLET view REMOVED - auth flows handled by SignInButton + bridge
     // If somehow WALLET view is requested, redirect to Dashboard
     if (targetView === AppContextView.WALLET) {
       console.log('AppContext: WALLET view requested but removed - redirecting to Dashboard');
@@ -746,7 +744,7 @@ export const AppProvider = ({ children }) => {
               handleReferral(referral);
             }
           } else if (status === LoginStatus.AUTHENTICATED) {
-            // User has identity but needs wallet - viewRouter will handle redirect + OnboardingBlocker
+            // User has identity but needs wallet - viewRouter will handle redirect
             setAppState(AppContextState.READY);
             await viewRouter(AppContextView.TRADING_DASHBOARD, null);
           } else if (status === LoginStatus.GUEST) {
@@ -800,8 +798,7 @@ export const AppProvider = ({ children }) => {
           _setCustodialBalance(AppData.custodialBalance || 0);
           setUserRoles(AppData.userRoles);
           
-          // Device login flow now handled by OnboardingWidget - no special WALLET view routing needed
-          // Device login completion happens in useOnboardingFlow.completeOnboarding()
+          // Device login flow - no special WALLET view routing needed
           
           // Normal flow: Ensure core data is present or fetched
           await refreshMyCommunitiesAndApps();
@@ -871,7 +868,7 @@ export const AppProvider = ({ children }) => {
           break;
 
         // ============================================================
-        // POWCH ONBOARDING - Now handled by useOnboardingFlow hook
+        // POWCH ONBOARDING - Bridge-based auth; makeCommandRequestJSON hydrates session
         // ============================================================
         // The following events are DEPRECATED and no longer processed here:
         // - POWCH_LOGIN_COMPLETE: Hook handles identity via direct setters
@@ -951,11 +948,23 @@ export const AppProvider = ({ children }) => {
           refreshSession
         },
         // Direct API access helper
-        call: Api.call
+        call: Api.call,
+        /** Standard app-sdk API: update session from Powch bridge result. Call after bridge.login() resolves. */
+        loginWithSessionToken: (sessionData) => {
+          const info = sessionData?.sessionInfo ?? sessionData;
+          if (!info?.id && !info?.access_token) return;
+          const status = sessionData?.auth_status ?? LoginStatus.CONNECTED;
+          AppData.sessionInfo = info;
+          AppData.loginStatus = status;
+          if (info?.custodial_balance !== undefined) AppData.custodialBalance = info.custodial_balance;
+          if (info?.roles !== undefined) AppData.userRoles = new Map(Object.entries(info.roles));
+          setSessionInfo(info);
+          setLoginStatus(status);
+        }
       };
       console.log('[App Shell] DeSciX helpers exposed on window object');
     }
-  }, [appState, currentView, loginStatus, sessionInfo, selectedCommunity, selectedApp, setCurrentView, setAppEvent, handleLaunchApp, refreshSession]);
+  }, [appState, currentView, loginStatus, sessionInfo, selectedCommunity, selectedApp, setCurrentView, setAppEvent, handleLaunchApp, refreshSession, setSessionInfo, setLoginStatus]);
 
   useEffect(() => {
     // Register the event dispatcher for session expiry handling
@@ -1080,7 +1089,7 @@ export const AppProvider = ({ children }) => {
       const response = await Api.purchaseProduct(app, ProductTypes.APP);
       
       if (response.needsOnboarding) {
-        // User needs to complete onboarding - go to Dashboard (OnboardingBlocker will handle)
+        // User needs to complete onboarding - go to Dashboard
         setAppEvent({ type: AppContextEvent.CHANGE_VIEW, payload: { view: AppContextView.TRADING_DASHBOARD } });
         return false;
       }
@@ -1116,7 +1125,7 @@ export const AppProvider = ({ children }) => {
       const response = await Api.purchaseProduct(community, ProductTypes.COMMUNITY);
 
       if (response.needsOnboarding) {
-        // User needs to complete onboarding - go to Dashboard (OnboardingBlocker will handle)
+        // User needs to complete onboarding - go to Dashboard
         setAppEvent({ type: AppContextEvent.CHANGE_VIEW, payload: { view: AppContextView.TRADING_DASHBOARD } });
         return false;
       }
@@ -1208,8 +1217,8 @@ export const AppProvider = ({ children }) => {
         sessionInfo, // Export sessionInfo React state for components
         setSessionInfo, // Export setter for components
 
-        // REMOVED: Login Modal State - all auth flows use OnboardingWidget
-        // REMOVED: TOS Modal State - owned by OnboardingWidget
+        // REMOVED: Login Modal State - all auth flows use SignInButton + bridge
+        // REMOVED: TOS Modal State - bridge-based auth
 
         // Selected Context
         selectedCommunity, setSelectedCommunity,

@@ -7,7 +7,8 @@
   "exports": {
     ".": "./src/index.js",
     "./dev": "./src/dev/index.js",
-    "./powch-client": "./src/powch/PowchClient.js"
+    "./powch-client": "./src/powch/PowchClient.js",
+    "./AppShell": "./src/AppShell.jsx"
   },
   "files": [
     "src"
