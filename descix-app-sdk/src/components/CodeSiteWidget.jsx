@@ -21,10 +21,13 @@ const CodeSiteWidget = ({ url, enableChat = true, chatPosition = 'right', chatWi
 
   const iframeSrc = useMemo(() => gcsMediaPath(url), [url]);
   
+  // Prevent recursion: If we are the Shell (daita) viewing daita, show placeholder
+  const isSelfView = selectedApp?.app_id === 'daita' && !window.__STANDALONE_APP_ID__;
+
   useEffect(() => {
     const iframeEl = iframeRef.current;
-    if (!iframeEl || !iframeSrc) return;
-
+    if (!iframeEl || !iframeSrc || isSelfView) return;
+    
     const onLoad = () => {
       // Log CodeSite view event
       if (selectedCommunity && selectedApp) {
@@ -49,6 +52,7 @@ const CodeSiteWidget = ({ url, enableChat = true, chatPosition = 'right', chatWi
    * This leverages allow-same-origin to directly invoke functions exposed by the CodeSite.
    */
   const handleExecuteAction = (functionName, args) => {
+    if (isSelfView) return;
     const childWindow = iframeRef.current?.contentWindow;
     if (!childWindow) {
       console.warn('[CodeSiteWidget] Cannot execute action: iframe not loaded');
@@ -89,6 +93,24 @@ const CodeSiteWidget = ({ url, enableChat = true, chatPosition = 'right', chatWi
   };
 
   if (!iframeSrc) return null;
+
+  if (isSelfView) {
+    return (
+      <Box sx={{ display: 'flex', height: '90vh', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 2 }}>
+        <Paper elevation={3} sx={{ p: 4, textAlign: 'center', maxWidth: 600 }}>
+          <Typography variant="h5" gutterBottom>
+            {selectedApp?.app_name || 'Platform Root'}
+          </Typography>
+          <Typography variant="body1" color="text.secondary" paragraph>
+            You are currently using this application (The DeSciX Store).
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            To view the source code or contribute, please visit our repository.
+          </Typography>
+        </Paper>
+      </Box>
+    );
+  }
 
   // Sandbox permissions: allow-same-origin is CRITICAL for direct interframe scripting
   const sandboxPermissions = 'allow-scripts allow-forms allow-popups allow-same-origin';

@@ -38,6 +38,26 @@ export class PowchBridgeClient {
   }
 
   /**
+   * Sync session from Powch to host when payload contains sessionInfo.
+   * Ensures DeSciX session state updates whether login came via bridge.login() or internal unlock.
+   */
+  _syncSessionToHost(payload) {
+    const info = payload?.sessionInfo ?? payload;
+    if (!info?.id && !info?.access_token) return;
+    try {
+      const shell = typeof window !== 'undefined' ? window.DeSciX : null;
+      if (shell?.loginWithSessionToken) {
+        shell.loginWithSessionToken(payload);
+      }
+      if (shell?.AppContext?.setAppEvent) {
+        shell.AppContext.setAppEvent('LOGIN_SUCCESS');
+      }
+    } catch (e) {
+      console.warn('[PowchBridgeClient] _syncSessionToHost failed:', e);
+    }
+  }
+
+  /**
    * Register the iframe element. Called when PowchSideBarWidget mounts.
    */
   registerIframe(iframe) {
@@ -65,8 +85,10 @@ export class PowchBridgeClient {
     if (type === 'POWCH_RESPONSE' && requestId && this.pendingRequests.has(requestId)) {
       const { resolve, reject } = this.pendingRequests.get(requestId);
       this.pendingRequests.delete(requestId);
-      if (success) resolve(payload);
-      else reject(new Error(errorMsg || 'Request failed'));
+      if (success) {
+        this._syncSessionToHost(payload);
+        resolve(payload);
+      } else reject(new Error(errorMsg || 'Request failed'));
       return;
     }
 
@@ -96,6 +118,7 @@ export class PowchBridgeClient {
     if (type === 'POWCH_STATE_UPDATE' && payload) {
       if (payload.isAuthenticated !== undefined) this._isAuthenticated = payload.isAuthenticated;
       if (payload.displayAddress !== undefined) this._displayAddress = payload.displayAddress;
+      this._syncSessionToHost(payload);
       this._emit('state_update', payload);
       return;
     }

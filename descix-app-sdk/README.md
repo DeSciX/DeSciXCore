@@ -13,7 +13,7 @@ npm install @descix/app-sdk
 ```json
 {
   "dependencies": {
-    "@descix/app-sdk": "file:../packages/descix-app-sdk"
+    "@descix/app-sdk": "file:../DeSciX_Core/descix-app-sdk"
   }
 }
 ```

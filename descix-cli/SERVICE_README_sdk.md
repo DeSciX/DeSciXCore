@@ -20,7 +20,7 @@ The DeSciX SDK provides command-line tools and MCP (Model Context Protocol) inte
 npm install -g @descix/cli
 
 # Or via npm link during development
-cd packages/descix-cli
+cd DeSciX_Core/descix-cli
 npm link
 ```
 
