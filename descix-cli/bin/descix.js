@@ -1217,7 +1217,7 @@ appCommand
         if (error.code === 'ENOENT') {
           console.error(chalk.red(`❌ manifest.json not found at ${manifestPath}`));
           console.error(chalk.gray('\nCreate a manifest.json with your service configuration.'));
-          console.error(chalk.gray('See packages/descix-cli/templates/scaffolds/microservice/manifest.json for a template.\n'));
+          console.error(chalk.gray('See DeSciX_Core/descix-cli/templates/scaffolds/microservice/manifest.json for a template.\n'));
           process.exit(1);
         }
         throw new Error(`Failed to parse manifest.json: ${error.message}`);

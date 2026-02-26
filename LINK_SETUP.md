@@ -5,7 +5,7 @@ DeSciX Core (this repo) can live anywhere on disk. Peer projects consume package
 ## 1. From DeSciX Core (this repo)
 
 ```bash
-cd /path/to/DeSciXCore   # or packages/ inside DaitaERC20
+cd /path/to/DeSciXCore   # or DeSciX_Core/ inside DaitaERC20
 npm install
 npm run link
 ```
@@ -85,11 +85,11 @@ Or keep packages inside DaitaERC20 (current layout):
 
 ```
 DaitaERC20/
-├── packages/            # DeSciX Core (separate git, npm link source)
+├── DeSciX_Core/            # DeSciX Core (separate git, npm link source)
 │   └── ...
 ├── DeSciX_Cloud/
 ├── DeSciX_PWA/
 └── ...
 ```
 
-Run `npm run link` from `packages/` and `npm link <pkg>` from each peer project. No `file:` paths required.
+Run `npm run link` from `DeSciX_Core/` and `npm link <pkg>` from each peer project. No `file:` paths required.

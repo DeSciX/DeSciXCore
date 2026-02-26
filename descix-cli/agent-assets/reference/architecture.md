@@ -27,7 +27,7 @@ Drive (raw assets) → CLI (pull + convert) → Local Git (text + chunks) → Ba
 
 ## 2. Core Components
 
-All core SDK logic resides in `packages/descix-cli/lib/core/`.
+All core SDK logic resides in `DeSciX_Core/descix-cli/lib/core/`.
 
 ### 2.1 Hydrator (`Hydrator.js`)
 
@@ -393,14 +393,14 @@ Both modes start with content on Google Drive (users create documents there). Th
 
 | Component | Path | Description |
 |-----------|------|-------------|
-| WorkspaceConfig | `packages/descix-cli/lib/workspace-config.js` | Sole configuration class |
-| GlobalConfig | `packages/descix-cli/lib/global-config.js` | User-level settings (~/.descix) |
-| Hydrator | `packages/descix-cli/lib/core/Hydrator.js` | Drive sync operations |
-| Chunker | `packages/descix-cli/lib/core/Chunker.js` | KB chunking |
-| Syncer | `packages/descix-cli/lib/core/Syncer.js` | Pinecone sync |
-| KB Commands | `packages/descix-cli/lib/commands/kb.js` | Git-mode KB processing |
-| Setup Command | `packages/descix-cli/lib/commands/setup.js` | Initial workspace setup |
-| Drive ADC | `packages/descix-cli/lib/google-storage-adc.js` | Google Drive API wrapper |
+| WorkspaceConfig | `DeSciX_Core/descix-cli/lib/workspace-config.js` | Sole configuration class |
+| GlobalConfig | `DeSciX_Core/descix-cli/lib/global-config.js` | User-level settings (~/.descix) |
+| Hydrator | `DeSciX_Core/descix-cli/lib/core/Hydrator.js` | Drive sync operations |
+| Chunker | `DeSciX_Core/descix-cli/lib/core/Chunker.js` | KB chunking |
+| Syncer | `DeSciX_Core/descix-cli/lib/core/Syncer.js` | Pinecone sync |
+| KB Commands | `DeSciX_Core/descix-cli/lib/commands/kb.js` | Git-mode KB processing |
+| Setup Command | `DeSciX_Core/descix-cli/lib/commands/setup.js` | Initial workspace setup |
+| Drive ADC | `DeSciX_Core/descix-cli/lib/google-storage-adc.js` | Google Drive API wrapper |
 | Backend KB API | `DeSciX_Cloud/services/commandHandlers/appCommands.js` | Server-side processing |
 | Pinecone Service | `DeSciX_Cloud/services/pineconeService.js` | Vector database |
 | Server Chunking | `DeSciX_Cloud/services/chunkingUtils.js` | Drive-mode chunking |

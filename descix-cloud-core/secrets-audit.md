@@ -4,7 +4,7 @@ This document audits all keys in [docs/secret.example.json](../secret.example.js
 
 ## Methodology
 
-- Grepped each key across `DeSciX_Cloud/cloud`, `DeSciX_Powch`, `packages/descix-cloud-core`
+- Grepped each key across `DeSciX_Cloud/cloud`, `DeSciX_Powch`, `DeSciX_Core/descix-cloud-core`
 - Cross-referenced [DeSciX_Cloud/cloud/defaults-config.json](../../DeSciX_Cloud/cloud/defaults-config.json) and config-schema.json
 - Status: **Active** = code uses it; **Deprecated** = no code usage; **Ambiguous** = unclear or likely bug; **Migration** = moving to descix-chain
 
@@ -207,7 +207,7 @@ These are non-sensitive, instance-wide defaults. They may vary by deployment but
 
 1. **bootstrap_keys**: Remove UPVOTE_EMOJI (it has a safe default; bootstrap should be minimal).
 2. **dev_override_keys**: Remove deprecated keys (SERPAPI, OPENAI, GOOGLE_CSE, etc.). Add DOCUMENT_AI_PROCESSOR_ID if Document AI is used in dev.
-3. **defaults**: Add PLATFORM_DEFAULT_CHAIN (already in packages/descix-cloud-core config-schema). Ensure DeSciX_Cloud config-schema stays in sync with packages.
+3. **defaults**: Add PLATFORM_DEFAULT_CHAIN (already in DeSciX_Core/descix-cloud-core config-schema). Ensure DeSciX_Cloud config-schema stays in sync with packages.
 
 ### dev-overrides.json
 

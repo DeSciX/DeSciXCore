@@ -416,9 +416,9 @@ cd /path/to/workspace
 
 | Component | Path |
 |-----------|------|
-| MCP Tools | `packages/descix-cli/lib/mcp-tools.js` |
+| MCP Tools | `DeSciX_Core/descix-cli/lib/mcp-tools.js` |
 | tell_me_how Implementation | `DeSciX_Cloud/services/commandHandlers/ragCommands.js` |
 | execute_remote_command | `DeSciX_Cloud/services/apiFront.js` |
 | SERVICE_README Template | `DeSciX_ServiceSDK/templates/SERVICE_README_TEMPLATE.md` |
-| Workspace Config | `packages/descix-cli/lib/workspace-config.js` |
-| Service Registration | `packages/descix-cli/lib/commands/service.js` |
+| Workspace Config | `DeSciX_Core/descix-cli/lib/workspace-config.js` |
+| Service Registration | `DeSciX_Core/descix-cli/lib/commands/service.js` |
