@@ -283,10 +283,15 @@ export class PathContext {
 
   /**
    * Get API URL
+   * Derives from env.platform.microservice.port in DEV mode (v2.1 workspace format).
    * @returns {string}
    */
   getApiUrl() {
-    return this.config.apiUrl || 'https://descix.net';
+    if (this.config.apiUrl) return this.config.apiUrl;
+    const env = this.config.env || {};
+    const platformPort = env.platform?.microservice?.port;
+    if (platformPort && env.environment === 'DEV') return `https://localhost:${platformPort}`;
+    return 'https://descix.net';
   }
 
   /**

@@ -24,48 +24,55 @@ import crypto from 'crypto';
 import { DeSciXApiClient } from '../api-client.js';
 import { requireAuth } from '../auth-guard.js';
 import { WorkspaceConfig } from '../workspace-config.js';
+import { runKbChunk, runKbSync } from './kb.js';
 
 /**
  * Helper to load workspace context with options override
+ * Unified Registry: app_id only required; community_id derived on backend
  * @param {Object} options - CLI options with community, app, kb
  * @returns {{ workspaceConfig, communityId, appId, kbId, appPath }}
  */
 async function loadWorkspaceContext(options = {}) {
   const workspaceConfig = await WorkspaceConfig.load();
-  const ctx = workspaceConfig.resolveContextWithOptions(options);
-  
-  if (!ctx.communityId || !ctx.appId) {
-    throw new Error(
-      'Could not determine app context.\n\n' +
-      'Options:\n' +
-      '  1. cd into an app directory\n' +
-      '  2. Use flags: -c <community> -a <app>\n\n' +
-      'Example: npx descix update kb -c descix -a appsdk'
-    );
+  const ctx = workspaceConfig.requireContext(options);
+
+  // Prefer getAppByAppId (env.platform/products, Unified Registry)
+  let appConfig = workspaceConfig.getAppByAppId(ctx.appId);
+  if (!appConfig && ctx.communityId) {
+    appConfig = workspaceConfig.getApp(ctx.communityId, ctx.appId);
+    if (appConfig) {
+      appConfig = {
+        localPath: appConfig.localPath,
+        absolutePath: appConfig.absolutePath || (workspaceConfig.workspaceRoot && appConfig.localPath
+          ? path.join(workspaceConfig.workspaceRoot, appConfig.localPath)
+          : null),
+        communityId: ctx.communityId,
+        kbId: appConfig.kbId || 'General'
+      };
+    }
   }
-  
-  const appConfig = workspaceConfig.getApp(ctx.communityId, ctx.appId);
+
   if (!appConfig) {
     throw new Error(
       `App "${ctx.appId}" not found in workspace.json.\n` +
-      'Run "npx descix init" to register the app.'
+      'Run "npx descix init" or ensure env.platform/env.products maps app_id to localPath.'
     );
   }
-  
-  const appPath = appConfig.absolutePath || 
-    (appConfig.localPath && workspaceConfig.workspaceRoot 
+
+  const appPath = appConfig.absolutePath ||
+    (appConfig.localPath && workspaceConfig.workspaceRoot
       ? path.join(workspaceConfig.workspaceRoot, appConfig.localPath)
       : null);
-  
+
   if (!appPath) {
-    throw new Error(`App path not configured for ${ctx.communityId}/${ctx.appId}`);
+    throw new Error(`App path not configured for ${ctx.appId}`);
   }
-  
+
   return {
     workspaceConfig,
-    communityId: ctx.communityId,
+    communityId: ctx.communityId || appConfig.communityId,
     appId: ctx.appId,
-    kbId: ctx.kbId,
+    kbId: ctx.kbId || appConfig.kbId || 'General',
     appPath
   };
 }
@@ -168,7 +175,7 @@ export async function updateAuto(options = {}) {
       syncType = 'microservice';
     }
     
-    spinner.succeed(`Context loaded: ${ctx.communityId}/${ctx.appId}`);
+    spinner.succeed(`Context loaded: ${ctx.communityId || '?'}/${ctx.appId}`);
     console.log(chalk.gray(`  Auto-detected sync type: ${syncType}\n`));
     
     // Route to appropriate update function
@@ -353,153 +360,54 @@ export async function updateApp(options = {}) {
 }
 
 /**
- * Update knowledge base (three-stage sync)
- * Stage 1: Local → Drive (DIRECT using ADC - no backend)
- * Stage 2-3: Drive → GCS → Pinecone (backend for server-side processing)
- * 
+ * Update knowledge base (Git Mode: local chunk → kb_sync_chunks → Pinecone)
+ *
+ * Drive Mode (Drive → GCS → Pinecone) is server-side only for PWA users.
+ * CLI mandates Git Mode: local files are chunked locally and upserted directly.
+ *
  * Convention: KB files are in {appPath}/kb/{kbId}/
  */
 export async function updateKB(options = {}) {
   const apiClient = new DeSciXApiClient();
   await requireAuth(apiClient);
-  
+
   const spinner = ora('Loading context...').start();
-  
+
   try {
     const ctx = await loadWorkspaceContext(options);
     const kbId = ctx.kbId;
-    
-    // Convention: KB folder path
-    const kbDir = path.join(ctx.appPath, 'kb', kbId);
-    
-    spinner.text = 'Reading KB files...';
-    
-    const files = await readDirectoryFiles(kbDir);
-    
-    spinner.succeed(`Found ${files.length} files`);
-    
+
+    spinner.succeed(`KB: ${ctx.appId}/${kbId}`);
+
+    // Resolve community_id from Products when missing (Unified Registry - app_id only)
+    if (!ctx.communityId) {
+      try {
+        const productCtx = await apiClient.invoke('get_product_context', { app_id: ctx.appId });
+        ctx.communityId = productCtx?.community_id || productCtx?.message?.community_id;
+        if (!ctx.communityId) {
+          throw new Error(`Product "${ctx.appId}" not found in Products registry. Run bootstrap.`);
+        }
+      } catch (err) {
+        if (err.message?.includes('not found')) throw err;
+        throw new Error(`Could not resolve community for app "${ctx.appId}". Run bootstrap.`);
+      }
+    }
+
     console.log(chalk.cyan('\n📤 Updating Knowledge Base\n'));
     console.log(chalk.gray(`  Community: ${ctx.communityId}`));
     console.log(chalk.gray(`  App: ${ctx.appId}`));
     console.log(chalk.gray(`  KB: ${kbId}`));
-    console.log(chalk.gray(`  Source: ${kbDir}\n`));
-    
-    if (files.length === 0) {
-      console.log(chalk.gray('  No files to sync.\n'));
-      return { success: true, synced: 0 };
-    }
-    
-    // Stage 1: Local → Drive (DIRECT using ADC - no backend involvement)
-    if (!options.skipStage1) {
-      spinner.start('Stage 1: Uploading to Drive (direct)...');
-      
-      try {
-        // Import ADC module
-        const googleStorageADC = await import('../google-storage-adc.js');
-        
-        // Get base folder ID from workspace config driveConfig
-        let baseFolderId = ctx.workspaceConfig.driveConfig?.base_folder_id;
-        
-        if (!baseFolderId) {
-          // Try getting from user profile via backend
-          const userInfo = await apiClient.invoke('get_my_profile', {});
-          baseFolderId = userInfo.message?.base_folder_id;
-        }
-        
-        if (!baseFolderId) {
-          throw new Error('No base Drive folder configured. Run descix login --setup first.');
-        }
-        
-        // Navigate to KB folder: {base}/{community}/{app}/kb/{kbId}
-        const kbPath = `${ctx.communityId}/${ctx.appId}/kb/${kbId}`;
-        let kbFolderId = await googleStorageADC.findFolderByPath(baseFolderId, kbPath);
-        
-        if (!kbFolderId) {
-          spinner.text = 'Stage 1: Creating folder structure...';
-          kbFolderId = await googleStorageADC.ensureFolderPath(baseFolderId, kbPath);
-        }
-        
-        // List Drive files for delta comparison
-        const driveFiles = await googleStorageADC.listFolderWithMeta(kbFolderId);
-        
-        // Compute delta
-        const localFilesForDelta = files.map(f => ({
-          name: f.name,
-          path: f.path,
-          modifiedTime: f.modified_time || new Date().toISOString(),
-          size: f.size
-        }));
-        
-        const { toUpload, toUpdate, unchanged } = googleStorageADC.computeDelta(localFilesForDelta, driveFiles);
-        
-        // Upload changed files directly to Drive
-        const uploaded = [];
-        for (const file of [...toUpload, ...toUpdate]) {
-          const localFilePath = path.join(kbDir, file.name);
-          spinner.text = `Stage 1: Uploading ${file.name}...`;
-          const driveId = await googleStorageADC.uploadFileToDrive(localFilePath, file.name, kbFolderId);
-          uploaded.push({ name: file.name, drive_id: driveId });
-        }
-        
-        // Update local metadata
-        await googleStorageADC.writeDriveMetadata(kbFolderId, {
-          lastSync: new Date().toISOString(),
-          files: uploaded,
-          source: 'descix-cli'
-        });
-        
-        spinner.succeed(`Stage 1: ${uploaded.length} files uploaded directly (${unchanged.length} unchanged)`);
-        
-      } catch (adcError) {
-        // Fallback to backend if ADC fails
-        if (adcError.message.includes('Could not load the default credentials') || 
-            adcError.message.includes('authentication')) {
-          spinner.text = 'Stage 1: Uploading to Drive (via backend)...';
-          console.log(chalk.yellow('\n  ADC not configured, using backend upload...'));
-          
-          const stage1Response = await apiClient.invoke('sync_local_to_drive', {
-            community_id: ctx.communityId,
-            app_id: ctx.appId,
-            kb_id: kbId,
-            files: files
-          });
-          
-          const stage1Result = stage1Response.message || stage1Response;
-          spinner.succeed(`Stage 1: ${stage1Result.uploaded || 0} files uploaded (via backend)`);
-        } else {
-          throw adcError;
-        }
-      }
-    }
-    
-    // Stage 2 & 3: Drive → GCS → Pinecone (backend for server-side processing)
-    if (!options.stage1Only) {
-      spinner.start('Stage 2: Extracting to GCS...');
-      
-      const stage2Response = await apiClient.invoke('sync_drive_to_gcs', {
-        community_id: ctx.communityId,
-        app_id: ctx.appId,
-        kb_id: kbId
-      });
-      
-      const stage2Result = stage2Response.message || stage2Response;
-      spinner.succeed(`Stage 2: ${stage2Result.processed || 0} files extracted`);
-      
-      spinner.start('Stage 3: Vectorizing to Pinecone...');
-      
-      const stage3Response = await apiClient.invoke('sync_gcs_to_pinecone', {
-        community_id: config.community_id,
-        app_id: config.app_id,
-        kb_id: kbId
-      });
-      
-      const stage3Result = stage3Response.message || stage3Response;
-      spinner.succeed(`Stage 3: ${stage3Result.vectors_updated || 0} vectors updated`);
-    }
-    
+    console.log(chalk.gray(`  Source: ${path.join(ctx.appPath, 'kb', kbId)}\n`));
+
+    // Git Mode: chunk local files → kb_sync_chunks → Pinecone
+    // (Drive → GCS → Pinecone is server-side only for PWA users)
+    const kbOptions = { ...options, app: ctx.appId, community: ctx.communityId, kb: kbId };
+    await runKbChunk(kbOptions);
+    await runKbSync(apiClient, kbOptions);
+
     console.log(chalk.green('\n✓ Knowledge base updated successfully\n'));
     return { success: true };
-    
+
   } catch (error) {
     spinner.fail('Update failed');
     console.error(chalk.red(`\n❌ ${error.message}\n`));
@@ -651,13 +559,13 @@ export async function updateSite(options = {}) {
     spinner.start('Confirming deployment...');
     
     const confirmResponse = await apiClient.invoke('confirm_site_deploy', {
-      community_id: config.community_id,
-      app_id: config.app_id,
+      community_id: ctx.communityId,
+      app_id: ctx.appId,
       token_id: token_id,
       manifest: {
         version: '1.0',
-        app_id: config.app_id,
-        community_id: config.community_id,
+        app_id: ctx.appId,
+        community_id: ctx.communityId,
         files: localFiles
       },
       preview: options.preview || false

@@ -31,12 +31,100 @@ export class WorkspaceConfig {
 
     // V2.1 Product tracking (Unified Registry)
     this.products = config.products || {};
+
+    // app_id → localPath map from env.platform + env.products (Unified Registry)
+    this._appIdToConfig = this._buildAppIdMap(config);
     
     // Environment URLs for descix-serve gateway routing
     this.env = config.env || {};
     
     // Drive configuration (base_folder_id for template-based navigation)
     this.driveConfig = config.driveConfig || null;
+  }
+
+  /**
+   * Build app_id → config map from env.platform and env.products
+   * Unified Registry: app_id is globally unique; localPath maps to directory
+   * @param {Object} config - Parsed workspace.json
+   * @returns {Object} Map of appId -> { localPath, communityId?, kbId }
+   */
+  _buildAppIdMap(config) {
+    const map = {};
+    const env = config.env || {};
+    const wsRoot = config.workspaceRoot || this.workspaceRoot;
+
+    // env.platform (e.g. daita -> DeSciX_Cloud)
+    if (env.platform?.appId && env.platform?.localPath) {
+      map[env.platform.appId] = {
+        localPath: env.platform.localPath,
+        communityId: env.platform.communityId || null,
+        kbId: env.platform.kbId || 'General'
+      };
+    }
+
+    // env.products array (e.g. powch -> DeSciX_Powch)
+    const products = Array.isArray(env.products) ? env.products : [];
+    for (const p of products) {
+      if (p?.appId && p?.localPath) {
+        map[p.appId] = {
+          localPath: p.localPath,
+          communityId: p.communityId || null,
+          kbId: p.kbId || 'General'
+        };
+      }
+    }
+
+    return map;
+  }
+
+  /**
+   * Get app config by app_id (Unified Registry - app_id is globally unique)
+   * Resolves from env.platform, env.products, communities, or products
+   * @param {string} appId - App/product identifier
+   * @returns {Object|null} { localPath, absolutePath?, communityId?, kbId } or null
+   */
+  getAppByAppId(appId) {
+    if (!appId || !this.workspaceRoot) return null;
+
+    // env.platform + env.products (primary for manually crafted workspace)
+    const fromEnv = this._appIdToConfig[appId];
+    if (fromEnv) {
+      const absPath = path.join(this.workspaceRoot, fromEnv.localPath);
+      return {
+        localPath: fromEnv.localPath,
+        absolutePath: absPath,
+        communityId: fromEnv.communityId,
+        kbId: fromEnv.kbId || 'General'
+      };
+    }
+
+    // Legacy: products object
+    const product = this.products[appId];
+    if (product?.localPath) {
+      const absPath = product.absolutePath || path.join(this.workspaceRoot, product.localPath);
+      return {
+        localPath: product.localPath,
+        absolutePath: absPath,
+        communityId: product.context?.community || null,
+        kbId: product.kbId || 'General'
+      };
+    }
+
+    // Legacy: communities.apps
+    for (const [, comm] of Object.entries(this.communities || {})) {
+      const app = comm?.apps?.[appId];
+      if (app?.localPath) {
+        const absPath = app.absolutePath || path.join(this.workspaceRoot, app.localPath);
+        return {
+          localPath: app.localPath,
+          absolutePath: absPath,
+          communityId: null, // Will be derived from Products on backend
+          kbId: app.kbId || 'General'
+        };
+      }
+    }
+
+    return null;
   }
   
   /**
@@ -462,10 +550,23 @@ export class WorkspaceConfig {
   detectContext(startDir = process.cwd()) {
     const cwd = path.resolve(startDir);
     const wsRoot = this.workspaceRoot ? path.resolve(this.workspaceRoot) : null;
+
+    // env.platform + env.products (Unified Registry - primary)
+    if (wsRoot) {
+      for (const [appId, cfg] of Object.entries(this._appIdToConfig || {})) {
+        const appPath = path.resolve(wsRoot, cfg.localPath);
+        if (cwd.startsWith(appPath)) {
+          return {
+            appId,
+            communityId: cfg.communityId || null,
+            kbId: cfg.kbId || 'General'
+          };
+        }
+      }
+    }
     
     for (const [commId, comm] of Object.entries(this.communities || {})) {
       for (const [appId, app] of Object.entries(comm.apps || {})) {
-        // Compute app path from absolutePath or localPath
         let appPath = app.absolutePath;
         if (!appPath && app.localPath && wsRoot) {
           appPath = path.join(wsRoot, app.localPath);
@@ -481,7 +582,7 @@ export class WorkspaceConfig {
       }
     }
 
-    // Check products
+    // products object (legacy)
     for (const [productId, product] of Object.entries(this.products || {})) {
       let productPath = product.absolutePath;
       if (!productPath && product.localPath && wsRoot) {
@@ -489,12 +590,10 @@ export class WorkspaceConfig {
       }
 
       if (productPath && cwd.startsWith(productPath)) {
-        // Return context compatible with legacy if possible, or new product context
         return {
           productId,
-          // Legacy compat if context is defined
           communityId: product.context?.community || null,
-          appId: product.context?.app || null, // Or derive from productId?
+          appId: product.context?.app || productId,
           kbId: product.kbId || 'General'
         };
       }
@@ -506,6 +605,7 @@ export class WorkspaceConfig {
   /**
    * Resolve context by merging CLI options with detected context
    * CLI options take priority over detected context
+   * Unified Registry: app_id only is sufficient; community_id derived on backend
    * 
    * @param {Object} options - CLI options { community, app, kb }
    * @returns {{ communityId: string|null, appId: string|null, kbId: string }}
@@ -521,22 +621,23 @@ export class WorkspaceConfig {
   }
   
   /**
-   * Resolve context and throw if community/app not determined
+   * Resolve context and throw if app not determined
+   * Unified Registry: app_id only required (community_id derived on backend)
    * 
    * @param {Object} options - CLI options { community, app, kb }
-   * @returns {{ communityId: string, appId: string, kbId: string }}
-   * @throws {Error} If community or app cannot be determined
+   * @returns {{ communityId: string|null, appId: string, kbId: string }}
+   * @throws {Error} If appId cannot be determined
    */
   requireContext(options = {}) {
     const ctx = this.resolveContextWithOptions(options);
     
-    if (!ctx.communityId || !ctx.appId) {
+    if (!ctx.appId) {
       throw new Error(
         'Could not determine app context.\n\n' +
         'Options:\n' +
         '  1. cd into an app directory\n' +
-        '  2. Use flags: -c <community> -a <app>\n\n' +
-        'Example: npx descix kb build -c descix -a appsdk'
+        '  2. Use flag: -a <app_id>\n\n' +
+        'Example: npx descix update kb -a daita'
       );
     }
     
@@ -549,6 +650,19 @@ export class WorkspaceConfig {
    */
   getWorkspaceRoot() {
     return this.workspaceRoot;
+  }
+
+  /**
+   * Get API URL for the current workspace.
+   * In DEV mode, derives from env.platform.microservice.port (v2.1 format).
+   * Eliminates the need for DESCIX_API_URL in local dev.
+   * @returns {string}
+   */
+  getApiUrl() {
+    if (this.apiUrl) return this.apiUrl;
+    const platformPort = this.env?.platform?.microservice?.port;
+    if (platformPort && this.env?.environment === 'DEV') return `https://localhost:${platformPort}`;
+    return 'https://descix.net';
   }
   
   /**

@@ -1,1 +1,42 @@
-{"$schema":"http://json-schema.org/draft-07/schema#","description":"DeSciX Cloud Service Configuration Schema - Defines key categories for bootstrap and dev override","version":"1.0.0","bootstrap_keys":{"description":"Keys loaded from .env/.yaml BEFORE Secret Manager access (required for bootstrap)","keys":["CONFIG_SECRET_NAME","CONFIG_SECRET_VERSION","CONTRACT_SECRET_NAME","DEPLOY_ENV","IS_BOT_ENABLED","BYPASS_PUBSUB","DEBUG_FUNCTION_FRAMEWORK","DEBUG_LOCAL"]},"boolean_keys":{"description":"Keys that should be parsed as boolean (value === 'true')","keys":["DEBUG_LOCAL","DEBUG_PROXY","DEBUG_STREAMING","IS_BOT_ENABLED","DEBUG_FUNCTION_FRAMEWORK","BYPASS_PUBSUB","CLOUDFLARED_AUTO_START","EMAIL_VERIFICATION_REQUIRED"]},"dev_override_keys":{"description":"Keys that can be overridden via .env or dev-overrides.json in dev for pre-testing before Secret Manager deployment","keys":["DEBUG_LOCAL","DEBUG_PROXY","DEBUG_STREAMING","LOCAL_PORT","CLOUDFLARED_AUTO_START","CLOUDFLARED_TUNNEL_PORT","CLOUDFLARE_TOKEN","CLOUDFLARE_API_TOKEN","CLOUDFLARE_ZONE_ID","CLOUDFLARE_TUNNEL_NAME","DEBUG_WALLET_ADDRESS","CRYPTOAPIS_API_KEY","HD_WALLET_MNEMONIC","BTC_XPUB","DOGE_XPUB","GOOGLE_REDIRECT_URI","POWCH_RP_ID","POWCH_RP_NAME","STRIPE_SECRET_KEY","STRIPE_WEBHOOK_SECRET","STRIPE_PUBLISHABLE_KEY","GMAIL_SENDER_EMAIL","EMAIL_VERIFICATION_REQUIRED","DESCIX_ROUTER_COMMUNITY_MANAGER","DISCORD_BOT_URL"]},"defaults":{"description":"Keys with safe default values (use sparingly - prefer null to expose config errors)","values":{"UPVOTE_EMOJI":"👍","DEFAULT_KNOWLEDGEBASE_NAME":"General","VECTORIZE_MODE":"sync","PINECONE_INTEGRATED_EMBED_MODEL":"llama-text-embed-v2","PINECONE_NAMESPACE_MODE":"community_id","PLATFORM_DEFAULT_CHAIN":"polygon"}}}
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "DeSciX Cloud Service Configuration Schema - Defines key categories for bootstrap and dev override",
+  "version": "1.1.0",
+  "bootstrap_keys": {
+    "description": "Keys loaded from .env/.yaml BEFORE Secret Manager access (required for bootstrap)",
+    "keys": ["CONFIG_SECRET_NAME","CONFIG_SECRET_VERSION","CONTRACT_SECRET_NAME","DEPLOY_ENV","IS_BOT_ENABLED","BYPASS_PUBSUB","DEBUG_FUNCTION_FRAMEWORK","DEBUG_LOCAL"]
+  },
+  "boolean_keys": {
+    "description": "Keys that should be parsed as boolean (value === 'true')",
+    "keys": ["DEBUG_LOCAL","DEBUG_PROXY","DEBUG_STREAMING","IS_BOT_ENABLED","DEBUG_FUNCTION_FRAMEWORK","BYPASS_PUBSUB","CLOUDFLARED_AUTO_START","EMAIL_VERIFICATION_REQUIRED"]
+  },
+  "dev_override_keys": {
+    "description": "Keys that can be overridden via .env or dev-overrides.json in dev for pre-testing before Secret Manager deployment",
+    "keys": [
+      "DEBUG_LOCAL","DEBUG_PROXY","DEBUG_STREAMING","LOCAL_PORT",
+      "CLOUDFLARED_AUTO_START","CLOUDFLARED_TUNNEL_PORT","CLOUDFLARE_TOKEN","CLOUDFLARE_API_TOKEN","CLOUDFLARE_ZONE_ID","CLOUDFLARE_TUNNEL_NAME",
+      "DEBUG_WALLET_ADDRESS","CRYPTOAPIS_API_KEY","HD_WALLET_MNEMONIC","BTC_XPUB","DOGE_XPUB",
+      "GOOGLE_REDIRECT_URI","POWCH_RP_ID","POWCH_RP_NAME",
+      "STRIPE_SECRET_KEY","STRIPE_WEBHOOK_SECRET","STRIPE_PUBLISHABLE_KEY",
+      "GMAIL_SENDER_EMAIL","EMAIL_VERIFICATION_REQUIRED",
+      "DESCIX_ROUTER_COMMUNITY_MANAGER","DISCORD_BOT_URL",
+      "POLYGON_RPC_URL","MUMBAI_RPC_URL","META_TX_RELAYER_KEY",
+      "STORAGE_BUCKET","APP_URL","DEFAULT_COMMUNITY_ID","DESCIX_ADMIN_GROUP",
+      "POWCH_JWT_SECRET"
+    ]
+  },
+  "defaults": {
+    "description": "Keys with safe default values. Use SPARINGLY — prefer null to expose config errors. Only add here if the value is stable across all environments and has no security implications.",
+    "values": {
+      "UPVOTE_EMOJI": "👍",
+      "DEFAULT_KNOWLEDGEBASE_NAME": "General",
+      "VECTORIZE_MODE": "sync",
+      "PINECONE_INTEGRATED_EMBED_MODEL": "llama-text-embed-v2",
+      "PINECONE_NAMESPACE_MODE": "community_id",
+      "PLATFORM_DEFAULT_CHAIN": "polygon",
+      "DEFAULT_AI_MODEL": "gemini-2.0-flash",
+      "CHAIN_DB_ID": "descix-chain",
+      "DESCIX_ROUTER_PREFIX": "reply+"
+    }
+  }
+}
