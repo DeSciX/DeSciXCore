@@ -700,6 +700,98 @@ const appCommand = program
   .description('App management operations');
 
 appCommand
+  .command('list')
+  .description('List apps you have access to (purchases + owned)')
+  .action(async () => {
+    try {
+      const apiClient = new DeSciXApiClient();
+      await requireAuth(apiClient);
+      const response = await apiClient.invoke('fetch_my_purchases', { product_type: 'APP' });
+      const apps = (response.message || response).apps || [];
+      if (apps.length === 0) {
+        console.log(chalk.yellow('\nNo apps found. Run bootstrap or purchase an app.\n'));
+        return;
+      }
+      const idW = Math.max(6, ...apps.map(a => (a.app_id || '').length));
+      const comW = Math.max(9, ...apps.map(a => (a.community_id || '').length));
+      const nameW = Math.max(8, ...apps.map(a => (a.app_name || '').length));
+      console.log('\n' + chalk.bold(
+        'APP ID'.padEnd(idW + 2) + 'COMMUNITY'.padEnd(comW + 2) + 'APP NAME'
+      ));
+      console.log('─'.repeat(idW + comW + nameW + 4));
+      for (const app of apps) {
+        console.log(
+          chalk.cyan((app.app_id || '').padEnd(idW + 2)) +
+          chalk.gray((app.community_id || '').padEnd(comW + 2)) +
+          (app.app_name || '')
+        );
+      }
+      console.log();
+    } catch (error) {
+      console.error(chalk.red(error.message));
+      process.exit(1);
+    }
+  });
+
+appCommand
+  .command('init')
+  .description('Initialize local workspace and Firestore KB for an app (idempotent)')
+  .requiredOption('-a, --app <app_id>', 'App ID (e.g. daita)')
+  .option('--kb <name>', 'Knowledge base name', 'General')
+  .option('-p, --path <dir>', 'Local app directory (default: auto-detected or cwd)')
+  .action(async (options) => {
+    try {
+      const apiClient = new DeSciXApiClient();
+      await requireAuth(apiClient);
+      const appId = options.app;
+      const kbId = options.kb || 'General';
+
+      // Resolve community_id from Products registry
+      const productCtx = await apiClient.invoke('get_product_context', { app_id: appId });
+      const communityId = (productCtx.message || productCtx).community_id;
+      if (!communityId) {
+        throw new Error(`App '${appId}' not found in Products registry. Run bootstrap first.`);
+      }
+
+      // 1. Workspace.json — register app if not already mapped
+      const workspaceConfig = await WorkspaceConfig.tryLoad();
+      const alreadyMapped = workspaceConfig?.getAppByAppId(appId);
+      let appPath = alreadyMapped?.absolutePath;
+
+      if (!alreadyMapped) {
+        const localPath = options.path || '.';
+        const wsRoot = workspaceConfig?.workspaceRoot || process.cwd();
+        const cfg = workspaceConfig || new WorkspaceConfig(wsRoot);
+        cfg.registerApp(communityId, appId, { localPath, kbId });
+        await cfg.save(wsRoot);
+        appPath = path.resolve(wsRoot, localPath);
+        console.log(chalk.gray(`  workspace.json updated: ${appId} → ${localPath}`));
+      }
+
+      // 2. Ensure local KB directory exists
+      if (appPath) {
+        const kbDir = path.join(appPath, 'kb', kbId);
+        await fs.mkdir(kbDir, { recursive: true });
+        console.log(chalk.gray(`  Local KB dir: ${kbDir}`));
+      }
+
+      // 3. Create KnowledgeBase Firestore doc (Git Mode — no Drive required)
+      const kbResponse = await apiClient.invoke('init_git_mode_kb', { app_id: appId, kb_name: kbId });
+      const kbResult = kbResponse.message || kbResponse;
+
+      console.log(chalk.green(`\n✓ ${appId} initialized`));
+      console.log(chalk.gray(`  Community: ${communityId}`));
+      console.log(chalk.gray(`  KB: ${kbId} — ${kbResult.created ? 'created' : 'already exists'}\n`));
+      console.log(chalk.cyan('Next steps:'));
+      console.log(chalk.gray(`  Add markdown files to kb/${kbId}/ then run:`));
+      console.log(chalk.white(`  descix update kb -a ${appId}\n`));
+    } catch (error) {
+      console.error(chalk.red(error.message));
+      process.exit(1);
+    }
+  });
+
+appCommand
   .command('register-folder')
   .description('Register your base Drive folder (must be shared with dip@descix.net)')
   .option('-u, --url <folderUrl>', 'Drive folder URL or ID')
@@ -3539,6 +3631,8 @@ const updateCommand = program
   .command('update')
   .description('Context-driven resource sync (auto-detects from workspace)')
   .argument('[type]', 'Update type: app, kb, site, all (auto-detects if not specified)')
+  .option('-c, --community <id>', 'Community ID (optional; app_id sufficient for Unified Registry)')
+  .option('-a, --app <id>', 'App ID (globally unique; required if not in app directory)')
   .option('--kb <name>', 'Specific KB to update (for kb type)')
   .option('--stage1', 'KB: Local to Drive only (skip vectorization)')
   .option('--preview', 'Site: Deploy to preview URL')

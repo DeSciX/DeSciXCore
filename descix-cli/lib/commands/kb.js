@@ -11,7 +11,7 @@
  * - compare: Show file-level deltas
  * 
  * Architecture:
- * - Uses PathContext for all path resolution (no "finding" at runtime)
+ * - Uses WorkspaceConfig for all path resolution (supports v2.1 env.platform/products format)
  * - All operations delegate to lib/core/ modules
  * - Supports interactive and unattended (agent) modes
  * - CLI handles UX (prompts, progress, errors)
@@ -22,7 +22,7 @@ import ora from 'ora';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import inquirer from 'inquirer';
-import { PathContext } from '../core/PathContext.js';
+import { WorkspaceConfig } from '../workspace-config.js';
 import { hydrateKb, pushStaging, checkStagingFiles } from '../core/Hydrator.js';
 import { processKb } from '../core/Chunker.js';
 import { syncKb, getSyncStatus } from '../core/Syncer.js';
@@ -48,25 +48,25 @@ export async function runKbPull(apiClient, options) {
   const spinner = ora('Loading workspace configuration...').start();
   
   try {
-    // 1. Load PathContext (from workspace.json - no searching)
-    const ctx = await PathContext.load();
-    
+    // 1. Load WorkspaceConfig (from workspace.json - no searching)
+    const workspaceConfig = await WorkspaceConfig.load();
+
     // 2. Resolve context (auto-detect from cwd or use CLI flags)
-    const { communityId, appId, kbId } = ctx.requireContext(options);
-    
+    const { communityId, appId, kbId } = workspaceConfig.requireContext(options);
+
     spinner.text = `Pulling KB: ${communityId}/${appId}/${kbId}`;
-    
+
     // 3. Validate Drive configuration
-    const driveConfig = ctx.getDriveConfig();
+    const driveConfig = workspaceConfig.driveConfig;
     if (!driveConfig?.base_folder_id) {
       spinner.fail('Drive not configured');
       console.log(chalk.yellow('\n💡 Run "descix setup --dev" first to link Drive.\n'));
       throw new Error('The base_folder_id is required for KB operations.');
     }
-    
-    // 4. Get paths from PathContext
-    const workspaceRoot = ctx.getWorkspaceRoot();
-    const appPath = ctx.getAppPath(communityId, appId);
+
+    // 4. Get paths
+    const workspaceRoot = workspaceConfig.getWorkspaceRoot();
+    const appPath = workspaceConfig.getAppByAppId(appId)?.absolutePath;
     
     // 5. Delegate to Hydrator with merge mode options
     spinner.text = 'Connecting to Google Drive...';
@@ -128,24 +128,24 @@ export async function runKbPush(apiClient, options) {
   const spinner = ora('Loading workspace configuration...').start();
   
   try {
-    // 1. Load PathContext
-    const ctx = await PathContext.load();
-    
+    // 1. Load WorkspaceConfig
+    const workspaceConfig = await WorkspaceConfig.load();
+
     // 2. Resolve context
-    const { communityId, appId, kbId } = ctx.requireContext(options);
-    
+    const { communityId, appId, kbId } = workspaceConfig.requireContext(options);
+
     spinner.text = `Pushing staging: ${communityId}/${appId}/${kbId}`;
-    
+
     // 3. Validate Drive configuration
-    const driveConfig = ctx.getDriveConfig();
+    const driveConfig = workspaceConfig.driveConfig;
     if (!driveConfig?.base_folder_id) {
       spinner.fail('Drive not configured');
       throw new Error('Run "descix setup --dev" first to link Drive.');
     }
-    
+
     // 4. Get paths
-    const workspaceRoot = ctx.getWorkspaceRoot();
-    const appPath = ctx.getAppPath(communityId, appId);
+    const workspaceRoot = workspaceConfig.getWorkspaceRoot();
+    const appPath = workspaceConfig.getAppByAppId(appId)?.absolutePath;
     const localPath = appPath ? appPath.replace(workspaceRoot + '/', '') : `${communityId}/${appId}`;
     const stagingDir = path.join(workspaceRoot, localPath, 'kb', 'staging');
     
@@ -233,17 +233,17 @@ export async function runKbChunk(options) {
   const spinner = ora('Loading workspace configuration...').start();
   
   try {
-    // 1. Load PathContext
-    const ctx = await PathContext.load();
-    
+    // 1. Load WorkspaceConfig
+    const workspaceConfig = await WorkspaceConfig.load();
+
     // 2. Resolve context
-    const { communityId, appId, kbId } = ctx.requireContext(options);
-    
+    const { communityId, appId, kbId } = workspaceConfig.requireContext(options);
+
     spinner.text = `Chunking KB: ${communityId}/${appId}/${kbId}`;
-    
+
     // 3. Get paths
-    const workspaceRoot = ctx.getWorkspaceRoot();
-    const appPath = ctx.getAppPath(communityId, appId);
+    const workspaceRoot = workspaceConfig.getWorkspaceRoot();
+    const appPath = workspaceConfig.getAppByAppId(appId)?.absolutePath;
     
     // 4. Delegate to Chunker
     const chunkOptions = {
@@ -299,17 +299,17 @@ export async function runKbSync(apiClient, options) {
       throw new Error('Run "descix login" first.');
     }
     
-    // 1. Load PathContext
-    const ctx = await PathContext.load();
-    
+    // 1. Load WorkspaceConfig
+    const workspaceConfig = await WorkspaceConfig.load();
+
     // 2. Resolve context
-    const { communityId, appId, kbId } = ctx.requireContext(options);
-    
+    const { communityId, appId, kbId } = workspaceConfig.requireContext(options);
+
     spinner.text = `Syncing KB: ${communityId}/${appId}/${kbId}`;
-    
+
     // 3. Get paths
-    const workspaceRoot = ctx.getWorkspaceRoot();
-    const appPath = ctx.getAppPath(communityId, appId);
+    const workspaceRoot = workspaceConfig.getWorkspaceRoot();
+    const appPath = workspaceConfig.getAppByAppId(appId)?.absolutePath;
     
     // 4. Delegate to Syncer
     const result = await syncKb(apiClient, {
@@ -366,10 +366,10 @@ export async function runKbBuild(apiClient, options) {
   
   try {
     // Load context once for all steps
-    const ctx = await PathContext.load();
-    const { communityId, appId, kbId } = ctx.requireContext(options);
-    const workspaceRoot = ctx.getWorkspaceRoot();
-    const appPath = ctx.getAppPath(communityId, appId);
+    const workspaceConfig = await WorkspaceConfig.load();
+    const { communityId, appId, kbId } = workspaceConfig.requireContext(options);
+    const workspaceRoot = workspaceConfig.getWorkspaceRoot();
+    const appPath = workspaceConfig.getAppByAppId(appId)?.absolutePath;
     const localPath = appPath ? appPath.replace(workspaceRoot + '/', '') : `${communityId}/${appId}`;
     const stagingDir = path.join(workspaceRoot, localPath, 'kb', 'staging');
     
@@ -448,13 +448,13 @@ export async function runKbStatus(apiClient, options) {
   const spinner = ora('Checking sync status...').start();
   
   try {
-    // Load PathContext
-    const ctx = await PathContext.load();
-    const { communityId, appId, kbId } = ctx.requireContext(options);
-    
-    const workspaceRoot = ctx.getWorkspaceRoot();
-    const appPath = ctx.getAppPath(communityId, appId);
-    
+    // Load WorkspaceConfig
+    const workspaceConfig = await WorkspaceConfig.load();
+    const { communityId, appId, kbId } = workspaceConfig.requireContext(options);
+
+    const workspaceRoot = workspaceConfig.getWorkspaceRoot();
+    const appPath = workspaceConfig.getAppByAppId(appId)?.absolutePath;
+
     const status = await getSyncStatus(apiClient, {
       workspaceRoot,
       communityId,
@@ -502,18 +502,18 @@ export async function runKbCompare(apiClient, options) {
   const spinner = ora('Loading workspace configuration...').start();
   
   try {
-    // Load PathContext
-    const ctx = await PathContext.load();
-    const { communityId, appId, kbId } = ctx.requireContext(options);
-    
-    const driveConfig = ctx.getDriveConfig();
+    // Load WorkspaceConfig
+    const workspaceConfig = await WorkspaceConfig.load();
+    const { communityId, appId, kbId } = workspaceConfig.requireContext(options);
+
+    const driveConfig = workspaceConfig.driveConfig;
     if (!driveConfig?.base_folder_id) {
       spinner.fail('Drive not configured');
       throw new Error('Run "descix setup --dev" first to link Drive.');
     }
-    
-    const workspaceRoot = ctx.getWorkspaceRoot();
-    const appPath = ctx.getAppPath(communityId, appId);
+
+    const workspaceRoot = workspaceConfig.getWorkspaceRoot();
+    const appPath = workspaceConfig.getAppByAppId(appId)?.absolutePath;
     const localPath = appPath ? appPath.replace(workspaceRoot + '/', '') : `${communityId}/${appId}`;
     
     spinner.text = 'Connecting to Google Drive...';

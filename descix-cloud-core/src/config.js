@@ -366,12 +366,12 @@ class CloudConfig {
             if (shouldLoadElevated) {
                 try {
                     if (!this.__googleApplicationCredentials) {
-                        const serviceAccountFileStr = await this.accessSecretVersion('elevated_credentials_descix', 'LIVE');
+                        const serviceAccountFileStr = await this.accessSecretVersion('elevated_credentials_descix', this.CONFIG_SECRET_VERSION);
                         this.__googleApplicationCredentials = JSON.parse(serviceAccountFileStr);
                         console.log('[Config] Loaded Elevated Credentials');
                     }
                     if (process.env.CONTRACT_SECRET_NAME) {
-                        const abiSecret = await this.accessSecretVersion(process.env.CONTRACT_SECRET_NAME, 'LIVE');
+                        const abiSecret = await this.accessSecretVersion(process.env.CONTRACT_SECRET_NAME, this.CONFIG_SECRET_VERSION);
                         this.DAITA_ABI = JSON.parse(abiSecret);
                         console.log('[Config] Loaded Contract ABI');
                     }
