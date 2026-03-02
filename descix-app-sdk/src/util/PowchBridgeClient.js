@@ -63,7 +63,10 @@ export class PowchBridgeClient {
   registerIframe(iframe) {
     if (!iframe || !iframe.contentWindow) return;
     this.iframe = iframe;
+    // Mark ready immediately — the iframe element is available for postMessage.
+    // POWCH_READY (from the Powch app's initialization) may arrive later as a secondary confirmation.
     this._isBridgeReady = true;
+    this._readyBuffered = false;
     this._emit('ready');
   }
 
@@ -73,22 +76,51 @@ export class PowchBridgeClient {
   }
 
   _handleMessage(event) {
+    const data = event.data || {};
+    const { type } = data;
+
+    // Debug: log all POWCH_ messages regardless of origin
+    if (type && typeof type === 'string' && type.startsWith('POWCH_')) {
+      const originMatch = event.origin === this.origin;
+      console.log(`[PowchBridge] Received ${type} from ${event.origin} (expected: ${this.origin}, match: ${originMatch})`,
+        type === 'POWCH_RESPONSE' ? { requestId: data.requestId, success: data.success, hasPending: this.pendingRequests.has(data.requestId) } : '');
+    }
+
     try {
       if (event.origin !== this.origin) return;
     } catch (e) {
       return;
     }
 
-    const data = event.data || {};
-    const { type, requestId, success, payload, error: errorMsg } = data;
+    const { requestId, success, payload, error: errorMsg } = data;
 
-    if (type === 'POWCH_RESPONSE' && requestId && this.pendingRequests.has(requestId)) {
-      const { resolve, reject } = this.pendingRequests.get(requestId);
-      this.pendingRequests.delete(requestId);
+    if (type === 'POWCH_RESPONSE') {
+      // Always sync session for successful responses — even if the pending request
+      // was removed (e.g. timeout fired during a long auth flow). The auth succeeded
+      // on the Powch side; the Shell must learn about it.
       if (success) {
         this._syncSessionToHost(payload);
-        resolve(payload);
-      } else reject(new Error(errorMsg || 'Request failed'));
+      }
+      if (requestId && this.pendingRequests.has(requestId)) {
+        const { resolve, reject, timer } = this.pendingRequests.get(requestId);
+        clearTimeout(timer);
+        this.pendingRequests.delete(requestId);
+        if (success) resolve(payload);
+        else reject(new Error(errorMsg || 'Request failed'));
+      }
+      return;
+    }
+
+    // POWCH_READY must be checked BEFORE the iframe null-guard.
+    // The iframe app may send READY before React calls registerIframe().
+    if (type === 'POWCH_READY') {
+      if (this.iframe) {
+        this._isBridgeReady = true;
+        this._emit('ready');
+      } else {
+        // Buffer: registerIframe() will apply readiness when the ref arrives.
+        this._readyBuffered = true;
+      }
       return;
     }
 
@@ -96,12 +128,6 @@ export class PowchBridgeClient {
     if (event.source !== this.iframe.contentWindow) return;
 
     if (!type) return;
-
-    if (type === 'POWCH_READY') {
-      this._isBridgeReady = true;
-      this._emit('ready');
-      return;
-    }
 
     if (type === 'POWCH_UI_CLOSE') {
       this._isIframeVisible = false;
@@ -124,7 +150,8 @@ export class PowchBridgeClient {
     }
 
     if (requestId && this.pendingRequests.has(requestId)) {
-      const { resolve, reject } = this.pendingRequests.get(requestId);
+      const { resolve, reject, timer } = this.pendingRequests.get(requestId);
+      clearTimeout(timer);
       this.pendingRequests.delete(requestId);
       if (success) resolve(payload);
       else reject(new Error(errorMsg || 'Request failed'));
@@ -140,20 +167,23 @@ export class PowchBridgeClient {
 
       const doSend = () => {
         const requestId = `req_${++this.requestIdCounter}_${Date.now()}`;
-        this.pendingRequests.set(requestId, { resolve, reject });
+        console.log(`[PowchBridge] Sending ${type} (requestId: ${requestId}) to ${this.origin}`);
 
-        const enrichedPayload = { ...payload, brand: this.brand };
-        this.iframe.contentWindow.postMessage(
-          { type, requestId, payload: enrichedPayload },
-          this.origin
-        );
-
+        // Register BEFORE postMessage — the response can arrive synchronously
+        // (same-origin iframe or fast round-trip) before the next line executes.
         const timer = setTimeout(() => {
           if (this.pendingRequests.has(requestId)) {
             this.pendingRequests.delete(requestId);
             reject(new Error(`Timeout waiting for ${type} response`));
           }
         }, timeout);
+        this.pendingRequests.set(requestId, { resolve, reject, timer });
+
+        const enrichedPayload = { ...payload, brand: this.brand };
+        this.iframe.contentWindow.postMessage(
+          { type, requestId, payload: enrichedPayload },
+          this.origin
+        );
       };
 
       this.openUi();
@@ -183,6 +213,10 @@ export class PowchBridgeClient {
 
   destroy() {
     window.removeEventListener('message', this._boundHandleMessage);
+    for (const { timer } of this.pendingRequests.values()) {
+      clearTimeout(timer);
+    }
+    this.pendingRequests.clear();
   }
 
   // --- UI State ---

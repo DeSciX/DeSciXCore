@@ -22,6 +22,7 @@ import { GlobalConfig } from '../global-config.js';
 import { WorkspaceConfig } from '../workspace-config.js';
 import { findIDEMarker } from '../core/PathContext.js';
 import * as driveADC from '../google-storage-adc.js';
+import { DeSciXApiClient } from '../api-client.js';
 
 /**
  * Run the streamlined setup wizard
@@ -167,100 +168,117 @@ export async function runSetup(options = {}) {
       workspaceConfigObj = new WorkspaceConfig(configData);
       await workspaceConfigObj.save(workspaceRoot);
       
-      // Collect all app paths (now with absolutePath computed)
-      for (const [communityId, communityConfig] of Object.entries(workspaceConfigObj.communities || {})) {
-        for (const [appId, appConfig] of Object.entries(communityConfig.apps || {})) {
-          appPaths.push({
-            communityId,
-            appId,
-            localPath: appConfig.localPath,
-            fullPath: appConfig.absolutePath || path.join(workspaceRoot, appConfig.localPath)
-          });
-        }
+      // Collect all app paths from v2 env format (env.platform + env.products)
+      const allEnvProducts = [
+        workspaceConfigObj.env?.platform,
+        ...(Array.isArray(workspaceConfigObj.env?.products) ? workspaceConfigObj.env.products : [])
+      ].filter(p => p?.appId && p?.localPath);
+
+      for (const product of allEnvProducts) {
+        appPaths.push({
+          appId: product.appId,
+          localPath: product.localPath,
+          fullPath: path.join(workspaceRoot, product.localPath)
+        });
       }
-      
+
       // Create GETTING STARTED.md in each app
       for (const app of appPaths) {
-        await createGettingStartedFile(app.fullPath, app.communityId, app.appId);
+        await createGettingStartedFile(app.fullPath, app.appId);
       }
-      
-      // 4.5 Per-app site/microservice setup prompts
-      const readline = await import('readline');
-      const { copyScaffold } = await import('../core/Hydrator.js');
-      
-      for (const app of appPaths) {
-        console.log(chalk.cyan(`\n📦 Configure ${app.communityId}/${app.appId}:\n`));
-        
-        // Site setup prompt
-        const rl1 = readline.createInterface({
-          input: process.stdin,
-          output: process.stdout
-        });
-        
-        const wantSite = await new Promise(resolve => {
-          rl1.question(chalk.white('  Do you want a CodeSite for this app? (y/N): '), answer => {
-            rl1.close();
-            resolve(answer.toLowerCase() === 'y');
-          });
-        });
-        
-        if (wantSite) {
+
+      // 4.5 Per-app scaffold setup — Git Mode vs Drive Mode
+      // Git Mode: no driveConfig returned by auth (CLI with local .md files → Pinecone)
+      // Drive Mode: driveConfig present (PWA/server-side Drive→GCS→Pinecone pipeline)
+      const isGitMode = !workspaceConfigObj.driveConfig;
+
+      if (isGitMode) {
+        // Git Mode: create local kb/General directory for each app.
+        // KB Firestore doc is created separately via `descix app init -a <appId>`.
+        for (const app of appPaths) {
+          const kbDir = path.join(app.fullPath, 'kb', 'General');
+          await fs.mkdir(kbDir, { recursive: true });
+          console.log(chalk.gray(`  ✓ kb/General created for ${app.appId}`));
+        }
+
+        // Grant entitlements for all workspace apps (Gap 6).
+        // Powch device-login users have user.id = wallet_address, but bootstrap set
+        // owner_id = ADC email. grant_app_entitlement writes an explicit purchase doc
+        // so fetch_my_purchases fast-path returns the app for any authenticated user.
+        const postLoginApi = new DeSciXApiClient();
+        for (const app of appPaths) {
           try {
-            const stats = await copyScaffold('site', app.fullPath, { verbose: false });
-            console.log(chalk.green(`  ✓ Site scaffold added (${stats.copied} files)`));
-            console.log(chalk.gray(`    Run "descix site upload" to deploy`));
-            
-            // Offer local port setup
-            const rl2 = readline.createInterface({
-              input: process.stdin,
-              output: process.stdout
-            });
-            
-            const wantPort = await new Promise(resolve => {
-              rl2.question(chalk.white('  Set up local dev server port? (enter port or n to skip): '), answer => {
-                rl2.close();
-                resolve(answer);
-              });
-            });
-            
-            if (wantPort && wantPort !== 'n' && wantPort !== 'N') {
-              const portNum = parseInt(wantPort);
-              if (!isNaN(portNum) && portNum > 0 && portNum < 65536) {
-                const appConfig = workspaceConfigObj.getApp(app.communityId, app.appId);
-                if (appConfig) {
-                  if (!appConfig.site) appConfig.site = {};
-                  appConfig.site.port = portNum;
-                  appConfig.site.devCommand = 'npm run dev';
-                  await workspaceConfigObj.save(workspaceRoot);
-                  console.log(chalk.green(`  ✓ Local port ${portNum} registered`));
-                }
-              }
-            }
+            await postLoginApi.invoke('grant_app_entitlement', { app_id: app.appId });
+            console.log(chalk.gray(`  ✓ Entitlement granted for ${app.appId}`));
           } catch (err) {
-            console.log(chalk.yellow(`  ⚠️  Could not add site scaffold: ${err.message}`));
+            console.log(chalk.yellow(`  ⚠️  Could not grant entitlement for ${app.appId}: ${err.message}`));
           }
         }
-        
-        // Microservice setup prompt
-        const rl3 = readline.createInterface({
-          input: process.stdin,
-          output: process.stdout
-        });
-        
-        const wantMicroservice = await new Promise(resolve => {
-          rl3.question(chalk.white('  Do you want a microservice for this app? (y/N): '), answer => {
-            rl3.close();
-            resolve(answer.toLowerCase() === 'y');
+      } else {
+        // Drive Mode: scaffold site/microservice via Hydrator
+        const readline = await import('readline');
+        const { copyScaffold } = await import('../core/Hydrator.js');
+
+        for (const app of appPaths) {
+          console.log(chalk.cyan(`\n📦 Configure ${app.appId}:\n`));
+
+          const rl1 = readline.createInterface({ input: process.stdin, output: process.stdout });
+          const wantSite = await new Promise(resolve => {
+            rl1.question(chalk.white('  Do you want a CodeSite for this app? (y/N): '), answer => {
+              rl1.close();
+              resolve(answer.toLowerCase() === 'y');
+            });
           });
-        });
-        
-        if (wantMicroservice) {
-          try {
-            const stats = await copyScaffold('microservice', app.fullPath, { verbose: false });
-            console.log(chalk.green(`  ✓ Microservice scaffold added (${stats.copied} files)`));
-            console.log(chalk.gray(`    Edit manifest.json, then run "descix microservice register"`));
-          } catch (err) {
-            console.log(chalk.yellow(`  ⚠️  Could not add microservice scaffold: ${err.message}`));
+
+          if (wantSite) {
+            try {
+              const stats = await copyScaffold('site', app.fullPath, { verbose: false });
+              console.log(chalk.green(`  ✓ Site scaffold added (${stats.copied} files)`));
+              console.log(chalk.gray(`    Run "descix site upload" to deploy`));
+
+              const rl2 = readline.createInterface({ input: process.stdin, output: process.stdout });
+              const wantPort = await new Promise(resolve => {
+                rl2.question(chalk.white('  Set up local dev server port? (enter port or n to skip): '), answer => {
+                  rl2.close();
+                  resolve(answer);
+                });
+              });
+
+              if (wantPort && wantPort !== 'n' && wantPort !== 'N') {
+                const portNum = parseInt(wantPort);
+                if (!isNaN(portNum) && portNum > 0 && portNum < 65536) {
+                  const envEntry = workspaceConfigObj.env?.products?.find(p => p.appId === app.appId)
+                    || (workspaceConfigObj.env?.platform?.appId === app.appId ? workspaceConfigObj.env.platform : null);
+                  if (envEntry) {
+                    if (!envEntry.site) envEntry.site = {};
+                    envEntry.site.port = portNum;
+                    envEntry.site.devCommand = 'npm run dev';
+                    await workspaceConfigObj.save(workspaceRoot);
+                    console.log(chalk.green(`  ✓ Local port ${portNum} registered`));
+                  }
+                }
+              }
+            } catch (err) {
+              console.log(chalk.yellow(`  ⚠️  Could not add site scaffold: ${err.message}`));
+            }
+          }
+
+          const rl3 = readline.createInterface({ input: process.stdin, output: process.stdout });
+          const wantMicroservice = await new Promise(resolve => {
+            rl3.question(chalk.white('  Do you want a microservice for this app? (y/N): '), answer => {
+              rl3.close();
+              resolve(answer.toLowerCase() === 'y');
+            });
+          });
+
+          if (wantMicroservice) {
+            try {
+              const stats = await copyScaffold('microservice', app.fullPath, { verbose: false });
+              console.log(chalk.green(`  ✓ Microservice scaffold added (${stats.copied} files)`));
+              console.log(chalk.gray(`    Edit manifest.json, then run "descix microservice register"`));
+            } catch (err) {
+              console.log(chalk.yellow(`  ⚠️  Could not add microservice scaffold: ${err.message}`));
+            }
           }
         }
       }
@@ -280,34 +298,34 @@ export async function runSetup(options = {}) {
       console.log(chalk.white('📁 Apps configured:\n'));
       for (const app of appPaths) {
         console.log(chalk.cyan(`  ${app.localPath}/`));
-        console.log(chalk.gray(`     ├── kb/staging/     # Add your files here`));
-        console.log(chalk.gray(`     ├── kb/General/     # Converted text files`));
+        console.log(chalk.gray(`     ├── kb/General/     # Add .md files here`));
         console.log(chalk.gray(`     └── GETTING STARTED.md`));
       }
       console.log('');
     }
-    
-    console.log(chalk.gray('  🔗 Drive connection for sync'));
+
     console.log(chalk.gray('  🔐 Authentication credentials saved to .descix/wallet.json'));
     console.log('');
-    
+
     console.log(chalk.cyan('Next Steps:\n'));
-    console.log(chalk.white('  1. Switch to an app directory:'));
     if (appPaths.length > 0) {
-      console.log(chalk.yellow(`     cd ${appPaths[0].localPath}`));
+      const firstApp = appPaths[0];
+      console.log(chalk.white('  1. Initialize KB for each app:'));
+      console.log(chalk.yellow(`     descix app init -a ${firstApp.appId}`));
+      console.log('');
+      console.log(chalk.white('  2. Add markdown files to the KB directory:'));
+      console.log(chalk.gray(`     ${firstApp.localPath}/kb/General/`));
+      console.log('');
+      console.log(chalk.white('  3. Sync to Pinecone:'));
+      console.log(chalk.yellow(`     descix update kb -a ${firstApp.appId}`));
+      console.log('');
+      console.log(chalk.white('  4. Chat:'));
+      console.log(chalk.yellow(`     descix chat -a ${firstApp.appId} "Your question"`));
     } else {
-      console.log(chalk.yellow(`     cd <community>/<app>`));
+      console.log(chalk.white('  1. Initialize KB: descix app init -a <appId>'));
+      console.log(chalk.white('  2. Sync KB: descix update kb -a <appId>'));
+      console.log(chalk.white('  3. Chat: descix chat -a <appId> "Your question"'));
     }
-    console.log('');
-    console.log(chalk.white('  2. Add files to your knowledge base:'));
-    console.log(chalk.gray('     Copy .md, .pdf, .docx files to kb/staging/'));
-    console.log('');
-    console.log(chalk.white('  3. Build your knowledge base:'));
-    console.log(chalk.yellow('     npx descix kb build'));
-    console.log(chalk.gray('     (auto-detects app from current directory)'));
-    console.log('');
-    console.log(chalk.white('  4. Or use flags from anywhere:'));
-    console.log(chalk.yellow('     npx descix kb build -c <community> -a <app>'));
     console.log('');
     console.log(chalk.gray('📄 See GETTING STARTED.md in each app folder for detailed instructions.\n'));
     console.log(chalk.gray('💡 Not sure what to do? Try: npx descix tell-me-how "your question"\n'));
@@ -327,7 +345,8 @@ export async function runSetup(options = {}) {
 /**
  * Create GETTING STARTED.md in an app directory
  */
-async function createGettingStartedFile(appPath, communityId, appId) {
+async function createGettingStartedFile(appPath, appId) {
+  const communityId = appId; // communityId is server-authoritative in V2; use appId as placeholder
   const gettingStartedPath = path.join(appPath, 'GETTING STARTED.md');
   
   // Don't overwrite if exists

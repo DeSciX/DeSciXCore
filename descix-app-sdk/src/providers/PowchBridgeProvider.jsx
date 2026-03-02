@@ -67,7 +67,9 @@ export function PowchBridgeProvider({ children, config = {} }) {
     };
   }, [bridge]);
 
+  const contextValue = useMemo(() => ({ bridge }), [bridge]);
+
   return (
-    <PowchBridgeContext.Provider value={{ bridge }}>{children}</PowchBridgeContext.Provider>
+    <PowchBridgeContext.Provider value={contextValue}>{children}</PowchBridgeContext.Provider>
   );
 }

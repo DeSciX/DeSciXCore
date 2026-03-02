@@ -86,7 +86,6 @@ export async function getRemoteChunkMetadata(apiClient, communityId, appId, kbId
   try {
     // Try new metadata endpoint first
     const result = await apiClient.invoke('kb_get_chunk_metadata', {
-      community_id: communityId,
       app_id: appId,
       kb_id: kbId
     });
@@ -95,7 +94,6 @@ export async function getRemoteChunkMetadata(apiClient, communityId, appId, kbId
     // Fall back to IDs-only endpoint
     try {
       const result = await apiClient.invoke('kb_get_chunk_ids', {
-        community_id: communityId,
         app_id: appId,
         kb_id: kbId
       });
@@ -134,15 +132,22 @@ export async function upsertChunks(apiClient, communityId, appId, kbId, chunks) 
   if (chunks.length === 0) {
     return { upserted: 0 };
   }
-  
-  const result = await apiClient.invoke('kb_sync_chunks', {
-    community_id: communityId,
-    app_id: appId,
-    kb_id: kbId,
-    chunks
-  });
-  
-  return { upserted: result.upserted_count || chunks.length };
+
+  // Pinecone limits upserts to 96 vectors per batch
+  const BATCH_SIZE = 90;
+  let totalUpserted = 0;
+
+  for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
+    const batch = chunks.slice(i, i + BATCH_SIZE);
+    const result = await apiClient.invoke('kb_sync_chunks', {
+      app_id: appId,
+      kb_id: kbId,
+      chunks: batch
+    });
+    totalUpserted += result.upserted_count || batch.length;
+  }
+
+  return { upserted: totalUpserted };
 }
 
 /**
@@ -161,7 +166,6 @@ export async function deleteStaleChunks(apiClient, communityId, appId, kbId, chu
   }
   
   await apiClient.invoke('kb_delete_chunks', {
-    community_id: communityId,
     app_id: appId,
     kb_id: kbId,
     chunk_ids: chunkIds
