@@ -40,9 +40,10 @@ See [`LINK_SETUP.md`](LINK_SETUP.md) for the full sequence.
 Before any change, state which package boundary is being touched and confirm no logic is being duplicated across packages. Package responsibilities:
 
 - `@descix/cloud-core` — GCP service bootstrap only; no business logic
-- `@descix/app-sdk` — app container + UI primitives; no platform-specific business logic
+- `@descix/app-sdk` — app container + UI primitives + **dev gateway** (`src/dev/gateway.js`); no platform-specific business logic. The gateway is SDK infrastructure — the platform PWA is a peer consumer, not a privileged one.
+- `@descix/app-sdk/dev` exports: `createViteProxyConfig` (app-level proxy rules), `createViteServerConfig` (HTTPS + proxy for any app), `runGateway` (pure reverse proxy replicating the production LB), `getViteHttpsConfig`, `watchWorkspaceConfig`
 - `@descix/sdk` — shared runtime utilities; no GCP-specific code (that belongs in cloud-core)
-- `@descix/cli` — HTTP-only client; zero direct service imports; all operations via `/apifront/`
+- `@descix/cli` — HTTP-only client; zero direct service imports; all operations via `/apifront/`. CLI commands like `descix serve` are thin wrappers around app-sdk functions.
 
 ---
 

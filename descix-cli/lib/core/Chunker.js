@@ -383,8 +383,8 @@ function createChunkRecord(chunk, context) {
   const chunk_idx = chunk.metadata.chunkIndex;
   const text = chunk.content.trim();
   
-  // Composite ID for multi-tenancy isolation
-  const id = `${community_id}:${app_id}:${kb_id}:${file_id}:${chunk_idx}`;
+  // Composite ID — app_id is globally unique, no community_id prefix needed
+  const id = `${app_id}:${kb_id}:${file_id}:${chunk_idx}`;
   
   return {
     id,

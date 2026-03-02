@@ -34,43 +34,35 @@ export function createViteProxyConfig(workspacePath, options = {}) {
 
   const env = config.env || {};
   const apiGatewayUrl = options.apiGatewayUrl ?? env.apiUrl ?? config.apiUrl ?? 'https://localhost:4000';
-  const powchUrl = env.powchUrl ?? null;
+  // Powch URL: explicit env.powchUrl, or auto-discover from env.products[]
+  let powchUrl = env.powchUrl ?? null;
+  if (!powchUrl && Array.isArray(env.products)) {
+    const powchProduct = env.products.find(p => p.appId === 'powch');
+    if (powchProduct?.site?.port) {
+      powchUrl = `https://localhost:${powchProduct.site.port}`;
+    }
+  }
 
   const localAppRoutes = {};
   const serviceRoutes = {};
 
-  if (config.communities) {
-    Object.entries(config.communities).forEach(([communityId, communityData]) => {
-      if (!communityData.apps) return;
-
-      Object.entries(communityData.apps).forEach(([appId, appData]) => {
-        if (appData.site?.port) {
-          localAppRoutes[`${communityId}/${appId}`] = {
-            port: appData.site.port,
-          };
-        }
-        if (appData.service?.port) {
-          serviceRoutes[`${communityId}/${appId}`] = {
-            port: appData.service.port,
-          };
-        }
-      });
-    });
+  // v2.1 workspace format: env.platform + env.products[]
+  const envBlock = config.env || {};
+  // Platform: only register microservice route (site is handled by gateway's root proxy)
+  if (envBlock.platform) {
+    const p = envBlock.platform;
+    const appId = p.appId;
+    if (appId) {
+      if (p.microservice?.port) serviceRoutes[appId] = { port: p.microservice.port };
+    }
   }
-
-  if (config.products) {
-    Object.entries(config.products).forEach(([productId, productData]) => {
-      if (productData.site?.port) {
-        localAppRoutes[productId] = {
-          port: productData.site.port,
-        };
-      }
-      if (productData.service?.port) {
-        serviceRoutes[productId] = {
-          port: productData.service.port,
-        };
-      }
-    });
+  if (Array.isArray(envBlock.products)) {
+    for (const p of envBlock.products) {
+      const appId = p.appId;
+      if (!appId) continue;
+      if (p.site?.port)        localAppRoutes[appId] = { port: p.site.port, protocol: p.site.protocol };
+      if (p.microservice?.port) serviceRoutes[appId] = { port: p.microservice.port };
+    }
   }
 
   const proxy = {};
@@ -156,9 +148,10 @@ export function createViteProxyConfig(workspacePath, options = {}) {
       // Global Product Route
       const productId = routeKey;
       const pathPrefix = `/p/${productId}`;
-      
+      const proto = route.protocol || 'https';
+
       proxy[pathPrefix] = {
-        target: `https://localhost:${route.port}`,
+        target: `${proto}://localhost:${route.port}`,
         changeOrigin: true,
         secure: false,
         ws: true,

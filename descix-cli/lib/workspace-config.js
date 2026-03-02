@@ -143,32 +143,27 @@ export class WorkspaceConfig {
   static async findWorkspaceRoot(startDir = process.cwd()) {
     let currentDir = path.resolve(startDir);
     const root = path.parse(currentDir).root;
-    
-    // Workspace marker directories in priority order
-    const workspaceMarkers = ['.descix', '.cursor', '.vscode'];
-    
+
     while (currentDir !== root) {
-      // Check for any workspace marker
-      for (const marker of workspaceMarkers) {
-        const markerDir = path.join(currentDir, marker);
-        try {
-          const stat = await fs.stat(markerDir);
-          if (stat.isDirectory()) {
-            return currentDir; // Workspace marker found = workspace root
-          }
-        } catch (error) {
-          // Marker not found at this level, continue
+      // Workspace root requires .descix/workspace.json — marker dirs alone are not enough
+      // (sub-projects like DeSciX_Cloud have .descix/ for wallet.json but are not workspace roots)
+      const wsConfigPath = path.join(currentDir, '.descix', 'workspace.json');
+      try {
+        const stat = await fs.stat(wsConfigPath);
+        if (stat.isFile()) {
+          return currentDir;
         }
+      } catch {
+        // workspace.json not found at this level, continue up
       }
-      
+
       const parentDir = path.dirname(currentDir);
       if (parentDir === currentDir) {
-        // Reached filesystem root
         break;
       }
       currentDir = parentDir;
     }
-    
+
     return null; // No workspace found
   }
   
@@ -224,7 +219,10 @@ export class WorkspaceConfig {
   }
   
   /**
-   * Save workspace configuration
+   * Save workspace configuration in v2.1 format.
+   * Always writes env.platform / env.products structure — never v1 communities.
+   * If loaded from a v1 communities format (e.g. PWA device_check_status response),
+   * auto-converts communities.apps → env.products on write.
    * @param {string} [workspaceRoot] - Workspace root directory (uses stored root if not provided)
    * @returns {Promise<string>} Path to saved config
    */
@@ -233,46 +231,42 @@ export class WorkspaceConfig {
     if (!root) {
       throw new Error('Workspace root not set. Provide workspaceRoot parameter or load config first.');
     }
-    
+
     const descixDir = path.join(root, '.descix');
     await fs.mkdir(descixDir, { recursive: true });
     const configPath = path.join(descixDir, 'workspace.json');
-    
-    // Update stored workspace root
+
     this.workspaceRoot = root;
-    
-    // Compute absolute paths before saving
-    this.computeAbsolutePaths(root);
-    
+
+    // Build env block for v2.1 output.
+    // Native v2.1 path: this.env is already populated from env.platform/env.products.
+    // Legacy conversion path: this.env is absent but communities are populated (v1 PWA response).
+    let envBlock = (this.env && Object.keys(this.env).length > 0) ? this.env : null;
+
+    if (!envBlock && Object.keys(this.communities || {}).length > 0) {
+      const products = [];
+      for (const [, community] of Object.entries(this.communities)) {
+        for (const [appId, app] of Object.entries(community.apps || {})) {
+          if (app.localPath) {
+            products.push({ appId, localPath: app.localPath, kbId: app.kbId || 'General' });
+          }
+        }
+      }
+      envBlock = { products };
+      // Update in-memory state so callers see a consistent env after save
+      this.env = envBlock;
+      this._appIdToConfig = this._buildAppIdMap({ env: this.env, workspaceRoot: this.workspaceRoot });
+    }
+
     const configData = {
-      version: this.version,
-      workspaceRoot: path.resolve(root), // Always store absolute workspace root
+      version: '2.1',
+      workspaceRoot: path.resolve(root),
       type: this.type,
-      primaryCommunity: this.primaryCommunity,
-      directoryMappings: this.directoryMappings,
-      additionalContexts: this.additionalContexts,
-      defaultContext: this.defaultContext,
-      apiUrl: this.apiUrl,
-      environment: this.environment
     };
-    
-    // Include communities for v2 root workspace
-    if (this.version === '2.0' || Object.keys(this.communities).length > 0 || Object.keys(this.products).length > 0) {
-      configData.version = '2.0';
-      if (Object.keys(this.communities).length > 0) configData.communities = this.communities;
-      if (Object.keys(this.products).length > 0) configData.products = this.products;
-    }
-    
-    // Include env block for descix-serve gateway routing
-    if (this.env && Object.keys(this.env).length > 0) {
-      configData.env = this.env;
-    }
-    
-    // Include driveConfig for template-based navigation
-    if (this.driveConfig) {
-      configData.driveConfig = this.driveConfig;
-    }
-    
+
+    if (envBlock) configData.env = envBlock;
+    if (this.driveConfig) configData.driveConfig = this.driveConfig;
+
     await fs.writeFile(configPath, JSON.stringify(configData, null, 2), 'utf-8');
     return configPath;
   }
@@ -320,58 +314,45 @@ export class WorkspaceConfig {
    * @returns {boolean} Success status
    */
   registerCommunity(communityId, communityConfig) {
-    if (!communityId || !communityConfig.localPath) {
-      throw new Error('communityId and localPath are required');
-    }
-    
-    this.communities[communityId] = {
-      localPath: communityConfig.localPath,
-      tokenSymbol: communityConfig.tokenSymbol || null,
-      registeredAt: new Date().toISOString(),
-      apps: communityConfig.apps || {}
-    };
-    
-    this.version = '2.0';
+    // V2: Community identity is server-authoritative (Products registry).
+    // workspace.json does not track communities. No-op.
     return true;
   }
   
   /**
-   * Register an app within a community
-   * @param {string} communityId - Community identifier
-   * @param {string} appId - App identifier
+   * Register an app in the v2.1 workspace (env.platform or env.products).
+   * community_id is server-authoritative — not stored in workspace.json.
+   * @param {string} communityId - Accepted for call-site compatibility but not stored
+   * @param {string} appId - App identifier (globally unique)
    * @param {Object} appConfig - App configuration
-   * @param {string} appConfig.localPath - Local folder path
+   * @param {string} appConfig.localPath - Local folder path relative to workspaceRoot
    * @param {string} [appConfig.kbId] - Default knowledge base ID
    * @returns {boolean} Success status
    */
   registerApp(communityId, appId, appConfig) {
-    if (!communityId || !appId || !appConfig.localPath) {
-      throw new Error('communityId, appId, and localPath are required');
+    if (!appId || !appConfig.localPath) {
+      throw new Error('appId and localPath are required');
     }
-    
-    // Create community entry if it doesn't exist
-    if (!this.communities[communityId]) {
-      this.communities[communityId] = {
-        localPath: null,
-        tokenSymbol: null,
-        apps: {}
-      };
+
+    if (!this.env) this.env = {};
+    if (!Array.isArray(this.env.products)) this.env.products = [];
+
+    const entry = { appId, localPath: appConfig.localPath, kbId: appConfig.kbId || 'General' };
+
+    if (this.env.platform?.appId === appId) {
+      this.env.platform.localPath = appConfig.localPath;
+      if (appConfig.kbId) this.env.platform.kbId = appConfig.kbId;
+    } else {
+      const idx = this.env.products.findIndex(p => p.appId === appId);
+      if (idx >= 0) {
+        this.env.products[idx] = { ...this.env.products[idx], ...entry };
+      } else {
+        this.env.products.push(entry);
+      }
     }
-    
-    this.communities[communityId].apps[appId] = {
-      localPath: appConfig.localPath,
-      kbId: appConfig.kbId || 'General',
-      registeredAt: new Date().toISOString()
-    };
-    
-    // Also update directoryMappings for backward compatibility
-    this.directoryMappings[appConfig.localPath] = {
-      communityId,
-      appId,
-      kbId: appConfig.kbId || 'General'
-    };
-    
-    this.version = '2.0';
+
+    this._appIdToConfig = this._buildAppIdMap({ env: this.env, workspaceRoot: this.workspaceRoot });
+    this.version = '2.1';
     return true;
   }
   

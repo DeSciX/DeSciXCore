@@ -185,7 +185,6 @@ export async function test(options = {}) {
     
     // Get RAG status via HTTP
     const statusResponse = await apiClient.invoke('get_kb_rag_status', {
-      community_id: config.defaultContext.communityId,
       app_id: config.defaultContext.appId,
       kb_id: config.defaultContext.kbId
     }, { allowGuest: false });
@@ -200,7 +199,6 @@ export async function test(options = {}) {
     
     const query = options.query || 'What is this knowledge base about?';
     const queryResponse = await apiClient.invoke('query_knowledge_base', {
-      community_id: config.defaultContext.communityId,
       app_id: config.defaultContext.appId,
       kb_id: config.defaultContext.kbId,
       query: query,

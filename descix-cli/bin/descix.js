@@ -761,18 +761,22 @@ appCommand
       if (!alreadyMapped) {
         const localPath = options.path || '.';
         const wsRoot = workspaceConfig?.workspaceRoot || process.cwd();
-        const cfg = workspaceConfig || new WorkspaceConfig(wsRoot);
+        const cfg = workspaceConfig || new WorkspaceConfig({}, wsRoot);
         cfg.registerApp(communityId, appId, { localPath, kbId });
         await cfg.save(wsRoot);
         appPath = path.resolve(wsRoot, localPath);
         console.log(chalk.gray(`  workspace.json updated: ${appId} → ${localPath}`));
       }
 
-      // 2. Ensure local KB directory exists
+      // 2. Create rigid app folder structure (site, kb, microservice)
       if (appPath) {
+        const siteDir = path.join(appPath, 'site');
         const kbDir = path.join(appPath, 'kb', kbId);
+        const msDir = path.join(appPath, 'microservice');
+        await fs.mkdir(siteDir, { recursive: true });
         await fs.mkdir(kbDir, { recursive: true });
-        console.log(chalk.gray(`  Local KB dir: ${kbDir}`));
+        await fs.mkdir(msDir, { recursive: true });
+        console.log(chalk.gray(`  Created: site/, kb/${kbId}/, microservice/`));
       }
 
       // 3. Create KnowledgeBase Firestore doc (Git Mode — no Drive required)
@@ -821,34 +825,82 @@ appCommand
 
 appCommand
   .command('create')
-  .description('Create an app. Use PWA or descix-admin app create. Optional: --quick with -c/-a for template-only.')
-  .option('-c, --community <id>', 'Community ID (with --quick)')
-  .option('-a, --app <name>', 'App name (with --quick)')
-  .option('--quick', 'Create app on backend only (template-based); requires -c and -a')
+  .description('Create an app in a community. --quick with -c/-a for CLI-driven creation.')
+  .option('-c, --community <id>', 'Community ID')
+  .option('-a, --app <name>', 'App name')
+  .option('--quick', 'Create app via CLI (registers in Products, creates Drive skeleton); requires -c and -a')
   .option('--overwrite', 'Overwrite existing (with --quick)')
   .action(async (options) => {
     try {
       if (options.quick && options.community && options.app) {
         const apiClient = new DeSciXApiClient();
         await requireAuth(apiClient);
-        const response = await apiClient.invoke('create_skeleton_app', {
+
+        // Ensure Drive base folder is registered in workspace.json
+        let wsConfig;
+        try {
+          wsConfig = await WorkspaceConfig.load(process.cwd());
+        } catch {
+          console.error(chalk.red('\n❌ No workspace found. Run `descix init` first.\n'));
+          process.exit(1);
+        }
+        const baseFolderId = wsConfig.driveConfig?.base_folder_id;
+
+        if (!baseFolderId) {
+          console.log(chalk.yellow('\n⚠  No Drive base folder registered in workspace.json.'));
+          console.log(chalk.white('  App creation requires a shared Drive folder for KB and asset storage.'));
+          console.log(chalk.white('  Share a Google Drive folder with dip@descix.net, then provide its URL.\n'));
+
+          const readline = await import('readline');
+          const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+          const folderUrl = await new Promise((resolve) => {
+            rl.question(chalk.cyan('  Drive folder URL or ID: '), (answer) => {
+              rl.close();
+              resolve(answer.trim());
+            });
+          });
+
+          if (!folderUrl) {
+            console.error(chalk.red('\n❌ Drive folder is required for app creation.\n'));
+            process.exit(1);
+          }
+
+          // Register the folder via backend (validates sharing + extracts folder ID)
+          const regResponse = await apiClient.invoke('register_base_folder', {
+            folder_url: folderUrl
+          });
+          const regResult = regResponse.message || regResponse;
+          console.log(chalk.green(`  ✓ Folder registered: ${regResult.folder_name} (${regResult.folder_id})`));
+
+          // Persist to workspace.json
+          wsConfig.driveConfig = { base_folder_id: regResult.folder_id };
+          await wsConfig.save();
+          console.log(chalk.green('  ✓ Saved to workspace.json\n'));
+        }
+
+        const response = await apiClient.invoke('create_app_for_community', {
           community_id: options.community,
           app_name: options.app,
-          createSubfolders: true,
+          create_skeleton: true,
           overwrite: options.overwrite
         });
         const result = response.message || response;
-        const appId = (result.app_id || options.app).toLowerCase().replace(/[^a-z0-9_-]/g, '');
         console.log(chalk.green('\n✅ App created successfully!\n'));
-        console.log(chalk.cyan(`  App ID: ${result.app_id || appId}`));
-        console.log(chalk.gray(`  Community: ${options.community}\n`));
+        console.log(chalk.cyan(`  App ID:     ${result.app_id}`));
+        console.log(chalk.cyan(`  Community:  ${result.community_id}`));
+        console.log(chalk.gray(`  Products:   Products/${result.app_id}`));
+        console.log(chalk.gray(`  Firestore:  Community/${result.community_id}/Apps/${result.app_id}`));
+        if (result.skeleton_result) {
+          console.log(chalk.gray(`  Drive:      ${result.skeleton_result.folder_id || 'created'}`));
+        }
+        console.log(chalk.cyan('\n  Next: descix app init -a ' + result.app_id + '\n'));
         return;
       }
       console.log(chalk.cyan('\n📦 App creation\n'));
-      console.log(chalk.white('Create apps in the PWA (Device Setup / App Manager) or use Admin CLI:'));
-      console.log(chalk.white('  descix-admin app create -c <community> -a <app-name>\n'));
-      console.log(chalk.gray('To create from this CLI (template-only, no local folder):'));
-      console.log(chalk.gray('  descix app create --quick -c <community> -a <app-name>\n'));
+      console.log(chalk.white('Create apps in the PWA (Device Setup / App Manager) or via CLI:\n'));
+      console.log(chalk.white('  descix app create --quick -c <community> -a <app-name>\n'));
+      console.log(chalk.gray('This registers the app in the Products registry, creates Firestore'));
+      console.log(chalk.gray('documents, grants entitlement, and creates Drive skeleton.\n'));
     } catch (error) {
       console.error(chalk.red(`\n❌ ${error.message}\n`));
       process.exit(1);
@@ -2916,7 +2968,6 @@ program
       console.log(chalk.gray(`Asking ${communityId}/${appId}...`));
       
       const response = await apiClient.invoke('ask_question_to_app', {
-        community_id: communityId,
         app_id: appId,
         knowledgebase_name: options.kb,
         user_input: question,
