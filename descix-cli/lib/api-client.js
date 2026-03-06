@@ -60,21 +60,30 @@ export class DeSciXApiClient {
    * @returns {Promise<string>} API base URL
    */
   async detectApiUrl() {
+    const PRODUCTION_URL = 'https://descix.net';
+
     // Check environment variable first (highest priority)
     if (process.env.DESCIX_API_URL) {
       return process.env.DESCIX_API_URL;
     }
-    
-    // Use PathContext config if loaded
+
+    // Use PathContext config if loaded (but only if it has an explicit URL, not the production default)
     if (this._pathContext) {
       const apiUrl = this._pathContext.getApiUrl();
-      if (apiUrl) {
+      if (apiUrl && apiUrl !== PRODUCTION_URL) {
         return apiUrl;
       }
     }
-    
+
+    // Check global config (set by `descix login --dev` or `descix config set-url`)
+    try {
+      const { GlobalConfig } = await import('./global-config.js');
+      const gc = await GlobalConfig.load();
+      if (gc.api_url && gc.api_url !== PRODUCTION_URL) return gc.api_url;
+    } catch {}
+
     // Default to production
-    return 'https://descix.net';
+    return PRODUCTION_URL;
   }
 
   /**

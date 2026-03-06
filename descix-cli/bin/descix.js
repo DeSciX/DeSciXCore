@@ -12,6 +12,7 @@ import chalk from 'chalk';
 import { DeSciXApiClient } from '../lib/api-client.js';
 import { requireAuth } from '../lib/auth-guard.js';
 import { WorkspaceConfig } from '../lib/workspace-config.js';
+import { GlobalConfig } from '../lib/global-config.js';
 import * as authCommands from '../lib/commands/auth.js';
 import * as configCommands from '../lib/commands/config.js';
 import { runAppWizard } from '../lib/commands/app-wizard.js';
@@ -47,10 +48,17 @@ program
     try {
       // Handle --dev flag
       if (options.dev) {
-        const workspaceConfig = await WorkspaceConfig.load(process.cwd());
-        workspaceConfig.apiUrl = 'https://localhost:4000';
-        workspaceConfig.environment = 'development';
-        await workspaceConfig.save(process.cwd());
+        const workspaceConfig = await WorkspaceConfig.tryLoad(process.cwd());
+        if (workspaceConfig) {
+          workspaceConfig.apiUrl = 'https://localhost:4000';
+          workspaceConfig.environment = 'development';
+          await workspaceConfig.save(process.cwd());
+        } else {
+          const gc = await GlobalConfig.load();
+          gc.api_url = 'https://localhost:4000';
+          gc.environment = 'development';
+          await gc.save();
+        }
         console.log(chalk.cyan('✓ Configured for development (https://localhost:4000)\n'));
       }
       
@@ -753,7 +761,10 @@ appCommand
         const productCtx = await apiClient.invoke('get_product_context', { app_id: appId });
         communityId = (productCtx.message || productCtx).community_id;
       } catch (e) {
-        // Product not found — create it if --community was provided
+        // Product not found — fall through to creation below
+      }
+      // Product missing or returned null community_id — create if --community was provided
+      if (!communityId) {
         if (options.community) {
           console.log(chalk.gray(`  App '${appId}' not in Products registry. Creating in community '${options.community}'...`));
           await apiClient.invoke('create_app_for_community', {
@@ -765,9 +776,6 @@ appCommand
         } else {
           throw new Error(`App '${appId}' not found in Products registry. Use --community to create it.`);
         }
-      }
-      if (!communityId) {
-        throw new Error(`App '${appId}' not found in Products registry. Use --community to create it.`);
       }
 
       // 1. Workspace.json — register app if not already mapped

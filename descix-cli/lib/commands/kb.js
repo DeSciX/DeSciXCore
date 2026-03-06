@@ -77,7 +77,7 @@ export async function runKbPull(apiClient, options) {
       appId,
       kbId,
       baseFolderId: driveConfig.base_folder_id,
-      localPath: appPath ? appPath.replace(workspaceRoot + '/', '') : `${communityId}/${appId}`
+      localPath: appPath ? (path.relative(workspaceRoot, appPath) || '.') : `${communityId}/${appId}`
     }, { 
       verbose: options.verbose,
       mergeMode: options.mergeMode || 'merge',
@@ -146,7 +146,7 @@ export async function runKbPush(apiClient, options) {
     // 4. Get paths
     const workspaceRoot = workspaceConfig.getWorkspaceRoot();
     const appPath = workspaceConfig.getAppByAppId(appId)?.absolutePath;
-    const localPath = appPath ? appPath.replace(workspaceRoot + '/', '') : `${communityId}/${appId}`;
+    const localPath = appPath ? (path.relative(workspaceRoot, appPath) || '.') : `${communityId}/${appId}`;
     const stagingDir = path.join(workspaceRoot, localPath, 'kb', 'staging');
     
     // Check if staging has files
@@ -262,7 +262,7 @@ export async function runKbChunk(options) {
       communityId,
       appId,
       kbId,
-      localPath: appPath ? appPath.replace(workspaceRoot + '/', '') : `${communityId}/${appId}`
+      localPath: appPath ? (path.relative(workspaceRoot, appPath) || '.') : `${communityId}/${appId}`
     }, chunkOptions);
     
     spinner.succeed(`Generated ${result.totalChunks} chunks from ${result.files} files`);
@@ -317,7 +317,7 @@ export async function runKbSync(apiClient, options) {
       communityId,
       appId,
       kbId,
-      localPath: appPath ? appPath.replace(workspaceRoot + '/', '') : `${communityId}/${appId}`
+      localPath: appPath ? (path.relative(workspaceRoot, appPath) || '.') : `${communityId}/${appId}`
     }, {
       verbose: options.verbose,
       onProgress: (msg) => { spinner.text = msg; }
@@ -370,7 +370,7 @@ export async function runKbBuild(apiClient, options) {
     const { communityId, appId, kbId } = workspaceConfig.requireContext(options);
     const workspaceRoot = workspaceConfig.getWorkspaceRoot();
     const appPath = workspaceConfig.getAppByAppId(appId)?.absolutePath;
-    const localPath = appPath ? appPath.replace(workspaceRoot + '/', '') : `${communityId}/${appId}`;
+    const localPath = appPath ? (path.relative(workspaceRoot, appPath) || '.') : `${communityId}/${appId}`;
     const stagingDir = path.join(workspaceRoot, localPath, 'kb', 'staging');
     
     // Show which app we're building
@@ -460,7 +460,7 @@ export async function runKbStatus(apiClient, options) {
       communityId,
       appId,
       kbId,
-      localPath: appPath ? appPath.replace(workspaceRoot + '/', '') : `${communityId}/${appId}`
+      localPath: appPath ? (path.relative(workspaceRoot, appPath) || '.') : `${communityId}/${appId}`
     });
     
     spinner.stop();
@@ -514,7 +514,7 @@ export async function runKbCompare(apiClient, options) {
 
     const workspaceRoot = workspaceConfig.getWorkspaceRoot();
     const appPath = workspaceConfig.getAppByAppId(appId)?.absolutePath;
-    const localPath = appPath ? appPath.replace(workspaceRoot + '/', '') : `${communityId}/${appId}`;
+    const localPath = appPath ? (path.relative(workspaceRoot, appPath) || '.') : `${communityId}/${appId}`;
     
     spinner.text = 'Connecting to Google Drive...';
     
