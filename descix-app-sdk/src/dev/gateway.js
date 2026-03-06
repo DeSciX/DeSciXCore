@@ -19,6 +19,7 @@ import path from 'path';
 import { createViteProxyConfig } from './createViteProxyConfig.js';
 import { getViteHttpsConfig } from './getViteHttpsConfig.js';
 import { watchWorkspaceConfig } from './watchWorkspaceConfig.js';
+import { buildWorkspaceProducts } from './workspaceProducts.js';
 
 /**
  * Find the workspace root by walking up from startDir looking for .descix/workspace.json.
@@ -57,7 +58,7 @@ function deriveApiUrl(config) {
  * Build the Vite `define` map from workspace config.
  * Injected into frontend code served through the gateway.
  */
-function buildDefines(config) {
+function buildDefines(config, workspaceRoot) {
   const env = config.env || {};
 
   // Powch URL: env.powchUrl or auto-discover from env.products[]
@@ -71,18 +72,8 @@ function buildDefines(config) {
 
   const apiGatewayUrl = deriveApiUrl(config);
 
-  // Build product map from v2.1 env.platform + env.products[]
-  const products = {};
-  if (env.platform?.appId && env.platform.site?.port) {
-    products[env.platform.appId] = `https://localhost:${env.platform.site.port}`;
-  }
-  if (Array.isArray(env.products)) {
-    for (const p of env.products) {
-      if (p.appId && p.site?.port) {
-        products[p.appId] = `https://localhost:${p.site.port}`;
-      }
-    }
-  }
+  // Build product map from workspace.json (shared helper)
+  const products = buildWorkspaceProducts(workspaceRoot) || {};
 
   return {
     '__STANDALONE_APP_ID__': 'null',
@@ -163,7 +154,7 @@ export async function runGateway(options = {}) {
       hmr: false,
       proxy: proxyRules,
     },
-    define: buildDefines(config),
+    define: buildDefines(config, workspaceRoot),
     optimizeDeps: { noDiscovery: true },
   });
 
@@ -189,7 +180,7 @@ export async function runGateway(options = {}) {
         hmr: false,
         proxy: newProxy,
       },
-      define: buildDefines(newConfig),
+      define: buildDefines(newConfig, workspaceRoot),
       optimizeDeps: { noDiscovery: true },
     });
 

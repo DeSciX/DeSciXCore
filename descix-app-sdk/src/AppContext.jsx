@@ -144,287 +144,8 @@ export const AppProvider = ({ children }) => {
     }
   }, []);
 
-  const viewRouter = async (targetView, viewEventData) => {
-
-    // if (appState === AppContextState.INITIALIZING) {
-    //   console.log('AppContext: viewRouter called with INITIALIZING state, returning LOADING');
-    //   return AppContextView.LOADING;\
-    // } else if (appState === AppContextState.ERROR) {
-    //   console.log('AppContext: viewRouter called with ERROR state, returning WELCOME');
-    //   return AppContextView.WELCOME;
-    // }
-
-    if (targetView === AppContextView.ERROR) {
-      return targetView;
-    }
-    
-    // ============================================================
-    // WALLET REQUIRED - Force onboarding completion if missing wallet
-    // User has identity but no wallet connected (regardless of cached status).
-    // This catches both AUTHENTICATED users AND users who incorrectly got
-    // CONNECTED status without actually having a wallet.
-    // User needs wallet - redirect to Dashboard; SignInButton handles auth.
-    // ============================================================
-    const currentAuthStatus = AppData.loginStatus;
-    const hasSession = AppData.sessionInfo?.id;
-    const hasWallet = AppData.sessionInfo?.wallet_address;
-    const isLoggedInWithoutWallet = hasSession && !hasWallet && currentAuthStatus !== LoginStatus.GUEST;
-    
-    if (isLoggedInWithoutWallet) {
-      console.log('AppContext: User logged in without wallet - enforcing onboarding. Status:', currentAuthStatus);
-      // Correct the login status to AUTHENTICATED (not CONNECTED) since no wallet
-      if (currentAuthStatus === LoginStatus.CONNECTED) {
-        console.log('AppContext: Correcting login status from', currentAuthStatus, 'to AUTHENTICATED (no wallet)');
-        AppData.loginStatus = LoginStatus.AUTHENTICATED;
-        _setLoginStatus(LoginStatus.AUTHENTICATED);
-      }
-      // Ensure appState is READY so UI can render properly
-      if (appState !== AppContextState.READY) {
-        setAppState(AppContextState.READY);
-      }
-      // Navigate to Trading Dashboard
-      // Only redirect if not already going there (avoid infinite loop)
-      if (targetView !== AppContextView.TRADING_DASHBOARD) {
-        console.log('AppContext: Redirecting user without wallet to TRADING_DASHBOARD for onboarding');
-        triggerViewChange(AppContextView.TRADING_DASHBOARD);
-        return AppContextView.TRADING_DASHBOARD;
-      }
-    }
-    // ============================================================
-
-    // Check if the target view is the same as the current view && the current view is not LOADING or WELCOME, all other views may be doing async work
-    if (currentView === targetView && !(currentView === AppContextView.LOADING || currentView === AppContextView.WELCOME)) {
-      console.log('Ignoring view change to the same view:', targetView);
-      return targetView;
-    }
-
-    // Check if the target view is LOADING or WELCOME, and if so, trigger the view change immediately
-    if (targetView === AppContextView.LOADING || targetView === AppContextView.WELCOME) {
-      triggerViewChange(targetView);
-      return targetView;
-    }
-
-    // Set loading state before async operations
-    triggerViewChange(AppContextView.LOADING);
-
-    console.log('AppContent: viewRouter called with targetView:', targetView, 'viewEventData:', JSON.stringify(viewEventData));
-
-    let localCommunity = selectedCommunity; // Store locally for async context
-    let localApp = selectedApp; // Store locally for async context
-
-
-
-    // WALLET view REMOVED - auth flows handled by SignInButton + bridge
-    // If somehow WALLET view is requested, redirect to Dashboard
-    if (targetView === AppContextView.WALLET) {
-      console.log('AppContext: WALLET view requested but removed - redirecting to Dashboard');
-      triggerViewChange(AppContextView.TRADING_DASHBOARD);
-      return AppContextView.TRADING_DASHBOARD;
-    }
-
-    // DEVICE_LOGIN view - no authentication required, used for CLI/MCP login flow
-    if (targetView === AppContextView.DEVICE_LOGIN) {
-      // Check if this is actually a setup flow
-      if (AppData.isSetupMode) {
-        console.log('AppContext: Redirecting DEVICE_LOGIN to DEVICE_SETUP due to setup mode');
-        triggerViewChange(AppContextView.DEVICE_SETUP);
-        return AppContextView.DEVICE_SETUP;
-      }
-      
-      // Store viewEventData (contains deviceCode) for DeviceLoginWidget
-      setViewEventData(viewEventData);
-      triggerViewChange(targetView);
-      return targetView;
-    }
-
-    // DEVICE_SETUP view - Workspace Builder
-    if (targetView === AppContextView.DEVICE_SETUP) {
-      setViewEventData(viewEventData);
-      triggerViewChange(targetView);
-      return targetView;
-    }
-
-    // CLAIM_PAGE view
-    if (targetView === AppContextView.CLAIM_PAGE) {
-      setViewEventData(viewEventData);
-      triggerViewChange(targetView);
-      return targetView;
-    }
-
-    // if (!isEmbedded) {
-    //   const params = new URLSearchParams(window.location.search);
-    //   const hasPaymentComplete = params.get('payment_complete') === 'true';
-    //   if (!hasPaymentComplete && !params.has('user_id') && !params.has('code') && !isDebugWallet) {
-    //     console.log('AppContent: No user_id or code, showing Welcome');
-    //     // Clear cached session to avoid forced logged-in state when no auth params
-    //     try {
-    //       AppData.reset();
-    //       localStorage.clear();
-         
-    //     } catch (err) {
-    //       console.error('Failed to clear cached session:', err);
-    //     }
-    //     if (currentView !== AppContextView.WELCOME) return AppContextView.WELCOME; // Show welcome screen for non-embedded, no context
-    //   }
-    // } else {
-    //   // If embedded and the app is not ready
-    // }
-
-
-
-    if (targetView === AppContextView.APP_STORE || targetView === AppContextView.APP_USAGE || targetView === AppContextView.COMMUNITY_LOBBY) { // Added COMMUNITY_LOBBY here
-      if (!AppData.myCommunities || AppData.myCommunities.length === 0 || !AppData.myApps || AppData.myApps.length === 0) {
-        console.log('AppContext: No communities or apps found, fetching purchases');
-        let myPurchases = await Api.fetchMyCommunitiesAndApps();
-        if (!(myPurchases && myPurchases.communities && myPurchases.communities.length > 0)) {
-          console.log('AppContext: No communities found, going to COMMUNITY STORE');
-          targetView = AppContextView.COMMUNITY_STORE;
-          return targetView;
-        }
-
-        if (targetView === AppContextView.APP_USAGE && myPurchases && (!myPurchases.apps || myPurchases.apps.length === 0)) {
-          console.log('AppContext: No purchased apps found, going to MY_APPS');
-          targetView = AppContextView.MY_APPS;
-          return targetView;
-        }
-        AppData.myCommunities = myPurchases.communities;
-        AppData.myApps = myPurchases.apps;
-      }
-
-
-      if (viewEventData?.communityId) { // Check optional chaining
-        localCommunity = AppData.myCommunities.find(c => c.community_id === viewEventData.communityId);
-        if (!localCommunity) {
-          console.log('AppContext: No community found for app, going to COMMUNITY_STORE');
-          targetView = AppContextView.COMMUNITY_STORE;
-          return targetView;
-        }
-      } else if (targetView === AppContextView.COMMUNITY_LOBBY) {
-        // For Lobby, default to the first community if no communityId in viewEventData
-        if (AppData.myCommunities && AppData.myCommunities.length > 0) {
-          localCommunity = AppData.myCommunities[0];
-        } else if (loginStatus === LoginStatus.GUEST) {
-          // GUEST: Fetch promoted communities and set EGPT as default
-          console.log('AppContext: GUEST user - fetching promoted communities');
-          try {
-            const promotedCommunities = await Api.fetchFeaturedCommunities(true);
-            // Find EGPT community or use first promoted community
-            const egptCommunity = promotedCommunities.find(c => 
-              c.token_symbol && c.token_symbol.toUpperCase() === 'EGPT'
-            ) || promotedCommunities[0];
-            
-            if (egptCommunity) {
-              localCommunity = egptCommunity;
-              AppData.availableCommunities = promotedCommunities;
-              // Set EGPT as selected community token
-              if (egptCommunity.token_symbol) {
-                AppData.selectedCommunityToken = egptCommunity.token_symbol.toUpperCase();
-              }
-              console.log(`AppContext: GUEST - Set promoted community: ${egptCommunity.community_name}`);
-            } else {
-              console.log('AppContext: No promoted communities found for GUEST');
-              targetView = AppContextView.WELCOME;
-              return targetView;
-            }
-          } catch (error) {
-            console.error('AppContext: Error fetching promoted communities for GUEST:', error);
-            targetView = AppContextView.WELCOME;
-            return targetView;
-          }
-        } else {
-          console.log('AppContext: No communities to show Lobby, going to COMMUNITY_STORE');
-          targetView = AppContextView.COMMUNITY_STORE; // Or MY_APPS?
-          return targetView;
-        }
-      }
-
-
-      if (targetView === AppContextView.APP_USAGE) {
-        localApp = AppData.myApps.find(a => a.app_id === viewEventData.appId && a.community_id === localCommunity.community_id);
-        if (!localApp) {
-          console.log('AppContext: No app found for community, going to MY_APPS');
-          targetView = AppContextView.MY_APPS;
-          return targetView;
-        }
-      }
-    }
-
-
-    if (targetView === AppContextView.APP_STORE) {
-      let communityApps = localCommunity.apps || await Api.fetchFeaturedApps(localCommunity.community_id);
-      localCommunity.apps = communityApps;
-      if (!localCommunity.apps || localCommunity.apps.length === 0) {
-        console.log('AppContext: No apps found for community, going to COMMUNITY_STORE');
-        targetView = AppContextView.COMMUNITY_STORE;
-        return targetView;
-      }
-    } else if (targetView === AppContextView.APP_USAGE) {
-      if (viewEventData && viewEventData.AppContextInAppActivityType) {
-        setInAppActivityView(viewEventData.AppContextInAppActivityType);
-      }
-    } else if (targetView === AppContextView.COMMUNITY_STORE && (!AppData.myCommunities && !AppData.availableCommunities || AppData.availableCommunities.length === 0)) {
-      if (loginStatus === LoginStatus.CONNECTED || loginStatus === LoginStatus.GUEST) {
-        //get the featured communities (GUEST can see promoted communities)
-        let featuredCommunities = await Api.fetchFeaturedCommunities(true);
-        AppData.availableCommunities = featuredCommunities || [];
-      } else {
-        targetView = AppContextView.WELCOME;
-      }
-    } else {
-      if (targetView === AppContextView.MY_APPS && (!AppData.myCommunities || AppData.myCommunities.length === 0)) {
-        targetView = AppContextView.COMMUNITY_STORE;
-      }
-    }
-
-    // NEW: When switching to COMMUNITY_LOBBY, fetch lobby data and attach to the community object
-    if (targetView === AppContextView.COMMUNITY_LOBBY && localCommunity) {
-      // Log community lobby view event
-      try {
-        await Api.logContentEvent({
-          event_type: 'PAGE_VIEW',
-          entity_type: 'COMMUNITY',
-          entity_id: localCommunity.community_id,
-          community_id: localCommunity.community_id
-        });
-      } catch (error) {
-        console.error('Error logging community lobby view:', error);
-      }
-      try {
-        const details = await Api.getCommunityDetails(localCommunity.community_id);
-        // For GUEST users, skip user stats (requires authentication)
-        let stats = null;
-        if (loginStatus !== LoginStatus.GUEST) {
-          stats = await Api.getUserCommunityStats(localCommunity.community_id);
-        } else {
-          // GUEST: Provide empty stats
-          stats = { stats: { community_dip: 0, community_ref: 0, community_rep: 0 }, token_balance: 0 };
-        }
-        // Use details if available, otherwise create a shallow copy to avoid circular reference
-        localCommunity.lobbyData = {
-          communityDetails: details || { ...localCommunity, lobbyData: undefined },
-          userStats: stats
-        };
-      } catch (error) {
-        console.error("Error fetching Community Lobby data:", error);
-        // For GUEST, provide fallback data
-        if (loginStatus === LoginStatus.GUEST) {
-          // Create a shallow copy to avoid circular reference
-          localCommunity.lobbyData = {
-            communityDetails: { ...localCommunity, lobbyData: undefined },
-            userStats: { stats: { community_dip: 0, community_ref: 0, community_rep: 0 }, token_balance: 0 }
-          };
-        }
-      }
-    }
-
-    if (viewEventData) {
-      setSelectedCommunity(localCommunity);
-      setSelectedApp(localApp);
-    }
-
-    triggerViewChange(targetView);
-    return targetView;
-  };
+  // viewRouter logic has been moved to PlatformViewProvider (DeSciX_Cloud/site/src/PlatformViewContext.jsx).
+  // SDK now fires lifecycle events; app-level view providers handle view routing.
 
   // --- Refresh User Roles Function ---
   const refreshUserRoles = useCallback(async () => {
@@ -442,37 +163,12 @@ export const AppProvider = ({ children }) => {
     setAppEvent({ type: AppContextEvent.CHANGE_VIEW, payload: { view: newView, viewEventData: newViewEventData } });
   };
 
-  // --- Function to handle launching an app ---
-  const handleLaunchApp = async (app, inAppActivityView = AppContextInAppActivity.CODESITE) => { // Default to CODESITE
-    if (!app || !app.community_id || !app.app_id) {
-      console.error("AppContext: Invalid app object provided to handleLaunchApp");
-      return;
-    }
-    // Ensure the community context is set correctly first
-    if (selectedCommunity?.community_id !== app.community_id) {
-      const community = AppData.myCommunities.find(c => c.community_id === app.community_id);
-      if (community) {
-        setSelectedCommunity(community);
-      } else {
-        console.error(`AppContext: Community ${app.community_id} not found in user's communities.`);
-        // Maybe fetch community details? Or redirect?
-        setCurrentView(AppContextView.COMMUNITY_STORE);
-        return;
-      }
-    }
-    // Now set the app and trigger the view change
-    setSelectedApp(app);
-    let newEventViewData = new AppEventViewData(app.community_id, app.app_id, AppContextView.APP_USAGE, inAppActivityView);
-    await viewRouter(AppContextView.APP_USAGE, newEventViewData); // Use viewRouter to handle transition
-  };
+  // handleLaunchApp has been moved to PlatformViewProvider (DeSciX_Cloud/site/src/PlatformViewContext.jsx).
 
   async function refreshMyCommunitiesAndApps() {
     try {
-      // Always fetch the latest data from backend
       const hadNoCommunities = !AppData.myCommunities || AppData.myCommunities.length === 0;
-      
-      await Api.fetchMyCommunitiesAndApps();
-      await Api.fetchMyTransactions();
+      await Api.fetchStoreAndPurchases(); // Single call replaces fetchMyCommunitiesAndApps + fetchMyTransactions
 
       // Set default selected community if this is the first time loading
       if (hadNoCommunities && AppData.myCommunities && AppData.myCommunities.length > 0) {
@@ -481,7 +177,6 @@ export const AppProvider = ({ children }) => {
       console.log("AppContext: Refresh complete.");
     } catch (error) {
       console.error("AppContext: Error during data refresh:", error);
-      // Handle error appropriately
     }
   };
 
@@ -573,12 +268,10 @@ export const AppProvider = ({ children }) => {
         setLoginStatus(status);
         if (status === LoginStatus.CONNECTED) {
           setAppEvent(AppContextEvent.LOGIN_SUCCESS);
-        } else if (status === LoginStatus.AUTHENTICATED) {
-          // Handle TOS acceptance
-          await viewRouter(AppContextView.TRADING_DASHBOARD, null);
         }
+        // AUTHENTICATED/other: status already updated — Platform handles view routing
       }
-      let status, data, params, hasPaymentComplete;
+      let status, data;
 
       switch (event) {
         case AppContextEvent.SDK_INITIALIZE:
@@ -712,75 +405,38 @@ export const AppProvider = ({ children }) => {
             setLoginStatus(status);
           }
 
-          // Fetch Token Contracts
-          data = await Api.getTokenContractAddresses();
-          setTokenContractAddresses(data);
+          // Token contract info is now included in the store bundle (fetched during login/view routing)
 
-          // 3. DETERMINE VIEW BASED ON AUTH STATUS
+          // 3. SET READY — Platform handles view routing based on loginStatus
+          setAppState(AppContextState.READY);
+
           if (status === LoginStatus.CONNECTED) {
-            setAppState(AppContextState.READY);
-            
-            // Handle Deep Links
+            // Store deep links for Platform to pick up after LOGIN_SUCCESS
             if (payload?.deepLink) {
-              const { type, code, route } = payload.deepLink;
-              if (type === 'CLAIM') {
-                setViewEventData({ claimCode: code });
-                triggerViewChange(AppContextView.CLAIM_PAGE); // Assuming this exists or we use viewRouter
-                return;
-              }
-              if (type === 'TEST' && route === 'powch-hello') {
-                // Handle test routes
-                triggerViewChange(AppContextView.LOADING); // Placeholder
-                // ...
-              }
+              AppData.pendingDeepLink = payload.deepLink;
             }
 
             setAppEvent(AppContextEvent.LOGIN_SUCCESS);
-            
+
             // Handle Referral if passed from SDK_READY
             const referral = payload?.referral;
             if (referral) {
               console.log("AppContext: Handling INCOMING_REFERRAL event - payload:", referral);
               handleReferral(referral);
             }
-          } else if (status === LoginStatus.AUTHENTICATED) {
-            // User has identity but needs wallet - viewRouter will handle redirect
-            setAppState(AppContextState.READY);
-            await viewRouter(AppContextView.TRADING_DASHBOARD, null);
-          } else if (status === LoginStatus.GUEST) {
-            setAppState(AppContextState.READY);
-            
-            // Handle payment complete param (was in SDK_FAILED)
-            const params = new URLSearchParams(window.location.search);
-            hasPaymentComplete = params.get('payment_complete') === 'true';
-            
-            if (hasPaymentComplete) {
-              // Guest returning from payment - go to Dashboard
-              console.log('AppContext: Guest returning from payment - going to Dashboard');
-              await viewRouter(AppContextView.TRADING_DASHBOARD, null);
-            } else {
-              // Standard Guest -> Trading Dashboard (new default home)
-              await viewRouter(AppContextView.TRADING_DASHBOARD, null);
-            }
-          } else {
-            // Not authenticated -> Welcome
-            setAppState(AppContextState.READY);
-            await viewRouter(AppContextView.WELCOME, null);
           }
+          // AUTHENTICATED, GUEST, other: Platform's initial route handler
+          // (useEffect on sdk.appState === READY) handles view routing.
           break;
         }
 
-        //Handle manual login
         case AppContextEvent.LOGIN_START:
-          //Go to the welcome page
-          await viewRouter(AppContextView.WELCOME, null);
+          // Platform handles view routing via lifecycle event handler
           break;
 
-        case AppContextEvent.CHANGE_VIEW: {
-          const { view, viewEventData } = payload;
-          const newFinalView = await viewRouter(view, viewEventData);
+        case AppContextEvent.CHANGE_VIEW:
+          // Platform handles view routing via lifecycle event handler
           break;
-        }
 
         case AppContextEvent.LOGIN_SUCCESS: {
           console.log("AppContext: LOGIN_SUCCESS event processing.");
@@ -803,15 +459,7 @@ export const AppProvider = ({ children }) => {
           // Normal flow: Ensure core data is present or fetched
           await refreshMyCommunitiesAndApps();
           
-          // Navigate based on mode
-          if (AppData.isSetupMode) {
-            console.log('AppContext: Setup mode detected - going to DEVICE_SETUP');
-            await viewRouter(AppContextView.DEVICE_SETUP, null);
-          } else {
-            // Navigate to Trading Dashboard (new default home)
-            await viewRouter(AppContextView.TRADING_DASHBOARD, null);
-          }
-
+          // Platform handles view routing via LOGIN_SUCCESS lifecycle event
           break;
         }
 
@@ -844,19 +492,10 @@ export const AppProvider = ({ children }) => {
             _setLoginStatus(auth_status);
           }
           
-          // Navigate to server-specified destination
-          if (next_destination?.view) {
-            console.log('AppContext: LOGIN_WITH_ROUTING - navigating to:', next_destination.view);
-            await viewRouter(next_destination.view, next_destination.view_data || null);
-            
-            // Update browser URL if deep_link provided
-            if (next_destination.deep_link && !isEmbedded) {
-              window.history.pushState(null, '', next_destination.deep_link);
-            }
-          } else {
-            // Fallback to default destination
+          // Platform handles view routing via LOGIN_WITH_ROUTING lifecycle event
+          if (!next_destination?.view) {
+            // Fallback: refresh data (Platform will route to default)
             await refreshMyCommunitiesAndApps();
-            await viewRouter(AppContextView.TRADING_DASHBOARD, null);
           }
           break;
         }
@@ -864,7 +503,7 @@ export const AppProvider = ({ children }) => {
         case AppContextEvent.LOGIN_FAILURE:
           console.log("AppContext: Handling LOGIN_FAILURE event");
           setLoginStatus(LoginStatus.AUTH_FAILED);
-          await viewRouter(AppContextView.WELCOME, null);
+          // Platform handles view routing via lifecycle event handler
           break;
 
         // ============================================================
@@ -887,9 +526,8 @@ export const AppProvider = ({ children }) => {
           await Api.fetchCommunities(true);
           // Optionally refresh other data like roles
           await refreshUserRoles();
-          console.log("AppContext: Refresh complete, staying on current view or navigating.");
-          // Decide where to navigate after refresh, e.g., stay or go to My Apps/Lobby
-          await viewRouter(currentView, null); // Re-run view logic for current view
+          console.log("AppContext: Refresh complete.");
+          // Platform handles re-routing via PURCHASES_REFRESH_REQUESTED lifecycle event
           break;
 
         case AppContextEvent.SESSION_EXPIRED: {
@@ -899,8 +537,8 @@ export const AppProvider = ({ children }) => {
           _setLoginStatus(LoginStatus.GUEST);
           _setCustodialBalance(0);
           setUserRoles(null);
-          // Clear store cache
-          clearStoreCache();
+          // Full cache clear including chat threads
+          AppData.reset();
           // Browser navigate to host root - full reload ensures clean state, correct app (standalone vs platform)
           window.location.href = window.location.origin + '/';
           break;
@@ -936,7 +574,6 @@ export const AppProvider = ({ children }) => {
         Api,
         registerSessionExpiryCallback,
         AppContext: {
-          currentView,
           appState,
           loginStatus,
           sessionInfo,
@@ -944,7 +581,6 @@ export const AppProvider = ({ children }) => {
           selectedApp,
           setCurrentView,
           setAppEvent,
-          handleLaunchApp,
           refreshSession
         },
         // Direct API access helper
@@ -964,7 +600,7 @@ export const AppProvider = ({ children }) => {
       };
       console.log('[App Shell] DeSciX helpers exposed on window object');
     }
-  }, [appState, currentView, loginStatus, sessionInfo, selectedCommunity, selectedApp, setCurrentView, setAppEvent, handleLaunchApp, refreshSession, setSessionInfo, setLoginStatus]);
+  }, [appState, loginStatus, sessionInfo, selectedCommunity, selectedApp, setCurrentView, setAppEvent, refreshSession, setSessionInfo, setLoginStatus]);
 
   useEffect(() => {
     // Register the event dispatcher for session expiry handling
@@ -980,39 +616,14 @@ export const AppProvider = ({ children }) => {
     };
   }, [setAppEvent]);
 
-  // NEW: Parse URL path for community token (e.g., /EGPT) or deep links on mount
+  // Parse URL path for community token (e.g., /EGPT) on mount.
+  // Deep link parsing (/p/{doc_id}, /t/{file_id}) moved to PlatformViewProvider.
   useEffect(() => {
     if (!isEmbedded) {
       const path = window.location.pathname;
-      const urlParams = new URLSearchParams(window.location.search);
-      
+
       // Exclude reserved routes
       if (path === '/device' || path.startsWith('/device')) {
-        return;
-      }
-      
-      // Handle proposed document deep links: /p/{doc_id}
-      const proposedMatch = path.match(/^\/p\/([^/]+)/);
-      if (proposedMatch && proposedMatch[1]) {
-        const proposedDocId = proposedMatch[1];
-        const referrerId = urlParams.get('ref') || urlParams.get('referrer_id');
-        console.log(`AppContext: Detected proposed doc deep link: ${proposedDocId}, referrer: ${referrerId}`);
-        
-        // Set view data and navigate to PROPOSED_DOC view
-        setViewEventData({ proposedDocId, referrerId });
-        triggerViewChange(AppContextView.PROPOSED_DOC);
-        return;
-      }
-      
-      // Handle saved thread deep links: /t/{file_id} (requires auth)
-      const threadMatch = path.match(/^\/t\/([^/]+)/);
-      if (threadMatch && threadMatch[1]) {
-        const threadFileId = threadMatch[1];
-        console.log(`AppContext: Detected thread deep link: ${threadFileId}`);
-        
-        // Store for later when authenticated
-        AppData.pendingThreadFileId = threadFileId;
-        // Will need to load and display after auth
         return;
       }
 
@@ -1022,7 +633,7 @@ export const AppProvider = ({ children }) => {
         const tokenSymbol = pathMatch[1].toUpperCase();
         console.log(`AppContext: Detected community token from URL: ${tokenSymbol}`);
         AppData.selectedCommunityToken = tokenSymbol;
-        
+
         // If user is authenticated, try to fetch and set the community
         if (AppData.sessionInfo?.id) {
           Api.fetchCommunityByTokenSymbol(tokenSymbol).then(community => {
@@ -1036,7 +647,7 @@ export const AppProvider = ({ children }) => {
         }
       }
     }
-  }, [isEmbedded, setSelectedCommunity, setViewEventData, triggerViewChange]);
+  }, [isEmbedded, setSelectedCommunity]);
 
   // --- Referral Validation Handler ---
   const handleReferral = async (payload) => {
@@ -1144,28 +755,16 @@ export const AppProvider = ({ children }) => {
     }
   };
 
-  // --- Uninstall Functions (Local state removal only - consider backend integration later) ---
-  const uninstallApp = (app, communityId) => {
-    console.warn("Uninstalling app locally - backend integration needed for full removal.");
-    const currentApps = AppData.myApps || {};
-    const communityApps = currentApps[communityId] || [];
-    const updatedApps = communityApps.filter((a) => a.app_id !== app.app_id);
-    AppData.myApps = { ...currentApps, [communityId]: updatedApps };
-    // Trigger UI update if necessary (e.g., refresh My Apps view)
+  // --- Uninstall Functions (Local-only: removes from cache, entitlement persists on server) ---
+  const uninstallApp = (app) => {
+    AppData.myApps = (AppData.myApps || []).filter(a => a.app_id !== app.app_id);
     setCurrentView(AppContextView.MY_APPS);
   };
 
   const uninstallCommunity = (community) => {
-    console.warn("Uninstalling community locally - backend integration needed.");
-    const currentCommunities = AppData.myCommunities || [];
-    const updatedCommunities = currentCommunities.filter((p) => p.community_id !== community.community_id);
-    AppData.myCommunities = updatedCommunities;
-    // Also remove apps associated with this community from local cache
-    const currentApps = AppData.myApps || {};
-    delete currentApps[community.community_id];
-    AppData.myApps = currentApps;
-    // Trigger UI update
-    setCurrentView(AppContextView.COMMUNITY_STORE);
+    AppData.myCommunities = (AppData.myCommunities || []).filter(c => c.community_id !== community.community_id);
+    AppData.myApps = (AppData.myApps || []).filter(a => a.community_id !== community.community_id);
+    setCurrentView(AppContextView.MY_APPS);
   };
 
 
@@ -1228,7 +827,6 @@ export const AppProvider = ({ children }) => {
         verifyAuthenticationStatus,
         refreshSession,
         refreshMyCommunitiesAndApps,
-        handleLaunchApp,
         makeCustomDeepLink,
         makeDeepLinkToCurrent,
 
