@@ -37,6 +37,11 @@ export function PowchBridgeProvider({ children, config = {} }) {
   }, [bridgeUrl, config.brand]);
 
   useEffect(() => {
+    // activate() sets up the window message listener. Must be in useEffect (not
+    // the constructor) so React strict-mode's cleanup/re-setup cycle works —
+    // otherwise destroy() in cleanup removes the listener and it's never re-added.
+    bridge.activate();
+
     const handleRegister = (event) => {
       if (event.detail?.iframe) {
         bridge.registerIframe(event.detail.iframe);
@@ -63,7 +68,7 @@ export function PowchBridgeProvider({ children, config = {} }) {
       bridge.off('ui_open', onStateUpdate);
       bridge.off('ui_close', onStateUpdate);
       bridge.off('toggle_ui', onStateUpdate);
-      bridge.destroy?.();
+      bridge.destroy();
     };
   }, [bridge]);
 

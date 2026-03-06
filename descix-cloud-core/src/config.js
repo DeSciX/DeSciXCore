@@ -58,7 +58,7 @@ const PERMISSIONS = {
 
 const GUEST_ALLOWED_COMMANDS = [
     'find_communities', 'get_community_details', 'get_community', 'list_apps_for_community',
-    'get_token_contract_addresses', 'fetch_my_purchases', 'log_content_event',
+    'get_store_bundle', 'get_token_contract_addresses', 'fetch_my_purchases', 'log_content_event',
     'create_stripe_checkout_session', 'get_crypto_deposit_info', 'get_stripe_status',
     'powch_register_begin', 'powch_register_finish', 'powch_login_begin', 'powch_login_finish',
     'powch_write_wallet_begin', 'powch_send_verification_code', 'powch_verify_code',

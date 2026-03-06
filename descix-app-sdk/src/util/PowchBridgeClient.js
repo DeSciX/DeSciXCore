@@ -33,8 +33,7 @@ export class PowchBridgeClient {
     this._displayAddress = null;
     this._currentTab = TAB_IDS.CARDS;
     this._listeners = new Map();
-
-    this._setupMessageListener();
+    this._boundHandleMessage = null;
   }
 
   /**
@@ -70,7 +69,15 @@ export class PowchBridgeClient {
     this._emit('ready');
   }
 
-  _setupMessageListener() {
+  /**
+   * Activate the bridge's window message listener. Idempotent — safe to call
+   * repeatedly (e.g. after React strict-mode unmount/remount cycles).
+   * Must be paired with destroy() for cleanup.
+   */
+  activate() {
+    if (this._boundHandleMessage) {
+      window.removeEventListener('message', this._boundHandleMessage);
+    }
     this._boundHandleMessage = (event) => this._handleMessage(event);
     window.addEventListener('message', this._boundHandleMessage);
   }
@@ -124,11 +131,8 @@ export class PowchBridgeClient {
       return;
     }
 
-    if (!this.iframe) return;
-    if (event.source !== this.iframe.contentWindow) return;
-
-    if (!type) return;
-
+    // UI events: origin-verified (line 90) is sufficient. Vite HMR may cause
+    // event.source !== iframe.contentWindow after a full-page reload inside the iframe.
     if (type === 'POWCH_UI_CLOSE') {
       this._isIframeVisible = false;
       this._emit('ui_close');
@@ -140,6 +144,11 @@ export class PowchBridgeClient {
       this._emit('toggle_ui');
       return;
     }
+
+    if (!this.iframe) return;
+    if (event.source !== this.iframe.contentWindow) return;
+
+    if (!type) return;
 
     if (type === 'POWCH_STATE_UPDATE' && payload) {
       if (payload.isAuthenticated !== undefined) this._isAuthenticated = payload.isAuthenticated;

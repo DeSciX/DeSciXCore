@@ -43,8 +43,8 @@ export class AppData {
   }
 
   static getProductUrl(product) {
-    if (AppData._workspaceProducts && AppData._workspaceProducts[product.id]) {
-      return AppData._workspaceProducts[product.id];
+    if (AppData._workspaceProducts && AppData._workspaceProducts[product.app_id]) {
+      return AppData._workspaceProducts[product.app_id];
     }
     return product.ip_site_gcs_path_url;
   }
@@ -86,6 +86,14 @@ export class AppData {
     localStorage.removeItem('myCommunities');
     localStorage.removeItem('myTransactions');
     localStorage.removeItem('myApps');
+
+    // Clear chat thread data (dynamic keys: descix_threads_{communityId}_{appId})
+    const keysToRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith('descix_threads_')) keysToRemove.push(key);
+    }
+    keysToRemove.forEach(k => localStorage.removeItem(k));
   }
 
   static get appModeConfig() {
@@ -332,14 +340,13 @@ export class AppData {
 
   // --- My Apps Getter/Setter ---
   static get myApps() {
-    if (AppData._myApps && Object.keys(AppData._myApps).length > 0) {
+    if (AppData._myApps && AppData._myApps.length > 0) {
       return AppData._myApps;
     }
     const stored = localStorage.getItem('myApps');
     try {
       const parsed = stored ? JSON.parse(stored) : [];
-      // Ensure it's an array (backward compatibility)
-      AppData._myApps = typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed : [];
+      AppData._myApps = Array.isArray(parsed) ? parsed : [];
       return AppData._myApps;
     } catch (error) {
       console.error('Error parsing myApps from localStorage:', error);

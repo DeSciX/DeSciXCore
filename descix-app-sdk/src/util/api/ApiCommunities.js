@@ -30,20 +30,51 @@ export const verifyAppStructure = async (folderId, appName, kbName, communityId)
   }
 };
 
-export const fetchMyCommunitiesAndApps = async () => {
+/**
+ * Fetch store bundle + purchases in a single call (authenticated users).
+ * Hydrates AppData.availableCommunities, myCommunities, and myApps.
+ */
+export const fetchStoreAndPurchases = async () => {
   try {
     const data = await makeCommandRequestJSON('fetch_my_purchases', {}, true);
     if (data.status === ResponseStatus.OK) {
-      if (data.message?.communities) AppData.myCommunities = data.message.communities;
-      if (data.message?.apps) AppData.myApps = data.message.apps;
+      const msg = data.message;
+      // Hydrate store data
+      AppData.availableCommunities = msg.communities || [];
+      // Hydrate user purchases (filter from store bundle using overlay IDs)
+      const myCommIds = new Set(msg.my_community_ids || []);
+      const myAppIds = new Set(msg.my_app_ids || []);
+      AppData.myCommunities = (msg.communities || []).filter(c => myCommIds.has(c.community_id));
+      AppData.myApps = (msg.communities || []).flatMap(c => (c.apps || []).filter(a => myAppIds.has(a.app_id)));
+      return msg;
+    }
+    return null;
+  } catch (error) {
+    console.error('Error in fetchStoreAndPurchases:', error);
+    return null;
+  }
+};
+
+/**
+ * Fetch store bundle only (guest path — no auth required).
+ * Hydrates AppData.availableCommunities.
+ */
+export const fetchStoreBundle = async () => {
+  try {
+    const data = await makeCommandRequestJSON('get_store_bundle', {}, true);
+    if (data.status === ResponseStatus.OK) {
+      AppData.availableCommunities = data.message.communities || [];
       return data.message;
     }
     return null;
   } catch (error) {
-    console.error('Error fetching my purchases:', error);
+    console.error('Error in fetchStoreBundle:', error);
     return null;
   }
 };
+
+/** @deprecated Use fetchStoreAndPurchases instead */
+export const fetchMyCommunitiesAndApps = fetchStoreAndPurchases;
 
 export const fetchMyTransactions = async () => {
   try {

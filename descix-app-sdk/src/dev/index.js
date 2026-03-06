@@ -3,3 +3,4 @@ export { getViteHttpsConfig } from './getViteHttpsConfig.js';
 export { createViteServerConfig } from './createViteServerConfig.js';
 export { watchWorkspaceConfig } from './watchWorkspaceConfig.js';
 export { runGateway } from './gateway.js';
+export { buildWorkspaceProducts } from './workspaceProducts.js';

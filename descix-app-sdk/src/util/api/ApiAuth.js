@@ -85,13 +85,7 @@ export async function checkAuthenticationStatus(newWalletAddress = null, newSign
     const isNativeMode = !AppData.sdk;
     if (isNativeMode && !newWalletAddress && !newSignature) {
       if (sessionInfo?.id) {
-        let currentStatus = AppData.loginStatus || LoginStatus.GUEST;
-        const hasWallet = sessionInfo?.wallet_address;
-        if (!hasWallet && currentStatus === LoginStatus.CONNECTED) {
-          console.log(`Authentication check: Correcting status from ${currentStatus} to AUTHENTICATED (no wallet)`);
-          currentStatus = LoginStatus.AUTHENTICATED;
-          AppData.loginStatus = LoginStatus.AUTHENTICATED;
-        }
+        const currentStatus = AppData.loginStatus || LoginStatus.GUEST;
         console.log(`Authentication check skipped in native mode. Using existing session. Status: ${currentStatus}`);
         return currentStatus;
       } else {

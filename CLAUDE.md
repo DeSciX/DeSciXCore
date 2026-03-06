@@ -94,6 +94,12 @@ node bin/descix.js chat -a daita "..."# verify RAG
 ### MCP uses CLI
 All MCP tool calls invoke CLI commands. The canonical MCP entry point (after legacy removal) is `@descix/sdk`'s MCP server integration, not the legacy `DeSciXMCPServer` class.
 
+### Powch Integration for App Developers
+- **Inside AppShell (default):** Powch sidebar is automatic. Use `usePowchBridge()` hook to call `bridge.login({ registerDeSciX: true })`, `bridge.sign()`, `bridge.connectWallet()`, etc. `registerDeSciX: true` ensures the full site pass flow (email + TOS + DeSciX registration) completes before returning.
+- **Standalone (no AppShell):** Import `PowchClient` from `@descix/app-sdk/powch-client`. It auto-detects embedded vs standalone mode — if `window.DeSciX.powch` exists, delegates to host's bridge; otherwise creates its own iframe sidebar.
+- **Session sync:** After `bridge.login()` resolves, call `window.DeSciX.loginWithSessionToken(result)` then fire `LOGIN_SUCCESS` event. The bridge also syncs automatically via `_syncSessionToHost()` on every successful POWCH_RESPONSE.
+- **Reference implementations:** `DeSciX_Powch/samples/standalone-vanilla/` (pure JS) and `standalone-react/` (React + PowchClient).
+
 ### No silent failures in cloud-core
 `@descix/cloud-core` bootstraps services from Secret Manager. If a required config value is null/missing, let it surface — never add default fallbacks. This exposes misconfigurations early.
 

@@ -739,6 +739,7 @@ appCommand
   .requiredOption('-a, --app <app_id>', 'App ID (e.g. daita)')
   .option('--kb <name>', 'Knowledge base name', 'General')
   .option('-p, --path <dir>', 'Local app directory (default: auto-detected or cwd)')
+  .option('-c, --community <community_id>', 'Community to create app in (if not yet in Products registry)')
   .action(async (options) => {
     try {
       const apiClient = new DeSciXApiClient();
@@ -747,10 +748,26 @@ appCommand
       const kbId = options.kb || 'General';
 
       // Resolve community_id from Products registry
-      const productCtx = await apiClient.invoke('get_product_context', { app_id: appId });
-      const communityId = (productCtx.message || productCtx).community_id;
+      let communityId;
+      try {
+        const productCtx = await apiClient.invoke('get_product_context', { app_id: appId });
+        communityId = (productCtx.message || productCtx).community_id;
+      } catch (e) {
+        // Product not found — create it if --community was provided
+        if (options.community) {
+          console.log(chalk.gray(`  App '${appId}' not in Products registry. Creating in community '${options.community}'...`));
+          await apiClient.invoke('create_app_for_community', {
+            community_id: options.community,
+            app_name: appId,
+          });
+          communityId = options.community;
+          console.log(chalk.green(`  ✓ Created App + Products + Purchase for ${appId}`));
+        } else {
+          throw new Error(`App '${appId}' not found in Products registry. Use --community to create it.`);
+        }
+      }
       if (!communityId) {
-        throw new Error(`App '${appId}' not found in Products registry. Run bootstrap first.`);
+        throw new Error(`App '${appId}' not found in Products registry. Use --community to create it.`);
       }
 
       // 1. Workspace.json — register app if not already mapped
