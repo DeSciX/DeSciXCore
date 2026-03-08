@@ -18,7 +18,6 @@ import * as configCommands from '../lib/commands/config.js';
 import { runAppWizard } from '../lib/commands/app-wizard.js';
 import * as buyCommands from '../lib/commands/buy.js';
 import { runInit } from '../lib/commands/init.js';
-import { runSetup } from '../lib/commands/setup.js';
 import * as folderCommands from '../lib/commands/folder.js';
 import * as updateCommands from '../lib/commands/update.js';
 import { runStatus } from '../lib/commands/status.js';
@@ -3625,20 +3624,6 @@ program
     }
   });
 
-// ============ Setup Wizard ============
-
-program
-  .command('setup')
-  .description('One-time developer setup')
-  .option('--dev', 'Use development environment')
-  .action(async (options) => {
-    try {
-      await runSetup(options);
-    } catch (error) {
-      process.exit(1);
-    }
-  });
-
 // ============ Folder Commands ============
 
 const folderCommand = program
@@ -3762,14 +3747,85 @@ program
     }
   });
 
+// ============ Quickstart Command ============
+
+program
+  .command('quickstart')
+  .description('One-command setup: auth → workspace → agent files → MCP config')
+  .option('-u, --url <url>', 'API URL override')
+  .option('--dev', 'Use development server (https://localhost:4000)')
+  .action(async (options) => {
+    const { generateAgentFiles, generateMcpConfig } = await import('../lib/agent-files.js');
+    const { WalletFileManager } = await import('../lib/wallet-file.js');
+
+    console.log(chalk.cyan('\n🚀 DeSciX Quickstart\n'));
+
+    const workspaceRoot = process.cwd();
+
+    // Step 1: Auth — login if no wallet.json
+    const walletPath = WalletFileManager.getWalletPath(workspaceRoot);
+    let needsLogin = true;
+    try {
+      const wallet = await WalletFileManager.loadWalletFile(walletPath);
+      if (wallet && WalletFileManager.hasValidSession(wallet)) {
+        console.log(chalk.green(`✓ Already authenticated as ${wallet.userId}`));
+        needsLogin = false;
+      }
+    } catch { /* no wallet */ }
+
+    if (needsLogin) {
+      const loginOptions = {};
+      if (options.url) loginOptions.url = options.url;
+      if (options.dev) loginOptions.dev = true;
+      await authCommands.loginDevice(loginOptions);
+    }
+
+    // Step 2: Workspace init — create workspace.json if missing
+    const wsConfigPath = path.join(workspaceRoot, '.descix', 'workspace.json');
+    let hasWorkspace = false;
+    try {
+      await fs.access(wsConfigPath);
+      hasWorkspace = true;
+      console.log(chalk.green('✓ Workspace already initialized'));
+    } catch { /* missing */ }
+
+    if (!hasWorkspace) {
+      console.log(chalk.cyan('\n📋 Initialize Workspace\n'));
+      await runInit({ path: workspaceRoot });
+    }
+
+    // Step 3: Generate agent instruction files
+    console.log(chalk.cyan('\n📋 Generating Agent Instructions\n'));
+    const written = await generateAgentFiles(workspaceRoot);
+    for (const f of written) {
+      console.log(chalk.green(`  ✓ ${f}`));
+    }
+
+    // Step 4: Generate .vscode/mcp.json
+    await generateMcpConfig(workspaceRoot);
+    console.log(chalk.green('  ✓ .vscode/mcp.json'));
+
+    // Step 5: Copy SDK assets
+    try {
+      const { pullSdkAssets } = await import('../lib/wizard/setup.js');
+      const pulled = await pullSdkAssets(workspaceRoot);
+      if (pulled) console.log(chalk.green('  ✓ .descix/sdk-assets/'));
+    } catch { /* setup.js pullSdkAssets may not be exported — skip */ }
+
+    // Done
+    console.log(chalk.green('\n✅ Quickstart complete!\n'));
+    console.log(chalk.white('Open your editor — the AI knows about DeSciX.\n'));
+    console.log(chalk.gray('  Copilot / Cline / Claude Code will have DeSciX MCP tools'));
+    console.log(chalk.gray('  Ask: "What DeSciX tools do I have?"\n'));
+  });
+
 // ============ MCP Server Command (for npx usage) ============
 
 program
   .command('mcp-serve')
-  .description('Start MCP server for Cursor integration (used by npx)')
+  .description('Start MCP server for Cursor/VS Code integration (used by npx)')
   .action(async () => {
     try {
-      // Dynamically import and run the mcp-server
       await import('./mcp-server.js');
     } catch (error) {
       console.error(chalk.red('MCP server error:', error.message));

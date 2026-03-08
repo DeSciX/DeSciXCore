@@ -239,13 +239,14 @@ export async function validateDeviceLoginRequest(userCode) {
 
 export async function completeDeviceLogin(params) {
   try {
-    const { device_code, user_code, email, tos_accepted, verification_code, wallet_address, signature } = params;
+    const { device_code, user_code, email, tos_accepted, verification_code } = params;
     if (!device_code && !user_code) throw new Error('Device code or user code is required');
     if (!email || !email.includes('@')) throw new Error('Valid email address is required');
     if (!tos_accepted) throw new Error('Terms of Service acceptance is required');
-    if (!wallet_address || !signature) throw new Error('Wallet address and signature are required');
+    // wallet_address + signature are NOT required — the backend reads them from the user record.
+    // Powch passkey IS the identity; the PRF-derived wallet IS the system wallet.
     const data = await makeCommandRequestJSON('device_complete', {
-      device_code, user_code, email, tos_accepted, verification_code, wallet_address, signature,
+      device_code, user_code, email, tos_accepted, verification_code,
     }, true);
     if (data && data.status === ResponseStatus.OK) {
       return { status: ResponseStatus.OK, message: data.message };

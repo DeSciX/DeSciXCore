@@ -345,20 +345,7 @@ export const AppProvider = ({ children }) => {
                 AppData.refCode = validationResult.message.device_code;
                 AppData.refType = 'DEVICE';
                 AppData.deviceUserCode = validationResult.message.user_code;
-                
-                // Check for setup mode
-                const isSetupMode = urlParams.get('setup') === 'true' || validationResult.message.setup_mode;
-                if (isSetupMode) {
-                  console.log('AppContext: Device setup mode detected');
-                  AppData.isSetupMode = true;
-                }
-                
-                // Store existing_workspace for pre-population in Workspace Builder
-                if (validationResult.message.existing_workspace) {
-                  console.log('AppContext: Existing workspace found for pre-population');
-                  AppData.existingWorkspace = validationResult.message.existing_workspace;
-                }
-                
+
                 console.log('AppContext: Device code validated, stored in AppData');
               } else {
                 console.error('AppContext: Device code validation failed:', validationResult.message);

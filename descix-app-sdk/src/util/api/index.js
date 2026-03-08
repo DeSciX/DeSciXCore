@@ -9,6 +9,8 @@ import { makeCommandRequestJSON } from '../AppData.jsx';
 import * as ApiAuth from './ApiAuth.js';
 import * as ApiCommunities from './ApiCommunities.js';
 import * as ApiPayments from './ApiPayments.js';
+import * as ApiTrading from './ApiTrading.js';
+import * as ApiAdmin from './ApiAdmin.js';
 import * as ApiContent from './ApiContent.js';
 
 export class Api {
@@ -16,4 +18,4 @@ export class Api {
     makeCommandRequestJSON(command, params, allowGuest);
 }
 
-Object.assign(Api, ApiAuth, ApiCommunities, ApiPayments, ApiContent);
+Object.assign(Api, ApiAuth, ApiCommunities, ApiPayments, ApiTrading, ApiAdmin, ApiContent);
