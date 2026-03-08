@@ -33,8 +33,6 @@ export class AppData {
   static _refType = null; // 'DEVICE' | 'REFERRAL' | null
   static _deviceUserCode = null; // For device login only
   static _referralData = null; // For referral: { custom_id, referrer_id, guild_id }
-  static _isSetupMode = false; // Flag for device setup mode
-  static _existingWorkspace = null; // CLI's existing workspace for pre-population
   static _appModeConfig = null; // NEW: Config for standalone app mode (appId, url)
   static _workspaceProducts = typeof __WORKSPACE_PRODUCTS__ !== 'undefined' ? __WORKSPACE_PRODUCTS__ : null;
 
@@ -68,8 +66,6 @@ export class AppData {
     AppData._refType = null;
     AppData._deviceUserCode = null;
     AppData._referralData = null;
-    AppData._isSetupMode = false;
-    AppData._existingWorkspace = null;
     AppData._appModeConfig = null;
 
     // Clear localStorage
@@ -77,8 +73,6 @@ export class AppData {
     localStorage.removeItem('custodialBalance');
     localStorage.removeItem('userRoles');
     localStorage.removeItem('loginStatus');
-    localStorage.removeItem('isSetupMode');
-    localStorage.removeItem('existingWorkspace');
     localStorage.removeItem('selectedCommunity');
     localStorage.removeItem('selectedCommunityToken');
     localStorage.removeItem('selectedApp');
@@ -123,36 +117,6 @@ export class AppData {
     localStorage.setItem('sessionInfo', JSON.stringify(value));
   }
 
-
-  // --- isSetupMode Getter/Setter ---
-  static get isSetupMode() {
-    if (AppData._isSetupMode) {
-      return AppData._isSetupMode;
-    }
-    const stored = localStorage.getItem('isSetupMode');
-    return stored === 'true';
-  }
-  static set isSetupMode(value) {
-    AppData._isSetupMode = value;
-    localStorage.setItem('isSetupMode', String(value));
-  }
-
-  // --- existingWorkspace Getter/Setter (for CLI pre-population) ---
-  static get existingWorkspace() {
-    if (AppData._existingWorkspace) {
-      return AppData._existingWorkspace;
-    }
-    const stored = localStorage.getItem('existingWorkspace');
-    return stored ? JSON.parse(stored) : null;
-  }
-  static set existingWorkspace(value) {
-    AppData._existingWorkspace = value;
-    if (value) {
-      localStorage.setItem('existingWorkspace', JSON.stringify(value));
-    } else {
-      localStorage.removeItem('existingWorkspace');
-    }
-  }
 
   // --- Custodial Balance Getter/Setter ---
   static get custodialBalance() {
@@ -423,7 +387,6 @@ export const AppContextView = {
   WALLET: 'WALLET',
   DEVELOPER_TOOLS: 'DEVELOPER_TOOLS',
   DEVICE_LOGIN: 'DEVICE_LOGIN', // CLI/MCP device login flow
-  DEVICE_SETUP: 'DEVICE_SETUP', // CLI/MCP device setup flow (Workspace Builder)
   STANDALONE_APP: 'STANDALONE_APP', // Isolated Standalone App mode
   CLAIM_PAGE: 'CLAIM_PAGE',     // NEW: Claim page view
   ERROR: 'ERROR',

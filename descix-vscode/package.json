@@ -1,0 +1,59 @@
+{
+  "name": "descix",
+  "displayName": "DeSciX",
+  "description": "AI-assisted app development on the DeSciX platform",
+  "version": "0.1.0",
+  "publisher": "descix",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "categories": [
+    "AI",
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "descix-mcp",
+        "label": "DeSciX Platform"
+      }
+    ],
+    "commands": [
+      {
+        "command": "descix.login",
+        "title": "DeSciX: Connect"
+      },
+      {
+        "command": "descix.init",
+        "title": "DeSciX: Initialize Workspace"
+      },
+      {
+        "command": "descix.status",
+        "title": "DeSciX: Show Status"
+      },
+      {
+        "command": "descix.logout",
+        "title": "DeSciX: Disconnect"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "dependencies": {
+    "@descix/cli": "file:../descix-cli"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.5",
+    "@types/vscode": "^1.100.0",
+    "@vscode/vsce": "^3.0.0",
+    "typescript": "^5.7.0"
+  }
+}

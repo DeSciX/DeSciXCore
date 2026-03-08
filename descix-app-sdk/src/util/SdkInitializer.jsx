@@ -341,7 +341,9 @@ const SdkInitializer = ({ children }) => {
                 const referrerMatch = url.match(/(?:referrer_id|user_id)=([^&]+)(?:&|$)/);
                 const customMatch = url.match(/custom_id=([^&]+)(?:&|$)/);
                 const guildMatch = url.match(/guild_id=([^&]+)(?:&|$)/);
-                const codeMatch = url.match(/code=([^&]+)(?:&|$)/);
+                // Skip code extraction for /device routes — handled by AppContext SDK_CHECKED
+                const isDeviceRoute = window.location.pathname === '/device' || window.location.pathname.startsWith('/device');
+                const codeMatch = isDeviceRoute ? null : url.match(/code=([^&]+)(?:&|$)/);
                 let custom_id = customMatch ? customMatch[1] : null;
                 let referrer_id = referrerMatch ? referrerMatch[1] : null;
                 let guild_id = guildMatch ? guildMatch[1] : 'mock_standalone_guild';

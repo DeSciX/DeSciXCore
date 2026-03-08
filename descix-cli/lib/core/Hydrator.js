@@ -180,34 +180,6 @@ async function hasContent(dirPath) {
 }
 
 /**
- * Check for local content conflicts before pulling from Drive
- * @param {string} workspaceRoot - Workspace root directory
- * @param {Object} workspaceConfig - Workspace configuration
- * @param {string} mode - Workspace mode ('single_app' or 'multi_app')
- * @returns {Promise<Array<{communityId, appId, folder, localPath}>>}
- */
-async function checkForConflicts(workspaceRoot, workspaceConfig, mode) {
-  const conflicts = [];
-  
-  for (const [communityId, community] of Object.entries(workspaceConfig.communities || {})) {
-    for (const [appId, app] of Object.entries(community.apps || {})) {
-      const appPath = mode === 'single_app'
-        ? workspaceRoot
-        : path.join(workspaceRoot, app.localPath || `${communityId}/${appId}`);
-      
-      for (const folder of SYNCABLE_FOLDERS) {
-        const folderPath = path.join(appPath, folder);
-        if (await hasContent(folderPath)) {
-          conflicts.push({ communityId, appId, folder, localPath: folderPath });
-        }
-      }
-    }
-  }
-  
-  return conflicts;
-}
-
-/**
  * Recursively pull app content from Drive to local filesystem
  * Handles Google Workspace files and convertible files (PDF, DOCX, images)
  * 
@@ -530,124 +502,6 @@ export async function hydrateApp(config, options = {}) {
 }
 
 /**
- * Hydrate full workspace from setup configuration
- * 
- * Creates:
- * - .descix/workspace.json
- * - Folder structure for all apps
- * - Pulls content from Drive
- * 
- * @param {string} workspaceRoot - Workspace root directory
- * @param {Object} workspaceConfig - Workspace configuration from setup
- * @param {Object} driveConfig - Drive configuration { base_folder_id }
- * @param {Object} options - { mode, onProgress, onConflict }
- * @returns {Promise<{totalDownloaded: number, totalSkipped: number}>}
- */
-export async function hydrateWorkspace(workspaceRoot, workspaceConfig, driveConfig, options = {}) {
-  const { mode = 'single_app', onProgress, onConflict } = options;
-  
-  // 1. Create .descix directory
-  const descixDir = path.join(workspaceRoot, '.descix');
-  await fs.mkdir(descixDir, { recursive: true });
-  
-  // 2. Write workspace.json
-  const configPath = path.join(descixDir, 'workspace.json');
-  const configToWrite = { ...workspaceConfig };
-  
-  if (driveConfig?.base_folder_id) {
-    configToWrite.driveConfig = {
-      base_folder_id: driveConfig.base_folder_id
-    };
-  }
-  
-  await fs.writeFile(configPath, JSON.stringify(configToWrite, null, 2), 'utf-8');
-  
-  // 3. Create folder structure for each app
-  for (const [communityId, community] of Object.entries(workspaceConfig.communities || {})) {
-    for (const [appId, app] of Object.entries(community.apps || {})) {
-      const appPath = mode === 'single_app'
-        ? workspaceRoot
-        : path.join(workspaceRoot, app.localPath || `${communityId}/${appId}`);
-      
-      // Create standard subfolders with new KB structure
-      await fs.mkdir(path.join(appPath, 'assets'), { recursive: true });
-      await fs.mkdir(path.join(appPath, 'kb', 'General'), { recursive: true });
-      await fs.mkdir(path.join(appPath, 'kb', 'staging'), { recursive: true });
-      await fs.mkdir(path.join(appPath, 'kb', 'chunks'), { recursive: true });
-      await fs.mkdir(path.join(appPath, 'site'), { recursive: true });
-      await fs.mkdir(path.join(appPath, 'microservice'), { recursive: true });
-    }
-  }
-  
-  // 4. Update .gitignore
-  const gitignorePath = path.join(workspaceRoot, '.gitignore');
-  const ignoreRules = ['# DeSciX', '.descix/wallet.json'];
-  
-  try {
-    let content = '';
-    try {
-      content = await fs.readFile(gitignorePath, 'utf-8');
-    } catch {
-      // File doesn't exist
-    }
-    
-    const lines = content.split('\n').map(l => l.trim());
-    const needsAppend = ignoreRules.some(rule => !lines.includes(rule));
-    
-    if (needsAppend) {
-      if (content && !content.endsWith('\n')) content += '\n';
-      content += '\n';
-      for (const rule of ignoreRules) {
-        if (!lines.includes(rule)) content += `${rule}\n`;
-      }
-      await fs.writeFile(gitignorePath, content, 'utf-8');
-    }
-  } catch {
-    // Ignore .gitignore errors
-  }
-  
-  // 5. Pull from Drive if configured
-  let totalDownloaded = 0;
-  let totalSkipped = 0;
-  
-  if (driveConfig?.base_folder_id) {
-    await driveADC.verifyDriveAuth();
-    
-    // Check for conflicts
-    const conflicts = await checkForConflicts(workspaceRoot, workspaceConfig, mode);
-    
-    let mergeMode = 'overwrite';
-    if (conflicts.length > 0 && onConflict) {
-      mergeMode = await onConflict(conflicts);
-      if (mergeMode === 'skip') {
-        return { totalDownloaded: 0, totalSkipped: 0 };
-      }
-    }
-    
-    // Pull content for each app
-    for (const [communityId, community] of Object.entries(workspaceConfig.communities || {})) {
-      for (const [appId, app] of Object.entries(community.apps || {})) {
-        const appLocalPath = mode === 'single_app'
-          ? workspaceRoot
-          : path.join(workspaceRoot, app.localPath || `${communityId}/${appId}`);
-        
-        const drivePath = `${communityId}/${appId}`;
-        const appFolderId = await driveADC.findFolderByPath(driveConfig.base_folder_id, drivePath);
-        
-        if (appFolderId) {
-          if (onProgress) onProgress(`Pulling ${communityId}/${appId}...`);
-          const stats = await pullFolder(appLocalPath, appFolderId, { mergeMode });
-          totalDownloaded += stats.downloaded;
-          totalSkipped += stats.skipped;
-        }
-      }
-    }
-  }
-  
-  return { totalDownloaded, totalSkipped };
-}
-
-/**
  * Push staging files to Drive
  * Files in kb/staging/ are uploaded to the corresponding Drive KB folder
  * 
@@ -933,19 +787,15 @@ export async function getAvailableScaffolds() {
 // Named exports for functions not already exported inline
 export {
   convertAndSave,
-  checkForConflicts,
-  
 };
 
 // Default export for backward compatibility
 export default {
-  hydrateWorkspace,
   hydrateApp,
   hydrateKb,
   pushStaging,
   checkStagingFiles,
   convertAndSave,
-  checkForConflicts,
   copyScaffold,
   getAvailableScaffolds
 };

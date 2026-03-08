@@ -6,6 +6,7 @@
  * Uses PathContext for workspace/config resolution.
  */
 
+import path from 'path';
 import axios from 'axios';
 import { PathContext } from './core/PathContext.js';
 
@@ -369,14 +370,32 @@ export class DeSciXApiClient {
       this.workspaceRoot = this._pathContext.getWorkspaceRoot();
     }
 
-    // If still no workspace root, try to load PathContext
+    // If still no workspace root, try: PathContext (IDE markers) → workspace.json → wallet.json
     if (!this.workspaceRoot) {
       const ctx = await PathContext.tryLoad();
       if (ctx) {
         this.workspaceRoot = ctx.getWorkspaceRoot();
         this._pathContext = ctx;
       } else {
-        return null; // No workspace, no credentials
+        const { WorkspaceConfig } = await import('./workspace-config.js');
+        this.workspaceRoot = await WorkspaceConfig.findWorkspaceRoot();
+      }
+      // Final fallback: walk up from cwd looking for .descix/wallet.json
+      if (!this.workspaceRoot) {
+        const fs = await import('fs/promises');
+        let dir = path.resolve(process.cwd());
+        const root = path.parse(dir).root;
+        while (dir !== root) {
+          try {
+            await fs.access(path.join(dir, '.descix', 'wallet.json'));
+            this.workspaceRoot = dir;
+            break;
+          } catch { /* not here, keep walking */ }
+          const parent = path.dirname(dir);
+          if (parent === dir) break;
+          dir = parent;
+        }
+        if (!this.workspaceRoot) return null;
       }
     }
 
