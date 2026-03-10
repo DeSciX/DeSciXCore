@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { checkWalletExists, readWorkspaceConfig } from './workspace';
+import { checkWalletExists, checkWorkspaceConfigExists, readWorkspaceConfig } from './workspace';
 
 let statusBarItem: vscode.StatusBarItem;
 
@@ -43,14 +43,21 @@ export async function updateStatusBar() {
     statusBarItem.tooltip = 'Click to connect to DeSciX';
     statusBarItem.command = 'descix.login';
   } else {
-    const config = await readWorkspaceConfig();
-    const appId = config?.env?.platform?.appId || config?.defaultContext?.appId || '';
-    const communityId = config?.env?.platform?.communityId || config?.defaultContext?.communityId || '';
+    const hasWorkspace = await checkWorkspaceConfigExists();
+    if (!hasWorkspace) {
+      statusBarItem.text = '$(plug) DeSciX: Setup Needed';
+      statusBarItem.tooltip = 'Connected but workspace not configured — click to complete setup';
+      statusBarItem.command = 'descix.login';
+    } else {
+      const config = await readWorkspaceConfig();
+      const appId = config?.env?.platform?.appId || config?.defaultContext?.appId || '';
+      const communityId = config?.env?.platform?.communityId || config?.defaultContext?.communityId || '';
 
-    const label = communityId && appId ? `${communityId}/${appId}` : 'Connected';
-    statusBarItem.text = `$(plug) DeSciX: ${label}`;
-    statusBarItem.tooltip = 'DeSciX connected — click for status';
-    statusBarItem.command = 'descix.status';
+      const label = communityId && appId ? `${communityId}/${appId}` : 'Connected';
+      statusBarItem.text = `$(plug) DeSciX: ${label}`;
+      statusBarItem.tooltip = 'DeSciX connected — click for status';
+      statusBarItem.command = 'descix.status';
+    }
   }
 
   statusBarItem.show();

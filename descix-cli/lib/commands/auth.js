@@ -321,8 +321,12 @@ export async function whoami() {
     console.log(chalk.white(`   Email:      ${userInfo?.email || walletInfo?.email || 'N/A'}`));
     if (walletInfo) {
       console.log(chalk.white(`   Wallet:     ${walletInfo.walletAddress?.substring(0, 10)}...${walletInfo.walletAddress?.slice(-6) || ''}`));
-      console.log(chalk.white(`   Community:  ${walletInfo.communityId || 'descix'}`));
-      console.log(chalk.white(`   Token:      ${walletInfo.tokenSymbol || 'DAITA'}`));
+      if (walletInfo.communityId) {
+        console.log(chalk.white(`   Community:  ${walletInfo.communityId}`));
+      }
+      if (walletInfo.tokenSymbol) {
+        console.log(chalk.white(`   Token:      ${walletInfo.tokenSymbol}`));
+      }
       console.log(chalk.white(`   Session:    ${isValid ? chalk.green('Valid') : chalk.red('Expired')}`));
       
       if (walletInfo.expiresAt) {
@@ -343,13 +347,20 @@ export async function whoami() {
       console.log(chalk.white(`   Staked:     ${userInfo.is_staked ? chalk.green('Yes') : chalk.yellow('No')}`));
       
       try {
-        const purchasesResponse = await apiClient.invoke('fetch_my_purchases', {}, { allowGuest: false });
+        const purchasesResponse = await apiClient.invoke('fetch_my_purchases', { product_type: 'APP' }, { allowGuest: false });
         const purchases = purchasesResponse.message || {};
         const communities = purchases.communities || [];
-        const apps = purchases.apps || [];
-        
+        const apps = purchases.apps || purchases.products || [];
+
         console.log(chalk.white(`   Communities: ${communities.length}`));
         console.log(chalk.white(`   Apps:        ${apps.length}`));
+        if (apps.length > 0) {
+          apps.slice(0, 5).forEach(a => {
+            const id = a.app_id || a.appId || a.id || a.product_id;
+            if (id) console.log(chalk.gray(`               - ${id}`));
+          });
+          if (apps.length > 5) console.log(chalk.gray(`               ... and ${apps.length - 5} more`));
+        }
       } catch (err) {
         // Ignore purchase fetch errors
       }

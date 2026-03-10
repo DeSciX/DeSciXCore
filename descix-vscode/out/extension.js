@@ -48,13 +48,25 @@ function activate(context) {
     (0, auth_1.registerCommands)(context);
     // 3. Create status bar item
     (0, statusBar_1.createStatusBar)(context);
-    // 4. Check auth state — show welcome if not connected
-    (0, workspace_1.checkWalletExists)().then((exists) => {
-        if (!exists) {
+    // 4. Check auth state — show welcome or setup guidance if not fully configured
+    Promise.all([(0, workspace_1.checkWalletExists)(), (0, workspace_1.checkWorkspaceConfigExists)()]).then(([hasWallet, hasWorkspace]) => {
+        if (!hasWallet) {
             vscode.window
                 .showInformationMessage('DeSciX: Connect to enable AI-assisted app development', 'Connect')
                 .then((action) => {
                 if (action === 'Connect') {
+                    vscode.commands.executeCommand('descix.login');
+                }
+            });
+        }
+        else if (!hasWorkspace) {
+            vscode.window
+                .showInformationMessage('DeSciX: Connected but workspace not configured. Ask your AI agent: "Help me get started with DeSciX"', 'Open Chat', 'Re-connect')
+                .then((action) => {
+                if (action === 'Open Chat') {
+                    vscode.commands.executeCommand('workbench.action.chat.open');
+                }
+                else if (action === 'Re-connect') {
                     vscode.commands.executeCommand('descix.login');
                 }
             });

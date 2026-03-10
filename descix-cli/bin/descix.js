@@ -3801,9 +3801,13 @@ program
       console.log(chalk.green(`  ✓ ${f}`));
     }
 
-    // Step 4: Generate .vscode/mcp.json
-    await generateMcpConfig(workspaceRoot);
-    console.log(chalk.green('  ✓ .vscode/mcp.json'));
+    // Step 4: Generate .vscode/mcp.json (skipped if DeSciX extension handles MCP)
+    const mcpWritten = await generateMcpConfig(workspaceRoot);
+    if (mcpWritten) {
+      console.log(chalk.green('  ✓ .vscode/mcp.json'));
+    } else {
+      console.log(chalk.green('  ✓ MCP handled by DeSciX extension (mcp.json skipped)'));
+    }
 
     // Step 5: Copy SDK assets
     try {

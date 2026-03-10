@@ -6,6 +6,8 @@
  * Thin HTTP relay: curated app-dev tools inline, all calls dispatch
  * to backend via DeSciXApiClient (POST /apifront/).
  *
+ * descix_doctor is handled locally (no backend call needed).
+ *
  * Uses official @modelcontextprotocol/sdk with stdio transport.
  */
 
@@ -18,12 +20,30 @@ import {
 import { WorkspaceConfig } from '../lib/workspace-config.js';
 import { DeSciXApiClient } from '../lib/api-client.js';
 import { WalletFileManager } from '../lib/wallet-file.js';
+import * as fs from 'fs/promises';
+import * as path from 'path';
 
 // ---------------------------------------------------------------------------
 // Curated app-dev tool definitions (inline — no external tools.js dependency)
 // ---------------------------------------------------------------------------
 
 const TOOLS = [
+  {
+    name: 'descix_doctor',
+    description:
+      'Startup diagnostic: returns auth state, workspace context, active app/community, ' +
+      'available MCP tools by category, and any mismatches between local config and platform. ' +
+      'Call this FIRST when starting a new session to understand the environment.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        verify_remote: {
+          type: 'boolean',
+          description: 'Also verify app exists on the platform (requires network). Default: true',
+        },
+      },
+    },
+  },
   {
     name: 'ask_question_to_app',
     description: 'Ask an AI-powered question to an app\'s knowledge base using RAG',
@@ -76,7 +96,8 @@ const TOOLS = [
     name: 'tell_me_how',
     description:
       'Discover platform tools and services by asking a natural language question. ' +
-      'Searches the entire service mesh for relevant capabilities.',
+      'Searches the entire service mesh for relevant capabilities. ' +
+      'If results are empty, try scope "discovery" or rephrase your question.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -84,7 +105,7 @@ const TOOLS = [
         scope: {
           type: 'string',
           enum: ['project', 'entitlements', 'discovery'],
-          description: 'Search scope (default: entitlements)',
+          description: 'Search scope. "entitlements" = your purchased tools, "discovery" = all platform capabilities. Default: entitlements.',
         },
       },
       required: ['question'],
@@ -118,9 +139,10 @@ try {
   });
 
   // Load wallet credentials
+  let walletInfo = null;
   const walletPath = await WalletFileManager.findWalletFile(workspaceRoot);
   if (walletPath) {
-    const walletInfo = await WalletFileManager.loadWalletFile(walletPath);
+    walletInfo = await WalletFileManager.loadWalletFile(walletPath);
     if (walletInfo) {
       console.error(`[MCP] Authenticated as: ${walletInfo.userId || 'unknown'}`);
       apiClient.setCredentials({
@@ -134,12 +156,130 @@ try {
     console.error('[MCP] No wallet file — some tools may require authentication');
   }
 
-  // Default context from workspace config
-  const defaultContext = workspaceConfig?.defaultContext || {
-    communityId: 'descix',
-    appId: 'daita',
-    kbId: 'General',
-  };
+  // Default context from workspace config — NO hardcoded fallbacks.
+  // When workspace isn't configured, defaultContext stays null so tools
+  // don't silently target the wrong app.
+  const defaultContext = workspaceConfig?.defaultContext || null;
+
+  // -------------------------------------------------------------------------
+  // descix_doctor — local diagnostic (no backend call)
+  // -------------------------------------------------------------------------
+
+  async function runDoctor(args) {
+    const verifyRemote = args?.verify_remote !== false;
+    const report = {
+      auth: { connected: false },
+      workspace: { configured: false },
+      app_context: null,
+      tools: {
+        diagnostic: ['descix_doctor'],
+        knowledge: ['ask_question_to_app', 'query_knowledge_base'],
+        discovery: ['find_communities', 'list_apps_for_community', 'tell_me_how'],
+      },
+      warnings: [],
+    };
+
+    // Auth state
+    if (walletInfo) {
+      report.auth = {
+        connected: true,
+        user_id: walletInfo.userId || null,
+        session_valid: WalletFileManager.hasValidSession?.(walletInfo) ?? true,
+      };
+    } else {
+      report.warnings.push('Not authenticated. Run "DeSciX: Connect" or "descix login" to authenticate.');
+    }
+
+    // Workspace config
+    if (workspaceConfig) {
+      const platform = workspaceConfig.env?.platform || {};
+      const products = workspaceConfig.env?.products || [];
+      report.workspace = {
+        configured: true,
+        version: workspaceConfig.version || 'unknown',
+        environment: workspaceConfig.env?.environment || 'unknown',
+      };
+      if (defaultContext) {
+        report.app_context = {
+          app_id: defaultContext.appId,
+          community_id: defaultContext.communityId,
+          kb_id: defaultContext.kbId || 'General',
+          api_url: workspaceConfig.apiUrl || apiClient.baseUrl,
+          local_apps: [
+            platform.appId,
+            ...products.map(p => p.appId),
+          ].filter(Boolean),
+        };
+      }
+    } else {
+      report.workspace = { configured: false };
+      report.setup_needed = true;
+      report.next_steps = [
+        'This project is not configured yet. Guide the user through setup:',
+        '',
+        '## Checkpoints (ask the user at each step)',
+        '1. **Objective:** "Do you want to explore existing apps, or build something new?"',
+        '2. **Community/App:** Use find_communities + list_apps_for_community, then ask: "Which community and app should this project target?"',
+        '3. **Environment:** "Should this run against local dev backend (localhost:4000) or hosted API (descix.net)?"',
+        '',
+        '## Canonical setup commands (run in terminal)',
+        '```',
+        'descix whoami                              # confirm identity',
+        'descix app list                            # see available apps',
+        'descix init -c <community> -a <app> -p .   # create workspace.json',
+        'descix app init -a <app> -c <community>    # register app on platform',
+        '```',
+        '',
+        '## Important: use explicit flags',
+        'Always use -c <community> -a <app> flags for all commands until workspace context is verified working.',
+        '',
+        'DeSciX is like a virtual university: communities are departments, apps are courses/textbooks/services.',
+      ];
+    }
+
+    // Check agent instruction files
+    const agentFiles = ['CLAUDE.md', '.github/copilot-instructions.md', '.cursorrules', '.clinerules'];
+    const foundFiles = [];
+    for (const f of agentFiles) {
+      try {
+        await fs.access(path.join(workspaceRoot, f));
+        foundFiles.push(f);
+      } catch { /* not present */ }
+    }
+    report.agent_files = foundFiles.length > 0 ? foundFiles : null;
+    if (!report.agent_files) {
+      report.warnings.push('No agent instruction files found. Run "descix quickstart" to generate them.');
+    }
+
+    // Remote verification (if requested, authenticated, and workspace configured)
+    if (verifyRemote && walletInfo && defaultContext?.appId) {
+      try {
+        const apps = await apiClient.invoke('list_apps_for_community', {
+          community_id: defaultContext.communityId,
+        });
+        const appList = Array.isArray(apps) ? apps : (apps?.apps || apps?.products || []);
+        const appIds = appList.map(a => a.app_id || a.appId || a.id).filter(Boolean);
+        report.remote_apps = appIds;
+
+        if (!appIds.includes(defaultContext.appId)) {
+          report.warnings.push(
+            `Local app_id "${defaultContext.appId}" not found on platform for community "${defaultContext.communityId}". ` +
+            `Available: ${appIds.join(', ') || 'none'}. Run "descix app init -a ${defaultContext.appId}" to register it.`
+          );
+        }
+      } catch (err) {
+        report.warnings.push(`Could not verify remote state: ${err.message}`);
+      }
+    }
+
+    if (report.warnings.length === 0) {
+      report.status = 'healthy';
+    } else {
+      report.status = 'warnings';
+    }
+
+    return report;
+  }
 
   // Create MCP server
   const server = new Server(
@@ -153,17 +293,29 @@ try {
     return { tools: TOOLS };
   });
 
-  // tools/call — dispatch to backend via HTTP
+  // tools/call — dispatch to backend via HTTP (except doctor which is local)
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
     console.error(`[MCP] tools/call — ${name}`);
 
     try {
-      // Merge default context for convenience (caller can override)
+      // descix_doctor is handled locally
+      if (name === 'descix_doctor') {
+        const report = await runDoctor(args);
+        return {
+          content: [{ type: 'text', text: JSON.stringify(report, null, 2) }],
+        };
+      }
+
+      // Merge default context for convenience (caller can override).
+      // Only auto-fill when workspace is configured — prevents silently
+      // targeting wrong app/community.
       const params = { ...args };
-      if (!params.app_id && defaultContext.appId) params.app_id = defaultContext.appId;
-      if (!params.kb_id && defaultContext.kbId) params.kb_id = defaultContext.kbId;
-      if (!params.community_id && defaultContext.communityId) params.community_id = defaultContext.communityId;
+      if (defaultContext) {
+        if (!params.app_id && defaultContext.appId) params.app_id = defaultContext.appId;
+        if (!params.kb_id && (defaultContext.kbId || 'General')) params.kb_id = params.kb_id || defaultContext.kbId || 'General';
+        if (!params.community_id && defaultContext.communityId) params.community_id = defaultContext.communityId;
+      }
 
       const result = await apiClient.invoke(name, params);
       return {

@@ -74,7 +74,8 @@ const GUEST_ALLOWED_COMMANDS = [
     'get_market_overview', 'get_user_nfts', 'get_pool_state', 'get_pool_liquidity',
     'submit_transaction', 'submit_meta_transaction',
     'get_pool_market_overview', 'get_price_history', 'get_pool_token_info', 'get_migration_status',
-    'list_services', 'get_service', 'service_health_check'
+    'list_services', 'get_service', 'service_health_check',
+    'verify_airdrop_wallet'
 ];
 
 function networkResponse(netStatus, authStatus, message) {
@@ -314,7 +315,16 @@ class CloudConfig {
             try {
                 const overrides = JSON.parse(fs.readFileSync(overridesPath, 'utf8'));
                 console.log('[Config] Applying dev-overrides.json');
-                this._mergeConfig(overrides);
+                // Force-assign: dev-overrides must win over Secret Manager
+                const { boolean_keys } = configSchema;
+                for (const [key, value] of Object.entries(overrides)) {
+                    if (key.startsWith('_')) continue;
+                    if (value === null) continue; // null in dev-overrides means "don't override"
+                    console.log(`[Config] Dev override from JSON: ${key}`);
+                    this[key] = boolean_keys.keys.includes(key) && typeof value === 'string'
+                        ? value === 'true'
+                        : value;
+                }
             } catch (e) {
                 console.error('[Config] Error loading dev-overrides.json:', e.message);
             }
