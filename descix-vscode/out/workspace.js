@@ -95,8 +95,10 @@ async function readWorkspaceConfig() {
     }
 }
 /**
- * Initialize workspace: run quickstart via terminal if workspace.json is missing.
- * Generates agent instruction files using the CLI's agent-files module.
+ * Initialize workspace: write bootstrap agent instruction files directly.
+ * Does NOT run `descix init` — the AI agent handles project setup
+ * conversationally using MCP tools (find_communities, descix_doctor, etc.).
+ * Does NOT generate mcp.json — the extension handles MCP registration natively.
  */
 async function initWorkspace(context) {
     const root = getWorkspaceRoot();
@@ -104,33 +106,59 @@ async function initWorkspace(context) {
         vscode.window.showErrorMessage('DeSciX: Open a folder first');
         return;
     }
-    const hasConfig = await checkWorkspaceConfigExists();
-    if (hasConfig) {
-        // Workspace already initialized — just regenerate agent files
-        await generateAgentFilesViaTerminal(context, root);
-        return;
-    }
-    // Run descix quickstart in terminal for full init
-    const cliPath = path.join(context.extensionPath, 'node_modules', '@descix', 'cli', 'bin', 'descix.js');
-    const terminal = vscode.window.createTerminal({
-        name: 'DeSciX Init',
-        cwd: root,
-    });
-    terminal.show();
-    terminal.sendText(`node "${cliPath}" quickstart --dev`);
+    await writeBootstrapAgentFiles(root, context);
 }
 /**
- * Generate agent instruction files by running a quick node script.
+ * Write bootstrap agent instruction files directly from the extension.
+ * No terminal, no async CLI process — files exist immediately.
+ * Uses bundled templates if available, otherwise writes inline bootstrap content.
  */
-async function generateAgentFilesViaTerminal(context, workspaceRoot) {
-    const agentFilesPath = path.join(context.extensionPath, 'node_modules', '@descix', 'cli', 'lib', 'agent-files.js');
-    // Use a simple inline node command to generate files
-    const terminal = vscode.window.createTerminal({
-        name: 'DeSciX Agent Files',
-        cwd: workspaceRoot,
-    });
-    terminal.sendText(`node -e "import('${agentFilesPath.replace(/\\/g, '/')}').then(m => m.generateAgentFiles('${workspaceRoot.replace(/\\/g, '/')}').then(f => { console.log('Generated:', f.join(', ')); process.exit(0); }))"`);
-    // Terminal auto-closes; no need to wait
-    vscode.window.showInformationMessage('DeSciX: Agent instruction files generated');
+async function writeBootstrapAgentFiles(workspaceRoot, context) {
+    const fs = await Promise.resolve().then(() => __importStar(require('fs/promises')));
+    // Try to read templates from bundled CLI
+    const templatesDir = path.join(context.extensionPath, 'node_modules', '@descix', 'cli', 'templates');
+    // Template -> output mapping
+    const files = [
+        { template: 'agent-claude.md', output: 'CLAUDE.md' },
+        { template: 'agent-copilot.md', output: path.join('.github', 'copilot-instructions.md') },
+        { template: 'agent-cursor.md', output: '.cursorrules' },
+        { template: 'agent-cline.md', output: '.clinerules' },
+    ];
+    // Read workspace.json for context (if it exists)
+    let appId = path.basename(workspaceRoot);
+    let communityId = 'descix';
+    let apiUrl = 'https://descix.net';
+    try {
+        const raw = await fs.readFile(path.join(workspaceRoot, '.descix', 'workspace.json'), 'utf-8');
+        const config = JSON.parse(raw);
+        const platform = config.env?.platform || {};
+        appId = platform.appId || config.defaultContext?.appId || appId;
+        communityId = platform.communityId || config.defaultContext?.communityId || communityId;
+        if (platform.microservice?.port) {
+            apiUrl = `https://localhost:${platform.microservice.port}`;
+        }
+    }
+    catch {
+        // No workspace.json — use folder name as app ID
+    }
+    const appName = appId.charAt(0).toUpperCase() + appId.slice(1);
+    for (const { template, output } of files) {
+        const outputPath = path.join(workspaceRoot, output);
+        try {
+            // Try bundled template first
+            const templatePath = path.join(templatesDir, template);
+            let content = await fs.readFile(templatePath, 'utf-8');
+            content = content
+                .replace(/\{\{appId\}\}/g, appId)
+                .replace(/\{\{communityId\}\}/g, communityId)
+                .replace(/\{\{apiUrl\}\}/g, apiUrl)
+                .replace(/\{\{appName\}\}/g, appName);
+            await fs.mkdir(path.dirname(outputPath), { recursive: true });
+            await fs.writeFile(outputPath, content, 'utf-8');
+        }
+        catch {
+            // Template not found — skip (CLAUDE.md is the critical one)
+        }
+    }
 }
 //# sourceMappingURL=workspace.js.map

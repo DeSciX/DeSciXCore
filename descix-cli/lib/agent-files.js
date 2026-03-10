@@ -105,11 +105,28 @@ export async function generateAgentFiles(workspaceRoot) {
 
 /**
  * Generate .vscode/mcp.json for non-extension users.
+ * Skips if the DeSciX VS Code extension is installed (it registers MCP natively).
  *
  * @param {string} workspaceRoot - Project root directory
- * @returns {Promise<boolean>} True if file was written
+ * @returns {Promise<boolean>} True if file was written, false if skipped
  */
 export async function generateMcpConfig(workspaceRoot) {
+  // Skip if the DeSciX extension is installed — it registers the MCP server
+  // natively via registerMcpServerDefinitionProvider, so mcp.json would create
+  // a duplicate namespace.
+  try {
+    const extensionsDir = path.join(
+      process.env.HOME || process.env.USERPROFILE || '',
+      '.vscode', 'extensions'
+    );
+    const entries = await fs.readdir(extensionsDir);
+    if (entries.some(e => e.startsWith('descix.'))) {
+      return false; // Extension installed — skip mcp.json
+    }
+  } catch {
+    // Can't read extensions dir — proceed with mcp.json
+  }
+
   const outputPath = path.join(workspaceRoot, '.vscode', 'mcp.json');
 
   // Preserve existing servers if file already exists
@@ -122,7 +139,7 @@ export async function generateMcpConfig(workspaceRoot) {
     // No existing file — start fresh
   }
 
-  // Add/update DeSciX MCP server (VS Code format uses "servers" key)
+  // Add/update DeSciX MCP server
   existing.servers['descix'] = {
     command: 'descix',
     args: ['mcp-serve'],

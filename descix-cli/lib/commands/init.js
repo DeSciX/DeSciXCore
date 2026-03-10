@@ -11,6 +11,7 @@ import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { WorkspaceConfig } from '../workspace-config.js';
+import { generateAgentFiles } from '../agent-files.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -144,9 +145,21 @@ export async function runInit(apiClient, options = {}) {
 
     console.log(chalk.green('Created:'));
     console.log(chalk.green('  ✓ .descix/workspace.json'));
+
+    // Generate agent instruction files with correct context
+    try {
+      const agentFilesWritten = await generateAgentFiles(projectPath);
+      for (const f of agentFilesWritten) {
+        console.log(chalk.green(`  ✓ ${f}`));
+      }
+    } catch {
+      // Agent file generation is best-effort
+    }
+
     console.log(chalk.cyan('\n─── Next Steps ───\n'));
-    console.log(chalk.white('  1. Create community/app in PWA or: descix-admin community create / app create'));
-    console.log(chalk.white('  2. descix sync / descix update to sync content\n'));
+    console.log(chalk.white(`  1. descix app init -a ${appId} -c ${communityId}    # register app on platform`));
+    console.log(chalk.white(`  2. descix update kb -c ${communityId} -a ${appId}   # sync KB to Pinecone`));
+    console.log(chalk.white(`  3. descix chat -c ${communityId} -a ${appId} -q "test"  # verify RAG\n`));
     console.log(chalk.green('✅ Workspace initialized.\n'));
     rl.close();
     return { created: ['.descix/workspace.json'], skipped: [], warnings: [] };
@@ -173,11 +186,21 @@ export async function initWorkspace(options) {
   const config = new WorkspaceConfig({ version: '2.0', type: 'workspace', communities: {} }, projectPath);
   config.registerApp(communityId, appId, { localPath: '.', kbId: 'General' });
   await config.save(projectPath);
+
+  // Generate agent instruction files with workspace context
+  const created = ['.descix/workspace.json'];
+  try {
+    const agentFilesWritten = await generateAgentFiles(projectPath);
+    created.push(...agentFilesWritten);
+  } catch {
+    // Best-effort
+  }
+
   return {
-    created: ['.descix/workspace.json'],
+    created,
     skipped: [],
     warnings: [],
-    nextSteps: ['Create community/app in PWA or use descix-admin', 'Run descix sync / descix update']
+    nextSteps: [`descix app init -a ${appId} -c ${communityId}`, `descix update kb -c ${communityId} -a ${appId}`]
   };
 }
 

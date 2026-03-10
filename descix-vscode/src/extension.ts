@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { registerMcpProvider } from './mcpProvider';
 import { registerCommands } from './auth';
 import { createStatusBar } from './statusBar';
-import { checkWalletExists } from './workspace';
+import { checkWalletExists, checkWorkspaceConfigExists } from './workspace';
 
 export function activate(context: vscode.ExtensionContext) {
   console.log('[DeSciX] Extension activating...');
@@ -16,9 +16,9 @@ export function activate(context: vscode.ExtensionContext) {
   // 3. Create status bar item
   createStatusBar(context);
 
-  // 4. Check auth state — show welcome if not connected
-  checkWalletExists().then((exists) => {
-    if (!exists) {
+  // 4. Check auth state — show welcome or setup guidance if not fully configured
+  Promise.all([checkWalletExists(), checkWorkspaceConfigExists()]).then(([hasWallet, hasWorkspace]) => {
+    if (!hasWallet) {
       vscode.window
         .showInformationMessage(
           'DeSciX: Connect to enable AI-assisted app development',
@@ -26,6 +26,20 @@ export function activate(context: vscode.ExtensionContext) {
         )
         .then((action) => {
           if (action === 'Connect') {
+            vscode.commands.executeCommand('descix.login');
+          }
+        });
+    } else if (!hasWorkspace) {
+      vscode.window
+        .showInformationMessage(
+          'DeSciX: Connected but workspace not configured. Ask your AI agent: "Help me get started with DeSciX"',
+          'Open Chat',
+          'Re-connect'
+        )
+        .then((action) => {
+          if (action === 'Open Chat') {
+            vscode.commands.executeCommand('workbench.action.chat.open');
+          } else if (action === 'Re-connect') {
             vscode.commands.executeCommand('descix.login');
           }
         });

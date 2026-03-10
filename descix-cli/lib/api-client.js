@@ -28,20 +28,16 @@ export class DeSciXApiClient {
    * @returns {Promise<void>}
    */
   async initialize() {
-    console.log('[ApiClient] initialize start');
     if (this._initialized) {
       return;
     }
 
     // Step 1: Try to load PathContext (will find IDE marker and load workspace.json)
     this._pathContext = await PathContext.tryLoad();
-    
+
     if (this._pathContext) {
       this.workspaceRoot = this._pathContext.getWorkspaceRoot();
-      console.log('[ApiClient] workspaceRoot:', this.workspaceRoot);
     } else {
-      // No workspace found (normal for first-time setup)
-      console.log('[ApiClient] No workspace root found (this is normal for setup)');
       this.workspaceRoot = null;
     }
 

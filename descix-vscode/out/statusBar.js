@@ -70,13 +70,21 @@ async function updateStatusBar() {
         statusBarItem.command = 'descix.login';
     }
     else {
-        const config = await (0, workspace_1.readWorkspaceConfig)();
-        const appId = config?.env?.platform?.appId || config?.defaultContext?.appId || '';
-        const communityId = config?.env?.platform?.communityId || config?.defaultContext?.communityId || '';
-        const label = communityId && appId ? `${communityId}/${appId}` : 'Connected';
-        statusBarItem.text = `$(plug) DeSciX: ${label}`;
-        statusBarItem.tooltip = 'DeSciX connected — click for status';
-        statusBarItem.command = 'descix.status';
+        const hasWorkspace = await (0, workspace_1.checkWorkspaceConfigExists)();
+        if (!hasWorkspace) {
+            statusBarItem.text = '$(plug) DeSciX: Setup Needed';
+            statusBarItem.tooltip = 'Connected but workspace not configured — click to complete setup';
+            statusBarItem.command = 'descix.login';
+        }
+        else {
+            const config = await (0, workspace_1.readWorkspaceConfig)();
+            const appId = config?.env?.platform?.appId || config?.defaultContext?.appId || '';
+            const communityId = config?.env?.platform?.communityId || config?.defaultContext?.communityId || '';
+            const label = communityId && appId ? `${communityId}/${appId}` : 'Connected';
+            statusBarItem.text = `$(plug) DeSciX: ${label}`;
+            statusBarItem.tooltip = 'DeSciX connected — click for status';
+            statusBarItem.command = 'descix.status';
+        }
     }
     statusBarItem.show();
 }

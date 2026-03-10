@@ -94,9 +94,20 @@ export async function runStatus(options = {}) {
   console.log(`Environment:    ${globalConfig.environment} (${globalConfig.api_url})`);
   console.log();
 
-  // Try to load PathContext (may fail if not in workspace)
-  const ctx = await PathContext.tryLoad();
-  const workspaceRoot = ctx?.getWorkspaceRoot();
+  // Try to load workspace context — WorkspaceConfig first (handles v2), fallback to PathContext
+  let ctx = null;
+  let workspaceRoot = null;
+  let workspaceConfig = null;
+  try {
+    const { WorkspaceConfig } = await import('../workspace-config.js');
+    const wsConfig = await WorkspaceConfig.load();
+    workspaceRoot = wsConfig.getWorkspaceRoot();
+    workspaceConfig = wsConfig;
+  } catch {
+    // Fallback to PathContext
+    ctx = await PathContext.tryLoad();
+    workspaceRoot = ctx?.getWorkspaceRoot();
+  }
 
   // 2. Authentication
   console.log(chalk.white('Authentication'));
@@ -130,74 +141,52 @@ export async function runStatus(options = {}) {
   console.log(chalk.white('Workspace Context'));
   console.log(chalk.white('-----------------'));
   
-  if (ctx) {
-    const workspaceConfig = ctx.getWorkspaceConfig();
+  if (workspaceConfig || ctx) {
     console.log(`Config File:    ${path.join(workspaceRoot, '.descix', 'workspace.json')}`);
-    
-    try {
-      const mode = detectWorkspaceMode(workspaceConfig);
-      console.log(`Mode:           ${chalk.green(mode)}`);
-      
-      // Display context based on mode
-      if (mode === 'single_app') {
-        let communityId = workspaceConfig.community_id || workspaceConfig.defaultContext?.communityId;
-        let appId = workspaceConfig.app_id || workspaceConfig.defaultContext?.appId;
-        let appName = workspaceConfig.app_name || appId;
 
-        // V2 Support: Extract from communities object if missing at top level
-        if (!communityId && workspaceConfig.communities) {
-          const commIds = Object.keys(workspaceConfig.communities);
-          if (commIds.length > 0) {
-            communityId = commIds[0];
-            const comm = workspaceConfig.communities[communityId];
-            if (comm.apps) {
-              const appIds = Object.keys(comm.apps);
-              if (appIds.length > 0) {
-                appId = appIds[0];
-                appName = comm.apps[appId].app_name || appId;
-              }
-            }
+    if (workspaceConfig) {
+      // V2 path — use WorkspaceConfig which handles env.platform/products format
+      try {
+        const defaultCtx = workspaceConfig.defaultContext;
+        if (defaultCtx) {
+          console.log(`Community:      ${defaultCtx.communityId || 'unknown'}`);
+          console.log(`App:            ${defaultCtx.appId || 'unknown'}`);
+        }
+
+        // List all configured apps
+        const platform = workspaceConfig.env?.platform;
+        const products = workspaceConfig.env?.products || [];
+        const allApps = [platform?.appId, ...products.map(p => p.appId)].filter(Boolean);
+        if (allApps.length > 0) {
+          console.log(`Local Apps:     ${allApps.join(', ')}`);
+        }
+
+        console.log(`API:            ${workspaceConfig.apiUrl || 'unknown'}`);
+        console.log(`Local Root:     ${workspaceRoot}`);
+      } catch (error) {
+        console.log(`Mode:           ${chalk.red('Unknown/Invalid')} (${error.message})`);
+      }
+    } else {
+      // Legacy PathContext path
+      const wsRawConfig = ctx.getWorkspaceConfig();
+      try {
+        const mode = detectWorkspaceMode(wsRawConfig);
+        console.log(`Mode:           ${chalk.green(mode)}`);
+
+        if (wsRawConfig.communities) {
+          for (const [commId, comm] of Object.entries(wsRawConfig.communities)) {
+            const appCount = Object.keys(comm.apps || {}).length;
+            console.log(chalk.gray(`  └─ ${commId}: ${appCount} app(s)`));
           }
         }
-
-        console.log(`Community:      ${communityId}`);
-        console.log(`App:            ${appName} (${appId})`);
-        console.log(`Drive Path:     ${communityId}/${appId}/`);
-      } else if (mode === 'single_community') {
-        const communityId = workspaceConfig.community_id || (workspaceConfig.communities && Object.keys(workspaceConfig.communities)[0]);
-        const communityName = workspaceConfig.community_name || communityId;
-        
-        console.log(`Community:      ${communityName} (${communityId})`);
-        
-        let appCount = 0;
-        if (workspaceConfig.apps) {
-          appCount = Object.keys(workspaceConfig.apps).length;
-        } else if (workspaceConfig.communities && workspaceConfig.communities[communityId]) {
-          appCount = Object.keys(workspaceConfig.communities[communityId].apps || {}).length;
-        }
-        
-        console.log(`Apps:           ${appCount} configured`);
-        console.log(`Drive Path:     ${communityId}/`);
-      } else if (mode === 'multi_community') {
-        const commCount = Object.keys(workspaceConfig.communities || {}).length;
-        console.log(`Communities:    ${commCount} configured`);
-        
-        // Show apps per community
-        for (const [commId, comm] of Object.entries(workspaceConfig.communities || {})) {
-          const appCount = Object.keys(comm.apps || {}).length;
-          console.log(chalk.gray(`  └─ ${commId}: ${appCount} app(s)`));
-        }
-        
-        console.log(`Drive Path:     / (Root)`);
+        console.log(`Local Root:     ${workspaceRoot}`);
+      } catch (error) {
+        console.log(`Mode:           ${chalk.red('Unknown/Invalid')} (${error.message})`);
       }
-      
-      console.log(`Local Root:     ${workspaceRoot}`);
-    } catch (error) {
-      console.log(`Mode:           ${chalk.red('Unknown/Invalid')} (${error.message})`);
     }
   } else {
     console.log(`Status:         ${chalk.yellow('No workspace found')}`);
-    console.log(`Action:         Run 'descix setup' to create a workspace`);
+    console.log(`Action:         Run 'descix init -c <community> -a <app> -p .' to create a workspace`);
   }
   console.log();
 

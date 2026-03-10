@@ -401,7 +401,7 @@ export async function updateKB(options = {}) {
 
     // Git Mode: chunk local files → kb_sync_chunks → Pinecone
     // (Drive → GCS → Pinecone is server-side only for PWA users)
-    const kbOptions = { ...options, app: ctx.appId, community: ctx.communityId, kb: kbId };
+    const kbOptions = { ...options, app: ctx.appId, community: ctx.communityId, kb: kbId, quiet: true };
     await runKbChunk(kbOptions);
     await runKbSync(apiClient, kbOptions);
 

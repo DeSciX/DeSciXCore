@@ -568,6 +568,8 @@ export const GUEST_ALLOWED_COMMANDS = [
     'get_user_nfts',                 // User NFTs (demo for guests)
     // Wallet config (signature message for passkey registration - pre-auth)
     'get_wallet_config',            // Signature message for passkey registration
+    // Airdrop token gate (pre-auth — runs during Powch login before session exists)
+    'verify_airdrop_wallet',         // Verify wallet holds DAITA tokens (token-gated registration)
     // Powch Zero-Knowledge Authentication (NO PII sent to server)
     'powch_register_begin',          // Start WebAuthn registration (zero-knowledge)
     'powch_register_finish',         // Complete WebAuthn registration (zero-knowledge)
