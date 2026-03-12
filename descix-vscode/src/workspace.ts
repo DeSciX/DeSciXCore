@@ -41,6 +41,38 @@ export async function checkWorkspaceConfigExists(): Promise<boolean> {
 }
 
 /**
+ * Check if .descix/app.json exists in the workspace root.
+ */
+export async function checkAppJsonExists(): Promise<boolean> {
+  const root = getWorkspaceRoot();
+  if (!root) return false;
+
+  try {
+    const fs = await import('fs/promises');
+    await fs.access(path.join(root, '.descix', 'app.json'));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Read .descix/app.json and return parsed config, or null if missing/invalid.
+ */
+export async function readAppJson(): Promise<any | null> {
+  const root = getWorkspaceRoot();
+  if (!root) return null;
+
+  try {
+    const fs = await import('fs/promises');
+    const raw = await fs.readFile(path.join(root, '.descix', 'app.json'), 'utf-8');
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Read workspace.json and return parsed config.
  */
 export async function readWorkspaceConfig(): Promise<any | null> {

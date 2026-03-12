@@ -33,7 +33,14 @@ export function createViteProxyConfig(workspacePath, options = {}) {
   }
 
   const env = config.env || {};
-  const apiGatewayUrl = options.apiGatewayUrl ?? env.apiUrl ?? config.apiUrl ?? 'https://localhost:4000';
+  // Derive API URL: explicit option > env.apiUrl > workspace microservice config > default
+  let apiGatewayUrl = options.apiGatewayUrl ?? env.apiUrl ?? config.apiUrl;
+  if (!apiGatewayUrl) {
+    const ms = env.platform?.microservice || {};
+    const port = ms.port || 4000;
+    const proto = ms.protocol || 'https';
+    apiGatewayUrl = `${proto}://localhost:${port}`;
+  }
   // Powch URL: explicit env.powchUrl, or auto-discover from env.products[]
   let powchUrl = env.powchUrl ?? null;
   if (!powchUrl && Array.isArray(env.products)) {

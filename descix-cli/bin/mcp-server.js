@@ -111,6 +111,24 @@ const TOOLS = [
       required: ['question'],
     },
   },
+  {
+    name: 'resolve_invite',
+    description:
+      'Resolve a DeSciX invite token into app configuration. Call this when .descix/app.json ' +
+      'contains an invite_token field. Returns app context, community info, and the agent_hint ' +
+      'authored by the app creator. The agent_hint tells you about the user\'s skill level and ' +
+      'goals — use it to adapt your approach.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        invite_token: {
+          type: 'string',
+          description: 'The invite token from .descix/app.json',
+        },
+      },
+      required: ['invite_token'],
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -190,21 +208,28 @@ try {
       report.warnings.push('Not authenticated. Run "DeSciX: Connect" or "descix login" to authenticate.');
     }
 
-    // Workspace config
-    if (workspaceConfig) {
-      const platform = workspaceConfig.env?.platform || {};
-      const products = workspaceConfig.env?.products || [];
+    // Workspace config — reload fresh so we pick up workspace.json created mid-session
+    let freshConfig = null;
+    let freshContext = null;
+    try {
+      freshConfig = await WorkspaceConfig.load(workspaceRoot || process.cwd());
+      freshContext = freshConfig.defaultContext || null;
+    } catch { /* no workspace.json present */ }
+
+    if (freshConfig) {
+      const platform = freshConfig.env?.platform || {};
+      const products = freshConfig.env?.products || [];
       report.workspace = {
         configured: true,
-        version: workspaceConfig.version || 'unknown',
-        environment: workspaceConfig.env?.environment || 'unknown',
+        version: freshConfig.version || 'unknown',
+        environment: freshConfig.env?.environment || 'unknown',
       };
-      if (defaultContext) {
+      if (freshContext) {
         report.app_context = {
-          app_id: defaultContext.appId,
-          community_id: defaultContext.communityId,
-          kb_id: defaultContext.kbId || 'General',
-          api_url: workspaceConfig.apiUrl || apiClient.baseUrl,
+          app_id: freshContext.appId,
+          community_id: freshContext.communityId,
+          kb_id: freshContext.kbId || 'General',
+          api_url: freshConfig.apiUrl || apiClient.baseUrl,
           local_apps: [
             platform.appId,
             ...products.map(p => p.appId),
@@ -216,6 +241,10 @@ try {
       report.setup_needed = true;
       report.next_steps = [
         'This project is not configured yet. Guide the user through setup:',
+        '',
+        '## Before asking questions, scan the repo',
+        'List the working directory to detect existing content (docs/, src/, package.json, kb/, site/).',
+        'Use findings to tailor your checkpoint questions.',
         '',
         '## Checkpoints (ask the user at each step)',
         '1. **Objective:** "Do you want to explore existing apps, or build something new?"',
@@ -233,16 +262,24 @@ try {
         '## Important: use explicit flags',
         'Always use -c <community> -a <app> flags for all commands until workspace context is verified working.',
         '',
+        '## Integrating existing content',
+        'If the repo has existing content (HTML app, React app, SDK with docs):',
+        '- Do NOT copy files into site/ or kb/. Integrate in place.',
+        '- Existing HTML/JS: serve as-is, add DeSciXAppSDK.js for DeSciX integration.',
+        '- React/Vite: wrap root in <AppShell appId="app_id"> from @descix/app-sdk/AppShell.',
+        '- Existing docs: copy *.md to kb/General/ for sync pipeline. Keep originals as source of truth.',
+        '',
         'DeSciX is like a virtual university: communities are departments, apps are courses/textbooks/services.',
       ];
     }
 
     // Check agent instruction files
+    const checkRoot = freshConfig?.getWorkspaceRoot?.() || workspaceRoot || process.cwd();
     const agentFiles = ['CLAUDE.md', '.github/copilot-instructions.md', '.cursorrules', '.clinerules'];
     const foundFiles = [];
     for (const f of agentFiles) {
       try {
-        await fs.access(path.join(workspaceRoot, f));
+        await fs.access(path.join(checkRoot, f));
         foundFiles.push(f);
       } catch { /* not present */ }
     }
@@ -252,19 +289,19 @@ try {
     }
 
     // Remote verification (if requested, authenticated, and workspace configured)
-    if (verifyRemote && walletInfo && defaultContext?.appId) {
+    if (verifyRemote && walletInfo && freshContext?.appId) {
       try {
         const apps = await apiClient.invoke('list_apps_for_community', {
-          community_id: defaultContext.communityId,
+          community_id: freshContext.communityId,
         });
         const appList = Array.isArray(apps) ? apps : (apps?.apps || apps?.products || []);
         const appIds = appList.map(a => a.app_id || a.appId || a.id).filter(Boolean);
         report.remote_apps = appIds;
 
-        if (!appIds.includes(defaultContext.appId)) {
+        if (!appIds.includes(freshContext.appId)) {
           report.warnings.push(
-            `Local app_id "${defaultContext.appId}" not found on platform for community "${defaultContext.communityId}". ` +
-            `Available: ${appIds.join(', ') || 'none'}. Run "descix app init -a ${defaultContext.appId}" to register it.`
+            `Local app_id "${freshContext.appId}" not found on platform for community "${freshContext.communityId}". ` +
+            `Available: ${appIds.join(', ') || 'none'}. Run "descix app init -a ${freshContext.appId}" to register it.`
           );
         }
       } catch (err) {

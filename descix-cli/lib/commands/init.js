@@ -10,6 +10,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+// clone.js is imported dynamically inside the invite flow to avoid circular deps
 import { WorkspaceConfig } from '../workspace-config.js';
 import { generateAgentFiles } from '../agent-files.js';
 
@@ -63,6 +64,55 @@ function askYesNo(rl, question, defaultYes = true) {
 export async function runInit(apiClient, options = {}) {
   const rl = createPrompt();
   const projectPath = options.path ? path.resolve(options.path) : process.cwd();
+
+  // If --from-invite provided, resolve the invite first to pre-fill context
+  if (options.fromInvite) {
+    if (!apiClient) {
+      console.error(chalk.red('\n❌ Authentication required for --from-invite. Run "descix login" first.\n'));
+      rl.close();
+      return {};
+    }
+    try {
+      console.log(chalk.cyan('Resolving invite...\n'));
+      const inviteData = await apiClient.invoke('resolve_invite', { invite_token: options.fromInvite });
+
+      // Write app.json seed file
+      const descixDir = join(projectPath, '.descix');
+      await fs.mkdir(descixDir, { recursive: true });
+      const appJson = {
+        version: '1.0',
+        invite_token: options.fromInvite,
+        invite_type: inviteData.invite_type,
+        app_id: inviteData.app_id,
+        community_id: inviteData.community_id,
+        app_name: inviteData.app_name,
+        agent_hint: inviteData.agent_hint,
+        kb_ready: inviteData.kb_ready,
+        has_repo: inviteData.has_repo
+      };
+      await fs.writeFile(join(descixDir, 'app.json'), JSON.stringify(appJson, null, 2));
+
+      console.log(chalk.green(`Invite resolved: ${inviteData.app_name} (${inviteData.community_id}/${inviteData.app_id})`));
+      if (inviteData.agent_hint) {
+        console.log(chalk.gray(`Agent hint: ${inviteData.agent_hint}`));
+      }
+
+      // Auto-fill community and app for the rest of init
+      options.community = options.community || inviteData.community_id;
+      options.app = options.app || inviteData.app_id;
+
+      // Offer to clone if repo exists
+      if (inviteData.has_repo) {
+        console.log(chalk.cyan('\nThis app has a linked repository.'));
+        const { runClone } = await import('./clone.js');
+        await runClone(apiClient, { app_id: inviteData.app_id });
+      }
+    } catch (error) {
+      console.error(chalk.red(`\n❌ Failed to resolve invite: ${error.message}\n`));
+      rl.close();
+      return {};
+    }
+  }
   
   console.log(chalk.cyan('\n╔════════════════════════════════════════════╗'));
   console.log(chalk.cyan('║     DeSciX Workspace Initialization        ║'));

@@ -91,6 +91,7 @@ program
   .option('-a, --app <name>', 'App name')
   .option('-p, --path <path>', 'Project path (defaults to current directory)')
   .option('-f, --force', 'Overwrite existing workspace.json')
+  .option('--from-invite <token>', 'Resolve an invite token to pre-fill app context')
   .action(async (options) => {
     try {
       // API client is optional for init (used for listing communities)
@@ -1427,6 +1428,69 @@ appCommand
       
     } catch (error) {
       console.error(chalk.red(`\n❌ Deployment failed: ${error.message}\n`));
+      process.exit(1);
+    }
+  });
+
+appCommand
+  .command('set-repo')
+  .description('Link a GitHub repository to your app')
+  .requiredOption('-a, --app <id>', 'App ID')
+  .option('--repo <url>', 'SSH git URL (e.g., git@github.com:user/repo.git)')
+  .option('--unlink', 'Remove the linked repository')
+  .option('--branch <name>', 'Default branch', 'main')
+  .option('--subfolder <path>', 'Subfolder within repo')
+  .action(async (options) => {
+    if (!options.repo && !options.unlink) {
+      console.error('Either --repo <url> or --unlink is required.');
+      process.exit(1);
+    }
+    try {
+      const apiClient = new DeSciXApiClient();
+      await requireAuth(apiClient);
+      const result = await apiClient.invoke('set_app_repo', {
+        app_id: options.app,
+        repo_url: options.unlink ? null : options.repo,
+        repo_branch: options.branch,
+        repo_subfolder: options.subfolder
+      });
+      if (result.cleared) {
+        console.log(result.message);
+      } else {
+        console.log('\nRepository linked successfully.\n');
+        console.log(result.instructions);
+        console.log(`\nFingerprint: ${result.fingerprint}\n`);
+      }
+    } catch (error) {
+      console.error(chalk.red(`\n❌ ${error.message}\n`));
+      process.exit(1);
+    }
+  });
+
+appCommand
+  .command('invite')
+  .description('Generate invite links to share your app')
+  .requiredOption('-a, --app <id>', 'App ID')
+  .option('--type <type>', 'Invite type: try or install', 'install')
+  .option('--hint <text>', 'Context for the AI agent (e.g., "Physics students, no coding background")')
+  .option('--expires <duration>', 'Expiry duration (e.g., 30d, 7d, 24h)')
+  .action(async (options) => {
+    try {
+      const apiClient = new DeSciXApiClient();
+      await requireAuth(apiClient);
+      const result = await apiClient.invoke('create_app_invite', {
+        app_id: options.app,
+        invite_type: options.type,
+        agent_hint: options.hint,
+        expires_in: options.expires
+      });
+      console.log(`\nInvite created for ${options.app}\n`);
+      console.log(`  Try (browser):     ${result.try_url}`);
+      console.log(`  Install (VS Code): ${result.install_url}`);
+      console.log(`  Expires: ${result.expires_at}`);
+      console.log(`  Token: ${result.token}\n`);
+    } catch (error) {
+      console.error(chalk.red(`\n❌ ${error.message}\n`));
       process.exit(1);
     }
   });
@@ -3439,9 +3503,28 @@ After creating the file:
 `));
 }
 
+// ============ Clone Command ============
+
+program
+  .command('clone')
+  .description('Clone a DeSciX app repository')
+  .requiredOption('-a, --app <id>', 'App ID')
+  .option('--path <dir>', 'Target directory')
+  .action(async (options) => {
+    try {
+      const apiClient = new DeSciXApiClient();
+      await requireAuth(apiClient);
+      await runClone(apiClient, { app_id: options.app, targetPath: options.path });
+    } catch (error) {
+      console.error(chalk.red(`\n❌ ${error.message}\n`));
+      process.exit(1);
+    }
+  });
+
 // ============ MCP Commands ============
 
 import * as mcpCommands from '../lib/commands/mcp.js';
+import { runClone } from '../lib/commands/clone.js';
 
 const mcpCommand = program
   .command('mcp')
