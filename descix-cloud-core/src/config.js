@@ -218,6 +218,7 @@ class CloudConfig {
         if (process.env.DEPLOY_ENV) this.DEPLOY_ENV = process.env.DEPLOY_ENV;
         if (process.env.DEBUG_LOCAL !== undefined) this.DEBUG_LOCAL = process.env.DEBUG_LOCAL === 'true';
         if (process.env.LOCAL_PORT) this.LOCAL_PORT = process.env.LOCAL_PORT;
+        if (process.env.SERVICE_PROXY_HOST) this.SERVICE_PROXY_HOST = process.env.SERVICE_PROXY_HOST;
     }
 
     _tryLoadWorkspaceConfig() {

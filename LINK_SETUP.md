@@ -5,7 +5,7 @@ DeSciX Core (this repo) can live anywhere on disk. Peer projects consume package
 ## 1. From DeSciX Core (this repo)
 
 ```bash
-cd /path/to/DeSciXCore   # or DeSciX_Core/ inside DaitaERC20
+cd /path/to/DeSciXCore   # or DeSciX_Core/ inside DeSciX
 npm install
 npm run link
 ```
@@ -16,33 +16,33 @@ This registers all packages globally: `cryptoapis-sdk`, `@descix/app-sdk`, `@des
 
 Replace `file:` dependencies with `npm link`:
 
-### DeSciX_Cloud (cloud/)
+### DeSciX_Cloud (microservice)
 
 ```bash
-cd DeSciX_Cloud/cloud
+cd DeSciX_Cloud/microservice
 npm link @descix/cloud-core cryptoapis-sdk
 ```
 
 Keep the existing `file:` entries in `package.json`; `npm link` overrides them at resolve time with the globally registered packages. When you move DeSciX Core elsewhere, switch to version ranges (`^1.0.0`) and use `npm link` for local dev.
 
-### DeSciX_PWA
+### DeSciX_Cloud/site (Platform PWA)
 
 ```bash
-cd DeSciX_PWA
+cd DeSciX_Cloud/site
 npm link @descix/app-sdk
 ```
 
 ### DeSciX_Cloud admin (ops)
 
 ```bash
-cd DeSciX_Cloud/cloud/admin
+cd DeSciX_Cloud/microservice/admin
 npm link @descix/cli
 ```
 
-### DeSciX_Powch samples/apps (if using app-sdk)
+### DeSciX_Powch/site and samples (if using app-sdk)
 
 ```bash
-cd DeSciX_Powch/samples/standalone-react   # or standalone-vanilla, apps/powch-pwa
+cd DeSciX_Powch/site   # or samples/standalone-react, samples/standalone-vanilla
 npm link @descix/app-sdk
 ```
 
@@ -64,7 +64,7 @@ npm install
 
 ## Recommended disk layout
 
-With `npm link`, DeSciX Core can be a sibling of DaitaERC20 or live in a separate directory:
+With `npm link`, DeSciX Core can be a sibling of DeSciX or live in a separate directory:
 
 ```
 ~/Code/
@@ -74,22 +74,20 @@ With `npm link`, DeSciX Core can be a sibling of DaitaERC20 or live in a separat
 │   ├── descix-cli/
 │   ├── descix-cloud-core/
 │   └── descix-sdk/
-└── DaitaERC20/          # Monorepo with peer projects
+└── DeSciX/              # Monorepo with peer projects
     ├── DeSciX_Cloud/
-    ├── DeSciX_PWA/
     ├── DeSciX_Powch/
     └── ...
 ```
 
-Or keep packages inside DaitaERC20 (current layout):
+Or keep packages inside DeSciX (current layout):
 
 ```
-DaitaERC20/
+DeSciX/
 ├── DeSciX_Core/            # DeSciX Core (separate git, npm link source)
 │   └── ...
 ├── DeSciX_Cloud/
-├── DeSciX_PWA/
-└── ...
+└── DeSciX_Powch/
 ```
 
 Run `npm run link` from `DeSciX_Core/` and `npm link <pkg>` from each peer project. No `file:` paths required.

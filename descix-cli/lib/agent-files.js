@@ -87,6 +87,17 @@ export async function generateAgentFiles(workspaceRoot) {
     const outputPath = path.join(workspaceRoot, output);
 
     try {
+      // Check if file exists and has been customized
+      try {
+        const existing = await fs.readFile(outputPath, 'utf-8');
+        if (!existing.includes('<!-- BOOTSTRAP')) {
+          // File has been customized — don't overwrite
+          continue;
+        }
+      } catch {
+        // File doesn't exist — proceed with writing
+      }
+
       const raw = await fs.readFile(templatePath, 'utf-8');
       const content = render(raw, vars);
 

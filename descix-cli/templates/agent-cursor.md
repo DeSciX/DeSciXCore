@@ -12,6 +12,32 @@ DeSciX is a virtual university for knowledge-powered apps. Communities are
 departments, apps are courses/textbooks/services. You are the primary
 interface — guide the user to explore, build, or discover.
 
+## Pre-Step 0: Check for Invite Config
+
+Before scanning the repo, check if `.descix/app.json` exists.
+
+If it does:
+1. Read it — extract `app_id`, `community_id`, `agent_hint`, `kb_ready`, `has_repo`
+2. If it contains `invite_token`, call `resolve_invite` with that token to get live context
+3. **Read `agent_hint` carefully** — it was written by the app creator specifically for you.
+   It describes this user's skill level and goals. Let it override default checkpoints.
+   For example, if the hint says "no coding background", do not ask technical questions.
+4. If `kb_ready` is true, skip KB setup and demonstrate value immediately:
+   `descix chat -a <app_id> "What is this about?"` — show the user what the AI knows
+5. If `has_repo` is true and no source code is present locally, suggest:
+   `descix clone -a <app_id>` — this clones the app's source code using platform-provided credentials
+6. After the demo and clone, proceed to standard setup (descix init, app init) if not yet done
+
+## Step 0: Scan the Repo
+
+Before asking questions, list the working directory and check for:
+- Existing content: `docs/`, `src/`, `README.md`, `package.json`
+- Existing DeSciX structure: `kb/`, `site/`, `microservice/`, `.descix/`
+- Existing frameworks: `vite.config.*`, `next.config.*`, `tsconfig.json`
+
+Tailor your questions based on what you find (e.g., offer to use existing docs
+as KB, configure an existing site, skip starter content if KB is already populated).
+
 ## Setup Workflow (if doctor reports setup_needed)
 
 Ask the user at each checkpoint — don't assume:
@@ -45,6 +71,17 @@ descix update kb -c <community> -a <app>
 - KB sync succeeds: `descix update kb -c <community> -a <app>`
 - Chat returns response: `descix chat -c <community> -a <app> -q "test"`
 
+## Local Development
+
+| Goal | Command |
+|------|---------|
+| Serve `site/` locally | `npx serve site/` or `python3 -m http.server -d site/` on any port |
+| Register port with DeSciX | `descix site servelocal <port> -c <community> -a <app>` |
+| Run full gateway (multi-app) | `descix serve` (reverse proxy on :5173) |
+
+Single-app dev: a static server is sufficient. Gateway is for multi-app or
+platform routing tests.
+
 ## MCP Tools
 
 - `descix_doctor` — Startup diagnostic (call first)
@@ -53,6 +90,17 @@ descix update kb -c <community> -a <app>
 - `find_communities` — List communities
 - `list_apps_for_community` — List apps in a community
 - `tell_me_how` — Discover any platform capability (use scope "discovery" if "entitlements" is empty)
+- `resolve_invite` — Exchange an invite token for app context + agent hint
+
+## Integrating Existing Content
+
+**NEVER copy existing project files into `site/` or `kb/`.** Integrate in place:
+
+- **Existing HTML/JS app:** Serve as-is. Add `DeSciXAppSDK.js` for DeSciX integration.
+- **React/Vite app:** Wrap root in `<AppShell appId="{{appId}}">` from `@descix/app-sdk/AppShell`.
+- **Auth only (no DeSciX UI):** Use `PowchClient` from `@descix/app-sdk/powch-client`.
+- **Existing docs:** Copy `docs/*.md` to `kb/General/` for sync. Keep originals as source of truth.
+- **Empty repo:** Scaffold from scratch.
 
 ## App Structure
 

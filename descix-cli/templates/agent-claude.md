@@ -23,6 +23,35 @@ it as a virtual university where:
 Any community member can build apps, contribute knowledge, and use AI tools
 to interact with the community's collective knowledge.
 
+## Pre-Step 0: Check for Invite Config
+
+Before scanning the repo, check if `.descix/app.json` exists.
+
+If it does:
+1. Read it — extract `app_id`, `community_id`, `agent_hint`, `kb_ready`, `has_repo`
+2. If it contains `invite_token`, call `resolve_invite` with that token to get live context
+3. **Read `agent_hint` carefully** — it was written by the app creator specifically for you.
+   It describes this user's skill level and goals. Let it override default checkpoints.
+   For example, if the hint says "no coding background", do not ask technical questions.
+4. If `kb_ready` is true, skip KB setup and demonstrate value immediately:
+   `descix chat -a <app_id> "What is this about?"` — show the user what the AI knows
+5. If `has_repo` is true and no source code is present locally, suggest:
+   `descix clone -a <app_id>` — this clones the app's source code using platform-provided credentials
+6. After the demo and clone, proceed to standard setup (descix init, app init) if not yet done
+
+## Step 0: Scan the Repo
+
+Before asking the user any questions, scan the working directory:
+- Check for existing content: `docs/`, `src/`, `README.md`, `package.json`
+- Check for existing DeSciX structure: `kb/`, `site/`, `microservice/`, `.descix/`
+- Check for existing frameworks: `vite.config.*`, `next.config.*`, `tsconfig.json`
+
+Use what you find to tailor your questions:
+- If docs exist: "I see markdown files in `docs/`. Want to use those as your knowledge base?"
+- If a site exists: "You have a site in `src/`. Want me to configure it as a DeSciX app?"
+- If KB already has content: skip the "create starter KB" question
+- If the repo is empty: proceed with standard checkpoints
+
 ## Setup Workflow
 
 If `descix_doctor` reports `setup_needed: true`, guide the user through these
@@ -72,6 +101,71 @@ After setup, verify all of these pass:
 - [ ] `descix update kb -c <community> -a <app>` succeeds (KB sync)
 - [ ] `descix chat -c <community> -a <app> -q "..."` returns response with source attribution
 
+## Local Development
+
+To see your app in a browser:
+
+| Goal | Command |
+|------|---------|
+| Serve `site/` locally | `npx serve site/` or `python3 -m http.server -d site/` on any port |
+| Register port with DeSciX | `descix site servelocal <port> -c <community> -a <app>` |
+| Run full gateway (multi-app) | `descix serve` (reverse proxy on :5173) |
+
+For single-app development, a static server is sufficient. The gateway is only
+needed when running multiple apps or testing platform routing.
+
+## Integrating Existing Content
+
+If the repo already has content (an HTML page, a React app, an SDK with docs),
+**do NOT copy files into `site/` or `kb/`**. Instead, integrate them in place.
+
+### Site Integration
+
+**If the project has an `index.html` or web app already:**
+- Serve it directly — it IS the site. Don't duplicate into `site/`.
+- To add DeSciX integration (auth, API access), include `DeSciXAppSDK.js`
+  (scaffolded by `descix app init`) in your HTML:
+  ```html
+  <script src="DeSciXAppSDK.js"></script>
+  <script>
+    // window.DeSciX.call('ask_question_to_app', { user_input: '...' })
+    // window.DeSciX.AppData — user profile, community data
+  </script>
+  ```
+
+**For React/Vite apps**, wrap your root component in AppShell:
+```jsx
+import AppShell from '@descix/app-sdk/AppShell';
+<AppShell appId="{{appId}}">
+  <YourApp />
+</AppShell>
+```
+AppShell provides: Powch auth sidebar, session management, Web3 wallet, DeSciX API.
+
+**For auth-only (no DeSciX UI chrome):**
+```js
+import { PowchClient } from '@descix/app-sdk/powch-client';
+const powch = new PowchClient();
+const user = await powch.auth();
+```
+
+### KB Integration
+
+If docs already exist (`docs/`, `README.md`, SDK reference files):
+- Copy markdown files to `kb/General/` for the sync pipeline
+- Keep originals as the source of truth — sync from there
+- Ask: "I see docs in `docs/`. Want me to use those as your knowledge base?"
+
+### Decision Guide
+
+| Existing Content | Site Strategy | KB Strategy |
+|-----------------|---------------|-------------|
+| HTML/JS app with `index.html` | Serve as-is, add DeSciXAppSDK.js | Use any `docs/` or `*.md` files |
+| React/Vite app | Wrap root in `<AppShell>` | Use `docs/` or README |
+| SDK package with docs + demo | Serve the SDK's demo page | Copy docs to `kb/General/` |
+| Docs only (no frontend) | Skip or create minimal site | Docs ARE the KB |
+| Empty repo | Scaffold from scratch | Create starter KB doc |
+
 ## App Structure
 
 Every app has three parts:
@@ -95,6 +189,7 @@ Every app has three parts:
 | `find_communities` | List communities on the platform |
 | `list_apps_for_community` | List apps in a community |
 | `tell_me_how` | Discover any platform capability by asking |
+| `resolve_invite` | Exchange an invite token for app context + agent hint |
 
 ## Known CLI Quirks
 

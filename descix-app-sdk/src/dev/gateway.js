@@ -51,7 +51,14 @@ function readWorkspaceConfig(workspaceRoot) {
  */
 function deriveApiUrl(config) {
   const env = config.env || {};
-  return env.apiUrl || config.apiUrl || 'https://localhost:4000';
+  if (env.apiUrl || config.apiUrl) {
+    return env.apiUrl || config.apiUrl;
+  }
+  // Derive from platform microservice config
+  const ms = env.platform?.microservice || {};
+  const port = ms.port || 4000;
+  const proto = ms.protocol || 'https';
+  return `${proto}://localhost:${port}`;
 }
 
 /**
