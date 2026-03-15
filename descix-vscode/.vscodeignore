@@ -2,4 +2,5 @@
 src/**
 tsconfig.json
 **/*.map
-node_modules/@descix/cli/node_modules/**
+**/*.ts
+!out/**/*.js

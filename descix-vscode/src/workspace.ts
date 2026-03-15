@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import { getCliTemplatesDir } from './cliResolver';
 
 /**
  * Get the workspace root directory.
@@ -115,11 +116,12 @@ async function writeBootstrapAgentFiles(
 ): Promise<void> {
   const fs = await import('fs/promises');
 
-  // Try to read templates from bundled CLI
-  const templatesDir = path.join(
-    context.extensionPath,
-    'node_modules', '@descix', 'cli', 'templates'
-  );
+  // Resolve templates from globally installed CLI
+  const templatesDir = await getCliTemplatesDir();
+  if (!templatesDir) {
+    console.warn('[DeSciX] @descix/cli not found - skipping agent file generation');
+    return;
+  }
 
   // Template -> output mapping
   const files: Array<{ template: string; output: string }> = [
@@ -143,7 +145,16 @@ async function writeBootstrapAgentFiles(
       apiUrl = `https://localhost:${platform.microservice.port}`;
     }
   } catch {
-    // No workspace.json — use folder name as app ID
+    // No workspace.json — try app.json (invite seed), then fall back to folder name
+    try {
+      const appJsonRaw = await fs.readFile(path.join(workspaceRoot, '.descix', 'app.json'), 'utf-8');
+      const appJson = JSON.parse(appJsonRaw);
+      if (appJson.app_id) appId = appJson.app_id;
+      if (appJson.community_id) communityId = appJson.community_id;
+      if (appJson.api_url) apiUrl = appJson.api_url;
+    } catch {
+      // No app.json either — folder name defaults remain
+    }
   }
   const appName = appId.charAt(0).toUpperCase() + appId.slice(1);
 

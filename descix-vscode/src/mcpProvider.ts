@@ -1,17 +1,9 @@
 import * as vscode from 'vscode';
-import * as path from 'path';
 import { checkWalletExists } from './workspace';
+import { getCliBinPath } from './cliResolver';
 
 /** Event emitter to signal MCP server definition changes (e.g., after login) */
 export const mcpDidChange = new vscode.EventEmitter<void>();
-
-/**
- * Resolve the path to mcp-server.js from the bundled @descix/cli.
- */
-function getMcpServerPath(context: vscode.ExtensionContext): string {
-  // Bundled CLI lives in extension's node_modules
-  return path.join(context.extensionPath, 'node_modules', '@descix', 'cli', 'bin', 'mcp-server.js');
-}
 
 /**
  * Register the DeSciX MCP server definition provider with VS Code.
@@ -24,12 +16,17 @@ export function registerMcpProvider(context: vscode.ExtensionContext) {
     onDidChangeMcpServerDefinitions: mcpDidChange.event,
 
     provideMcpServerDefinitions: async () => {
-      const mcpServerPath = getMcpServerPath(context);
+      const mcpServerPath = await getCliBinPath('mcp-server.js');
+      if (!mcpServerPath) {
+        vscode.window.showWarningMessage(
+          'DeSciX: @descix/cli not found. Install with: npm install -g @descix/cli'
+        );
+        return [];
+      }
 
-      // Determine workspace root (first workspace folder or cwd)
       const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
       if (!workspaceFolder) {
-        return []; // No workspace open — can't run MCP server
+        return [];
       }
 
       const server = new vscode.McpStdioServerDefinition(
@@ -46,7 +43,6 @@ export function registerMcpProvider(context: vscode.ExtensionContext) {
     resolveMcpServerDefinition: async (
       server: vscode.McpServerDefinition
     ): Promise<vscode.McpServerDefinition | undefined> => {
-      // Auth gate: check wallet.json before starting MCP server
       const hasWallet = await checkWalletExists();
       if (!hasWallet) {
         const action = await vscode.window.showWarningMessage(
@@ -56,10 +52,9 @@ export function registerMcpProvider(context: vscode.ExtensionContext) {
         if (action === 'Connect') {
           await vscode.commands.executeCommand('descix.login');
         }
-        // Re-check after login attempt
         const walletNow = await checkWalletExists();
         if (!walletNow) {
-          return undefined; // Don't start server without auth
+          return undefined;
         }
       }
       return server;

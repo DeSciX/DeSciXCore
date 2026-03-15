@@ -49,10 +49,16 @@ function activate(context) {
     // 3. Create status bar item
     (0, statusBar_1.createStatusBar)(context);
     // 4. Check auth state — show welcome or setup guidance if not fully configured
-    Promise.all([(0, workspace_1.checkWalletExists)(), (0, workspace_1.checkWorkspaceConfigExists)()]).then(([hasWallet, hasWorkspace]) => {
+    Promise.all([(0, workspace_1.checkWalletExists)(), (0, workspace_1.checkWorkspaceConfigExists)(), (0, workspace_1.readAppJson)()]).then(([hasWallet, hasWorkspace, appJson]) => {
         if (!hasWallet) {
+            const isTry = appJson?.invite_type === 'try';
+            const message = appJson?.app_name
+                ? isTry
+                    ? `DeSciX: Found app preview for "${appJson.app_name}" — connect to explore`
+                    : `DeSciX: Found invite to "${appJson.app_name}" — connect to get started`
+                : 'DeSciX: Connect to enable AI-assisted app development';
             vscode.window
-                .showInformationMessage('DeSciX: Connect to enable AI-assisted app development', 'Connect')
+                .showInformationMessage(message, 'Connect')
                 .then((action) => {
                 if (action === 'Connect') {
                     vscode.commands.executeCommand('descix.login');
@@ -60,8 +66,14 @@ function activate(context) {
             });
         }
         else if (!hasWorkspace) {
+            const isTry = appJson?.invite_type === 'try';
+            const message = appJson?.app_name
+                ? isTry
+                    ? `DeSciX: Found app preview for "${appJson.app_name}" — ask your AI agent to explore it`
+                    : `DeSciX: Found invite to "${appJson.app_name}" — your AI agent can set this up`
+                : 'DeSciX: Connected but workspace not configured. Ask your AI agent: "Help me get started with DeSciX"';
             vscode.window
-                .showInformationMessage('DeSciX: Connected but workspace not configured. Ask your AI agent: "Help me get started with DeSciX"', 'Open Chat', 'Re-connect')
+                .showInformationMessage(message, 'Open Chat', 'Re-connect')
                 .then((action) => {
                 if (action === 'Open Chat') {
                     vscode.commands.executeCommand('workbench.action.chat.open');

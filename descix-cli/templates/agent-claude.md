@@ -30,14 +30,32 @@ Before scanning the repo, check if `.descix/app.json` exists.
 If it does:
 1. Read it — extract `app_id`, `community_id`, `agent_hint`, `kb_ready`, `has_repo`
 2. If it contains `invite_token`, call `resolve_invite` with that token to get live context
+2b. **Verify auth before demo:** Call `descix_doctor` first. If `auth.connected` is false,
+    tell the user: "Run `descix login` in the terminal — or click DeSciX: Connect in the VS Code
+    status bar." Wait for auth before proceeding to chat or resolve_invite.
 3. **Read `agent_hint` carefully** — it was written by the app creator specifically for you.
    It describes this user's skill level and goals. Let it override default checkpoints.
-   For example, if the hint says "no coding background", do not ask technical questions.
+   The hint can change your entire approach:
+   - "No coding background" → never ask about frameworks or deployment. Only narrate what you're doing.
+   - "Experienced DeSciX developer" → skip all setup explanations, go straight to the task.
+   - "Airdrop recipient, first time" → demonstrate value with 2-3 demo questions before explaining anything.
+   If the hint contradicts a checkpoint in this document, the hint wins.
 4. If `kb_ready` is true, skip KB setup and demonstrate value immediately:
    `descix chat -a <app_id> "What is this about?"` — show the user what the AI knows
-5. If `has_repo` is true and no source code is present locally, suggest:
-   `descix clone -a <app_id>` — this clones the app's source code using platform-provided credentials
-6. After the demo and clone, proceed to standard setup (descix init, app init) if not yet done
+5. If `kb_ready` is false, skip the chat demo — the KB is not populated yet.
+   Proceed to setup (`descix init`, `app init`, `update kb`), then demo afterward.
+   Frame it as: "Let's get this set up so you can start exploring."
+6. If `has_repo` is true and no source code is present locally, offer `descix clone -a <app_id>`.
+   For non-technical users (infer from `agent_hint`): "Want to run this on your own machine?"
+   For developers: "I'll clone the source code so you can build on it."
+7. If `app.json` contains `api_url`, use it as the backend target — skip Checkpoint 3 (environment).
+8. After the demo and clone, check if `workspace.json` exists. If not, run standard setup
+   (`descix init`, `app init`). If it does, setup is already done — proceed to development.
+9. If `descix_doctor` shows an existing workspace with a **different** `app_id` than the invite,
+   ask the user: "You have an existing workspace for [X]. Add the invited app, or switch context?"
+
+**Important:** If `app.json` is present, Step 0's empty-repo detection does NOT mean "scaffold from scratch."
+The project context comes from the invite, not the file structure.
 
 ## Step 0: Scan the Repo
 

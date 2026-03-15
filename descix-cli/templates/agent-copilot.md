@@ -24,9 +24,20 @@ If it does:
    For example, if the hint says "no coding background", do not ask technical questions.
 4. If `kb_ready` is true, skip KB setup and demonstrate value immediately:
    `descix chat -a <app_id> "What is this about?"` — show the user what the AI knows
-5. If `has_repo` is true and no source code is present locally, suggest:
-   `descix clone -a <app_id>` — this clones the app's source code using platform-provided credentials
-6. After the demo and clone, proceed to standard setup (descix init, app init) if not yet done
+5. If `kb_ready` is false, skip the chat demo — the KB is not populated yet.
+   Proceed to setup (`descix init`, `app init`, `update kb`), then demo afterward.
+   Frame it as: "Let's get this set up so you can start exploring."
+6. If `has_repo` is true and no source code is present locally, offer `descix clone -a <app_id>`.
+   For non-technical users (infer from `agent_hint`): "Want to run this on your own machine?"
+   For developers: "I'll clone the source code so you can build on it."
+7. If `app.json` contains `api_url`, use it as the backend target — skip Checkpoint 3 (environment).
+8. After the demo and clone, check if `workspace.json` exists. If not, run standard setup
+   (`descix init`, `app init`). If it does, setup is already done — proceed to development.
+9. If `descix_doctor` shows an existing workspace with a **different** `app_id` than the invite,
+   ask the user: "You have an existing workspace for [X]. Add the invited app, or switch context?"
+
+**Important:** If `app.json` is present, Step 0's empty-repo detection does NOT mean "scaffold from scratch."
+The project context comes from the invite, not the file structure.
 
 ## Step 0: Scan the Repo
 
@@ -44,7 +55,7 @@ Ask the user at each checkpoint — don't assume:
 
 1. **Objective:** "Explore existing apps or build something new?"
 2. **Community/App:** Use `find_communities` + `list_apps_for_community`, then ask which to target
-3. **Environment:** "Local dev (localhost:4000) or hosted API?"
+3. **Environment:** "Local dev (localhost:4000) or hosted API?" (Skip if `app.json` has `api_url`)
 
 Canonical setup commands:
 ```bash

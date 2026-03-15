@@ -36,17 +36,10 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.mcpDidChange = void 0;
 exports.registerMcpProvider = registerMcpProvider;
 const vscode = __importStar(require("vscode"));
-const path = __importStar(require("path"));
 const workspace_1 = require("./workspace");
+const cliResolver_1 = require("./cliResolver");
 /** Event emitter to signal MCP server definition changes (e.g., after login) */
 exports.mcpDidChange = new vscode.EventEmitter();
-/**
- * Resolve the path to mcp-server.js from the bundled @descix/cli.
- */
-function getMcpServerPath(context) {
-    // Bundled CLI lives in extension's node_modules
-    return path.join(context.extensionPath, 'node_modules', '@descix', 'cli', 'bin', 'mcp-server.js');
-}
 /**
  * Register the DeSciX MCP server definition provider with VS Code.
  *
@@ -57,28 +50,29 @@ function registerMcpProvider(context) {
     const provider = vscode.lm.registerMcpServerDefinitionProvider('descix-mcp', {
         onDidChangeMcpServerDefinitions: exports.mcpDidChange.event,
         provideMcpServerDefinitions: async () => {
-            const mcpServerPath = getMcpServerPath(context);
-            // Determine workspace root (first workspace folder or cwd)
+            const mcpServerPath = await (0, cliResolver_1.getCliBinPath)('mcp-server.js');
+            if (!mcpServerPath) {
+                vscode.window.showWarningMessage('DeSciX: @descix/cli not found. Install with: npm install -g @descix/cli');
+                return [];
+            }
             const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
             if (!workspaceFolder) {
-                return []; // No workspace open — can't run MCP server
+                return [];
             }
             const server = new vscode.McpStdioServerDefinition('DeSciX Platform', 'node', [mcpServerPath], {}, '1.0.0');
             server.cwd = workspaceFolder.uri;
             return [server];
         },
         resolveMcpServerDefinition: async (server) => {
-            // Auth gate: check wallet.json before starting MCP server
             const hasWallet = await (0, workspace_1.checkWalletExists)();
             if (!hasWallet) {
                 const action = await vscode.window.showWarningMessage('DeSciX: Authentication required to start MCP server', 'Connect');
                 if (action === 'Connect') {
                     await vscode.commands.executeCommand('descix.login');
                 }
-                // Re-check after login attempt
                 const walletNow = await (0, workspace_1.checkWalletExists)();
                 if (!walletNow) {
-                    return undefined; // Don't start server without auth
+                    return undefined;
                 }
             }
             return server;
