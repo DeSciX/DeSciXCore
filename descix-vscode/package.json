@@ -42,13 +42,15 @@
       }
     ]
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/descix/descix"
+  },
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "package": "vsce package"
-  },
-  "dependencies": {
-    "@descix/cli": "file:../descix-cli"
+    "prepublish": "npm run compile",
+    "vsix": "vsce package"
   },
   "devDependencies": {
     "@types/node": "^25.3.5",

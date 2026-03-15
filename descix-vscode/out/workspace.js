@@ -36,10 +36,13 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.getWorkspaceRoot = getWorkspaceRoot;
 exports.checkWalletExists = checkWalletExists;
 exports.checkWorkspaceConfigExists = checkWorkspaceConfigExists;
+exports.checkAppJsonExists = checkAppJsonExists;
+exports.readAppJson = readAppJson;
 exports.readWorkspaceConfig = readWorkspaceConfig;
 exports.initWorkspace = initWorkspace;
 const vscode = __importStar(require("vscode"));
 const path = __importStar(require("path"));
+const cliResolver_1 = require("./cliResolver");
 /**
  * Get the workspace root directory.
  */
@@ -79,6 +82,38 @@ async function checkWorkspaceConfigExists() {
     }
 }
 /**
+ * Check if .descix/app.json exists in the workspace root.
+ */
+async function checkAppJsonExists() {
+    const root = getWorkspaceRoot();
+    if (!root)
+        return false;
+    try {
+        const fs = await Promise.resolve().then(() => __importStar(require('fs/promises')));
+        await fs.access(path.join(root, '.descix', 'app.json'));
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
+/**
+ * Read .descix/app.json and return parsed config, or null if missing/invalid.
+ */
+async function readAppJson() {
+    const root = getWorkspaceRoot();
+    if (!root)
+        return null;
+    try {
+        const fs = await Promise.resolve().then(() => __importStar(require('fs/promises')));
+        const raw = await fs.readFile(path.join(root, '.descix', 'app.json'), 'utf-8');
+        return JSON.parse(raw);
+    }
+    catch {
+        return null;
+    }
+}
+/**
  * Read workspace.json and return parsed config.
  */
 async function readWorkspaceConfig() {
@@ -115,8 +150,12 @@ async function initWorkspace(context) {
  */
 async function writeBootstrapAgentFiles(workspaceRoot, context) {
     const fs = await Promise.resolve().then(() => __importStar(require('fs/promises')));
-    // Try to read templates from bundled CLI
-    const templatesDir = path.join(context.extensionPath, 'node_modules', '@descix', 'cli', 'templates');
+    // Resolve templates from globally installed CLI
+    const templatesDir = await (0, cliResolver_1.getCliTemplatesDir)();
+    if (!templatesDir) {
+        console.warn('[DeSciX] @descix/cli not found - skipping agent file generation');
+        return;
+    }
     // Template -> output mapping
     const files = [
         { template: 'agent-claude.md', output: 'CLAUDE.md' },
@@ -139,7 +178,20 @@ async function writeBootstrapAgentFiles(workspaceRoot, context) {
         }
     }
     catch {
-        // No workspace.json — use folder name as app ID
+        // No workspace.json — try app.json (invite seed), then fall back to folder name
+        try {
+            const appJsonRaw = await fs.readFile(path.join(workspaceRoot, '.descix', 'app.json'), 'utf-8');
+            const appJson = JSON.parse(appJsonRaw);
+            if (appJson.app_id)
+                appId = appJson.app_id;
+            if (appJson.community_id)
+                communityId = appJson.community_id;
+            if (appJson.api_url)
+                apiUrl = appJson.api_url;
+        }
+        catch {
+            // No app.json either — folder name defaults remain
+        }
     }
     const appName = appId.charAt(0).toUpperCase() + appId.slice(1);
     for (const { template, output } of files) {

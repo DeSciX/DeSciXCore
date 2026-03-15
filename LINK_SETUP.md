@@ -20,7 +20,7 @@ Replace `file:` dependencies with `npm link`:
 
 ```bash
 cd DeSciX_Cloud/microservice
-npm link @descix/cloud-core cryptoapis-sdk
+npm link @descix/cloud-core @descix/platform-api cryptoapis-sdk
 ```
 
 Keep the existing `file:` entries in `package.json`; `npm link` overrides them at resolve time with the globally registered packages. When you move DeSciX Core elsewhere, switch to version ranges (`^1.0.0`) and use `npm link` for local dev.
@@ -46,11 +46,11 @@ cd DeSciX_Powch/site   # or samples/standalone-react, samples/standalone-vanilla
 npm link @descix/app-sdk
 ```
 
-### DeSciX_Powch service (if using cloud-core)
+### DeSciX_Powch service (microservice)
 
 ```bash
-cd DeSciX_Powch/service
-npm link @descix/cloud-core
+cd DeSciX_Powch/microservice
+npm link @descix/cloud-core @descix/platform-api
 ```
 
 ## 3. Unlinking

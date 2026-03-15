@@ -1,12 +1,12 @@
 {
   "name": "@descix/cli",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "DeSciX CLI and MCP Server - Unified command-line interface for DeSciX platform",
   "type": "module",
   "main": "./bin/descix.js",
   "bin": {
-    "descix": "./bin/descix.js",
-    "descix-mcp": "./bin/mcp-server.js"
+    "descix": "bin/descix.js",
+    "descix-mcp": "bin/mcp-server.js"
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
@@ -23,8 +23,8 @@
   "author": "DeSciX",
   "license": "@Daita_DeSci_Community_License_v1/Daita_DeSci_Community_License_v1.pdf",
   "dependencies": {
-    "@descix/app-sdk": "file:../descix-app-sdk",
-    "@descix/sdk": "file:../descix-sdk",
+    "@descix/app-sdk": "^0.1.0",
+    "@descix/sdk": "^1.0.0",
     "@modelcontextprotocol/sdk": "^1.25.1",
     "axios": "^1.7.9",
     "chalk": "^5.6.2",
@@ -34,7 +34,14 @@
     "ora": "^9.0.0",
     "vite": "^6.2.0"
   },
-  "bundledDependencies": ["@descix/app-sdk", "@descix/sdk"],
+  "files": [
+    "bin",
+    "lib",
+    "templates",
+    "agent-assets",
+    "vendor",
+    "!**/node_modules"
+  ],
   "engines": {
     "node": ">=24.0.0"
   }

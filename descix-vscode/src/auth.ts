@@ -3,20 +3,7 @@ import * as path from 'path';
 import { mcpDidChange } from './mcpProvider';
 import { checkWalletExists, checkWorkspaceConfigExists, getWorkspaceRoot, initWorkspace } from './workspace';
 import { updateStatusBar } from './statusBar';
-
-/**
- * Resolve the descix CLI entry point from the bundled package.
- */
-function getCliPath(context: vscode.ExtensionContext): string {
-  return path.join(
-    context.extensionPath,
-    'node_modules',
-    '@descix',
-    'cli',
-    'bin',
-    'descix.js'
-  );
-}
+import { getCliBinPath } from './cliResolver';
 
 /**
  * Run `descix login --dev` in a VS Code terminal and watch for wallet.json
@@ -29,7 +16,13 @@ async function login(context: vscode.ExtensionContext): Promise<boolean> {
     return false;
   }
 
-  const cliPath = getCliPath(context);
+  const cliPath = await getCliBinPath('descix.js');
+  if (!cliPath) {
+    vscode.window.showErrorMessage(
+      'DeSciX: @descix/cli not found. Install with: npm install -g @descix/cli'
+    );
+    return false;
+  }
   const terminal = vscode.window.createTerminal({
     name: 'DeSciX Login',
     cwd: workspaceRoot,

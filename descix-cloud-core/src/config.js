@@ -244,7 +244,7 @@ class CloudConfig {
                     this.DEPLOY_ENV = 'dev';
                     this.DEBUG_LOCAL = true;
                     this.CONFIG_SECRET_NAME = 'descix_config'; // Default for dev
-                    this.CONFIG_SECRET_VERSION = 'DEBUG';      // Default for dev
+                    this.CONFIG_SECRET_VERSION = 'DEV';        // Default for dev
                     
                     // Auto-detect port from workspace apps
                     this._autoDetectPort(workspace);
@@ -341,7 +341,7 @@ class CloudConfig {
     }
 
     async accessSecretVersion(secretname, tag) {
-        if (!tag) tag = 'DEBUG';
+        if (!tag) tag = 'DEV';
         if (!this.secretClient) this.secretClient = new SecretManagerServiceClient();
         const name = `projects/${this.GOOGLE_PROJECT_ID}/secrets/${secretname}/versions/${tag}`;
         const [version] = await this.secretClient.accessSecretVersion({ name });
@@ -391,9 +391,8 @@ class CloudConfig {
                 }
             }
 
-            if (this.PUB_SUB_DISCORD_BOT_REPLY && this.CONFIG_SECRET_VERSION) {
-                this.PUB_SUB_DISCORD_BOT_REPLY = this.PUB_SUB_DISCORD_BOT_REPLY + this.CONFIG_SECRET_VERSION.toLowerCase();
-            }
+            // PUB_SUB_DISCORD_BOT_REPLY is set as a complete topic name per-env
+            // via deploy script --set-env-vars (bootstrap key). No suffix appending needed.
         }
     }
 }

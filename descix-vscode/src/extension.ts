@@ -20,8 +20,11 @@ export function activate(context: vscode.ExtensionContext) {
   Promise.all([checkWalletExists(), checkWorkspaceConfigExists(), readAppJson()]).then(
     ([hasWallet, hasWorkspace, appJson]) => {
       if (!hasWallet) {
+        const isTry = appJson?.invite_type === 'try';
         const message = appJson?.app_name
-          ? `DeSciX: Found invite to "${appJson.app_name}" — connect to get started`
+          ? isTry
+            ? `DeSciX: Found app preview for "${appJson.app_name}" — connect to explore`
+            : `DeSciX: Found invite to "${appJson.app_name}" — connect to get started`
           : 'DeSciX: Connect to enable AI-assisted app development';
         vscode.window
           .showInformationMessage(message, 'Connect')
@@ -31,8 +34,11 @@ export function activate(context: vscode.ExtensionContext) {
             }
           });
       } else if (!hasWorkspace) {
+        const isTry = appJson?.invite_type === 'try';
         const message = appJson?.app_name
-          ? `DeSciX: Found invite to "${appJson.app_name}" — your AI agent can set this up`
+          ? isTry
+            ? `DeSciX: Found app preview for "${appJson.app_name}" — ask your AI agent to explore it`
+            : `DeSciX: Found invite to "${appJson.app_name}" — your AI agent can set this up`
           : 'DeSciX: Connected but workspace not configured. Ask your AI agent: "Help me get started with DeSciX"';
         vscode.window
           .showInformationMessage(message, 'Open Chat', 'Re-connect')

@@ -1,0 +1,25 @@
+{
+  "name": "@descix/platform-api",
+  "version": "1.0.0",
+  "description": "Shared platform infrastructure: Firestore models, auth/session, permissions, entitlements, email",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./models": "./src/models/index.js",
+    "./auth": "./src/auth/index.js",
+    "./email": "./src/email/index.js",
+    "./permissions": "./src/permissions/index.js",
+    "./entitlements": "./src/entitlements/index.js"
+  },
+  "files": ["src"],
+  "keywords": ["descix", "platform", "models", "auth", "permissions"],
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "dependencies": {
+    "@descix/cloud-core": "file:../descix-cloud-core",
+    "googleapis": "^169.0.0"
+  }
+}
