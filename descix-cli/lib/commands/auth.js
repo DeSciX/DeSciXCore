@@ -405,3 +405,61 @@ export async function logout() {
     throw error;
   }
 }
+
+/**
+ * Admin bootstrap login — generates CLI credentials for platform admins
+ * without requiring the PWA device login / Powch flow.
+ * Requires email to be in the DESCIX_ADMIN_GROUP Google Group.
+ */
+export async function adminLogin(options = {}) {
+  const email = options.email;
+  if (!email) {
+    console.error(chalk.red('--email is required'));
+    process.exit(1);
+  }
+
+  const spinner = ora('Authenticating as admin...').start();
+
+  try {
+    const apiClient = new DeSciXApiClient();
+    await apiClient.ensureBaseUrl();
+
+    const result = await apiClient.invokeRaw('admin_bootstrap_login', { email });
+    const data = result.data || result;
+
+    if (data.status === 'ERROR') {
+      spinner.fail(data.message || 'Admin login failed');
+      process.exit(1);
+    }
+
+    const info = data.message;
+    if (!info || !info.session_token) {
+      spinner.fail('Unexpected response from server');
+      process.exit(1);
+    }
+
+    const walletData = {
+      walletAddress: info.wallet_address,
+      signature: info.signature,
+      sessionToken: info.session_token,
+      userId: info.user_id,
+      email: info.email,
+      communityId: info.community_id || 'descix',
+      tokenSymbol: info.token_symbol || 'DAITA',
+      expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
+    };
+
+    // Save wallet.json
+    const workspaceRoot = await WorkspaceConfig.findWorkspaceRoot(process.cwd()) || process.cwd();
+    const walletPath = WalletFileManager.getProjectWalletPath(workspaceRoot);
+    await WalletFileManager.saveWalletFile(walletPath, walletData);
+
+    spinner.succeed(chalk.green(`Logged in as admin: ${email}`));
+    console.log(chalk.dim(`  Wallet: ${walletData.walletAddress}`));
+    console.log(chalk.dim(`  Session expires: ${walletData.expiresAt}`));
+    console.log(chalk.dim(`  Credentials saved to: ${walletPath}`));
+  } catch (error) {
+    spinner.fail(error.message || 'Admin login failed');
+    process.exit(1);
+  }
+}
