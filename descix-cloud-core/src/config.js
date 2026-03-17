@@ -75,7 +75,8 @@ const GUEST_ALLOWED_COMMANDS = [
     'submit_transaction', 'submit_meta_transaction',
     'get_pool_market_overview', 'get_price_history', 'get_pool_token_info', 'get_migration_status',
     'list_services', 'get_service', 'service_health_check',
-    'verify_airdrop_wallet'
+    'verify_airdrop_wallet',
+    'admin_bootstrap_login'
 ];
 
 function networkResponse(netStatus, authStatus, message) {

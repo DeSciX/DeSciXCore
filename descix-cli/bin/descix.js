@@ -82,6 +82,34 @@ program
     }
   });
 
+program
+  .command('admin-login')
+  .description('Bootstrap CLI credentials for platform admins (requires admin group membership)')
+  .requiredOption('-e, --email <email>', 'Admin email (must be in platform admin Google Group)')
+  .option('-u, --url <url>', 'API URL override')
+  .option('--dev', 'Use development server (https://localhost:4000)')
+  .action(async (options) => {
+    try {
+      if (options.dev) {
+        const workspaceConfig = await WorkspaceConfig.tryLoad(process.cwd());
+        if (workspaceConfig) {
+          workspaceConfig.apiUrl = 'https://localhost:4000';
+          workspaceConfig.environment = 'development';
+          await workspaceConfig.save(process.cwd());
+        } else {
+          const gc = await GlobalConfig.load();
+          gc.api_url = 'https://localhost:4000';
+          gc.environment = 'development';
+          await gc.save();
+        }
+        console.log(chalk.cyan('Configured for development (https://localhost:4000)\n'));
+      }
+      await authCommands.adminLogin(options);
+    } catch (error) {
+      process.exit(1);
+    }
+  });
+
 // ============ Init Command (Git-aware workspace setup) ============
 
 program

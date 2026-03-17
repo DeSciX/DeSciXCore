@@ -46,13 +46,14 @@ const TOOLS = [
   },
   {
     name: 'ask_question_to_app',
-    description: 'Ask an AI-powered question to an app\'s knowledge base using RAG',
+    description: 'Ask an AI-powered question to an app\'s knowledge base using RAG. Supports conversation threading via previous_interaction_id — pass the interaction_id from the previous response to continue a conversation.',
     inputSchema: {
       type: 'object',
       properties: {
         app_id: { type: 'string', description: 'App ID to query' },
         knowledgebase_name: { type: 'string', description: 'KB name (default: General)' },
         user_input: { type: 'string', description: 'The question to ask' },
+        previous_interaction_id: { type: 'string', description: 'Interaction ID from previous response to continue a conversation thread. Omit for first message.' },
       },
       required: ['app_id', 'user_input'],
     },
