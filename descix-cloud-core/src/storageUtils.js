@@ -143,6 +143,8 @@ class FirestoreCollections {
             day_bucket: day_bucket
         });
     }
+    static KB_TUNING_DATA(community_id, app_id, knowledgebase_name) { return new BaseStoragePath("Community/{community_id}/Apps/{app_id}/KnowledgeBases/{knowledgebase_name}/TuningData", "dict").getPath({ community_id, app_id, knowledgebase_name }); }
+    static KB_TUNING_JOBS(community_id, app_id, knowledgebase_name) { return new BaseStoragePath("Community/{community_id}/Apps/{app_id}/KnowledgeBases/{knowledgebase_name}/TuningJobs", "dict").getPath({ community_id, app_id, knowledgebase_name }); }
     static TOKEN_USAGE() { return new BaseStoragePath("TokenUsage", "dict").getPath(); }
     static IP_DOCS_VIEWS() { return new BaseStoragePath("IPDocsViews", "dict").getPath(); }
     static REP_VOTES() { return new BaseStoragePath("RepVotes", "dict").getPath(); }
