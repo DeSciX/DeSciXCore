@@ -375,18 +375,18 @@ function generateLocalFileId(relativePath) {
  * the same file appearing in multiple KBs/Apps.
  * 
  * @param {Object} chunk - { content, metadata }
- * @param {Object} context - { community_id, app_id, kb_id, file_id, file_name }
+ * @param {Object} context - { community_id, app_id, kb_id, file_id, file_name, customMetadata }
  * @returns {Object} Pinecone-ready chunk record
  */
 function createChunkRecord(chunk, context) {
-  const { community_id, app_id, kb_id, file_id, file_name } = context;
+  const { community_id, app_id, kb_id, file_id, file_name, customMetadata } = context;
   const chunk_idx = chunk.metadata.chunkIndex;
   const text = chunk.content.trim();
-  
+
   // Composite ID — app_id is globally unique, no community_id prefix needed
   const id = `${app_id}:${kb_id}:${file_id}:${chunk_idx}`;
-  
-  return {
+
+  const record = {
     id,
     text,
     entity_type: 'CHUNK',
@@ -405,6 +405,23 @@ function createChunkRecord(chunk, context) {
     chunk_title: chunk.metadata.title || chunk.metadata.name || null,
     content_hash: computeContentHash(text)      // For change detection
   };
+
+  // Merge custom metadata fields (passthrough to Pinecone)
+  // Pinecone supports: string, number, boolean, string[] as metadata types.
+  // Custom fields must not collide with reserved record fields.
+  if (customMetadata && typeof customMetadata === 'object') {
+    for (const [key, value] of Object.entries(customMetadata)) {
+      if (key in record) continue; // Don't overwrite reserved fields
+      const type = typeof value;
+      if (type === 'string' || type === 'number' || type === 'boolean') {
+        record[key] = value;
+      } else if (Array.isArray(value) && value.every(v => typeof v === 'string')) {
+        record[key] = value;
+      }
+    }
+  }
+
+  return record;
 }
 
 /**
@@ -449,12 +466,12 @@ function getFileId(fileName, fileMetadata, kbId) {
  * Uses .descix_metadata.json to get Drive IDs for files.
  * Files without Drive IDs get a local:hash ID for tracking.
  * 
- * @param {Object} config - { workspaceRoot, communityId, appId, kbId, localPath }
+ * @param {Object} config - { workspaceRoot, communityId, appId, kbId, localPath, customMetadata }
  * @param {Object} options - { maxChunkSize, overlapSize, verbose }
  * @returns {Promise<{files: number, totalChunks: number}>}
  */
 export async function processKb(config, options = {}) {
-  const { workspaceRoot, communityId, appId, kbId = 'General', localPath } = config;
+  const { workspaceRoot, communityId, appId, kbId = 'General', localPath, customMetadata } = config;
   const { verbose = false } = options;
   
   // Find source directory (kb/General for converted files)
@@ -506,13 +523,14 @@ export async function processKb(config, options = {}) {
       const rawChunks = chunkFile({ file_name: fileName, mime_type: mimeType, content }, options);
       
       // Convert to Pinecone-ready records
-      const chunks = rawChunks.map(chunk => 
+      const chunks = rawChunks.map(chunk =>
         createChunkRecord(chunk, {
           community_id: communityId,
           app_id: appId,
           kb_id: kbId,
           file_id,
-          file_name: fileName
+          file_name: fileName,
+          customMetadata
         })
       );
       

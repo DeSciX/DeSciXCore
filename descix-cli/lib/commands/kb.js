@@ -226,12 +226,12 @@ export async function runKbPush(apiClient, options) {
 /**
  * Generate chunks from text files
  * Delegates to Chunker.processKb()
- * 
- * @param {Object} options - { community, app, kb, chunkSize, overlap, verbose }
+ *
+ * @param {Object} options - { community, app, kb, chunkSize, overlap, verbose, metadata }
  */
 export async function runKbChunk(options) {
   const spinner = ora('Loading workspace configuration...').start();
-  
+
   try {
     // 1. Load WorkspaceConfig
     const workspaceConfig = await WorkspaceConfig.load();
@@ -244,25 +244,43 @@ export async function runKbChunk(options) {
     // 3. Get paths
     const workspaceRoot = workspaceConfig.getWorkspaceRoot();
     const appPath = workspaceConfig.getAppByAppId(appId)?.absolutePath;
-    
-    // 4. Delegate to Chunker
+
+    // 4. Parse custom metadata (JSON string from --metadata flag)
+    let customMetadata = null;
+    if (options.metadata) {
+      try {
+        customMetadata = JSON.parse(options.metadata);
+        if (typeof customMetadata !== 'object' || Array.isArray(customMetadata)) {
+          throw new Error('metadata must be a JSON object');
+        }
+      } catch (parseErr) {
+        spinner.fail('Invalid --metadata value');
+        throw new Error(`--metadata must be a valid JSON object: ${parseErr.message}`);
+      }
+    }
+
+    // 5. Delegate to Chunker
     const chunkOptions = {
       maxChunkSize: parseInt(options.chunkSize || 2000),
       overlapSize: parseInt(options.overlap || 500),
       verbose: options.verbose
     };
-    
+
     if (options.verbose) {
       console.log(chalk.gray(`  Chunk size: ${chunkOptions.maxChunkSize}`));
       console.log(chalk.gray(`  Overlap: ${chunkOptions.overlapSize}`));
+      if (customMetadata) {
+        console.log(chalk.gray(`  Custom metadata: ${JSON.stringify(customMetadata)}`));
+      }
     }
-    
+
     const result = await processKb({
       workspaceRoot,
       communityId,
       appId,
       kbId,
-      localPath: appPath ? (path.relative(workspaceRoot, appPath) || '.') : `${communityId}/${appId}`
+      localPath: appPath ? (path.relative(workspaceRoot, appPath) || '.') : `${communityId}/${appId}`,
+      customMetadata
     }, chunkOptions);
     
     spinner.succeed(`Generated ${result.totalChunks} chunks from ${result.files} files`);
