@@ -11,3 +11,4 @@ export { default as PowchSideBarWidget } from './components/PowchSideBarWidget.j
 export { PowchBridgeProvider, usePowchBridge } from './providers/PowchBridgeProvider.jsx';
 export { PowchClient } from './powch/PowchClient.js';
 export { NetworkLoadingProvider, useNetworkLoading } from './util/NetworkAPI.jsx';
+

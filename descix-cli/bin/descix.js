@@ -1596,6 +1596,7 @@ kbCommand
   .option('-k, --kb <id>', 'Knowledge Base ID (default: General)')
   .option('-s, --chunk-size <size>', 'Chunk size in characters (default: 512)')
   .option('-o, --overlap <size>', 'Overlap between chunks (default: 64)')
+  .option('-m, --metadata <json>', 'Custom metadata JSON to attach to all chunks (e.g. \'{"source":"beast","domain":"training"}\')')
   .option('-v, --verbose', 'Show verbose output')
   .action(async (options) => {
     try {
