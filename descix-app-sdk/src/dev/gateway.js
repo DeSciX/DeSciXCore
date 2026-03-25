@@ -54,11 +54,13 @@ function deriveApiUrl(config) {
   if (env.apiUrl || config.apiUrl) {
     return env.apiUrl || config.apiUrl;
   }
-  // Derive from platform microservice config
-  const ms = env.platform?.microservice || {};
-  const port = ms.port || 4000;
+  // Derive from platform microservice config — no fallback port
+  const ms = env.platform?.microservice;
+  if (!ms?.port) {
+    throw new Error('[Gateway] Cannot determine API URL: no env.apiUrl and no env.platform.microservice.port in workspace.json');
+  }
   const proto = ms.protocol || 'https';
-  return `${proto}://localhost:${port}`;
+  return `${proto}://localhost:${ms.port}`;
 }
 
 /**
@@ -68,13 +70,17 @@ function deriveApiUrl(config) {
 function buildDefines(config, workspaceRoot) {
   const env = config.env || {};
 
-  // Powch URL: env.powchUrl or auto-discover from env.products[]
-  let powchAppUrl = env.powchUrl || 'https://powch.descix.net/';
-  if (!env.powchUrl && Array.isArray(env.products)) {
+  // Powch URL: env.powchUrl > auto-discover from env.products[] > fail explicitly
+  let powchAppUrl = env.powchUrl ?? null;
+  if (!powchAppUrl && Array.isArray(env.products)) {
     const powchProduct = env.products.find(p => p.appId === 'powch');
     if (powchProduct?.site?.port) {
       powchAppUrl = `https://localhost:${powchProduct.site.port}/`;
     }
+  }
+  if (!powchAppUrl) {
+    console.warn('[Gateway] No Powch URL found in workspace config. Powch integration will not work.');
+    powchAppUrl = null; // Downstream code handles null gracefully
   }
 
   const apiGatewayUrl = deriveApiUrl(config);

@@ -33,13 +33,15 @@ export function createViteProxyConfig(workspacePath, options = {}) {
   }
 
   const env = config.env || {};
-  // Derive API URL: explicit option > env.apiUrl > workspace microservice config > default
+  // Derive API URL: explicit option > env.apiUrl > workspace microservice config — no fallback
   let apiGatewayUrl = options.apiGatewayUrl ?? env.apiUrl ?? config.apiUrl;
   if (!apiGatewayUrl) {
-    const ms = env.platform?.microservice || {};
-    const port = ms.port || 4000;
+    const ms = env.platform?.microservice;
+    if (!ms?.port) {
+      throw new Error('[createViteProxyConfig] Cannot determine API URL: no apiGatewayUrl option, no env.apiUrl, and no env.platform.microservice.port in workspace.json');
+    }
     const proto = ms.protocol || 'https';
-    apiGatewayUrl = `${proto}://localhost:${port}`;
+    apiGatewayUrl = `${proto}://localhost:${ms.port}`;
   }
   // Powch URL: explicit env.powchUrl, or auto-discover from env.products[]
   let powchUrl = env.powchUrl ?? null;
