@@ -167,18 +167,11 @@ export async function runStatus(options = {}) {
         console.log(`Mode:           ${chalk.red('Unknown/Invalid')} (${error.message})`);
       }
     } else {
-      // Legacy PathContext path
+      // PathContext fallback — still uses detectWorkspaceMode for v2.1 format
       const wsRawConfig = ctx.getWorkspaceConfig();
       try {
         const mode = detectWorkspaceMode(wsRawConfig);
         console.log(`Mode:           ${chalk.green(mode)}`);
-
-        if (wsRawConfig.communities) {
-          for (const [commId, comm] of Object.entries(wsRawConfig.communities)) {
-            const appCount = Object.keys(comm.apps || {}).length;
-            console.log(chalk.gray(`  └─ ${commId}: ${appCount} app(s)`));
-          }
-        }
         console.log(`Local Root:     ${workspaceRoot}`);
       } catch (error) {
         console.log(`Mode:           ${chalk.red('Unknown/Invalid')} (${error.message})`);

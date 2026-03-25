@@ -152,9 +152,9 @@ class CloudConfig {
 
         this._loadDefaults();
 
-        this.__port = process.env.PORT || this.DEFAULT_PORT;
+        this.__port = process.env.PORT || this.LOCAL_PORT || this.DEFAULT_PORT;
         this.PORT = this.__port;
-        console.error("PORT: ", this.__port);
+        console.log("[Config] PORT:", this.__port);
     }
 
     get expressPort() { return this.__port; }
@@ -240,14 +240,14 @@ class CloudConfig {
 
             if (workspacePath) {
                 const workspace = JSON.parse(fs.readFileSync(workspacePath, 'utf8'));
-                if (workspace.environment === 'development') {
-                    console.log('[Config] Auto-detected development workspace');
+                if (workspace.env?.environment === 'DEV') {
+                    console.log('[Config] Auto-detected DEV workspace from', workspacePath);
                     this.DEPLOY_ENV = 'dev';
                     this.DEBUG_LOCAL = true;
-                    this.CONFIG_SECRET_NAME = 'descix_config'; // Default for dev
-                    this.CONFIG_SECRET_VERSION = 'DEV';        // Default for dev
-                    
-                    // Auto-detect port from workspace apps
+                    this.CONFIG_SECRET_NAME = 'descix_config';
+                    this.CONFIG_SECRET_VERSION = 'DEV';
+
+                    // Auto-detect port from workspace apps (v2.1 format)
                     this._autoDetectPort(workspace);
                 }
             }
@@ -257,28 +257,31 @@ class CloudConfig {
     }
 
     _autoDetectPort(workspace) {
-        // Try to match current directory to an app in workspace
-        // This is a heuristic based on path suffix
+        // Match current directory to an app in workspace (v2.1 format: env.platform + env.products[])
         try {
-            const relPath = path.relative(path.dirname(path.dirname(workspace.workspaceRoot || this.__rootPath)), this.__appDir);
-            
-            // Search communities for matching app
-            if (workspace.communities) {
-                for (const comm of Object.values(workspace.communities)) {
-                    if (comm.apps) {
-                        for (const app of Object.values(comm.apps)) {
-                            // Check if this app's path matches our current directory
-                            // Handle both absolute and relative paths
-                            const appAbsPath = app.absolutePath || path.resolve(workspace.workspaceRoot, app.localPath);
-                            if (this.__appDir === appAbsPath || this.__appDir.endsWith(app.localPath)) {
-                                if (app.service && app.service.port) {
-                                    this.LOCAL_PORT = app.service.port;
-                                    console.log(`[Config] Auto-detected port ${this.LOCAL_PORT} from workspace`);
-                                    return;
-                                }
-                            }
-                        }
-                    }
+            const wsRoot = workspace.workspaceRoot || path.dirname(path.dirname(this.__rootPath));
+            const entries = [];
+
+            // Platform entry
+            if (workspace.env?.platform) {
+                entries.push(workspace.env.platform);
+            }
+            // Product entries
+            if (Array.isArray(workspace.env?.products)) {
+                entries.push(...workspace.env.products);
+            }
+
+            for (const entry of entries) {
+                if (!entry.localPath || !entry.microservice?.port) continue;
+                const entryAbs = path.resolve(wsRoot, entry.localPath);
+                // Match if __appDir is the entry root or its microservice subdirectory
+                if (this.__appDir === entryAbs ||
+                    this.__appDir === path.resolve(entryAbs, 'microservice') ||
+                    this.__appDir.endsWith(entry.localPath) ||
+                    this.__appDir.endsWith(entry.localPath + '/microservice')) {
+                    this.LOCAL_PORT = entry.microservice.port;
+                    console.log(`[Config] Auto-detected port ${this.LOCAL_PORT} for ${entry.appId || 'platform'} from workspace`);
+                    return;
                 }
             }
         } catch (e) {
@@ -350,6 +353,10 @@ class CloudConfig {
     }
 
     async initialize() {
+        if (!this.DEPLOY_ENV) {
+            throw new Error('[CloudConfig] FATAL: DEPLOY_ENV not set. Cannot determine environment before Secret Manager call. Provide DEPLOY_ENV via .env (local dev), deployment env vars (cloud deploy), or ensure .descix/workspace.json is reachable from the service root.');
+        }
+
         const auth = new GoogleAuth();
         this.GOOGLE_PROJECT_ID = await auth.getProjectId();
         console.error("***** INITIALIZING Project ID: ", this.GOOGLE_PROJECT_ID);
