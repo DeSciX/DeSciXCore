@@ -22,6 +22,7 @@ import * as folderCommands from '../lib/commands/folder.js';
 import * as updateCommands from '../lib/commands/update.js';
 import { runStatus } from '../lib/commands/status.js';
 import { runDoctor } from '../lib/commands/doctor.js';
+import { runHealth } from '../lib/commands/health.js';
 import * as kbCommands from '../lib/commands/kb.js';
 import fs from 'fs/promises';
 import path from 'path';
@@ -185,6 +186,20 @@ program
     } catch (error) {
       // runDoctor handles its own errors mostly, but catch-all here
       console.error(chalk.red(`\n❌ Error: ${error.message}\n`));
+      process.exit(1);
+    }
+  });
+
+program
+  .command('health')
+  .description('Check platform service health (environment-aware: port checks in DEV, HTTPS in prod)')
+  .option('-m, --microservice <name>', 'Check a specific service by appId')
+  .option('-j, --json', 'Output raw JSON')
+  .action(async (options) => {
+    try {
+      await runHealth(options);
+    } catch (error) {
+      console.error(chalk.red(`\nHealth check error: ${error.message}\n`));
       process.exit(1);
     }
   });

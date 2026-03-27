@@ -51,6 +51,9 @@ export function categorizeFile(fileName, mimeType = null) {
   if (name.endsWith('.tex')) {
     return 'papers';
   }
+  if (name.endsWith('.jsonl')) {
+    return 'training';
+  }
   
   // Check by MIME type
   if (mimeType === 'application/vnd.google-apps.document' ||
@@ -275,6 +278,55 @@ function chunkByMarkdownSections(content, fileMetadata, rules) {
 }
 
 /**
+ * Chunk JSONL training files — one chunk per record
+ * Each line is parsed as JSON; Q&A pairs are formatted as readable text for embedding.
+ * Non-reserved fields (domain, role, difficulty, verified_by, etc.) are preserved in
+ * chunk.metadata.jsonlFields for passthrough to Pinecone as filterable metadata.
+ *
+ * @param {string} content - File content (one JSON object per line)
+ * @param {Object} fileMetadata - { name }
+ * @returns {Array<{content, metadata}>}
+ */
+function chunkJsonl(content, fileMetadata) {
+  const lines = content.split('\n').filter(line => line.trim());
+  const chunks = [];
+
+  for (const line of lines) {
+    let parsed;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      continue; // skip malformed lines
+    }
+
+    // Format as readable text for embedding
+    let text;
+    if (parsed.question && parsed.answer) {
+      text = `Q: ${parsed.question}\nA: ${parsed.answer}`;
+    } else {
+      text = JSON.stringify(parsed, null, 2);
+    }
+
+    // Separate embedding content from metadata fields
+    // question/answer go into text; everything else becomes filterable Pinecone metadata
+    const { question, answer, ...jsonlFields } = parsed;  // eslint-disable-line no-unused-vars
+
+    chunks.push({
+      content: text,
+      metadata: {
+        chunkIndex: chunks.length,
+        type: 'qa-pair',
+        fileName: fileMetadata.name,
+        jsonlFields  // domain, role, difficulty, verified_by, id, status, etc.
+      }
+    });
+  }
+
+  chunks.forEach(chunk => { chunk.metadata.totalChunks = chunks.length; });
+  return chunks;
+}
+
+/**
  * Generic chunking using sliding window
  * Fallback for file types without semantic structure
  * 
@@ -342,6 +394,8 @@ export function chunkFile(fileInfo, options = {}) {
     case 'docs':
     case 'papers':
       return chunkDocument(content, { name: file_name }, rules);
+    case 'training':
+      return chunkJsonl(content, { name: file_name });
     default:
       return chunkGeneric(content, { name: file_name }, rules);
   }
@@ -406,12 +460,26 @@ function createChunkRecord(chunk, context) {
     content_hash: computeContentHash(text)      // For change detection
   };
 
-  // Merge custom metadata fields (passthrough to Pinecone)
+  // Merge file-level custom metadata (passthrough to Pinecone)
   // Pinecone supports: string, number, boolean, string[] as metadata types.
   // Custom fields must not collide with reserved record fields.
   if (customMetadata && typeof customMetadata === 'object') {
     for (const [key, value] of Object.entries(customMetadata)) {
       if (key in record) continue; // Don't overwrite reserved fields
+      const type = typeof value;
+      if (type === 'string' || type === 'number' || type === 'boolean') {
+        record[key] = value;
+      } else if (Array.isArray(value) && value.every(v => typeof v === 'string')) {
+        record[key] = value;
+      }
+    }
+  }
+
+  // Merge per-chunk JSONL fields (domain, role, difficulty, verified_by, id, etc.)
+  // These override file-level customMetadata but cannot overwrite reserved record fields.
+  if (chunk.metadata.jsonlFields && typeof chunk.metadata.jsonlFields === 'object') {
+    for (const [key, value] of Object.entries(chunk.metadata.jsonlFields)) {
+      if (key in record) continue;
       const type = typeof value;
       if (type === 'string' || type === 'number' || type === 'boolean') {
         record[key] = value;
@@ -493,9 +561,9 @@ export async function processKb(config, options = {}) {
   
   // Read files (exclude metadata and hidden files)
   const files = await fs.readdir(srcDir);
-  const textFiles = files.filter(f => 
-    !f.startsWith('.') && 
-    (f.endsWith('.md') || f.endsWith('.txt') || f.endsWith('.csv'))
+  const textFiles = files.filter(f =>
+    !f.startsWith('.') &&
+    (f.endsWith('.md') || f.endsWith('.txt') || f.endsWith('.csv') || f.endsWith('.jsonl'))
   );
   
   if (textFiles.length === 0) {
@@ -518,6 +586,7 @@ export async function processKb(config, options = {}) {
       let mimeType = 'text/plain';
       if (fileName.endsWith('.md')) mimeType = 'text/markdown';
       else if (fileName.endsWith('.csv')) mimeType = 'text/csv';
+      else if (fileName.endsWith('.jsonl')) mimeType = 'application/jsonl';
       
       // Generate chunks
       const rawChunks = chunkFile({ file_name: fileName, mime_type: mimeType, content }, options);
