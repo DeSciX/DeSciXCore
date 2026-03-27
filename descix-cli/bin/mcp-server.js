@@ -130,6 +130,22 @@ const TOOLS = [
       required: ['invite_token'],
     },
   },
+  {
+    name: 'platform_health',
+    description:
+      'Check platform health. Returns structured pass/fail JSON for core platform (Cloud) and ' +
+      'an optional named microservice. The microservice is probed through the existing MCP proxy ' +
+      'infrastructure — no direct HTTP or curl. If this command responds, Cloud is healthy.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        microservice: {
+          type: 'string',
+          description: 'Name of a registered microservice to check (e.g., "beast", "powch"). Omit to check core platform only.',
+        },
+      },
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------------
