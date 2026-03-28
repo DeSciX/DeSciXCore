@@ -1374,6 +1374,33 @@ appCommand
   });
 
 appCommand
+  .command('set-name')
+  .description('Set app display name')
+  .requiredOption('-c, --community <id>', 'Community ID')
+  .requiredOption('-a, --app <id>', 'App ID')
+  .requiredOption('--name <name>', 'Display name for the app')
+  .action(async (options) => {
+    try {
+      const apiClient = new DeSciXApiClient();
+      await requireAuth(apiClient);
+
+      const response = await apiClient.invoke('update_app', {
+        community_id: options.community,
+        app_id: options.app,
+        app_name: options.name
+      });
+      const result = response.message || response;
+
+      console.log(chalk.green('\n✅ App display name updated!\n'));
+      console.log(chalk.cyan(`  App: ${options.community}/${options.app}`));
+      console.log(chalk.gray(`  Name: ${options.name}\n`));
+    } catch (error) {
+      console.error(chalk.red(error.message));
+      process.exit(1);
+    }
+  });
+
+appCommand
   .command('set-api-url')
   .description('Set API base URL for app\'s own backend')
   .requiredOption('-c, --community <id>', 'Community ID')
