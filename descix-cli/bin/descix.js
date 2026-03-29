@@ -24,6 +24,7 @@ import { runStatus } from '../lib/commands/status.js';
 import { runDoctor } from '../lib/commands/doctor.js';
 import { runHealth } from '../lib/commands/health.js';
 import * as kbCommands from '../lib/commands/kb.js';
+import * as corpusCommands from '../lib/commands/corpus.js';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
@@ -1753,6 +1754,52 @@ kbCommand
   .action(async (options) => {
     try {
       await kbCommands.runKbCompare(null, options);
+    } catch (error) {
+      console.error(chalk.red(`\n❌ ${error.message}\n`));
+      process.exit(1);
+    }
+  });
+
+// Corpus sub-commands (git-aware RAG sync via manifests)
+const corpusCommand = kbCommand
+  .command('corpus')
+  .description('Git-aware corpus sync via manifests');
+
+corpusCommand
+  .command('sync')
+  .description('Sync corpus files to Pinecone using manifest definitions')
+  .requiredOption('-a, --app <id>', 'App ID')
+  .option('-k, --kb <name>', 'KB name (syncs specific manifest; default: all)')
+  .option('-v, --verbose', 'Show verbose output')
+  .action(async (options) => {
+    try {
+      const apiClient = new DeSciXApiClient();
+      await requireAuth(apiClient);
+
+      await corpusCommands.runCorpusSync(apiClient, options);
+    } catch (error) {
+      console.error(chalk.red(`\n❌ ${error.message}\n`));
+      process.exit(1);
+    }
+  });
+
+corpusCommand
+  .command('status')
+  .description('Show corpus sync state (files, chunks, last sync)')
+  .requiredOption('-a, --app <id>', 'App ID')
+  .option('-k, --kb <name>', 'KB name (default: all)')
+  .option('-v, --verbose', 'Show verbose output including change detection')
+  .action(async (options) => {
+    try {
+      let apiClient = null;
+      try {
+        apiClient = new DeSciXApiClient();
+        await apiClient.loadCredentials();
+      } catch {
+        // Status can work offline
+      }
+
+      await corpusCommands.runCorpusStatus(apiClient, options);
     } catch (error) {
       console.error(chalk.red(`\n❌ ${error.message}\n`));
       process.exit(1);
