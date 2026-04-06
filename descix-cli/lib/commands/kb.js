@@ -491,8 +491,8 @@ export async function runKbStatus(apiClient, options) {
       console.log(chalk.green('\n   ✓ In sync\n'));
     } else {
       console.log(chalk.yellow('\n   ⚠ Out of sync:'));
-      if (status.toUpload > 0) {
-        console.log(chalk.gray(`     - ${status.toUpload} chunks to upload`));
+      if (status.toUpsert > 0) {
+        console.log(chalk.gray(`     - ${status.toUpsert} chunks to upsert`));
       }
       if (status.toDelete > 0) {
         console.log(chalk.gray(`     - ${status.toDelete} chunks to delete`));

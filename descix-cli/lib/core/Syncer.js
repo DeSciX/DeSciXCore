@@ -89,7 +89,9 @@ export async function getRemoteChunkMetadata(apiClient, communityId, appId, kbId
       app_id: appId,
       kb_id: kbId
     });
-    return result.chunks || [];
+    // apiClient.invoke returns { status, message: { chunks, count, ... } }
+    const data = result.message || result;
+    return data.chunks || [];
   } catch (error) {
     // Fall back to IDs-only endpoint
     try {
@@ -97,8 +99,9 @@ export async function getRemoteChunkMetadata(apiClient, communityId, appId, kbId
         app_id: appId,
         kb_id: kbId
       });
-      // Return as array of IDs (old format) for backward compatibility
-      return result.chunk_ids || [];
+      // apiClient.invoke returns { status, message: { chunk_ids, count, ... } }
+      const data = result.message || result;
+      return data.chunk_ids || [];
     } catch {
       return [];
     }

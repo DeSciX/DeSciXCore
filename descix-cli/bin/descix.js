@@ -1566,6 +1566,102 @@ appCommand
     }
   });
 
+appCommand
+  .command('delete')
+  .description('Delete an app with full cascade cleanup (Pinecone, GCS, Firestore, Products)')
+  .requiredOption('-a, --app <app_id>', 'App ID to delete')
+  .option('-c, --community <community_id>', 'Community ID (auto-resolved from Products if omitted)')
+  .option('--dry-run', 'Preview what would be deleted without executing')
+  .option('--soft', 'Soft delete only (mark as hidden, no cascade)')
+  .option('--yes', 'Skip confirmation prompt')
+  .action(async (options) => {
+    try {
+      const apiClient = new DeSciXApiClient();
+      await requireAuth(apiClient);
+
+      const appId = options.app;
+      const hardDelete = !options.soft;
+      const dryRun = !!options.dryRun;
+
+      // Resolve community_id if not provided (apiFront hydrates from Products)
+      let communityId = options.community || null;
+
+      if (dryRun) {
+        console.log(chalk.cyan(`\n--- DRY RUN: delete ${appId} ---\n`));
+      }
+
+      const response = await apiClient.invoke('delete_app', {
+        app_id: appId,
+        community_id: communityId,
+        hard_delete: hardDelete,
+        dry_run: dryRun
+      });
+
+      const result = response.message || response;
+
+      if (dryRun) {
+        const m = result.deletion_manifest || result;
+        console.log(chalk.bold('Deletion manifest:\n'));
+        if (m.pinecone_only_orphan) {
+          console.log(chalk.yellow(`  ** Pinecone-only orphan: no Firestore/Products records found **\n`));
+        }
+        if (m.app_doc) console.log(chalk.gray(`  Firestore App:     ${m.app_doc}`));
+        if (m.products_doc) console.log(chalk.gray(`  Products Doc:      ${m.products_doc}`));
+        if (m.knowledgebases?.length) {
+          console.log(chalk.gray(`  Knowledge Bases:   ${m.knowledgebases.length}`));
+          for (const kb of m.knowledgebases) {
+            console.log(chalk.gray(`    - ${kb}`));
+          }
+        }
+        if (m.pinecone_note) {
+          console.log(chalk.yellow(`  Pinecone:          ${m.pinecone_note}`));
+        } else {
+          console.log(chalk.gray(`  Pinecone filter:   app_id == ${appId} (${m.pinecone_kb_count} KBs)`));
+        }
+        console.log(chalk.gray(`  GCS prefix:        ${m.gcs_prefix}`));
+        console.log(chalk.gray(`  IPDocs:            ${m.ip_docs_count}`));
+        if (m.service_manifests?.length) {
+          console.log(chalk.gray(`  ServiceManifests:  ${m.service_manifests.join(', ')}`));
+        }
+        console.log(chalk.yellow('\n  No changes were made. Remove --dry-run to execute.\n'));
+        return;
+      }
+
+      // Confirmation prompt (unless --yes)
+      if (!options.yes && hardDelete) {
+        const readline = await import('readline');
+        const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+        const answer = await new Promise(resolve => {
+          rl.question(chalk.yellow(`\n  Permanently delete ${appId}? This cannot be undone. [y/N] `), resolve);
+        });
+        rl.close();
+        if (answer.toLowerCase() !== 'y') {
+          console.log(chalk.gray('\n  Aborted.\n'));
+          return;
+        }
+      }
+
+      // Display results
+      if (result.cleanup) {
+        const c = result.cleanup;
+        console.log(chalk.green(`\n  App ${appId} deleted.\n`));
+        console.log(chalk.gray(`  Pinecone vectors:  ${c.pinecone_deleted === -1 ? 'filter-deleted' : c.pinecone_deleted} (KBs: ${c.kbs_deleted?.join(', ') || 'none'})`));
+        console.log(chalk.gray(`  GCS files:         ${c.gcs_deleted}`));
+        console.log(chalk.gray(`  Firestore docs:    ${c.firestore_deleted} (IPDocs)`));
+        console.log(chalk.gray(`  Products deleted:  ${c.products_deleted ? 'yes' : 'no'}`));
+        if (c.service_manifests_deleted?.length) {
+          console.log(chalk.gray(`  ServiceManifests:  ${c.service_manifests_deleted.join(', ')}`));
+        }
+        console.log();
+      } else {
+        console.log(chalk.green(`\n  ${result.message || `App ${appId} deleted.`}\n`));
+      }
+    } catch (error) {
+      console.error(chalk.red(`\n  Error: ${error.message}\n`));
+      process.exit(1);
+    }
+  });
+
 // ============ Knowledge Base Commands ============
 
 const kbCommand = program
@@ -3689,6 +3785,66 @@ mcpCommand
     try {
       await mcpCommands.quickstart();
     } catch (error) {
+      process.exit(1);
+    }
+  });
+
+mcpCommand
+  .command('execute')
+  .description('Execute a registered MCP tool by name with JSON parameters')
+  .requiredOption('--tool <name>', 'Tool/command name (e.g., beast_get_initiatives, beast_update_stream)')
+  .option('--params <json>', 'JSON parameters for the tool', '{}')
+  .option('-a, --app <app_id>', 'App context (sets app_id in params if not already present)')
+  .option('--json', 'Output raw JSON response')
+  .action(async (options) => {
+    try {
+      const apiClient = new DeSciXApiClient();
+      await apiClient.initialize();
+      await requireAuth(apiClient);
+
+      // Parse JSON params
+      let params;
+      try {
+        params = JSON.parse(options.params);
+      } catch (parseError) {
+        console.error(chalk.red(`Invalid JSON in --params: ${parseError.message}`));
+        console.error(chalk.gray('Example: --params \'{"initiative_id": "agentic-memory"}\''));
+        process.exit(1);
+      }
+
+      // Inject app_id if provided via --app flag and not already in params
+      if (options.app && !params.app_id) {
+        params.app_id = options.app;
+      }
+
+      console.log(chalk.gray(`Executing ${options.tool}...`));
+
+      const response = await apiClient.invoke(options.tool, params);
+
+      if (options.json) {
+        // Raw JSON output for piping/scripting
+        console.log(JSON.stringify(response, null, 2));
+      } else {
+        // Human-readable output
+        const result = response.message || response;
+
+        if (result.success !== undefined) {
+          console.log(chalk.green(`\nSuccess: ${result.message || 'Command executed successfully'}`));
+        } else {
+          console.log(chalk.green('\nResult:'));
+        }
+
+        // Pretty-print the result, excluding verbose fields
+        const displayResult = typeof result === 'object' ? result : { response: result };
+        console.log(chalk.white(JSON.stringify(displayResult, null, 2)));
+      }
+
+      console.log('');
+    } catch (error) {
+      console.error(chalk.red(`Error: ${error.message}`));
+      if (error.response) {
+        console.error(chalk.gray(JSON.stringify(error.response, null, 2)));
+      }
       process.exit(1);
     }
   });

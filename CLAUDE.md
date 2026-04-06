@@ -14,6 +14,7 @@ Shared packages consumed by `DeSciX_Cloud` and `DeSciX_Powch` via npm link. This
 | `cryptoapis-sdk` | OpenAPI-generated SDK | DeSciX_Cloud microservice, DeSciX_Powch microservice |
 | `@descix/sdk` | MCP server, RAG orchestrators, Git integrations | CLI, backend services |
 | `@descix/cloud-core` | Firestore, Pub/Sub, Secret Manager bootstrap | All GCP microservices |
+| `@descix/platform-api` | Shared business logic: Firestore models, auth/session, email, permissions, entitlements | DeSciX_Cloud microservice, DeSciX_Powch microservice |
 | `@descix/app-sdk` | App shell framework, React components, Web3 stack | DeSciX_Cloud site, DeSciX_Powch site |
 | `@descix/cli` | Unified CLI + MCP server (`bin/descix.js`) | All developers, E2E tests, CI |
 
@@ -40,6 +41,7 @@ See [`LINK_SETUP.md`](LINK_SETUP.md) for the full sequence.
 Before any change, state which package boundary is being touched and confirm no logic is being duplicated across packages. Package responsibilities:
 
 - `@descix/cloud-core` — GCP service bootstrap only; no business logic
+- `@descix/platform-api` — Shared business logic (models, auth, email, permissions, entitlements); depends on cloud-core for all GCP access; never imports from consuming services
 - `@descix/app-sdk` — app container + UI primitives + **dev gateway** (`src/dev/gateway.js`); no platform-specific business logic. The gateway is SDK infrastructure — the platform PWA is a peer consumer, not a privileged one.
 - `@descix/app-sdk/dev` exports: `createViteProxyConfig` (app-level proxy rules), `createViteServerConfig` (HTTPS + proxy for any app), `runGateway` (pure reverse proxy replicating the production LB), `getViteHttpsConfig`, `watchWorkspaceConfig`
 - `@descix/sdk` — shared runtime utilities; no GCP-specific code (that belongs in cloud-core)
