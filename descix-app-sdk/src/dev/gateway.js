@@ -20,6 +20,7 @@ import { createViteProxyConfig } from './createViteProxyConfig.js';
 import { getViteHttpsConfig } from './getViteHttpsConfig.js';
 import { watchWorkspaceConfig } from './watchWorkspaceConfig.js';
 import { buildWorkspaceProducts } from './workspaceProducts.js';
+import { staticSitePlugin } from './staticSitePlugin.js';
 
 /**
  * Find the workspace root by walking up from startDir looking for .descix/workspace.json.
@@ -151,15 +152,25 @@ export async function runGateway(options = {}) {
   log('');
 
   const proxyRules = buildGatewayProxy(workspaceRoot, apiGatewayUrl);
+  const staticRoutes = proxyRules._staticRoutes || {};
+  delete proxyRules._staticRoutes;
   const httpsConfig = getViteHttpsConfig();
 
   logProxyTable(proxyRules, log);
+  if (Object.keys(staticRoutes).length > 0) {
+    log('  Static sites:');
+    for (const [appId, dir] of Object.entries(staticRoutes)) {
+      log(`    /p/${appId.padEnd(36)} → ${dir}`);
+    }
+    log('');
+  }
 
   const { createServer } = await import('vite');
 
   let server = await createServer({
     root: workspaceRoot,
     configFile: false,
+    plugins: [staticSitePlugin(staticRoutes)],
     server: {
       port,
       ...httpsConfig,
@@ -177,6 +188,8 @@ export async function runGateway(options = {}) {
   const watcher = watchWorkspaceConfig(workspaceRoot, async (newConfig) => {
     const newApiUrl = deriveApiUrl(newConfig);
     const newProxy = buildGatewayProxy(workspaceRoot, newApiUrl);
+    const newStaticRoutes = newProxy._staticRoutes || {};
+    delete newProxy._staticRoutes;
 
     log('\n  workspace.json changed — restarting gateway...\n');
     logProxyTable(newProxy, log);
@@ -186,6 +199,7 @@ export async function runGateway(options = {}) {
     server = await createServer({
       root: workspaceRoot,
       configFile: false,
+      plugins: [staticSitePlugin(newStaticRoutes)],
       server: {
         port,
         ...httpsConfig,

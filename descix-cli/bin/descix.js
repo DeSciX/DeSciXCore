@@ -546,12 +546,69 @@ communityCommand
 
 communityCommand
   .command('create')
-  .description('Community creation is via PWA (Workspace Config). Admins: use descix-admin community create')
-  .action(async () => {
-    console.log(chalk.cyan('\n📦 Community creation\n'));
-    console.log(chalk.white('Create communities in the PWA (Workspace Config / Device Setup).'));
-    console.log(chalk.white('Platform admins can use: descix-admin community create -n "Name" -t SYMBOL\n'));
-    console.log(chalk.gray('  descix-admin uses the same workspace root and .descix/wallet.json as this CLI.\n'));
+  .description('[ADMIN] Create a new community with token contract (requires platform admin, deploys to live Polygon)')
+  .requiredOption('-n, --name <name>', 'Community display name (e.g. "SMILE")')
+  .requiredOption('-t, --token <symbol>', 'Token symbol (e.g. SMILE)')
+  .option('--icon <url>', 'Icon URL for the community')
+  .option('--yes', 'Skip confirmation prompt (use with caution)')
+  .action(async (options) => {
+    try {
+      const apiClient = new DeSciXApiClient();
+      await requireAuth(apiClient);
+
+      const communityId = options.token.toLowerCase();
+      const tokenSymbol = options.token.toUpperCase();
+
+      console.log(chalk.cyan('\n📦 Community Creation [ADMIN ONLY]\n'));
+      console.log(chalk.yellow('  ⚠  WARNING: This operation is IRREVERSIBLE.'));
+      console.log(chalk.yellow('  ⚠  DEV/DEMO environments use the LIVE Polygon blockchain.'));
+      console.log(chalk.yellow('  ⚠  A real token contract will be deployed on-chain.\n'));
+      console.log(chalk.white(`  Community ID:    ${communityId}`));
+      console.log(chalk.white(`  Community Name:  ${options.name}`));
+      console.log(chalk.white(`  Token Symbol:    ${tokenSymbol}`));
+      console.log(chalk.white(`  Network:         Polygon (live)\n`));
+
+      if (!options.yes) {
+        const readline = await import('readline');
+        const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+        const answer = await new Promise(resolve => {
+          rl.question(chalk.yellow(`  Create community "${options.name}" with token ${tokenSymbol} on live Polygon? [y/N] `), resolve);
+        });
+        rl.close();
+        if (answer.toLowerCase() !== 'y') {
+          console.log(chalk.gray('\n  Aborted.\n'));
+          return;
+        }
+      }
+
+      console.log(chalk.gray('\n  Creating community skeleton...'));
+
+      const response = await apiClient.invoke('create_community_skeleton', {
+        community_id: communityId,
+        community_name: options.name,
+        token_symbol: tokenSymbol,
+        icon_url: options.icon || null,
+      });
+
+      const result = response.message || response;
+
+      console.log(chalk.green(`\n  ✓ Community "${options.name}" created\n`));
+      console.log(chalk.white(`  Community ID:     ${result.community_id}`));
+      console.log(chalk.white(`  Default App:      ${result.app_id}`));
+      console.log(chalk.white(`  Token Symbol:     ${result.token_symbol}`));
+      if (result.contract_address) {
+        console.log(chalk.white(`  Contract:         ${result.contract_address}`));
+      }
+
+      console.log(chalk.cyan('\n  Next steps:'));
+      console.log(chalk.gray(`    descix app init -a ${result.app_id}          # Initialize KB`));
+      console.log(chalk.gray(`    descix kb corpus sync -a ${result.app_id}    # Sync content`));
+      console.log(chalk.gray(`    descix site upload -c ${communityId} -a ${result.app_id} -p ./site  # Deploy site\n`));
+
+    } catch (error) {
+      console.error(chalk.red(`\n  Error: ${error.message}\n`));
+      process.exit(1);
+    }
   });
 
 // Deploy a token contract without creating community

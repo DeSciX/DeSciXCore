@@ -43,7 +43,7 @@ Before any change, state which package boundary is being touched and confirm no 
 - `@descix/cloud-core` — GCP service bootstrap only; no business logic
 - `@descix/platform-api` — Shared business logic (models, auth, email, permissions, entitlements); depends on cloud-core for all GCP access; never imports from consuming services
 - `@descix/app-sdk` — app container + UI primitives + **dev gateway** (`src/dev/gateway.js`); no platform-specific business logic. The gateway is SDK infrastructure — the platform PWA is a peer consumer, not a privileged one.
-- `@descix/app-sdk/dev` exports: `createViteProxyConfig` (app-level proxy rules), `createViteServerConfig` (HTTPS + proxy for any app), `runGateway` (pure reverse proxy replicating the production LB), `getViteHttpsConfig`, `watchWorkspaceConfig`
+- `@descix/app-sdk/dev` exports: `createViteProxyConfig` (app-level proxy rules + `_staticRoutes` for `site.static` products), `createViteServerConfig` (HTTPS + proxy for any app), `runGateway` (pure reverse proxy replicating the production LB), `staticSitePlugin` (Vite middleware serving static files at `/p/{appId}/` for products with `site.static`), `getViteHttpsConfig`, `watchWorkspaceConfig`
 - `@descix/sdk` — shared runtime utilities; no GCP-specific code (that belongs in cloud-core)
 - `@descix/cli` — HTTP-only client; zero direct service imports; all operations via `/apifront/`. CLI commands like `descix serve` are thin wrappers around app-sdk functions.
 
