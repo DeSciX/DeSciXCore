@@ -21,11 +21,17 @@ export function buildWorkspaceProducts(workspaceRoot) {
   }
 
   // Products (community apps, Powch, etc.)
+  // Determine gateway port for static site products (default 5173)
+  const gatewayPort = ws.env?.gateway?.port || 5173;
+
   if (Array.isArray(ws.env?.products)) {
     for (const p of ws.env.products) {
       if (p.appId && p.site?.port) {
         const proto = p.site.protocol || 'https';
         products[p.appId] = `${proto}://localhost:${p.site.port}`;
+      } else if (p.appId && p.site?.static) {
+        // Static sites are served by the gateway at /p/{appId}
+        products[p.appId] = `https://localhost:${gatewayPort}/p/${p.appId}`;
       }
     }
   }

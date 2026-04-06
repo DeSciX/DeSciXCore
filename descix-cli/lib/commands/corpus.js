@@ -54,6 +54,11 @@ async function chunkCorpusFile(fileEntry, context) {
   else if (fileName.endsWith('.json')) mimeType = 'application/json';
   else if (fileName.endsWith('.jsonl')) mimeType = 'application/jsonl';
 
+  // Skip empty files — they produce chunks with no text which fails validation
+  if (!content || content.trim().length === 0) {
+    return [];
+  }
+
   // Skip files that are too large (> 500KB) — likely generated/minified
   if (content.length > 500000) {
     return [];
@@ -67,6 +72,7 @@ async function chunkCorpusFile(fileEntry, context) {
   const MAX_CHUNK_TEXT_BYTES = 35000;
 
   // Convert to Pinecone-ready records with corpus-specific metadata
+  // Filter out any chunks with empty text (safety net for edge cases)
   return rawChunks.map((chunk, idx) => {
     const chunkIdx = chunk.metadata.chunkIndex ?? idx;
     // Content-addressed ID: same blob SHA = same IDs
@@ -77,6 +83,8 @@ async function chunkCorpusFile(fileEntry, context) {
     if (Buffer.byteLength(text, 'utf-8') > MAX_CHUNK_TEXT_BYTES) {
       text = text.substring(0, MAX_CHUNK_TEXT_BYTES);
     }
+
+    if (!text) return null; // Skip empty chunks
 
     return {
       id,
@@ -102,7 +110,7 @@ async function chunkCorpusFile(fileEntry, context) {
       chunk_type: chunk.metadata.type,
       chunk_title: chunk.metadata.title || chunk.metadata.name || null
     };
-  });
+  }).filter(Boolean);
 }
 
 /**
@@ -194,7 +202,24 @@ export async function runCorpusSync(apiClient, options) {
 
     spinner.succeed(`Found ${manifests.length} manifest(s)`);
 
-    // 3. Process each manifest
+    // 3. Pre-check: verify the KB document exists in Firestore.
+    // Without it, vectors will be orphaned in Pinecone with no KB to query against.
+    // Run "descix app init -a <app_id>" to create the KB document first.
+    try {
+      const kbCheck = await apiClient.invoke('get_app', { app_id: appId, community_id: communityId });
+      const kbData = kbCheck?.message || kbCheck;
+      const kbs = kbData?.knowledgebases || kbData?.knowledge_bases || [];
+      if (Array.isArray(kbs) && kbs.length === 0) {
+        console.log(chalk.yellow(`\n  ⚠ No KnowledgeBase documents found for app "${appId}".`));
+        console.log(chalk.yellow(`    Vectors will sync to Pinecone but chat won't work until KB exists.`));
+        console.log(chalk.yellow(`    Run: descix app init -a ${appId}\n`));
+      }
+    } catch (kbErr) {
+      console.log(chalk.yellow(`\n  ⚠ Could not verify KB exists for app "${appId}": ${kbErr.message}`));
+      console.log(chalk.yellow(`    If chat returns "KnowledgeBase not found", run: descix app init -a ${appId}\n`));
+    }
+
+    // 4. Process each manifest
     let totalFilesProcessed = 0;
     let totalChunksCreated = 0;
     let totalFilesSkipped = 0;
@@ -273,6 +298,7 @@ export async function runCorpusSync(apiClient, options) {
       // We batch in small groups with delays between to stay under the limit.
       let upserted = 0;
       let deleted = 0;
+      const syncFailures = [];
 
       if (allChunks.length > 0) {
         const syncSpinner = ora(`  Upserting ${allChunks.length} chunks...`).start();
@@ -298,7 +324,11 @@ export async function runCorpusSync(apiClient, options) {
                 syncSpinner.text = `  Rate limited. Waiting ${backoff / 1000}s before retry ${retries}/${MAX_RETRIES}...`;
                 await new Promise(r => setTimeout(r, backoff));
               } else {
-                throw err;
+                // Non-rate-limit error: log failed chunks, continue with remaining batches
+                const failedIds = batch.map(c => c.id);
+                syncFailures.push({ error: err.message, chunks: failedIds });
+                syncSpinner.text = `  Batch failed (${failedIds.length} chunks): ${err.message.substring(0, 80)}. Continuing...`;
+                success = true; // Don't retry non-rate-limit errors, move to next batch
               }
             }
           }
@@ -315,6 +345,19 @@ export async function runCorpusSync(apiClient, options) {
         }
 
         syncSpinner.succeed(`  Upserted: ${upserted} chunks`);
+
+        // Write failure log to .descix if any batches failed
+        if (syncFailures.length > 0) {
+          const failLogDir = path.join(appRoot, '.descix', 'sync-state');
+          await fs.mkdir(failLogDir, { recursive: true });
+          const failLogPath = path.join(failLogDir, `${kbName}-failures.json`);
+          await fs.writeFile(failLogPath, JSON.stringify({
+            timestamp: new Date().toISOString(),
+            commit: commitSha,
+            failures: syncFailures,
+          }, null, 2));
+          console.log(chalk.yellow(`  ⚠ ${syncFailures.length} batch(es) failed. Details: ${failLogPath}`));
+        }
       }
 
       if (idsToDelete.length > 0) {

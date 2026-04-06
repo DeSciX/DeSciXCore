@@ -54,9 +54,12 @@ export function createViteProxyConfig(workspacePath, options = {}) {
 
   const localAppRoutes = {};
   const serviceRoutes = {};
+  const staticRoutes = {};
 
   // v2.1 workspace format: env.platform + env.products[]
   const envBlock = config.env || {};
+  const workspaceRoot = path.dirname(path.dirname(workspaceConfigPath)); // up from .descix/
+
   // Platform: only register microservice route (site is handled by gateway's root proxy)
   if (envBlock.platform) {
     const p = envBlock.platform;
@@ -70,6 +73,12 @@ export function createViteProxyConfig(workspacePath, options = {}) {
       const appId = p.appId;
       if (!appId) continue;
       if (p.site?.port)        localAppRoutes[appId] = { port: p.site.port, protocol: p.site.protocol };
+      else if (p.site?.static) {
+        // Static site: resolve path relative to product localPath from workspace root
+        const localPath = p.localPath || '.';
+        const staticDir = p.site.static === '.' ? localPath : path.join(localPath, p.site.static);
+        staticRoutes[appId] = path.resolve(workspaceRoot, staticDir);
+      }
       if (p.microservice?.port) serviceRoutes[appId] = { port: p.microservice.port };
     }
   }
@@ -160,6 +169,10 @@ export function createViteProxyConfig(workspacePath, options = {}) {
       return `/descix-assets-public${pathWithoutPrefix}`;
     },
   };
+
+  // Attach staticRoutes to the proxy object so gateway.js can access them
+  // without changing the function signature (backward compatible)
+  proxy._staticRoutes = staticRoutes;
 
   return proxy;
 }
