@@ -10,7 +10,8 @@
     "./auth": "./src/auth/index.js",
     "./email": "./src/email/index.js",
     "./permissions": "./src/permissions/index.js",
-    "./entitlements": "./src/entitlements/index.js"
+    "./entitlements": "./src/entitlements/index.js",
+    "./manifest": "./src/manifest/index.js"
   },
   "files": ["src"],
   "keywords": ["descix", "platform", "models", "auth", "permissions"],
