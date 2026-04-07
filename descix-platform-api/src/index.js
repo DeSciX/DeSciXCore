@@ -10,6 +10,7 @@
  *   import { ... } from '@descix/platform-api/email'
  *   import { ... } from '@descix/platform-api/permissions'
  *   import { ... } from '@descix/platform-api/entitlements'
+ *   import { ... } from '@descix/platform-api/manifest'
  */
 
 // Models
@@ -61,3 +62,12 @@ export {
 export {
     hydrateCommunityIdFromProducts
 } from './entitlements/index.js';
+
+// Manifest (service discovery)
+export {
+    buildManifestFromHandlers,
+    buildManifestFromStatic,
+    validateManifest,
+    manifestMiddleware,
+    computeManifestHash
+} from './manifest/index.js';

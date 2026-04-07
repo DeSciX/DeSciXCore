@@ -185,6 +185,11 @@ export async function runGateway(options = {}) {
   await server.listen();
   log(`\n  Gateway listening on https://localhost:${port}\n`);
 
+  // WS-7: Service discovery — fetch /manifest from all microservices
+  discoverServices(config, log).catch(err => {
+    log(`  [Service Discovery] Error: ${err.message}\n`);
+  });
+
   const watcher = watchWorkspaceConfig(workspaceRoot, async (newConfig) => {
     const newApiUrl = deriveApiUrl(newConfig);
     const newProxy = buildGatewayProxy(workspaceRoot, newApiUrl);
@@ -217,6 +222,88 @@ export async function runGateway(options = {}) {
 
   process.on('SIGINT', () => { watcher.close(); server.close(); process.exit(0); });
   process.on('SIGTERM', () => { watcher.close(); server.close(); process.exit(0); });
+}
+
+/**
+ * WS-7: Service Discovery
+ *
+ * After the gateway starts, discover all microservices by fetching their /manifest
+ * endpoint. Logs the results for visibility into the service mesh state.
+ *
+ * Services self-register with Cloud on their own startup (Powch → storage.js,
+ * Cloud → app.js bootstrap). This discovery step provides a unified view and
+ * catches any services that may have failed to self-register.
+ *
+ * @param {Object} config — workspace config from .descix/workspace.json
+ * @param {Function} log — logger function
+ */
+async function discoverServices(config, log) {
+  const services = [];
+
+  // Platform microservice (Cloud)
+  const platform = config.env?.platform;
+  if (platform?.microservice?.port) {
+    services.push({
+      name: platform.appId || 'platform',
+      port: platform.microservice.port,
+    });
+  }
+
+  // Product microservices (Powch, BEAST, etc.)
+  const products = config.env?.products || [];
+  for (const p of products) {
+    if (p.microservice?.port) {
+      services.push({
+        name: p.appId,
+        port: p.microservice.port,
+      });
+    }
+  }
+
+  if (services.length === 0) {
+    log('  [Service Discovery] No microservices found in workspace.json\n');
+    return;
+  }
+
+  log('  Service discovery:');
+
+  // Tolerate self-signed certs in dev (same as Vite proxy secure:false)
+  const prevTls = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
+  for (const svc of services) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+
+      const res = await fetch(`https://localhost:${svc.port}/manifest`, {
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+
+      if (!res.ok) {
+        log(`    ${svc.name.padEnd(20)} port:${svc.port}  no /manifest (${res.status})`);
+        continue;
+      }
+
+      const manifest = await res.json();
+      const commandCount = Object.keys(manifest.commands || {}).length;
+      const version = manifest.service?.version || '?';
+      log(`    ${svc.name.padEnd(20)} port:${svc.port}  ${commandCount} commands (v${version})`);
+    } catch (err) {
+      const reason = err.name === 'AbortError' ? 'timeout' : err.message;
+      log(`    ${svc.name.padEnd(20)} port:${svc.port}  unreachable (${reason})`);
+    }
+  }
+
+  // Restore TLS setting
+  if (prevTls === undefined) {
+    delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+  } else {
+    process.env.NODE_TLS_REJECT_UNAUTHORIZED = prevTls;
+  }
+
+  log('');
 }
 
 function logProxyTable(proxy, log) {
