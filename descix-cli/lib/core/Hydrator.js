@@ -254,27 +254,35 @@ async function pullFolder(localPath, driveFolderId, options = {}) {
  * @returns {Promise<{pulled: number, converted: number, skipped: number, unchanged: number}>}
  */
 export async function hydrateKb(config, options = {}) {
-  const { workspaceRoot, communityId, appId, kbId = 'General', baseFolderId, localPath } = config;
-  const { 
-    verbose = false, 
+  const { workspaceRoot, communityId, appId, kbId = 'General', baseFolderId, directFolderId, localPath } = config;
+  const {
+    verbose = false,
     mergeMode = 'merge',
     skipUnchanged = true,
     dryRun = false,
     onProgress = null
   } = options;
-  
+
   // Verify ADC auth
   await driveADC.verifyDriveAuth();
-  
-  // Navigate to KB folder using template path
-  const kbPath = `${communityId}/${appId}/kb/${kbId}`;
-  const kbDriveFolderId = await driveADC.findFolderByPath(baseFolderId, kbPath);
-  
-  if (!kbDriveFolderId) {
-    throw new Error(
-      `KB folder not found at path: ${kbPath}\n` +
-      'Ensure the app was created from template and the KB folder exists in Drive.'
-    );
+
+  // Resolve the KB Drive folder: direct override or navigate via base_folder_id
+  let kbDriveFolderId;
+  if (directFolderId) {
+    // --folder override: use the provided folder ID directly (arbitrary Drive folder)
+    kbDriveFolderId = directFolderId;
+    if (verbose) console.log(`  Using override folder: ${directFolderId}`);
+  } else {
+    // Standard path: navigate to KB folder using template path
+    const kbPath = `${communityId}/${appId}/kb/${kbId}`;
+    kbDriveFolderId = await driveADC.findFolderByPath(baseFolderId, kbPath);
+
+    if (!kbDriveFolderId) {
+      throw new Error(
+        `KB folder not found at path: ${kbPath}\n` +
+        'Ensure the app was created from template and the KB folder exists in Drive.'
+      );
+    }
   }
   
   // Prepare local directories with new structure
