@@ -46,7 +46,7 @@ import * as driveADC from '../google-storage-adc.js';
  */
 export async function runKbPull(apiClient, options) {
   const spinner = ora('Loading workspace configuration...').start();
-  
+
   try {
     // 1. Load WorkspaceConfig (from workspace.json - no searching)
     const workspaceConfig = await WorkspaceConfig.load();
@@ -56,29 +56,40 @@ export async function runKbPull(apiClient, options) {
 
     spinner.text = `Pulling KB: ${communityId}/${appId}/${kbId}`;
 
-    // 3. Validate Drive configuration
-    const driveConfig = workspaceConfig.driveConfig;
-    if (!driveConfig?.base_folder_id) {
-      spinner.fail('Drive not configured');
-      console.log(chalk.yellow('\n💡 Run "descix setup --dev" first to link Drive.\n'));
-      throw new Error('The base_folder_id is required for KB operations.');
+    // 3. Handle --folder override: extract folder ID from raw ID or full Drive URL
+    let directFolderId = null;
+    if (options.folder) {
+      const folderInput = options.folder;
+      // Handle full Drive URLs: https://drive.google.com/drive/u/0/folders/FOLDER_ID or variants
+      const urlMatch = folderInput.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+      directFolderId = urlMatch ? urlMatch[1] : folderInput;
+      spinner.text = `Pulling KB from override folder: ${directFolderId.substring(0, 12)}...`;
     }
 
-    // 4. Get paths
+    // 4. Validate Drive configuration (skip base_folder_id check when --folder is provided)
+    const driveConfig = workspaceConfig.driveConfig;
+    if (!directFolderId && !driveConfig?.base_folder_id) {
+      spinner.fail('Drive not configured');
+      console.log(chalk.yellow('\n💡 Run "descix setup --dev" first to link Drive, or use --folder <id> for one-time import.\n'));
+      throw new Error('The base_folder_id is required for KB operations (or use --folder for one-time import).');
+    }
+
+    // 5. Get paths
     const workspaceRoot = workspaceConfig.getWorkspaceRoot();
     const appPath = workspaceConfig.getAppByAppId(appId)?.absolutePath;
-    
-    // 5. Delegate to Hydrator with merge mode options
+
+    // 6. Delegate to Hydrator with merge mode options
     spinner.text = 'Connecting to Google Drive...';
-    
+
     const result = await hydrateKb({
       workspaceRoot,
       communityId,
       appId,
       kbId,
-      baseFolderId: driveConfig.base_folder_id,
+      baseFolderId: directFolderId ? null : driveConfig.base_folder_id,
+      directFolderId,
       localPath: appPath ? (path.relative(workspaceRoot, appPath) || '.') : `${communityId}/${appId}`
-    }, { 
+    }, {
       verbose: options.verbose,
       mergeMode: options.mergeMode || 'merge',
       dryRun: options.dryRun,

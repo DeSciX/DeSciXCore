@@ -1859,19 +1859,21 @@ appCommand
       const fs = await import('fs');
       const path = await import('path');
 
-      // Resolve app path
+      // Resolve app path via WorkspaceConfig (v2.1 — localPath from workspace.json)
       let appPath = options.path;
       if (!appPath) {
         try {
-          const { PathContext } = await import('../lib/core/PathContext.js');
-          const ctx = await PathContext.tryLoad();
-          if (ctx) {
-            const detected = ctx.detectContext();
-            if (detected && detected.appPath) appPath = detected.appPath;
+          const wsConfig = await WorkspaceConfig.load();
+          const appConfig = wsConfig.getAppByAppId(options.app);
+          if (appConfig?.absolutePath) {
+            appPath = appConfig.absolutePath;
           }
         } catch { /* fall through */ }
       }
-      if (!appPath) appPath = process.cwd();
+      if (!appPath) {
+        console.error(chalk.red(`App '${options.app}' not found in workspace.json. Use -p to specify path.`));
+        process.exit(1);
+      }
 
       const assetsDir = path.default.join(appPath, 'assets');
       const assets = {};
@@ -2029,6 +2031,7 @@ kbCommand
   .option('-c, --community <id>', 'Community ID')
   .option('-a, --app <id>', 'App ID')
   .option('-k, --kb <id>', 'Knowledge Base ID (default: General)')
+  .option('--folder <id_or_url>', 'Override Drive folder (raw ID or full Drive URL) — one-time import without modifying workspace.json')
   .option('-v, --verbose', 'Show verbose output')
   .option('--merge-mode <mode>', 'Merge mode: merge|overwrite|force-overwrite (default: merge)')
   .option('--dry-run', 'Show what would happen without making changes')
@@ -2093,6 +2096,7 @@ kbCommand
   .option('-c, --community <id>', 'Community ID')
   .option('-a, --app <id>', 'App ID')
   .option('-k, --kb <id>', 'Knowledge Base ID (default: General)')
+  .option('--folder <id_or_url>', 'Override Drive folder (raw ID or full Drive URL) — one-time import without modifying workspace.json')
   .option('-s, --chunk-size <size>', 'Chunk size in characters (default: 2000)')
   .option('-o, --overlap <size>', 'Overlap between chunks (default: 500)')
   .option('-v, --verbose', 'Show verbose output')
@@ -3617,10 +3621,9 @@ program
 
       if (!communityId || !appId) {
         try {
-          const { PathContext } = await import('../lib/core/PathContext.js');
-          const ctx = await PathContext.tryLoad();
-          if (ctx) {
-            const detected = ctx.detectContext();
+          const wsConfig = await WorkspaceConfig.tryLoad();
+          if (wsConfig) {
+            const detected = wsConfig.detectContext();
             if (detected) {
               communityId = communityId || detected.communityId;
               appId = appId || detected.appId;
