@@ -485,17 +485,23 @@ communityCommand
 communityCommand
   .command('info')
   .description('Get community information')
-  .requiredOption('-c, --community <id>', 'Community ID')
+  .option('-c, --community <id>', 'Community ID')
+  .option('-n, --name <id>', 'Community ID (alias for -c)')
   .action(async (options) => {
     try {
+      const communityId = options.community || options.name;
+      if (!communityId) {
+        console.error(chalk.red('\n  Error: Community ID is required. Use -c or -n to specify.\n'));
+        process.exit(1);
+      }
       const apiClient = new DeSciXApiClient();
       await requireAuth(apiClient);
-      
-      const response = await apiClient.invoke('get_community', { community_id: options.community }, { allowGuest: false });
+
+      const response = await apiClient.invoke('get_community', { community_id: communityId }, { allowGuest: false });
       const result = response.message || response;
       const community = result.community;
-      
-      console.log(chalk.green('\n✅ Community Information:\n'));
+
+      console.log(chalk.green('\n  Community Information:\n'));
       console.log(chalk.cyan(`  Name: ${community.community_name}`));
       console.log(chalk.gray(`  ID: ${community.community_id}`));
       console.log(chalk.gray(`  Token: ${community.token_symbol}`));
@@ -605,6 +611,111 @@ communityCommand
       console.log(chalk.gray(`    descix kb corpus sync -a ${result.app_id}    # Sync content`));
       console.log(chalk.gray(`    descix site upload -c ${communityId} -a ${result.app_id} -p ./site  # Deploy site\n`));
 
+    } catch (error) {
+      console.error(chalk.red(`\n  Error: ${error.message}\n`));
+      process.exit(1);
+    }
+  });
+
+communityCommand
+  .command('delete')
+  .description('[ADMIN] Delete a community with full cascade cleanup (all apps, KBs, vectors, GCS)')
+  .requiredOption('-n, --name <community_id>', 'Community ID to delete')
+  .option('--dry-run', 'Preview what would be deleted without executing')
+  .option('--soft', 'Soft delete only (mark as hidden, no cascade)')
+  .option('--yes', 'Skip confirmation prompt')
+  .action(async (options) => {
+    try {
+      const apiClient = new DeSciXApiClient();
+      await requireAuth(apiClient);
+
+      const communityId = options.name;
+      const hardDelete = !options.soft;
+      const dryRun = !!options.dryRun;
+
+      if (dryRun) {
+        console.log(chalk.cyan(`\n--- DRY RUN: delete community ${communityId} ---\n`));
+      }
+
+      // Always call with dry_run first to get the manifest for display
+      const previewResponse = await apiClient.invoke('delete_community', {
+        community_id: communityId,
+        hard_delete: hardDelete,
+        dry_run: true
+      });
+
+      const preview = previewResponse.message || previewResponse;
+      const manifest = preview.community_manifest;
+
+      if (!manifest) {
+        console.error(chalk.red('\n  Error: Could not retrieve community information.\n'));
+        process.exit(1);
+      }
+
+      // Display manifest
+      console.log(chalk.bold('Community deletion manifest:\n'));
+      console.log(chalk.gray(`  Community:       ${manifest.community_name} (${manifest.community_id})`));
+      console.log(chalk.gray(`  Token:           ${manifest.token_symbol}`));
+      console.log(chalk.gray(`  Apps:            ${manifest.app_count}`));
+      if (manifest.apps && manifest.apps.length > 0) {
+        for (const appM of manifest.apps) {
+          if (appM.error) {
+            console.log(chalk.red(`    - ${appM.app_id} (error: ${appM.error})`));
+          } else {
+            const kbCount = appM.pinecone_kb_count || 0;
+            console.log(chalk.gray(`    - ${appM.app_id}: ${kbCount} KB(s), GCS: ${appM.gcs_prefix || 'N/A'}, Products: ${appM.products_doc ? 'yes' : 'no'}`));
+          }
+        }
+      }
+      console.log(chalk.gray(`  Mode:            ${hardDelete ? 'HARD DELETE (permanent)' : 'soft delete (hide only)'}`));
+
+      if (dryRun) {
+        console.log(chalk.yellow('\n  No changes were made. Remove --dry-run to execute.\n'));
+        return;
+      }
+
+      // Confirmation prompt (unless --yes)
+      if (!options.yes && hardDelete) {
+        const readline = await import('readline');
+        const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+        const answer = await new Promise(resolve => {
+          rl.question(chalk.yellow(`\n  Permanently delete community "${manifest.community_name}" and all ${manifest.app_count} app(s)? This cannot be undone. [y/N] `), resolve);
+        });
+        rl.close();
+        if (answer.toLowerCase() !== 'y') {
+          console.log(chalk.gray('\n  Aborted.\n'));
+          return;
+        }
+      }
+
+      // Execute the actual delete
+      const response = await apiClient.invoke('delete_community', {
+        community_id: communityId,
+        hard_delete: hardDelete,
+        dry_run: false
+      });
+
+      const result = response.message || response;
+
+      if (result.cleanup) {
+        const c = result.cleanup;
+        console.log(chalk.green(`\n  Community ${communityId} deleted.\n`));
+        console.log(chalk.gray(`  Apps deleted:          ${c.apps_deleted?.length || 0} (${c.apps_deleted?.join(', ') || 'none'})`));
+        if (c.apps_failed?.length > 0) {
+          console.log(chalk.red(`  Apps failed:           ${c.apps_failed.length}`));
+          for (const f of c.apps_failed) {
+            console.log(chalk.red(`    - ${f.app_id}: ${f.error}`));
+          }
+        }
+        console.log(chalk.gray(`  Pinecone vectors:      ${c.total_pinecone_deleted}`));
+        console.log(chalk.gray(`  GCS files:             ${c.total_gcs_deleted}`));
+        console.log(chalk.gray(`  Firestore docs:        ${c.total_firestore_deleted}`));
+        console.log(chalk.gray(`  Products entries:      ${c.total_products_deleted}`));
+        console.log(chalk.gray(`  ServiceManifests:      ${c.total_service_manifests_deleted}`));
+        console.log();
+      } else {
+        console.log(chalk.green(`\n  ${result.message || `Community ${communityId} deleted.`}\n`));
+      }
     } catch (error) {
       console.error(chalk.red(`\n  Error: ${error.message}\n`));
       process.exit(1);
@@ -894,15 +1005,31 @@ appCommand
         console.log(chalk.gray(`  workspace.json updated: ${appId} → ${localPath}`));
       }
 
-      // 2. Create rigid app folder structure (site, kb, microservice)
+      // 2. Create rigid app folder structure (site, kb, microservice, assets)
       if (appPath) {
         const siteDir = path.join(appPath, 'site');
         const kbDir = path.join(appPath, 'kb', kbId);
         const msDir = path.join(appPath, 'microservice');
+        const assetsDir = path.join(appPath, 'assets');
         await fs.mkdir(siteDir, { recursive: true });
         await fs.mkdir(kbDir, { recursive: true });
         await fs.mkdir(msDir, { recursive: true });
-        console.log(chalk.gray(`  Created: site/, kb/${kbId}/, microservice/`));
+        await fs.mkdir(assetsDir, { recursive: true });
+
+        // Create template asset files if they don't exist
+        const siPath = path.join(assetsDir, 'system_instructions.md');
+        const descPath = path.join(assetsDir, 'app_description.md');
+        try {
+          await fs.access(siPath);
+        } catch {
+          await fs.writeFile(siPath, `# System Instructions for ${appId}\n\nYou are an AI assistant for the ${appId} application.\n`);
+        }
+        try {
+          await fs.access(descPath);
+        } catch {
+          await fs.writeFile(descPath, `# ${appId}\n\nApplication description goes here.\n`);
+        }
+        console.log(chalk.gray(`  Created: site/, kb/${kbId}/, microservice/, assets/`));
       }
 
       // 3. Create KnowledgeBase Firestore doc (Git Mode — no Drive required)
@@ -1719,11 +1846,149 @@ appCommand
     }
   });
 
+appCommand
+  .command('sync-assets')
+  .description('Sync local assets (system_instructions.md, app_description.md, icon.png) to platform')
+  .requiredOption('-a, --app <app_id>', 'App ID')
+  .option('-k, --kb <name>', 'Target KB for system_instructions', 'General')
+  .option('-p, --path <dir>', 'App directory (default: auto-detected)')
+  .action(async (options) => {
+    try {
+      const apiClient = new DeSciXApiClient();
+      await requireAuth(apiClient);
+      const fs = await import('fs');
+      const path = await import('path');
+
+      // Resolve app path
+      let appPath = options.path;
+      if (!appPath) {
+        try {
+          const { PathContext } = await import('../lib/core/PathContext.js');
+          const ctx = await PathContext.tryLoad();
+          if (ctx) {
+            const detected = ctx.detectContext();
+            if (detected && detected.appPath) appPath = detected.appPath;
+          }
+        } catch { /* fall through */ }
+      }
+      if (!appPath) appPath = process.cwd();
+
+      const assetsDir = path.default.join(appPath, 'assets');
+      const assets = {};
+      let found = 0;
+
+      // system_instructions.md
+      const siPath = path.default.join(assetsDir, 'system_instructions.md');
+      if (fs.default.existsSync(siPath)) {
+        assets.system_instructions = fs.default.readFileSync(siPath, 'utf8');
+        found++;
+        console.log(chalk.gray(`  Found: ${siPath}`));
+      }
+
+      // app_description.md
+      const descPath = path.default.join(assetsDir, 'app_description.md');
+      if (fs.default.existsSync(descPath)) {
+        assets.app_description = fs.default.readFileSync(descPath, 'utf8');
+        found++;
+        console.log(chalk.gray(`  Found: ${descPath}`));
+      }
+
+      // icon.png
+      const iconPath = path.default.join(assetsDir, 'icon.png');
+      if (fs.default.existsSync(iconPath)) {
+        assets.icon_base64 = fs.default.readFileSync(iconPath).toString('base64');
+        found++;
+        console.log(chalk.gray(`  Found: ${iconPath}`));
+      }
+
+      if (found === 0) {
+        console.log(chalk.yellow(`\nNo assets found in ${assetsDir}`));
+        console.log(chalk.gray('Expected: system_instructions.md, app_description.md, icon.png\n'));
+        return;
+      }
+
+      console.log(chalk.gray(`\nSyncing ${found} asset(s) for ${options.app}...`));
+
+      const response = await apiClient.invoke('sync_app_assets', {
+        app_id: options.app,
+        kb_name: options.kb,
+        assets
+      });
+
+      const result = response.message || response;
+      if (result.results) {
+        for (const [key, val] of Object.entries(result.results)) {
+          if (val.updated) {
+            console.log(chalk.green(`  ${key}: synced${val.kb ? ` (KB: ${val.kb})` : ''}`));
+          } else {
+            console.log(chalk.red(`  ${key}: failed — ${val.error || 'unknown'}`));
+          }
+        }
+      }
+      console.log(chalk.green('\nAsset sync complete.\n'));
+    } catch (error) {
+      console.error(chalk.red(error.message));
+      process.exit(1);
+    }
+  });
+
 // ============ Knowledge Base Commands ============
 
 const kbCommand = program
   .command('kb')
   .description('Knowledge base operations');
+
+kbCommand
+  .command('list')
+  .description('List knowledge bases for an app')
+  .requiredOption('-a, --app <app_id>', 'App ID')
+  .action(async (options) => {
+    try {
+      const apiClient = new DeSciXApiClient();
+      await requireAuth(apiClient);
+
+      const response = await apiClient.invoke('list_knowledge_bases', {
+        app_id: options.app
+      });
+      const result = response.message || response;
+      const kbs = result.knowledge_bases || [];
+
+      if (kbs.length === 0) {
+        console.log(chalk.yellow(`\nNo knowledge bases found for app ${options.app}\n`));
+        return;
+      }
+
+      // Table output
+      const nameW = Math.max(7, ...kbs.map(k => (k.name || '').length));
+      const modelW = Math.max(5, ...kbs.map(k => (k.model || '').length));
+
+      console.log('\n' + chalk.bold(
+        'KB Name'.padEnd(nameW + 2) +
+        'Model'.padEnd(modelW + 2) +
+        'Instructions'.padEnd(14) +
+        'Vectors'.padEnd(9) +
+        'Last Sync'
+      ));
+      console.log('-'.repeat(nameW + modelW + 40));
+
+      for (const kb of kbs) {
+        const syncDate = kb.rag_last_sync
+          ? new Date(kb.rag_last_sync._seconds ? kb.rag_last_sync._seconds * 1000 : kb.rag_last_sync).toISOString().split('T')[0]
+          : '-';
+        console.log(
+          chalk.cyan((kb.name || '').padEnd(nameW + 2)) +
+          chalk.gray((kb.model || '').padEnd(modelW + 2)) +
+          (kb.system_instructions === 'present' ? chalk.green('present') : chalk.gray('empty')).padEnd(14 + 10) +
+          String(kb.rag_vector_count || 0).padEnd(9) +
+          syncDate
+        );
+      }
+      console.log();
+    } catch (error) {
+      console.error(chalk.red(error.message));
+      process.exit(1);
+    }
+  });
 
 kbCommand
   .command('create')
@@ -3277,24 +3542,79 @@ program
   .option('-c, --community <id>', 'Community ID (defaults to descix)')
   .option('-a, --app <id>', 'App ID (defaults to agent)')
   .option('-q, --question <text>', 'Question to ask (alternative to positional argument)')
-  .option('-k, --kb <id>', 'Knowledge Base ID', 'General')
+  .option('-k, --kb <id...>', 'Knowledge Base ID(s) — repeat for multi-KB, use * for all')
+  .option('--apps <ids>', 'Comma-separated app IDs for cross-app query')
+  .option('--level <n>', 'Intelligence level (1-5)', parseInt)
+  .option('--model <name>', 'Explicit model override')
+  .option('--thinking <budget>', 'Thinking token budget (-1=dynamic, 0=off, N=fixed)', parseInt)
+  .option('--tokens', 'Show token usage in response footer')
   .option('--new', 'Start a new conversation (clear session)')
   .action(async (questionArgs, options) => {
     try {
       const apiClient = new DeSciXApiClient();
       await requireAuth(apiClient);
-      
+
       // Get question from positional args or -q option
       const question = options.question || (questionArgs && questionArgs.join(' '));
       if (!question) {
         console.error(chalk.red('Error: Question required. Usage: descix chat "Your question" or descix chat -q "Your question"'));
         process.exit(1);
       }
-      
-      // Auto-detect app from current directory if not specified
+
+      // Multi-app mode: --apps daita,unk-beast
+      if (options.apps) {
+        const appIds = options.apps.split(',').map(s => s.trim());
+        const apps = appIds.map(id => {
+          const kbNames = options.kb && !options.kb.includes('General') ? options.kb : undefined;
+          return kbNames ? { app_id: id, knowledgebase_names: kbNames } : { app_id: id };
+        });
+
+        console.log(chalk.gray(`Asking ${appIds.join(', ')}...`));
+
+        const response = await apiClient.invoke('ask_multiple_apps', {
+          apps,
+          user_input: question,
+          intelligence_level: options.level,
+          model: options.model,
+          thinking_budget: options.thinking,
+          streaming: false
+        });
+        const result = response.message || response;
+
+        console.log(chalk.green('\n\u2705 Response:\n'));
+        console.log(chalk.white(result.response || result.text || JSON.stringify(result, null, 2)));
+
+        if (result.apps_queried) {
+          console.log(chalk.cyan(`\nApps queried: ${result.apps_queried.join(', ')}`));
+        }
+
+        const sources = result.sources || [];
+        if (sources.length > 0) {
+          console.log(chalk.cyan('\n\ud83d\udcda Sources:'));
+          sources.forEach((src, i) => {
+            const fileName = src.fileName || src.file_path || src.source || src;
+            const fileId = src.fileId || src.id || '';
+            const score = src.score || src.similarity || 0;
+            const scoreStr = score ? ` (score: ${score.toFixed(3)})` : '';
+            const idStr = fileId ? ` [ID: ${fileId}]` : '';
+            console.log(chalk.gray(`   ${i + 1}. ${fileName}${idStr}${scoreStr}`));
+          });
+        }
+
+        // Token usage footer
+        if (options.tokens && result.usage) {
+          const u = result.usage;
+          const thinkStr = u.thinking_tokens ? ` + ${u.thinking_tokens} thinking` : '';
+          console.log(chalk.gray(`\n[${result.model_used || 'unknown'} | ${u.input_tokens} in + ${u.output_tokens} out${thinkStr} = ${u.total_tokens} tokens]`));
+        }
+        console.log('');
+        return;
+      }
+
+      // Single-app mode
       let communityId = options.community;
       let appId = options.app;
-      
+
       if (!communityId || !appId) {
         try {
           const { PathContext } = await import('../lib/core/PathContext.js');
@@ -3310,42 +3630,54 @@ program
           // Fall through to defaults
         }
       }
-      
-      // Fall back to defaults if still not set
+
       communityId = communityId || 'descix';
       appId = appId || 'agent';
-      
+
       // Get session interaction_id unless --new flag
       let previousInteractionId = null;
       if (!options.new) {
         previousInteractionId = await getSessionInteractionId(communityId, appId);
       } else {
-        // Clear session if --new flag
         await clearSession(communityId, appId);
       }
-      
+
+      // Resolve KB param — single or multi
+      const kbList = options.kb || ['General'];
+      const useMultiKb = kbList.length > 1 || kbList.includes('*');
+
       console.log(chalk.gray(`Asking ${communityId}/${appId}...`));
-      
-      const response = await apiClient.invoke('ask_question_to_app', {
+
+      const invokeParams = {
         app_id: appId,
-        knowledgebase_name: options.kb,
         user_input: question,
         previous_interaction_id: previousInteractionId,
-        streaming: false
-      });
+        streaming: false,
+        intelligence_level: options.level,
+        model: options.model,
+        thinking_budget: options.thinking,
+      };
+
+      if (useMultiKb) {
+        invokeParams.knowledgebase_names = kbList;
+      } else {
+        invokeParams.knowledgebase_name = kbList[0];
+      }
+
+      const response = await apiClient.invoke('ask_question_to_app', invokeParams);
       const result = response.message || response;
-      
+
       // Save new interaction_id for next message
       if (result.interaction_id) {
         await saveSessionInteractionId(communityId, appId, result.interaction_id);
       }
-      
-      console.log(chalk.green('\n✅ Response:\n'));
+
+      console.log(chalk.green('\n\u2705 Response:\n'));
       console.log(chalk.white(result.response || result.text || JSON.stringify(result, null, 2)));
-      
+
       const sources = result.sources || response.sources || response.message?.sources || [];
       if (sources && sources.length > 0) {
-        console.log(chalk.cyan('\n📚 Sources:'));
+        console.log(chalk.cyan('\n\ud83d\udcda Sources:'));
         sources.forEach((src, i) => {
           const fileName = src.fileName || src.file_path || src.source || src;
           const fileId = src.fileId || src.id || '';
@@ -3354,6 +3686,14 @@ program
           const idStr = fileId ? ` [ID: ${fileId}]` : '';
           console.log(chalk.gray(`   ${i + 1}. ${fileName}${idStr}${scoreStr}`));
         });
+      }
+
+      // Token usage footer
+      if (options.tokens && result.usage) {
+        const u = result.usage;
+        const thinkStr = u.thinking_tokens ? ` + ${u.thinking_tokens} thinking` : '';
+        const levelStr = options.level ? `level ${options.level}` : `level ${result.usage?.intelligence_level || '2'}`;
+        console.log(chalk.gray(`\n[${result.model_used || 'unknown'} | ${levelStr} | ${u.input_tokens} in + ${u.output_tokens} out${thinkStr} = ${u.total_tokens} tokens]`));
       }
       console.log('');
     } catch (error) {
