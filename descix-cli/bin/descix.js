@@ -34,7 +34,43 @@ const program = new Command();
 program
   .name('descix')
   .description('DeSciX CLI - Unified command-line interface')
-  .version('1.0.0');
+  .version('1.0.0')
+  .option('--env <name>', 'Target environment: dev, demo, prod (overrides API URL)')
+  .option('--api-url <url>', 'Direct API URL override (e.g., https://demo.descix.net)');
+
+// ============ Global Environment Override ============
+// Maps --env flag to DESCIX_API_URL before any command runs.
+// detectApiUrl() in api-client.js checks process.env.DESCIX_API_URL first.
+
+const ENV_URL_MAP = {
+  dev: null,  // null = use workspace.json default (local dev server)
+  demo: 'https://demo.descix.net',
+  prod: 'https://descix.net',
+};
+
+program.hook('preAction', (thisCommand) => {
+  const opts = thisCommand.opts();
+
+  // --api-url takes highest priority
+  if (opts.apiUrl) {
+    process.env.DESCIX_API_URL = opts.apiUrl;
+    return;
+  }
+
+  // --env maps to known URLs
+  if (opts.env) {
+    const envName = opts.env.toLowerCase();
+    if (!(envName in ENV_URL_MAP)) {
+      console.error(chalk.red(`Unknown environment: ${opts.env}. Use: dev, demo, prod`));
+      process.exit(1);
+    }
+    const url = ENV_URL_MAP[envName];
+    if (url) {
+      process.env.DESCIX_API_URL = url;
+    }
+    // For 'dev', don't set — let workspace.json resolve naturally
+  }
+});
 
 // ============ Authentication Commands (No Auth Required) ============
 

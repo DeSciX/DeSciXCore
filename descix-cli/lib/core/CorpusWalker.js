@@ -22,7 +22,7 @@ import { minimatch } from 'minimatch';
  */
 const PROCESSABLE_EXTENSIONS = new Set([
   '.md', '.txt', '.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx',
-  '.py', '.rs', '.go', '.sol', '.lean', '.jsonl',
+  '.py', '.rs', '.go', '.sol', '.lean', '.json', '.jsonl',
   '.yaml', '.yml', '.toml', '.csv', '.tex', '.sh', '.bash'
 ]);
 
