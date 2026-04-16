@@ -42,11 +42,10 @@ program
 // Maps --env flag to DESCIX_API_URL before any command runs.
 // detectApiUrl() in api-client.js checks process.env.DESCIX_API_URL first.
 
-const ENV_URL_MAP = {
-  dev: null,  // null = use workspace.json default (local dev server)
-  demo: 'https://demo.descix.net',
-  prod: 'https://descix.net',
-};
+// Derive ephemeral --env URL map from the canonical WorkspaceConfig.ENV_MAP
+const ENV_URL_MAP = Object.fromEntries(
+  Object.entries(WorkspaceConfig.ENV_MAP).map(([k, v]) => [k, v.url])
+);
 
 program.hook('preAction', (thisCommand) => {
   const opts = thisCommand.opts();
@@ -2316,13 +2315,13 @@ siteCommand
     }
   });
 
-// site upload - Deploy to GCS (context-aware, replaces deploy)
+// site upload - Deploy to GCS (context-aware, manifest-aware)
 siteCommand
   .command('upload')
-  .description('Upload site to GCS and update app metadata')
+  .description('Upload site to GCS and update app metadata (uses .descix/manifests/site.json when present)')
   .option('-c, --community <id>', 'Community ID (auto-detects from context)')
   .option('-a, --app <id>', 'App ID (auto-detects from context)')
-  .option('-p, --path <localPath>', 'Local directory to deploy', './site')
+  .option('-p, --path <localPath>', 'Local directory to deploy (ignored when site manifest exists)', './site')
   .option('--preview', 'Deploy to preview path')
   .option('--full', 'Force full upload (ignore delta)')
   .option('--dry-run', 'Show what would be deployed')
@@ -2331,92 +2330,144 @@ siteCommand
     try {
       const apiClient = new DeSciXApiClient();
       await requireAuth(apiClient);
-      
+
       // Load workspace context
       const workspaceConfig = await WorkspaceConfig.load();
       const ctx = workspaceConfig.resolveContextWithOptions(options);
-      
-      const communityId = ctx.communityId;
+
+      let communityId = ctx.communityId;
       const appId = ctx.appId;
-      
-      if (!communityId || !appId) {
-        console.error(chalk.red('\n❌ Community and App ID required.'));
-        console.log(chalk.gray('  Either provide -c and -a flags, or cd into an app directory\n'));
+
+      if (!appId) {
+        console.error(chalk.red('\n❌ App ID required.'));
+        console.log(chalk.gray('  Either provide -a flag, or cd into an app directory\n'));
         process.exit(1);
       }
-      
-      // Import GitUtils for file hashing
-      const { GitUtils } = await import('@descix/sdk/integrations/git');
-      const mime = (await import('mime-types')).default;
-      
-      const localPath = path.resolve(options.path);
-      
-      // Check if directory exists
-      try {
-        const stat = await fs.stat(localPath);
-        if (!stat.isDirectory()) {
-          throw new Error(`Path is not a directory: ${localPath}`);
-        }
-      } catch (err) {
-        if (err.code === 'ENOENT') {
-          throw new Error(`Directory not found: ${localPath}`);
-        }
-        throw err;
+
+      // Resolve app root from workspace config
+      const appConfig = workspaceConfig.getAppByAppId(appId);
+
+      // Derive communityId from workspace config if not provided.
+      // Fallback: for NFT apps, community_id === app_id (convention).
+      // The backend will validate this via hydrateCommunityIdFromProducts.
+      if (!communityId) {
+        communityId = appConfig?.communityId || appId;
       }
-      
-      // Get Git status
+      const appRoot = appConfig?.absolutePath || path.resolve('.');
+
+      // Check for site manifest (.descix/manifests/site.json)
+      const { loadSiteManifest } = await import('../lib/core/ManifestLoader.js');
+      const siteManifest = await loadSiteManifest(appRoot);
+
+      // Import mime for content types
+      const mime = (await import('mime-types')).default;
+      const { GitUtils } = await import('@descix/sdk/integrations/git');
       const gitUtils = new GitUtils(process.cwd());
       const gitStatus = await gitUtils.getStatus();
-      
-      console.log(chalk.cyan(`\n🚀 Site Upload: ${localPath} → GCS\n`));
+
+      let fileList;      // Array<{ path, hash, size, content_type }>
+      let localFiles;    // Object for delta comparison { path: { hash, size } }
+      let sourceLabel;   // For display
+
+      if (siteManifest) {
+        // ── Manifest-driven flow ──
+        const { walkSite } = await import('../lib/core/SiteWalker.js');
+
+        // Run buildCommand if specified
+        if (siteManifest.buildCommand) {
+          console.log(chalk.cyan(`\n  Running build: ${siteManifest.buildCommand}\n`));
+          const { exec } = await import('child_process');
+          const { promisify } = await import('util');
+          const execAsync = promisify(exec);
+          await execAsync(siteManifest.buildCommand, { cwd: appRoot });
+          console.log(chalk.green('  Build completed.\n'));
+        }
+
+        const walkResult = await walkSite(siteManifest, appRoot);
+        sourceLabel = `manifest (${siteManifest._manifestPath})`;
+
+        fileList = walkResult.files.map(f => ({
+          path: f.deployPath,
+          hash: f.hash,
+          size: f.size,
+          content_type: mime.lookup(f.deployPath) || 'application/octet-stream',
+          _absolutePath: f.absolutePath  // kept for upload reads
+        }));
+
+        // Build localFiles object for delta comparison
+        localFiles = {};
+        for (const f of fileList) {
+          localFiles[f.path] = { hash: f.hash, size: f.size };
+        }
+      } else {
+        // ── Legacy flat-directory flow (unchanged) ──
+        const localPath = path.resolve(options.path);
+        sourceLabel = localPath;
+
+        try {
+          const stat = await fs.stat(localPath);
+          if (!stat.isDirectory()) {
+            throw new Error(`Path is not a directory: ${localPath}`);
+          }
+        } catch (err) {
+          if (err.code === 'ENOENT') {
+            throw new Error(`Directory not found: ${localPath}`);
+          }
+          throw err;
+        }
+
+        const rawFiles = await gitUtils.getFileHashes(localPath);
+        localFiles = rawFiles;
+        fileList = Object.entries(rawFiles).map(([filePath, info]) => ({
+          path: filePath,
+          hash: info.hash,
+          size: info.size,
+          content_type: mime.lookup(filePath) || 'application/octet-stream',
+          _absolutePath: path.join(localPath, filePath)
+        }));
+      }
+
+      console.log(chalk.cyan(`\n  Site Upload: ${appId} → GCS\n`));
+      console.log(chalk.gray(`  Source: ${sourceLabel}`));
       console.log(chalk.gray(`  Target: ${communityId}/${appId}`));
       if (options.preview) console.log(chalk.yellow(`  Mode: PREVIEW`));
       if (gitStatus.isGitRepo) {
         console.log(chalk.gray(`  Git: ${gitStatus.branch} @ ${gitStatus.shortHash}`));
       }
-      
-      // 1. Compute local file hashes
-      const localFiles = await gitUtils.getFileHashes(localPath);
-      const fileList = Object.entries(localFiles).map(([filePath, info]) => ({
-        path: filePath,
-        hash: info.hash,
-        size: info.size,
-        content_type: mime.lookup(filePath) || 'application/octet-stream'
-      }));
-      
+
       console.log(chalk.gray(`\n  Found ${fileList.length} files\n`));
-      
+
       if (fileList.length === 0) {
-        console.log(chalk.yellow('  No files found in directory. Nothing to deploy.\n'));
+        console.log(chalk.yellow('  No files found. Nothing to deploy.\n'));
         return;
       }
-      
+
       // 2. Request deploy token with file list
       const tokenResponse = await apiClient.invoke('get_site_deploy_token', {
         community_id: communityId,
         app_id: appId,
-        files: fileList,
+        files: fileList.map(f => ({ path: f.path, hash: f.hash, size: f.size, content_type: f.content_type })),
         preview: options.preview || false
       });
-      
+
       const { signed_urls, existing_manifest, token_id, site_url } = tokenResponse.message;
-      
+
       // 3. Determine delta
       let filesToUpload = fileList;
       let filesToDelete = [];
-      
+
       if (!options.full && existing_manifest) {
         const delta = gitUtils.compareSyncState(localFiles, existing_manifest);
-        filesToUpload = fileList.filter(f => 
+        filesToUpload = fileList.filter(f =>
           delta.added.includes(f.path) || delta.modified.includes(f.path)
         );
         filesToDelete = delta.deleted;
-        
+
         console.log(chalk.gray(`  Delta: ${delta.added.length} added, ${delta.modified.length} modified, ${delta.unchanged.length} unchanged, ${delta.deleted.length} deleted`));
       }
-      
+
       if (options.dryRun) {
-        console.log(chalk.yellow('\n📋 Dry run - would upload:'));
+        console.log(chalk.yellow('\n  Dry run - would upload:'));
         if (filesToUpload.length === 0) {
           console.log(chalk.gray('  (no files to upload)'));
         } else {
@@ -2429,56 +2480,56 @@ siteCommand
         console.log(chalk.gray(`\n  Site URL: ${site_url}\n`));
         return;
       }
-      
+
       if (filesToUpload.length === 0) {
-        console.log(chalk.green('\n✅ Site already up to date on GCS.'));
+        console.log(chalk.green('\n  Site already up to date on GCS.'));
         console.log(chalk.gray('  Ensuring app metadata is synchronized...'));
-        // Fall through to confirm_site_deploy to ensure DB is updated with relative path
+        // Fall through to confirm_site_deploy to ensure DB is updated
       } else {
         // 4. Upload files directly to GCS using signed URLs
         console.log(chalk.gray(`\n  Uploading ${filesToUpload.length} files...`));
-        
+
         let uploadedCount = 0;
         let uploadErrors = [];
-        
+
         for (const file of filesToUpload) {
           const signedUrl = signed_urls[file.path];
           if (!signedUrl) {
             uploadErrors.push(`No signed URL for: ${file.path}`);
             continue;
           }
-          
+
           try {
-            const content = await fs.readFile(path.join(localPath, file.path));
-            
+            const content = await fs.readFile(file._absolutePath);
+
             const response = await fetch(signedUrl, {
               method: 'PUT',
-              headers: { 
+              headers: {
                 'Content-Type': file.content_type,
                 ...(options.noCache ? { 'Cache-Control': 'no-cache' } : {})
               },
               body: content
             });
-            
+
             if (!response.ok) {
               uploadErrors.push(`Failed to upload ${file.path}: ${response.status} ${response.statusText}`);
-              console.log(chalk.red(`  ✗ ${file.path}`));
+              console.log(chalk.red(`  x ${file.path}`));
             } else {
               uploadedCount++;
-              console.log(chalk.green(`  ✓ ${file.path}`));
+              console.log(chalk.green(`  + ${file.path}`));
             }
           } catch (err) {
             uploadErrors.push(`Error uploading ${file.path}: ${err.message}`);
-            console.log(chalk.red(`  ✗ ${file.path}`));
+            console.log(chalk.red(`  x ${file.path}`));
           }
         }
-        
+
         if (uploadErrors.length > 0) {
-          console.log(chalk.yellow(`\n⚠️  ${uploadErrors.length} errors during upload:`));
+          console.log(chalk.yellow(`\n  ${uploadErrors.length} errors during upload:`));
           uploadErrors.forEach(e => console.log(chalk.red(`  - ${e}`)));
         }
       }
-      
+
       // 5. Confirm deployment (ALWAYS call this to ensure DB is updated)
       const confirmResponse = await apiClient.invoke('confirm_site_deploy', {
         community_id: communityId,
@@ -2489,7 +2540,7 @@ siteCommand
           app_id: appId,
           community_id: communityId,
           files: localFiles,
-          source_path: options.path
+          source_path: siteManifest ? 'manifest' : options.path
         },
         git_info: gitStatus.isGitRepo ? {
           commit: gitStatus.shortHash,
@@ -2497,25 +2548,25 @@ siteCommand
         } : null,
         preview: options.preview || false
       });
-      
+
       const result = confirmResponse.message;
-      
-      console.log(chalk.green(`\n✅ Site uploaded successfully!\n`));
+
+      console.log(chalk.green(`\n  Site uploaded successfully!\n`));
       console.log(chalk.cyan(`  URL: ${result.site_url}`));
       console.log(chalk.gray(`  Files: ${result.files_count}`));
       console.log(chalk.gray(`  Deployed: ${result.deployed_at}`));
       if (result.preview) {
         console.log(chalk.yellow(`  Mode: PREVIEW`));
       }
-      
+
       if (!options.preview) {
         console.log(chalk.gray(`\n  For local development, run:`));
         console.log(chalk.cyan(`    descix site servelocal <port>\n`));
       }
       console.log('');
-      
+
     } catch (error) {
-      console.error(chalk.red(`\n❌ Upload failed: ${error.message}\n`));
+      console.error(chalk.red(`\n  Upload failed: ${error.message}\n`));
       process.exit(1);
     }
   });
@@ -3846,6 +3897,19 @@ configCommand
       await configCommands.setSyncMode(mode, options);
     } catch (error) {
       console.error(chalk.red(`\n❌ ${error.message}\n`));
+      process.exit(1);
+    }
+  });
+
+configCommand
+  .command('set-env')
+  .description('Set target environment persistently (updates workspace.json, auto-reconnects)')
+  .argument('<env>', 'Environment: dev, demo, prod, or custom name')
+  .option('-u, --url <url>', 'API URL override (for custom environments)')
+  .action(async (env, options) => {
+    try {
+      await configCommands.setEnv(env, options);
+    } catch (error) {
       process.exit(1);
     }
   });

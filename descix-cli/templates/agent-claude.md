@@ -216,6 +216,107 @@ Every app has three parts:
 - `descix status` may suggest `descix setup` — that command doesn't exist. Use
   `descix init -c <community> -a <app> -p .` instead.
 
+## Cloud Brain Alignment
+
+After calling `descix_doctor`, check the `alignment` and `available_kbs` fields:
+
+### If `alignment` is present (already configured)
+You are bonded to cloud knowledge bases. **BEFORE starting any task**, query them:
+
+**Multi-app query (preferred — richer context):**
+```bash
+descix chat --apps APP1,APP2 -q "YOUR SPECIFIC QUESTION" --level 3 --thinking -1 --tokens
+```
+
+**Single-app query:**
+```bash
+descix chat --app APP_ID -q "YOUR SPECIFIC QUESTION" --level 3 --tokens
+```
+
+**MCP tool (if shell unavailable):**
+```
+ask_question_to_app({ app_id: "APP_ID", user_input: "YOUR SPECIFIC QUESTION" })
+```
+
+**Query parameters:**
+- `--level 1-5` — intelligence (1=fast lookup, 3=balanced, 5=deep reasoning)
+- `--thinking -1` — dynamic thinking budget; `0`=off, `N`=fixed tokens
+- `--tokens` — show token usage in response
+- Omit `--new` to continue the session thread (Gemini remembers context)
+
+Query **multiple times** during a task — not just at the start. Cross-reference KB answers with local files.
+
+### If `alignment` is null (not yet configured)
+Follow Checkpoint 4 from the doctor's `next_steps`:
+1. Show the user apps from `available_kbs` (from the doctor report)
+2. Ask: "Which knowledge bases should I always consult when helping you in this project?"
+3. Write their selections to `.descix/alignment.json`:
+```json
+{
+  "version": "1.0",
+  "apps": [
+    { "app_id": "selected_app", "kb": "General", "role": "user's description of this KB's domain" }
+  ],
+  "defaults": { "level": 3, "thinking": -1, "tokens": true }
+}
+```
+4. If user wants an app they don't have access to, guide them to `find_communities` to discover and join.
+
+### If `claude_code_detected` is true (Claude Code environment)
+Also create these files for always-on dynamic alignment:
+
+**`.claude/settings.json`** (merge with existing if present):
+```json
+{
+  "mcpServers": {
+    "descix": {
+      "command": "npx",
+      "args": ["descix", "mcp-serve"]
+    }
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/cloud-brain.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+**`.claude/hooks/cloud-brain.sh`** (make executable):
+```bash
+#!/bin/bash
+set -euo pipefail
+PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(pwd)}"
+ALIGNMENT="$PROJECT_DIR/.descix/alignment.json"
+[ ! -f "$ALIGNMENT" ] && exit 0
+REMINDER=$(node -e '
+const fs = require("fs");
+const cfg = JSON.parse(fs.readFileSync(process.argv[1], "utf-8"));
+const apps = cfg.apps || [];
+if (!apps.length) { process.exit(0); }
+const appList = apps.map(a => a.app_id).join(", ");
+const appsCsv = apps.map(a => a.app_id).join(",");
+const level = (cfg.defaults && cfg.defaults.level) || 3;
+const thinking = (cfg.defaults && cfg.defaults.thinking !== undefined) ? cfg.defaults.thinking : -1;
+const tokens = (cfg.defaults && cfg.defaults.tokens) ? "--tokens" : "";
+const roles = apps.map(a => "  • " + a.app_id + ": " + a.role).join("\n");
+const reminder = "CLOUD BRAIN ACTIVE — Aligned apps: " + appList + "\n\nYOU MUST query your cloud knowledge bases BEFORE starting any task. Do not guess when the KB knows.\n\nApps and their domains:\n" + roles + "\n\nMulti-app query:\n  descix chat --apps " + appsCsv + " -q \"YOUR QUESTION\" --level " + level + " --thinking " + thinking + " " + tokens + "\n\nSingle-app query:\n  descix chat --app APP_ID -q \"YOUR QUESTION\" --level " + level + " " + tokens + "\n\nMCP fallback:\n  ask_question_to_app({ app_id: \"APP_ID\", user_input: \"YOUR QUESTION\" })\n\nThreading: omit --new to continue session. Use --new only for unrelated topics.\nQuery MULTIPLE TIMES during a task. Cross-reference KB answers with local files.";
+process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: reminder } }));
+' "$ALIGNMENT" 2>/dev/null)
+[ -n "$REMINDER" ] && echo "$REMINDER"
+```
+
+This hook injects a reminder on EVERY prompt turn, surviving context compaction.
+
 ## After Bootstrap
 
 Once you understand the user's intent and have verified the success criteria,

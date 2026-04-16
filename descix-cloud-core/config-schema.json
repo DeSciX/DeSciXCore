@@ -4,7 +4,7 @@
   "version": "1.1.0",
   "bootstrap_keys": {
     "description": "Keys loaded from .env/.yaml BEFORE Secret Manager access (required for bootstrap)",
-    "keys": ["CONFIG_SECRET_NAME","CONFIG_SECRET_VERSION","CONTRACT_SECRET_NAME","DEPLOY_ENV","IS_BOT_ENABLED","BYPASS_PUBSUB","DEBUG_FUNCTION_FRAMEWORK","DEBUG_LOCAL","DISCORD_BOT_URL","POWCH_APP_URL","PUB_SUB_DISCORD_BOT_REPLY"]
+    "keys": ["CONFIG_SECRET_NAME","CONFIG_SECRET_VERSION","CONTRACT_SECRET_NAME","DEPLOY_ENV","IS_BOT_ENABLED","BYPASS_PUBSUB","DEBUG_FUNCTION_FRAMEWORK","DEBUG_LOCAL","DISCORD_BOT_URL","POWCH_APP_URL","PUB_SUB_DISCORD_BOT_REPLY","PUB_SUB_DISCORD_EVENTS","DISCORD_VERIFIED_ROLE_NAME"]
   },
   "boolean_keys": {
     "description": "Keys that should be parsed as boolean (value === 'true')",

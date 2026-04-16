@@ -128,6 +128,18 @@ platform routing tests.
 - `descix status` may show "No workspace found" even when config exists — use explicit flags
 - `descix status` may suggest `descix setup` — use `descix init` instead
 
+## Cloud Brain Alignment
+
+After calling `descix_doctor`, check the `alignment` field:
+
+**If aligned:** Query your cloud KBs BEFORE starting any task:
+```
+ask_question_to_app({ app_id: "APP_ID", user_input: "YOUR SPECIFIC QUESTION" })
+```
+The `alignment.apps` array lists which app_ids to query. Ask specific questions, query multiple times.
+
+**If not aligned:** Follow Checkpoint 4 from the doctor's `next_steps` — ask the user which KBs to bond to, write `.descix/alignment.json`.
+
 ## After Bootstrap
 
 Rewrite this file with project-specific context once you understand the user's intent.

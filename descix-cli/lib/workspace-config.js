@@ -635,15 +635,79 @@ export class WorkspaceConfig {
 
   /**
    * Get API URL for the current workspace.
-   * In DEV mode, derives from env.platform.microservice.port (v2.1 format).
+   * Priority: env.apiUrl > legacy this.apiUrl > derive from platform port (DEV) > production.
    * Eliminates the need for DESCIX_API_URL in local dev.
    * @returns {string}
    */
   getApiUrl() {
+    if (this.env?.apiUrl) return this.env.apiUrl;
     if (this.apiUrl) return this.apiUrl;
     const platformPort = this.env?.platform?.microservice?.port;
     if (platformPort && this.env?.environment === 'DEV') return `https://localhost:${platformPort}`;
     return 'https://descix.net';
+  }
+
+  /**
+   * Known environment URL mapping.
+   * Shared between `descix config set-env` and the `--env` global flag.
+   * @type {Object.<string, {url: string|null, secretLabel: string}>}
+   */
+  static ENV_MAP = {
+    dev:  { url: null, secretLabel: 'DEBUG' },
+    demo: { url: 'https://demo.descix.net', secretLabel: 'DEMO' },
+    prod: { url: 'https://descix.net', secretLabel: 'LIVE' },
+  };
+
+  /**
+   * Persistently set the target environment in workspace.json.
+   *
+   * Updates env.environment and env.apiUrl, then saves.
+   * For DEV, clears apiUrl so getApiUrl() falls back to localhost:{port}.
+   * For known envs, uses the canonical URL from ENV_MAP.
+   * For custom envs, uses --url or defaults to https://{name}.descix.net.
+   *
+   * @param {string} envName - Environment name (dev, demo, prod, or custom)
+   * @param {string|null} [apiUrl] - Explicit API URL override (for custom envs)
+   * @returns {Promise<{configPath: string, environment: string, apiUrl: string|null, secretLabel: string}>}
+   */
+  async setEnvironment(envName, apiUrl = null) {
+    const normalized = envName.toLowerCase();
+    const known = WorkspaceConfig.ENV_MAP[normalized];
+
+    let resolvedUrl;
+    let secretLabel;
+    let envLabel;
+
+    if (known) {
+      resolvedUrl = apiUrl || known.url; // explicit --url overrides even for known envs
+      secretLabel = known.secretLabel;
+      envLabel = normalized.toUpperCase();
+    } else {
+      resolvedUrl = apiUrl || `https://${normalized}.descix.net`;
+      secretLabel = normalized.toUpperCase();
+      envLabel = normalized.toUpperCase();
+    }
+
+    // Update in-memory state
+    if (!this.env) this.env = {};
+    this.env.environment = envLabel;
+
+    if (resolvedUrl) {
+      this.env.apiUrl = resolvedUrl;
+    } else {
+      // DEV: remove apiUrl so getApiUrl() derives from platform port
+      delete this.env.apiUrl;
+    }
+
+    // Save to disk
+    const configPath = await this.save();
+
+    return {
+      configPath,
+      environment: envLabel,
+      apiUrl: resolvedUrl,
+      secretLabel
+    };
   }
   
   /**

@@ -104,6 +104,47 @@ export async function init(env = 'prod', options = {}) {
 }
 
 /**
+ * Set target environment persistently in workspace.json.
+ * After switching, auto-runs reconnect against the new API URL.
+ *
+ * @param {string} envName - Environment: dev, demo, prod, or custom name
+ * @param {Object} options - { url?: string } optional URL override for custom envs
+ */
+export async function setEnv(envName, options = {}) {
+  try {
+    const workspaceConfig = await WorkspaceConfig.load();
+
+    const result = await workspaceConfig.setEnvironment(envName, options.url || null);
+
+    console.log(chalk.green('\n✅ Environment switched!\n'));
+    console.log(chalk.white(`   Environment:   ${result.environment}`));
+    console.log(chalk.white(`   API URL:       ${result.apiUrl || `https://localhost:${workspaceConfig.env?.platform?.microservice?.port || '4000'} (local)`}`));
+    console.log(chalk.white(`   Secret Label:  ${result.secretLabel}`));
+    console.log(chalk.gray(`   Saved to:      ${result.configPath}\n`));
+
+    // Auto-reconnect against the new environment
+    if (result.apiUrl) {
+      process.env.DESCIX_API_URL = result.apiUrl;
+    } else {
+      delete process.env.DESCIX_API_URL;
+    }
+
+    console.log(chalk.cyan('   Reconnecting to new environment...\n'));
+    try {
+      const { reconnect } = await import('./auth.js');
+      await reconnect();
+    } catch (err) {
+      console.log(chalk.yellow(`\n   ⚠️  Auto-reconnect failed: ${err.message}`));
+      console.log(chalk.gray('   Run "descix reconnect" or "descix login" manually.\n'));
+    }
+
+  } catch (error) {
+    console.error(chalk.red(`\n❌ ${error.message}\n`));
+    throw error;
+  }
+}
+
+/**
  * Set sync_mode for an app
  * @param {string} mode - "git" or "drive"
  * @param {Object} options - { community, app }
