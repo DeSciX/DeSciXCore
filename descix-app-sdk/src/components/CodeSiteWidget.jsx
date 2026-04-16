@@ -1,6 +1,6 @@
 // CodeSiteWidget.jsx
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Paper, IconButton } from '@mui/material';
+import { Box, Paper, IconButton, Typography } from '@mui/material';
 import ChatIcon from '@mui/icons-material/Chat';
 import CloseIcon from '@mui/icons-material/Close';
 import { gcsMediaPath } from '../util/AppData';
@@ -9,10 +9,37 @@ import { useAppContext } from '../AppContext';
 import ChatWidget from './ChatWidget';
 
 /**
+ * Platform app IDs that should NOT render in the CodeSite iframe.
+ * - daita: The Platform PWA itself — rendering it would be recursive (PWA inside PWA).
+ * - powch: The identity/wallet provider — already embedded as PowchSideBarWidget.
+ *          Rendering it in CodeSite would create a duplicate/conflicting instance.
+ *
+ * Design note: A metadata-driven approach (e.g., `is_platform_app` flag in Products)
+ * would be more extensible, but hardcoding is appropriate for only 2 platform apps.
+ */
+const PLATFORM_APP_IDS = ['daita', 'powch'];
+
+const PLATFORM_APP_MESSAGES = {
+  daita: {
+    title: 'DeSciX Platform',
+    description: 'You are currently using this application (The DeSciX Store).',
+    detail: 'To view the source code or contribute, please visit our repository.'
+  },
+  powch: {
+    title: 'Powch Identity Wallet',
+    description: 'Powch is your identity wallet — use the sidebar to access it.',
+    detail: 'Powch provides zero-knowledge authentication, WebAuthn passkeys, and self-custody wallet services across all DeSciX apps.'
+  }
+};
+
+/**
  * CodeSiteWidget
- * 
+ *
  * Displays an app's CodeSite in an iframe with an optional Chat split-view.
  * Leverages direct interframe scripting since all frames are same-site.
+ *
+ * Platform apps (daita, powch) are guarded from iframe rendering to prevent
+ * recursion (daita) and duplicate instances (powch). See PLATFORM_APP_IDS.
  */
 const CodeSiteWidget = ({ url, enableChat = true, chatPosition = 'right', chatWidth = 0.25 }) => {
   const iframeRef = useRef(null);
@@ -20,13 +47,13 @@ const CodeSiteWidget = ({ url, enableChat = true, chatPosition = 'right', chatWi
   const [chatOpen, setChatOpen] = useState(enableChat);
 
   const iframeSrc = useMemo(() => gcsMediaPath(url), [url]);
-  
-  // Prevent recursion: If we are the Shell (daita) viewing daita, show placeholder
-  const isSelfView = selectedApp?.app_id === 'daita' && !window.__STANDALONE_APP_ID__;
+
+  // Prevent rendering platform apps in iframe (recursion for daita, duplication for powch)
+  const isPlatformApp = PLATFORM_APP_IDS.includes(selectedApp?.app_id) && !window.__STANDALONE_APP_ID__;
 
   useEffect(() => {
     const iframeEl = iframeRef.current;
-    if (!iframeEl || !iframeSrc || isSelfView) return;
+    if (!iframeEl || !iframeSrc || isPlatformApp) return;
     
     const onLoad = () => {
       // Log CodeSite view event
@@ -52,7 +79,7 @@ const CodeSiteWidget = ({ url, enableChat = true, chatPosition = 'right', chatWi
    * This leverages allow-same-origin to directly invoke functions exposed by the CodeSite.
    */
   const handleExecuteAction = (functionName, args) => {
-    if (isSelfView) return;
+    if (isPlatformApp) return;
     const childWindow = iframeRef.current?.contentWindow;
     if (!childWindow) {
       console.warn('[CodeSiteWidget] Cannot execute action: iframe not loaded');
@@ -94,18 +121,19 @@ const CodeSiteWidget = ({ url, enableChat = true, chatPosition = 'right', chatWi
 
   if (!iframeSrc) return null;
 
-  if (isSelfView) {
+  if (isPlatformApp) {
+    const msg = PLATFORM_APP_MESSAGES[selectedApp?.app_id] || PLATFORM_APP_MESSAGES.daita;
     return (
       <Box sx={{ display: 'flex', height: '90vh', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 2 }}>
         <Paper elevation={3} sx={{ p: 4, textAlign: 'center', maxWidth: 600 }}>
           <Typography variant="h5" gutterBottom>
-            {selectedApp?.app_name || 'Platform Root'}
+            {selectedApp?.app_name || msg.title}
           </Typography>
           <Typography variant="body1" color="text.secondary" paragraph>
-            You are currently using this application (The DeSciX Store).
+            {msg.description}
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            To view the source code or contribute, please visit our repository.
+            {msg.detail}
           </Typography>
         </Paper>
       </Box>

@@ -1,0 +1,20 @@
+{
+  "$comment": "Schema reference for .descix/alignment.json — cloud brain alignment config",
+  "version": "1.0",
+  "apps": [
+    {
+      "app_id": "example-app",
+      "kb": "General",
+      "role": "Description of what this KB covers"
+    }
+  ],
+  "defaults": {
+    "level": 3,
+    "thinking": -1,
+    "tokens": true
+  },
+  "persona_cache": {
+    "path": ".descix/cloud-persona.md",
+    "ttl_seconds": 3600
+  }
+}

@@ -267,6 +267,14 @@ try {
         '1. **Objective:** "Do you want to explore existing apps, or build something new?"',
         '2. **Community/App:** Use find_communities + list_apps_for_community, then ask: "Which community and app should this project target?"',
         '3. **Environment:** "Should this run against local dev backend (localhost:4000) or hosted API (descix.net)?"',
+        '4. **Cloud Brain:** "Which knowledge bases should I always consult when helping you?"',
+        '   Use the available_kbs field from this doctor report to show apps the user has access to.',
+        '   Present each with its app_id and community.',
+        '   User selects which ones to align to.',
+        '   Write their selections to .descix/alignment.json:',
+        '   { "version": "1.0", "apps": [{ "app_id": "...", "kb": "General", "role": "user\'s description" }],',
+        '     "defaults": { "level": 3, "thinking": -1, "tokens": true } }',
+        '   If user wants an app they don\'t have: guide them to join the community via find_communities.',
         '',
         '## Canonical setup commands (run in terminal)',
         '```',
@@ -305,6 +313,43 @@ try {
       report.warnings.push('No agent instruction files found. Run "descix quickstart" to generate them.');
     }
 
+    // Cloud brain alignment — read local alignment config
+    const alignmentPath = path.join(checkRoot, '.descix', 'alignment.json');
+    try {
+      const raw = await fs.readFile(alignmentPath, 'utf-8');
+      report.alignment = JSON.parse(raw);
+    } catch {
+      report.alignment = null;
+    }
+
+    // Detect Claude Code environment
+    try {
+      await fs.access(path.join(checkRoot, '.claude'));
+      report.claude_code_detected = true;
+    } catch {
+      report.claude_code_detected = false;
+    }
+
+    // Discover available KBs when authenticated and alignment is needed
+    if (walletInfo && (report.setup_needed || !report.alignment)) {
+      try {
+        const purchasesResult = await apiClient.invoke(
+          'fetch_my_purchases',
+          { product_type: 'APP' },
+          { allowGuest: false }
+        );
+        const purchasedApps = purchasesResult?.message?.apps || [];
+        const kbApps = purchasedApps.map(app => ({
+          app_id: app.app_id || app.appId || app.id,
+          community_id: app.community_id || app.communityId,
+          name: app.name || app.app_id || app.appId || app.id,
+        })).filter(a => a.app_id);
+        report.available_kbs = kbApps;
+      } catch {
+        report.available_kbs = null;
+      }
+    }
+
     // Remote verification (if requested, authenticated, and workspace configured)
     if (verifyRemote && walletInfo && freshContext?.appId) {
       try {
@@ -324,6 +369,15 @@ try {
       } catch (err) {
         report.warnings.push(`Could not verify remote state: ${err.message}`);
       }
+    }
+
+    // Suggest cloud brain alignment when workspace is configured but alignment is missing
+    if (!report.alignment && report.workspace?.configured) {
+      report.suggestions = report.suggestions || [];
+      report.suggestions.push(
+        'Cloud brain alignment not configured. Ask the user which knowledge bases to always consult. ' +
+        'Write selections to .descix/alignment.json.'
+      );
     }
 
     if (report.warnings.length === 0) {

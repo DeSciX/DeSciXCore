@@ -76,7 +76,12 @@ const GUEST_ALLOWED_COMMANDS = [
     'get_pool_market_overview', 'get_price_history', 'get_pool_token_info', 'get_migration_status',
     'list_services', 'get_service', 'service_health_check', 'platform_health',
     'verify_airdrop_wallet',
-    'admin_bootstrap_login'
+    'admin_bootstrap_login',
+    // Internal platform command dispatched by Pub/Sub subscriber (discord-events-{env}).
+    // The command is invoked only by trusted Pub/Sub messages published by
+    // authCommands.unlink_auth_provider. Authorization is enforced at the transport
+    // layer (Pub/Sub IAM) and, on the bot callback, by DESCIX_DISCORD_BOT_TOKEN.
+    'revoke_discord_role'
 ];
 
 function networkResponse(netStatus, authStatus, message) {
@@ -244,8 +249,8 @@ class CloudConfig {
                     console.log('[Config] Auto-detected DEV workspace from', workspacePath);
                     this.DEPLOY_ENV = 'dev';
                     this.DEBUG_LOCAL = true;
-                    this.CONFIG_SECRET_NAME = 'descix_config';
-                    this.CONFIG_SECRET_VERSION = 'DEV';
+                    this.CONFIG_SECRET_NAME = 'descix_config_dev';
+                    this.CONFIG_SECRET_VERSION = 'latest';
 
                     // Auto-detect port from workspace apps (v2.1 format)
                     this._autoDetectPort(workspace);
@@ -254,6 +259,17 @@ class CloudConfig {
         } catch (e) {
             // Ignore errors in production/CI where workspace.json might be missing
         }
+    }
+
+    /**
+     * Derive the Secret Manager version alias for shared secrets (elevated_credentials_descix,
+     * daita_contract_abi) that still use per-env aliases on a single secret.
+     * Per-env config secrets (descix_config_dev, descix_config_demo) use 'latest' as their
+     * version, but shared secrets continue to use env-specific aliases.
+     */
+    _getElevatedSecretVersion() {
+        if (this.CONFIG_SECRET_VERSION !== 'latest') return this.CONFIG_SECRET_VERSION;
+        return this.DEPLOY_ENV.toUpperCase();
     }
 
     _autoDetectPort(workspace) {
@@ -370,7 +386,7 @@ class CloudConfig {
                 this._mergeConfig(JSON.parse(secretPayload));
                 console.log(`[Config] Loaded from Secret Manager: ${this.CONFIG_SECRET_NAME}`);
             } catch (error) {
-                console.warn(`[Config] Secret Manager unavailable or failed:`, error.message);
+                throw new Error(`[CloudConfig] Secret Manager failed for ${this.CONFIG_SECRET_NAME}/${this.CONFIG_SECRET_VERSION}: ${error.message}`);
             }
 
             this._loadDevOverrides();
@@ -384,13 +400,16 @@ class CloudConfig {
 
             if (shouldLoadElevated) {
                 try {
+                    // Shared secrets (elevated_credentials, contract ABI) still use env-specific
+                    // aliases on a single secret, unlike the per-env descix_config_{env} pattern.
+                    const elevatedVersion = this._getElevatedSecretVersion();
                     if (!this.__googleApplicationCredentials) {
-                        const serviceAccountFileStr = await this.accessSecretVersion('elevated_credentials_descix', this.CONFIG_SECRET_VERSION);
+                        const serviceAccountFileStr = await this.accessSecretVersion('elevated_credentials_descix', elevatedVersion);
                         this.__googleApplicationCredentials = JSON.parse(serviceAccountFileStr);
                         console.log('[Config] Loaded Elevated Credentials');
                     }
                     if (process.env.CONTRACT_SECRET_NAME) {
-                        const abiSecret = await this.accessSecretVersion(process.env.CONTRACT_SECRET_NAME, this.CONFIG_SECRET_VERSION);
+                        const abiSecret = await this.accessSecretVersion(process.env.CONTRACT_SECRET_NAME, elevatedVersion);
                         this.DAITA_ABI = JSON.parse(abiSecret);
                         console.log('[Config] Loaded Contract ABI');
                     }

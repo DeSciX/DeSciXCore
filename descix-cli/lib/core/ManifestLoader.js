@@ -129,4 +129,82 @@ export async function loadManifests(appRoot, workspaceRoot, filterKbName = null)
   return manifests;
 }
 
-export default { loadManifest, loadManifests };
+// ============ Site Manifest Support ============
+
+/**
+ * Validate a site manifest against its schema.
+ * Required: sources (non-empty array).
+ * Each source: path (string) required; include, exclude optional string arrays.
+ * buildCommand: optional string.
+ *
+ * @param {Object} manifest - Parsed JSON manifest
+ * @param {string} filePath - Path to manifest file (for error messages)
+ * @throws {Error} If validation fails
+ */
+function validateSiteManifest(manifest, filePath) {
+  if (!manifest || typeof manifest !== 'object') {
+    throw new Error(`Invalid site manifest at ${filePath}: not a JSON object`);
+  }
+
+  if (!Array.isArray(manifest.sources) || manifest.sources.length === 0) {
+    throw new Error(`Invalid site manifest at ${filePath}: sources (non-empty array) is required`);
+  }
+
+  for (let i = 0; i < manifest.sources.length; i++) {
+    const src = manifest.sources[i];
+    if (!src.path || typeof src.path !== 'string') {
+      throw new Error(`Invalid site manifest at ${filePath}: sources[${i}].path (string) is required`);
+    }
+    if (src.include !== undefined && !Array.isArray(src.include)) {
+      throw new Error(`Invalid site manifest at ${filePath}: sources[${i}].include must be a string array`);
+    }
+    if (src.exclude !== undefined && !Array.isArray(src.exclude)) {
+      throw new Error(`Invalid site manifest at ${filePath}: sources[${i}].exclude must be a string array`);
+    }
+  }
+
+  if (manifest.buildCommand !== undefined && manifest.buildCommand !== null && typeof manifest.buildCommand !== 'string') {
+    throw new Error(`Invalid site manifest at ${filePath}: buildCommand must be a string or null`);
+  }
+}
+
+/**
+ * Load a site manifest from {appRoot}/.descix/manifests/site.json.
+ *
+ * Resolves source paths relative to the app's localPath in workspace.json.
+ * Each source entry gets include/exclude defaults applied.
+ *
+ * @param {string} appRoot - Absolute path to the app root directory
+ * @returns {Promise<Object|null>} Validated site manifest with _resolvedSources, or null if not found
+ */
+export async function loadSiteManifest(appRoot) {
+  const manifestPath = path.join(appRoot, '.descix', 'manifests', 'site.json');
+
+  let raw;
+  try {
+    raw = await fs.readFile(manifestPath, 'utf-8');
+  } catch (err) {
+    if (err.code === 'ENOENT') {
+      return null; // No site manifest — not an error
+    }
+    throw err;
+  }
+
+  const manifest = JSON.parse(raw);
+  validateSiteManifest(manifest, manifestPath);
+
+  // Resolve source paths relative to app root
+  manifest._resolvedSources = manifest.sources.map(src => ({
+    sourcePath: src.path,
+    absolutePath: path.resolve(appRoot, src.path),
+    include: src.include || [],  // empty = include everything
+    exclude: src.exclude || [],
+  }));
+
+  manifest._manifestPath = manifestPath;
+  manifest.buildCommand = manifest.buildCommand || null;
+
+  return manifest;
+}
+
+export default { loadManifest, loadManifests, loadSiteManifest };

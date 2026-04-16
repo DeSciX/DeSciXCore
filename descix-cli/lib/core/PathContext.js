@@ -287,8 +287,10 @@ export class PathContext {
    * @returns {string}
    */
   getApiUrl() {
-    if (this.config.apiUrl) return this.config.apiUrl;
     const env = this.config.env || {};
+    // env.apiUrl set by `descix config set-env` takes priority
+    if (env.apiUrl) return env.apiUrl;
+    if (this.config.apiUrl) return this.config.apiUrl;
     const platformPort = env.platform?.microservice?.port;
     if (platformPort && env.environment === 'DEV') return `https://localhost:${platformPort}`;
     return 'https://descix.net';
