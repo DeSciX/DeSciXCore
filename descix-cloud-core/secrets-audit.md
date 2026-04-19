@@ -54,7 +54,6 @@ This document audits all keys in [docs/secret.example.json](../secret.example.js
 | **DEFAULT_COMMUNITY_PROMPT** | System prompt template | communityManagement.js, ipStorageUtils | Active |
 | **WEB3_HARDHAT_PROVIDER_URL** | Hardhat local RPC | — | Deprecated (Rinkeby deprecated; use POLYGON_URL) |
 | **WEB3_INFURA_DEV_PROVIDER_URL** | Infura dev RPC | — | Deprecated |
-| **WEB3_INFURA_MAINNET_PROVIDER_URL** | Infura mainnet RPC | — | Deprecated |
 | **DAITA_TOKEN_ADDRESS_INFURA** | Legacy DAITA on Infura network | — | Deprecated (superseded by descix-chain) |
 | **DAITA_TOKEN_ADDRESS_MAINNET** | Legacy DAITA mainnet | — | Deprecated (superseded by descix-chain) |
 | **BITCOIN_TREASURY_WALLET** | Bitcoin treasury address | — | Ambiguous (in secret; chainWatcherService uses POLYGON_DAITA for polygon) |
