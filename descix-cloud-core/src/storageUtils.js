@@ -149,6 +149,16 @@ class FirestoreCollections {
     static IP_DOCS_VIEWS() { return new BaseStoragePath("IPDocsViews", "dict").getPath(); }
     static REP_VOTES() { return new BaseStoragePath("RepVotes", "dict").getPath(); }
     static MICRO_REP_VIEWS_CAP() { return new BaseStoragePath("MicroRepViewsCap", "dict").getPath(); }
+
+    // WS-ADMIN-B1 §5 Firestore schema additions (env-local DB, not descix-chain).
+    // AirdropVerifications: EIP-191 challenge records (extended in B1 to carry email +
+    // tokens_snapshot + batched/enqueued status — see stub-plan §5.2).
+    static AIRDROP_VERIFICATIONS() { return new BaseStoragePath("AirdropVerifications", "dict").getPath(); }
+    // pending_migrations: the batch-runner queue — NEW in B1 (stub-plan §5.1).
+    static PENDING_MIGRATIONS() { return new BaseStoragePath("pending_migrations", "dict").getPath(); }
+    // on_chain_log: mandatory audit row per CEO-D-ONCHAIN-POLICY for every on-chain write
+    // emitted by the platform (stub-plan §5.3).
+    static ON_CHAIN_LOG() { return new BaseStoragePath("on_chain_log", "dict").getPath(); }
 }
 
 // --- FirestoreDocumentPath ---
