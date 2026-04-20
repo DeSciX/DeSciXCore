@@ -112,12 +112,36 @@ export async function loadManifests(appRoot, workspaceRoot, filterKbName = null)
     return []; // No manifests directory — not an error
   }
 
-  const jsonFiles = files.filter(f => f.endsWith('.json'));
+  // M2 (2026-04-20): skip non-KB manifests.
+  // {app}/.descix/manifests/ can hold schemas other than KB manifests
+  // (notably site.json, which has its own schema — see loadSiteManifest).
+  // The legacy loader validated every .json as a KB manifest and blocked
+  // 'descix kb corpus sync' with `kb_name required` whenever a site.json
+  // was present. We now:
+  //   (a) explicitly skip known non-KB filenames (site.json)
+  //   (b) try-catch each load and treat validation failures as "not a KB
+  //       manifest" when the cause is a missing kb_name, rather than
+  //       aborting the whole operation.
+  // Any other error (I/O, malformed JSON) is still propagated with context.
+  const NON_KB_MANIFESTS = new Set(['site.json']);
+  const jsonFiles = files.filter(f => f.endsWith('.json') && !NON_KB_MANIFESTS.has(f));
   const manifests = [];
 
   for (const file of jsonFiles) {
     const manifestPath = path.join(manifestsDir, file);
-    const manifest = await loadManifest(manifestPath, workspaceRoot);
+    let manifest;
+    try {
+      manifest = await loadManifest(manifestPath, workspaceRoot);
+    } catch (err) {
+      // If the file is missing kb_name, it's not a KB manifest — skip it
+      // with a warning rather than aborting the whole operation. This
+      // lets future non-KB schemas coexist without editing this allowlist.
+      if (/kb_name \(string\) is required/.test(err.message)) {
+        console.warn(`  ⚠ Skipping non-KB manifest: ${file} (${err.message})`);
+        continue;
+      }
+      throw err;
+    }
 
     if (filterKbName && manifest.kb_name !== filterKbName) {
       continue;

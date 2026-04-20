@@ -2263,6 +2263,26 @@ corpusCommand
     }
   });
 
+// ============ KB Doctor (M3, 2026-04-20) ============
+// Compare local sync-state vs Pinecone vectorCount and scan recent sync
+// logs for per-file 0-chunk warnings. Exits non-zero on drift > threshold.
+kbCommand
+  .command('doctor')
+  .description('Detect drift between local sync-state and live Pinecone vector count')
+  .requiredOption('-a, --app <id>', 'App ID')
+  .requiredOption('-k, --kb <name>', 'KB name')
+  .option('-t, --threshold <ratio>', 'Drift threshold as a fraction (default: 0.05)', parseFloat)
+  .action(async (options) => {
+    try {
+      const apiClient = new DeSciXApiClient();
+      await requireAuth(apiClient);
+      await kbCommands.runKbDoctor(apiClient, options);
+    } catch (error) {
+      console.error(chalk.red(`\n❌ ${error.message}\n`));
+      process.exit(1);
+    }
+  });
+
 // ============ Site Commands ============
 
 const siteCommand = program
