@@ -59,8 +59,15 @@ async function chunkCorpusFile(fileEntry, context) {
     return [];
   }
 
-  // Skip files that are too large (> 500KB) — likely generated/minified
-  if (content.length > 500000) {
+  // M1 (2026-04-20): the 500KB silent-drop cap was removed after it was found
+  // to be the proximate cause of 77% of EGPT's concordance content missing from
+  // Pinecone. The Chunker now handles large files via content-aware splitting
+  // (structured-json / JS object-literal extraction / line-aware sliding window).
+  // A generous sanity cap protects against accidentally ingesting minified
+  // bundles or binary blobs that slipped past the manifest walker.
+  const MAX_SRC_BYTES = 20 * 1024 * 1024; // 20MB: anything bigger should be excluded in the manifest
+  if (content.length > MAX_SRC_BYTES) {
+    console.warn(`    ⚠ Skipping ${fileName}: ${content.length} bytes exceeds ${MAX_SRC_BYTES} sanity cap. Exclude via manifest syncignore.`);
     return [];
   }
 
@@ -280,13 +287,17 @@ export async function runCorpusSync(apiClient, options) {
             const chunks = await chunkCorpusFile(fileEntry, { appId, communityId, kbName });
             allChunks.push(...chunks);
 
-            if (options.verbose) {
+            if (chunks.length === 0) {
+              // M1 (2026-04-20): always surface 0-chunk files even without -v.
+              // These are the silent failures that caused the 77% EGPT gap.
+              // 'kb doctor' scans sync logs for this exact string.
+              console.log(chalk.yellow(`    ⚠ 0-chunk: ${fileEntry.relative_path} produced no chunks (check file type / content)`));
+            } else if (options.verbose) {
               console.log(chalk.gray(`    ${fileEntry.relative_path}: ${chunks.length} chunks`));
             }
           } catch (err) {
-            if (options.verbose) {
-              console.log(chalk.yellow(`    ${fileEntry.relative_path}: skipped (${err.message})`));
-            }
+            // Always surface errors — skipping silently is what produced the 2026-04-20 regression.
+            console.log(chalk.yellow(`    ⚠ skipped: ${fileEntry.relative_path} (${err.message})`));
           }
         }
 

@@ -672,6 +672,163 @@ export async function runKbCompare(apiClient, options) {
   }
 }
 
+
+// ============ M3: `descix kb doctor` — drift detector (2026-04-20) ============
+/**
+ * Compare local sync-state vs live Pinecone vectorCount, and scan the most
+ * recent verbose sync log (if any) for per-file 0-chunk warnings. Reports
+ * drift direction and exits non-zero when drift exceeds the threshold.
+ *
+ * WHY THIS EXISTS
+ * ---------------
+ * `descix kb corpus sync` trusts local sync-state/<KB>.json for delta
+ * detection. When the Pinecone index is reset (e.g. dev-env churn), the
+ * local state still lists all blob SHAs as "synced", so the next sync
+ * skips re-upload and orphan/loss goes undetected until a content
+ * retrieval test fails. This command surfaces the drift directly.
+ *
+ * BEHAVIOUR
+ * ---------
+ *   descix kb doctor -a <app> -k <kb>
+ *
+ *   (a) Queries Pinecone via get_kb_rag_status for vectorCount.
+ *   (b) Reads {appRoot}/.descix/sync-state/{kb}.json for total_chunks.
+ *   (c) Reports diff and direction:
+ *          Pinecone < sync-state  → LOST (chunks missing from Pinecone)
+ *          Pinecone > sync-state  → ORPHANS (Pinecone has extra vectors)
+ *          |drift| / local ≤ threshold  → HEALTHY
+ *   (d) Scans the most recent file matching logs/kb-sync-*.log for
+ *       '0-chunk' / 'skipped' warnings (these are the signal M1 wired
+ *       into corpus.js).
+ *   (e) Exits non-zero on drift above threshold (default: 5%).
+ */
+export async function runKbDoctor(apiClient, options) {
+  const { WorkspaceConfig } = await import('../workspace-config.js');
+  const workspaceConfig = await WorkspaceConfig.load();
+
+  const appId = options.app;
+  const kbName = options.kb;
+  if (!appId) throw new Error('-a, --app <id> is required');
+  if (!kbName) throw new Error('-k, --kb <name> is required');
+
+  const appMeta = workspaceConfig.getAppByAppId(appId);
+  if (!appMeta) throw new Error(`App '${appId}' not found in workspace.json`);
+  const appRoot = appMeta.absolutePath;
+  const communityId = appMeta.communityId || appMeta.community_id || null;
+
+  // Drift threshold (fraction). CEO guidance 2026-04-20: ~5% is reasonable.
+  const DRIFT_THRESHOLD = Number.isFinite(Number(options.threshold))
+    ? Number(options.threshold) : 0.05;
+
+  const scope = communityId ? `${communityId}/${appId}/${kbName}` : `${appId}/${kbName}`;
+  console.log(chalk.cyan(`\n🩺 kb doctor — ${scope}\n`));
+
+  // (a) Pinecone live vector count
+  let vectorCount = null;
+  let ragStatus = null;
+  try {
+    const res = await apiClient.invoke('get_kb_rag_status', {
+      app_id: appId,
+      kb_id: kbName
+    }, { allowGuest: false });
+    ragStatus = res.message || res;
+    vectorCount = ragStatus?.vectorCount;
+    if (typeof vectorCount !== 'number') {
+      throw new Error(`get_kb_rag_status returned no vectorCount: ${JSON.stringify(ragStatus)}`);
+    }
+  } catch (err) {
+    console.log(chalk.red(`  ✗ get_kb_rag_status failed: ${err.message}`));
+    throw err;
+  }
+
+  // (b) Local sync-state total_chunks
+  const syncStatePath = path.join(appRoot, '.descix', 'sync-state', `${kbName}.json`);
+  let localChunks = null;
+  let syncStateRaw = null;
+  try {
+    const raw = await fs.readFile(syncStatePath, 'utf-8');
+    syncStateRaw = JSON.parse(raw);
+    localChunks = syncStateRaw?.total_chunks;
+    if (typeof localChunks !== 'number') {
+      throw new Error(`sync-state has no total_chunks: ${syncStatePath}`);
+    }
+  } catch (err) {
+    if (err.code === 'ENOENT') {
+      console.log(chalk.yellow(`  ⚠ No local sync-state at ${syncStatePath}`));
+      console.log(chalk.gray(`    Run 'descix kb corpus sync -a ${appId} -k ${kbName}' first.`));
+      process.exit(2);
+    }
+    throw err;
+  }
+
+  // (c) Report
+  const delta = vectorCount - localChunks;
+  const ratio = localChunks === 0 ? Infinity : Math.abs(delta) / localChunks;
+  const direction = delta === 0 ? 'EXACT'
+    : delta < 0 ? 'LOST (Pinecone missing chunks)'
+    : 'ORPHANS (Pinecone has extra vectors)';
+  const healthy = Math.abs(delta) / Math.max(localChunks, 1) <= DRIFT_THRESHOLD;
+
+  console.log(`  Pinecone vectorCount : ${chalk.white(vectorCount)}`);
+  console.log(`  Local total_chunks   : ${chalk.white(localChunks)}`);
+  console.log(`  Drift                : ${chalk.white((delta >= 0 ? '+' : '') + delta)} (${(ratio * 100).toFixed(1)}%)`);
+  console.log(`  Direction            : ${delta === 0 ? chalk.green(direction) : (healthy ? chalk.yellow(direction) : chalk.red(direction))}`);
+  console.log(`  Index                : ${ragStatus.indexName || '(unknown)'}`);
+  console.log(`  Last sync (server)   : ${ragStatus.lastSync || '(unknown)'}`);
+  console.log(`  Last sync (local)    : ${syncStateRaw.timestamp || '(unknown)'}`);
+
+  // (d) Scan most recent sync log for 0-chunk / skipped warnings
+  const logsDir = path.join(appRoot, '.descix', 'logs');
+  let recentLog = null;
+  let warnings = [];
+  try {
+    const entries = await fs.readdir(logsDir);
+    const syncLogs = entries.filter(f => /^kb-sync-.*\.log$/.test(f)).sort();
+    if (syncLogs.length > 0) {
+      recentLog = path.join(logsDir, syncLogs[syncLogs.length - 1]);
+      const content = await fs.readFile(recentLog, 'utf-8');
+      for (const line of content.split('\n')) {
+        if (/0-chunk|⚠ skipped/.test(line)) {
+          warnings.push(line.trim());
+        }
+      }
+    }
+  } catch {
+    // logs dir may not exist — not fatal
+  }
+
+  if (recentLog) {
+    console.log(`\n  Most recent sync log : ${path.relative(process.cwd(), recentLog)}`);
+    if (warnings.length > 0) {
+      console.log(chalk.yellow(`  Per-file warnings (${warnings.length}):`));
+      warnings.slice(0, 10).forEach(w => console.log(chalk.yellow(`    ${w}`)));
+      if (warnings.length > 10) {
+        console.log(chalk.gray(`    ...${warnings.length - 10} more`));
+      }
+    } else {
+      console.log(chalk.gray(`  No 0-chunk / skipped warnings in most recent log.`));
+    }
+  } else {
+    console.log(chalk.gray(`\n  No sync log found at ${logsDir} (logs are optional).`));
+  }
+
+  // (e) Exit
+  console.log();
+  if (!healthy) {
+    console.log(chalk.red(`  ✗ DRIFT detected: ${(ratio * 100).toFixed(1)}% exceeds ${(DRIFT_THRESHOLD * 100).toFixed(1)}% threshold.\n`));
+    if (delta < 0) {
+      console.log(chalk.gray(`    Recommended: invalidate sync-state and re-sync:`));
+      console.log(chalk.gray(`      rm "${syncStatePath}"`));
+      console.log(chalk.gray(`      descix kb corpus sync -a ${appId} -k ${kbName}\n`));
+    } else {
+      console.log(chalk.gray(`    Recommended: clear stale vectors and re-sync to rebuild Pinecone from local state.\n`));
+    }
+    process.exit(1);
+  }
+
+  console.log(chalk.green(`  ✓ HEALTHY (drift within ${(DRIFT_THRESHOLD * 100).toFixed(1)}% threshold)\n`));
+}
+
 export default {
   runKbPull,
   runKbPush,
@@ -679,5 +836,6 @@ export default {
   runKbSync,
   runKbBuild,
   runKbStatus,
-  runKbCompare
+  runKbCompare,
+  runKbDoctor
 };

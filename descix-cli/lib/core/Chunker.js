@@ -38,9 +38,14 @@ const DEFAULT_OVERLAP_SIZE = 500;
  */
 export function categorizeFile(fileName, mimeType = null) {
   const name = (fileName || '').toLowerCase();
-  
+
+  // Structured data files — splits by top-level array/object element
+  if (name.endsWith('.json')) {
+    return 'structured-json';
+  }
+
   // Check by extension
-  if (name.endsWith('.js') || name.endsWith('.py') || name.endsWith('.ts') || 
+  if (name.endsWith('.js') || name.endsWith('.py') || name.endsWith('.ts') ||
       name.endsWith('.jsx') || name.endsWith('.tsx') || name.endsWith('.lean') ||
       name.endsWith('.sol') || name.endsWith('.rs') || name.endsWith('.go')) {
     return 'code';
@@ -54,16 +59,17 @@ export function categorizeFile(fileName, mimeType = null) {
   if (name.endsWith('.jsonl')) {
     return 'training';
   }
-  
+
   // Check by MIME type
   if (mimeType === 'application/vnd.google-apps.document' ||
       mimeType === 'text/markdown' ||
       mimeType === 'text/plain') {
     return 'docs';
   }
-  
+
   return 'generic';
 }
+
 
 /**
  * Chunk code files
@@ -371,6 +377,375 @@ function chunkGeneric(content, fileMetadata, rules) {
   return chunks;
 }
 
+// ============ Content-Aware Structured Chunking (M1, 2026-04-20) ============
+// Rationale: the pre-existing chunkCode/chunkGeneric paths silently produced
+// 0 chunks for files like EGPT/www/data/concordance-data.js (588KB). The
+// regex-driven logical-boundary walker never matched, and the downstream
+// corpus.js had a 500KB hard cap that dropped such files entirely. These
+// helpers split by structural boundaries first — top-level object keys,
+// top-level array elements, top-level function/class/export/const-arrow
+// declarations — before falling back to line-aware sliding windows.
+// The cap in corpus.js is removed; large content is now safely chunked.
+
+/**
+ * Split a JSON object into chunks by walking its top-level structure.
+ *
+ * Strategy:
+ *  - If root is an array: one chunk per element (merging small adjacent
+ *    elements up to maxSize to avoid single-entry chunks when the array
+ *    contains many tiny items).
+ *  - If root is an object: one chunk per top-level key. If a single key's
+ *    value is still larger than maxSize, recurse into it (array → per-
+ *    element; object → per-sub-key).
+ *  - If content is not valid JSON or produces no natural splits: fall back
+ *    to chunkGeneric (line-aware sliding window).
+ *
+ * Each chunk is a pretty-printed JSON snippet with a header comment so
+ * the retrieval context tells Gemini what part of the original document
+ * it came from.
+ *
+ * @param {string} content - Full JSON text
+ * @param {Object} fileMetadata - { name }
+ * @param {Object} rules - { maxChunkSize, overlapSize }
+ * @returns {Array<{content, metadata}>}
+ */
+function chunkStructuredJson(content, fileMetadata, rules) {
+  // Structured data is denser than prose — default to 8KB per chunk so that a
+  // single rich array element (e.g. one debate exchange with multi-KB turns)
+  // stays intact. Callers can still override via rules.maxChunkSize.
+  const maxSize = rules.maxChunkSize || 8000;
+
+  let parsed;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    // Not valid JSON (or contains trailing code like `window.X = {...};`).
+    // Fall back to the generic line-aware sliding window so we never
+    // produce zero chunks for a non-empty file.
+    return chunkGeneric(content, fileMetadata, rules);
+  }
+
+  // If whole document fits, keep as one chunk
+  if (content.length <= maxSize) {
+    return [{
+      content,
+      metadata: {
+        chunkIndex: 0,
+        totalChunks: 1,
+        type: 'full-json',
+        fileName: fileMetadata.name
+      }
+    }];
+  }
+
+  const chunks = [];
+  const push = (obj, label, type) => {
+    const snippet = JSON.stringify(obj, null, 2);
+    // If a single logical unit itself overflows, recurse (but only one level)
+    // then fall back to line-aware windowing. Prior behaviour atomised
+    // elements into per-field shards which were useless for retrieval.
+    if (snippet.length > maxSize) {
+      if (Array.isArray(obj)) {
+        // Emit each element as its own chunk — do NOT recurse deeper into
+        // object fields. A 15KB exchange stays whole as one 15KB chunk.
+        for (let j = 0; j < obj.length; j++) {
+          const esnip = JSON.stringify(obj[j], null, 2);
+          const elemLabel = `${label}[${j}]`;
+          if (esnip.length <= maxSize * 2) {
+            chunks.push({
+              content: `// ${elemLabel}
+${esnip}`,
+              metadata: {
+                chunkIndex: chunks.length,
+                type: 'array-element',
+                title: elemLabel,
+                fileName: fileMetadata.name
+              }
+            });
+          } else {
+            // Truly enormous element — line-window it
+            const sub = chunkGeneric(esnip, fileMetadata, rules);
+            for (const c of sub) {
+              chunks.push({
+                content: `// ${elemLabel} (part ${chunks.length + 1})
+${c.content}`,
+                metadata: {
+                  chunkIndex: chunks.length,
+                  type: 'array-element-overflow',
+                  title: elemLabel,
+                  fileName: fileMetadata.name
+                }
+              });
+            }
+          }
+        }
+        return;
+      }
+      if (obj && typeof obj === 'object') {
+        // Object with a too-big value: recurse ONE level, then stop.
+        for (const [k, v] of Object.entries(obj)) {
+          push(v, `${label}.${k}`, 'object-key-nested');
+        }
+        return;
+      }
+      // Primitive that somehow exceeds maxSize → sliding window with line boundaries
+      const sub = chunkGeneric(snippet, fileMetadata, rules);
+      for (const c of sub) {
+        chunks.push({
+          content: `// ${label}\n${c.content}`,
+          metadata: {
+            chunkIndex: chunks.length,
+            type: 'json-overflow',
+            title: label,
+            fileName: fileMetadata.name
+          }
+        });
+      }
+      return;
+    }
+
+    chunks.push({
+      content: `// ${label}\n${snippet}`,
+      metadata: {
+        chunkIndex: chunks.length,
+        type,
+        title: label,
+        fileName: fileMetadata.name
+      }
+    });
+  };
+
+  if (Array.isArray(parsed)) {
+    // Merge small adjacent elements up to maxSize to avoid many tiny chunks
+    let batch = [];
+    let batchSize = 0;
+    let startIdx = 0;
+    for (let i = 0; i < parsed.length; i++) {
+      const elem = parsed[i];
+      const elemSize = JSON.stringify(elem, null, 2).length;
+      if (batchSize + elemSize > maxSize && batch.length > 0) {
+        push(batch, `[${startIdx}..${i - 1}]`, 'array-batch');
+        batch = [];
+        batchSize = 0;
+        startIdx = i;
+      }
+      batch.push(elem);
+      batchSize += elemSize;
+    }
+    if (batch.length > 0) {
+      push(batch, `[${startIdx}..${parsed.length - 1}]`, 'array-batch');
+    }
+  } else if (parsed && typeof parsed === 'object') {
+    for (const [key, value] of Object.entries(parsed)) {
+      push(value, key, 'object-key');
+    }
+  } else {
+    // Primitive root — shouldn't normally happen in our KB content, but be safe
+    return chunkGeneric(content, fileMetadata, rules);
+  }
+
+  // Safety net: if the walk produced nothing (empty object/array with headers
+  // still counts as empty), fall back so we never return 0 chunks from a
+  // non-empty file.
+  if (chunks.length === 0) {
+    return chunkGeneric(content, fileMetadata, rules);
+  }
+
+  chunks.forEach(c => { c.metadata.totalChunks = chunks.length; });
+  return chunks;
+}
+
+/**
+ * Try to extract an embedded JSON object from JS content like:
+ *   window.X = { ... };
+ *   module.exports = { ... };
+ *   const X = { ... };
+ *   export const X = { ... };
+ *   export default { ... };
+ *
+ * Walks braces/brackets respecting string literals. Returns the captured
+ * JSON-ish text (still may be JS — trailing commas, unquoted keys) or null.
+ *
+ * Caller must JSON.parse() and handle failure gracefully.
+ */
+function extractTopLevelAssignmentLiteral(content) {
+  // Patterns (ordered): we match the line up to the first `{` or `[` that
+  // starts the value and then do a bracket walk to find the matching close.
+  const patterns = [
+    /\b(?:window|globalThis)\.\w+\s*=\s*(?=[{[])/,
+    /\bmodule\.exports\s*=\s*(?=[{[])/,
+    /\bexport\s+default\s*(?=[{[])/,
+    /\bexport\s+const\s+\w+\s*=\s*(?=[{[])/,
+    /\b(?:const|let|var)\s+\w+\s*=\s*(?=[{[])/
+  ];
+
+  let start = -1;
+  for (const p of patterns) {
+    const m = p.exec(content);
+    if (m && (start === -1 || m.index < start)) {
+      start = m.index + m[0].length;
+    }
+  }
+  if (start === -1) return null;
+
+  const open = content[start];
+  const close = open === '{' ? '}' : ']';
+  let depth = 0;
+  let inStr = null;
+  let escape = false;
+  for (let i = start; i < content.length; i++) {
+    const ch = content[i];
+    if (inStr) {
+      if (escape) { escape = false; continue; }
+      if (ch === '\\') { escape = true; continue; }
+      if (ch === inStr) { inStr = null; }
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') { inStr = ch; continue; }
+    if (ch === open) depth++;
+    else if (ch === close) {
+      depth--;
+      if (depth === 0) {
+        return content.substring(start, i + 1);
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Split JavaScript/TypeScript source on top-level declarations.
+ *
+ * Handles these top-level patterns line-anchored:
+ *   function foo(...)              export async function foo(...)
+ *   class Foo { ... }              export class Foo { ... }
+ *   export const foo = (...) => {  const foo = function (...) {
+ *   export default ...             module.exports = ...
+ *
+ * Unlike the legacy splitByLogicalBoundaries() this walker:
+ *  - Requires boundaries to start at column 0 (skips indented matches that
+ *    live inside classes/objects/functions).
+ *  - Does not impose a minimum chunk size (the 1000-char gate in the
+ *    legacy walker silently swallowed boundaries inside large objects).
+ *  - Uses overlap between adjacent chunks so declarations keep surrounding
+ *    context for retrieval.
+ *  - Always falls back to chunkGeneric on no-match so we never return 0.
+ */
+function chunkJsStructured(content, fileMetadata, rules) {
+  const maxSize = rules.maxCodeFileSize || DEFAULT_MAX_CODE_FILE_SIZE;
+  const overlap = rules.overlapSize || DEFAULT_OVERLAP_SIZE;
+
+  // Fast path: if the whole file fits, keep as one chunk.
+  if (content.length <= maxSize) {
+    return [{
+      content,
+      metadata: {
+        chunkIndex: 0,
+        totalChunks: 1,
+        type: 'full-file',
+        fileName: fileMetadata.name
+      }
+    }];
+  }
+
+  // Attempt to extract a single top-level assignment object literal (e.g.
+  // window.CONCORDANCE_SOURCE = {...};). If present and parseable as JSON,
+  // chunk the object as structured JSON — this is the dominant shape for
+  // data-embedded JS files. (Strict JSON.parse is used — this is a
+  // conservative best-effort; any failure falls through to the boundary
+  // walker.)
+  const literal = extractTopLevelAssignmentLiteral(content);
+  if (literal) {
+    try {
+      JSON.parse(literal);
+      return chunkStructuredJson(literal, fileMetadata, rules);
+    } catch {
+      // Not strict JSON (trailing commas, comments, expressions). Fall through.
+    }
+  }
+
+  // Top-level declaration boundary walker.
+  const lines = content.split('\n');
+  const patterns = [
+    /^export\s+(?:async\s+)?function\s+(\w+)/,
+    /^export\s+default\s+(?:async\s+)?function(?:\s+(\w+))?/,
+    /^export\s+class\s+(\w+)/,
+    /^export\s+const\s+(\w+)/,
+    /^export\s+default\s+/,
+    /^(?:async\s+)?function\s+(\w+)/,
+    /^class\s+(\w+)/,
+    /^(?:const|let|var)\s+(\w+)\s*=/,
+    /^module\.exports\s*=/,
+    /^(?:window|globalThis)\.(\w+)\s*=/
+  ];
+
+  // Collect boundary line indices and the name at each boundary.
+  const boundaries = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    for (const pat of patterns) {
+      const m = line.match(pat);
+      if (m) {
+        boundaries.push({ line: i, name: m[1] || 'anonymous' });
+        break;
+      }
+    }
+  }
+
+  if (boundaries.length === 0) {
+    // No top-level boundaries found — fall back to a line-aware sliding
+    // window. This is the key fix: we never return 0 chunks.
+    return chunkGeneric(content, fileMetadata, rules);
+  }
+
+  const chunks = [];
+  for (let b = 0; b < boundaries.length; b++) {
+    const startLine = boundaries[b].line;
+    const endLine = (b + 1 < boundaries.length) ? boundaries[b + 1].line : lines.length;
+    const sliceLines = lines.slice(startLine, endLine);
+    let slice = sliceLines.join('\n');
+
+    // Very large single boundary (e.g. a 400KB object literal) → window it
+    if (slice.length > maxSize) {
+      const sub = chunkGeneric(slice, fileMetadata, rules);
+      for (const c of sub) {
+        chunks.push({
+          content: c.content,
+          metadata: {
+            chunkIndex: chunks.length,
+            type: 'code-block-overflow',
+            name: boundaries[b].name,
+            fileName: fileMetadata.name
+          }
+        });
+      }
+      continue;
+    }
+
+    // Prepend overlap from previous slice for retrieval continuity
+    if (chunks.length > 0) {
+      const prev = chunks[chunks.length - 1].content;
+      const carry = prev.slice(-overlap);
+      slice = `// ...prior context...\n${carry}\n// --- boundary: ${boundaries[b].name} ---\n${slice}`;
+    }
+
+    chunks.push({
+      content: slice,
+      metadata: {
+        chunkIndex: chunks.length,
+        type: 'code-block',
+        name: boundaries[b].name,
+        fileName: fileMetadata.name
+      }
+    });
+  }
+
+  chunks.forEach(c => { c.metadata.totalChunks = chunks.length; });
+  return chunks;
+}
+
+// ============ End M1 additions ============
+
 /**
  * Chunk a file's content based on its type
  * 
@@ -388,9 +763,21 @@ export function chunkFile(fileInfo, options = {}) {
     overlapSize: options.overlapSize || DEFAULT_OVERLAP_SIZE
   };
   
+  // M1 (2026-04-20): route structured formats through content-aware chunkers.
+  // For .js/.ts, try the structured walker first (handles embedded JSON
+  // literals like window.X = {...} and top-level declaration boundaries).
+  // For .json, always use chunkStructuredJson.
   switch (fileCategory) {
-    case 'code':
+    case 'structured-json':
+      return chunkStructuredJson(content, { name: file_name }, rules);
+    case 'code': {
+      const nm = (file_name || '').toLowerCase();
+      if (nm.endsWith('.js') || nm.endsWith('.mjs') || nm.endsWith('.cjs') ||
+          nm.endsWith('.ts') || nm.endsWith('.jsx') || nm.endsWith('.tsx')) {
+        return chunkJsStructured(content, { name: file_name }, rules);
+      }
       return chunkCode(content, { name: file_name }, rules);
+    }
     case 'docs':
     case 'papers':
       return chunkDocument(content, { name: file_name }, rules);
