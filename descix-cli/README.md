@@ -90,6 +90,42 @@ For apps managed via CLI (Git Mode), use the following commands to process your 
 1.  Create your App in the PWA (Workspace Builder).
 2.  Run `descix setup` to hydrate your local folder structure.
 
+## Airdrop Admin Operations (WS-ADMIN-B1)
+
+Admin-only commands for triggering airdrop migration batch runs. Per CEO-D-MANUAL-TRIGGER-NO-CRON (2026-04-20), Cloud Scheduler cron was dropped from Round B in favor of operator-invoked manual triggers via this CLI.
+
+**Access:** requires platform-admin membership (enforced server-side via `isPlatformAdmin(user)`).
+
+### `descix airdrop execute-queue`
+
+Manually trigger the server-side `airdrop_execute_queue` command on the target environment. Assembles `pending_migrations` rows into per-community batches and (when `BATCH_UPDATE_BALANCES_BROADCAST_ENABLED=true`) broadcasts to the Powch HD wallet. When the broadcast flag is off (default for DEV), batches are assembled but the downstream Powch handler returns `stopped_at_broadcast_boundary` — useful for verifying queue shape without spending MATIC.
+
+**Options:**
+
+- `--batch-size <n>`: Cap on users processed this run (server caps at `AIRDROP_MAX_RUN_USERS`; a larger `--batch-size` is clamped).
+- `--dry-run`: Assemble batches but skip the broadcast call entirely. Emits an `on_chain_log` row with `status: dry_run` for audit.
+
+**Examples:**
+
+```bash
+# Dry run against DEV — safe to run repeatedly; no broadcast, no MATIC
+descix airdrop execute-queue --env dev --dry-run
+
+# Execute a capped real run (10 users max this invocation)
+descix airdrop execute-queue --env dev --batch-size 10
+
+# Execute a full queue run (still gated by BATCH_UPDATE_BALANCES_BROADCAST_ENABLED)
+descix airdrop execute-queue --env dev
+```
+
+**Audit trail:** every invocation (dry-run or real) writes one `on_chain_log` row with `op.kind = "airdrop_execute_queue_trigger"` and `caller.operator_email = <invoking admin email>`.
+
+**Testing:**
+
+```bash
+cd DeSciX_Core/descix-cli && npm test
+```
+
 ## Documentation
 
 For full documentation, please refer to the [DeSciX SDK Documentation](../../SERVICE_README_sdk.md).
