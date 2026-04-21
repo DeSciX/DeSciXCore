@@ -293,6 +293,56 @@ class CacheFirestore {
         }
     }
 
+    /**
+     * Variant of get_docs that preserves the Firestore document ID by attaching it as `_id` on each returned object.
+     * Use when the caller needs the doc ID as a recovery fallback (e.g., a missing or corrupt name field).
+     * Same signature as get_docs; returned objects are { ...doc.data(), _id: doc.id }.
+     */
+    async get_docs_with_ids(collectionPath, documentIds = null, whereClause = null, orderBy = null, limit = null, sortDesc = true) {
+        let query = this._getCollectionRef(collectionPath);
+
+        if (documentIds && Array.isArray(documentIds) && documentIds.length > 0) {
+            if (documentIds.length <= 30) {
+                 query = query.where(Firestore.FieldPath.documentId(), 'in', documentIds);
+            } else {
+                try {
+                    const promises = documentIds.map(async (id) => {
+                        const data = await this.get_doc(collectionPath, id);
+                        return data ? { ...data, _id: id } : null;
+                    });
+                    const docs = await Promise.all(promises);
+                    return docs.filter(doc => doc !== null);
+                } catch (e) {
+                    console.error(`Error getting documents by multiple IDs from ${collectionPath}: ${e}`);
+                    return null;
+                }
+            }
+        } else {
+            if (whereClause && Array.isArray(whereClause)) {
+                whereClause.forEach(([field, operator, value]) => {
+                    query = query.where(field, operator, value);
+                });
+            }
+            if (orderBy) {
+                query = query.orderBy(orderBy, sortDesc ? "desc" : "asc");
+            }
+            if (limit) {
+                query = query.limit(limit);
+            }
+        }
+
+        try {
+            const snapshot = await query.get();
+            if (snapshot.empty) {
+                return [];
+            }
+            return snapshot.docs.map(doc => ({ ...doc.data(), _id: doc.id }));
+        } catch (e) {
+            console.error(`Error getting documents (with ids) from ${collectionPath}: ${e}`);
+            return null;
+        }
+    }
+
 
     async put_docs(collectionPath, docIds, docsData) {
         if (!docIds || !docsData || docIds.length !== docsData.length) {
