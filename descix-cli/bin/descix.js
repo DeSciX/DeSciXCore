@@ -17,6 +17,7 @@ import * as authCommands from '../lib/commands/auth.js';
 import * as configCommands from '../lib/commands/config.js';
 import { runAppWizard } from '../lib/commands/app-wizard.js';
 import * as buyCommands from '../lib/commands/buy.js';
+import * as airdropCommands from '../lib/commands/airdrop.js';
 import { runInit } from '../lib/commands/init.js';
 import * as folderCommands from '../lib/commands/folder.js';
 import * as updateCommands from '../lib/commands/update.js';
@@ -294,6 +295,29 @@ buyCommand
   .description('List supported blockchains for payments')
   .action(() => {
     buyCommands.listChains();
+  });
+
+// ============ Airdrop Commands (WS-ADMIN-B1 manual-trigger) ============
+// Per CEO-D-MANUAL-TRIGGER-NO-CRON (2026-04-20), airdrop batch execution is operator-triggered
+// via this CLI command group rather than Cloud Scheduler cron. Server-side access is gated on
+// platform-admin membership (`isPlatformAdmin(user)`); the server emits an on_chain_log row
+// with `caller.operator_email` for audit.
+
+const airdropCommand = program
+  .command('airdrop')
+  .description('Admin airdrop migration operations (WS-ADMIN-B1)');
+
+airdropCommand
+  .command('execute-queue')
+  .description('Manually trigger airdrop_execute_queue on the target env (admin-only)')
+  .option('--batch-size <n>', 'Cap on users processed this run (server caps at AIRDROP_MAX_RUN_USERS)')
+  .option('--dry-run', 'Assemble batches but skip the broadcast call; emits dry_run on_chain_log row')
+  .action(async (options) => {
+    try {
+      await airdropCommands.executeQueue(options);
+    } catch (error) {
+      process.exit(1);
+    }
   });
 
 // ============ Sync Commands ============
