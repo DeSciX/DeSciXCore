@@ -80,7 +80,15 @@ const GUEST_ALLOWED_COMMANDS = [
     // The command is invoked only by trusted Pub/Sub messages published by
     // authCommands.unlink_auth_provider. Authorization is enforced at the transport
     // layer (Pub/Sub IAM) and, on the bot callback, by DESCIX_DISCORD_BOT_TOKEN.
-    'revoke_discord_role'
+    'revoke_discord_role',
+    // WS-ADMIN-B1 §3.1 — Signature-gated any-token gate. Internally verifies EIP-191
+    // signature against supplied wallet_address before consulting holdings. Adding to
+    // guest allowlist so Powch's server-to-server loopback (from descix_accept_tos
+    // airdrop-PK path) can reach it without propagating the user's session token back
+    // across the Powch→Cloud boundary. Safe because the signature IS the authN; the
+    // optional user_id param only extends the check to pending_migrations and does not
+    // grant impersonation. See docs/design/ws-admin-b1-ceo-walkthrough.md bug fix.
+    'confirm_wallet_any_registered_token'
     // T-FLOW-PASSKEY-FIRST Chunk 6 — airdrop_check_pending + airdrop_enqueue_migration
     // REMOVED from guest allowlist. See AppData.jsx comment + Powch manifest flip.
 ];
