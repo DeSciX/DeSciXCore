@@ -592,14 +592,12 @@ export const GUEST_ALLOWED_COMMANDS = [
     // Store Search (semantic search for browsing)
     'search_store',                  // Search communities and apps by description
 
-    // Airdrop onboarding (pre-auth) — WS-ADMIN-B1 §1.1/§1.2, CEO-D-TOKEN-GATE-SEMANTICS.
-    // These run during Screen B (Airdrop Preview) BEFORE the user has a Powch vault or
-    // session. Server-side handler uses the supplied EVM address / EIP-191 signature for
-    // self-auth; _descix.user is null and that is intentional. The Powch microservice
-    // manifest mirrors `guestAllowed: true` for these, which is what Cloud's apiFront
-    // enforces via isExternalGuestCommand().
-    'airdrop_check_pending',         // Screen B preview of pending airdrop tokens (GUEST)
-    'airdrop_enqueue_migration',     // EIP-191 self-auth: enqueue migration challenge (GUEST)
+    // T-FLOW-PASSKEY-FIRST Chunk 6 — airdrop_check_pending + airdrop_enqueue_migration
+    // were previously GUEST-allowed for the pre-passkey TokenGateView preview. The
+    // consolidated flow (Chunk 4) removes that pre-passkey screen; the any-token gate
+    // now runs inside descix_accept_tos (NOT_AUTHENTICATED post-passkey). These two
+    // commands are no longer reachable from a guest session in the PWA; REMOVE from
+    // the client allowlist (REMOVE legacy per DeSciX CLAUDE.md policy).
 ];
 
 // --- Event dispatcher registration for session expiry handling ---
