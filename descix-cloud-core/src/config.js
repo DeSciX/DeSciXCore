@@ -80,7 +80,14 @@ const GUEST_ALLOWED_COMMANDS = [
     // The command is invoked only by trusted Pub/Sub messages published by
     // authCommands.unlink_auth_provider. Authorization is enforced at the transport
     // layer (Pub/Sub IAM) and, on the bot callback, by DESCIX_DISCORD_BOT_TOKEN.
-    'revoke_discord_role'
+    'revoke_discord_role',
+    // Airdrop onboarding (pre-auth) — WS-ADMIN-B1 §1.1/§1.2, CEO-D-TOKEN-GATE-SEMANTICS.
+    // Screen B runs BEFORE the user has a Powch vault/session. Server-side handler uses
+    // the EVM address / EIP-191 signature for self-auth; _descix.user is null by design.
+    // These mirror the Powch manifest `guestAllowed: true` entries and keep the SDK +
+    // cloud-core mirrors consistent with apiFront's isExternalGuestCommand() lookup.
+    'airdrop_check_pending',
+    'airdrop_enqueue_migration'
 ];
 
 function networkResponse(netStatus, authStatus, message) {
