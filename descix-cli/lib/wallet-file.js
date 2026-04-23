@@ -226,7 +226,6 @@ export class WalletFileManager {
     const success = await this.saveWalletFile(walletPath, walletData);
     return success ? walletPath : null;
   }
-
 }
 
 export default WalletFileManager;

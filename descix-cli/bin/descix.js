@@ -1014,81 +1014,17 @@ appCommand
 
 appCommand
   .command('init')
-  .description('Initialize local workspace and Firestore KB for an app (idempotent). Use --local-only for Phase-1 scaffold without platform mutations.')
+  .description('Initialize local workspace and Firestore KB for an app (idempotent)')
   .requiredOption('-a, --app <app_id>', 'App ID (e.g. daita)')
   .option('--kb <name>', 'Knowledge base name', 'General')
   .option('-p, --path <dir>', 'Local app directory (default: auto-detected or cwd)')
   .option('-c, --community <community_id>', 'Community to create app in (if not yet in Products registry)')
-  .option('--local-only', 'Skip all platform mutations (no create_app_for_community, no init_git_mode_kb, no Products write). Local scaffold + workspace.json only.')
   .action(async (options) => {
     try {
-      const appId = options.app;
-      const kbId = options.kb || 'General';
-      const localOnly = options.localOnly === true;
-
-      // ── Local-only branch: no platform mutations, no API client ──
-      if (localOnly) {
-        console.log(chalk.gray(`  [--local-only] Platform-mutation gate is CLOSED for ${appId}. No Firestore writes, no KB init, no app creation.`));
-
-        // Community resolution: --community flag OR workspace default. No network call.
-        let communityId = options.community;
-        const workspaceConfig = await WorkspaceConfig.tryLoad();
-        if (!communityId) {
-          // Derive from workspace default if present (first entry or a designated default).
-          const wsAny = workspaceConfig?.config || {};
-          const envPlatform = wsAny.env?.platform;
-          if (envPlatform?.community_id) {
-            communityId = envPlatform.community_id;
-          }
-        }
-        if (!communityId) {
-          throw new Error(`--local-only requires --community <id> or a workspace default; neither was provided.`);
-        }
-
-        // 1. Workspace.json — register the app locally only.
-        const alreadyMapped = workspaceConfig?.getAppByAppId(appId);
-        let appPath = alreadyMapped?.absolutePath;
-        if (!alreadyMapped) {
-          const localPath = options.path || '.';
-          const wsRoot = workspaceConfig?.workspaceRoot || process.cwd();
-          const cfg = workspaceConfig || new WorkspaceConfig({}, wsRoot);
-          cfg.registerApp(communityId, appId, { localPath, kbId });
-          await cfg.save(wsRoot);
-          appPath = path.resolve(wsRoot, localPath);
-          console.log(chalk.gray(`  workspace.json updated: ${appId} → ${localPath}`));
-        }
-
-        // 2. Scaffold app folder shape (site, kb, microservice, assets).
-        if (!appPath) {
-          throw new Error(`Could not resolve app path for ${appId}`);
-        }
-        const siteDir = path.join(appPath, 'site');
-        const kbDir = path.join(appPath, 'kb', kbId);
-        const msDir = path.join(appPath, 'microservice');
-        const assetsDir = path.join(appPath, 'assets');
-        await fs.mkdir(siteDir, { recursive: true });
-        await fs.mkdir(kbDir, { recursive: true });
-        await fs.mkdir(msDir, { recursive: true });
-        await fs.mkdir(assetsDir, { recursive: true });
-        const siPath = path.join(assetsDir, 'system_instructions.md');
-        const descPath = path.join(assetsDir, 'app_description.md');
-        try { await fs.access(siPath); } catch {
-          await fs.writeFile(siPath, `# System Instructions for ${appId}\n\nYou are an AI assistant for the ${appId} application.\n`);
-        }
-        try { await fs.access(descPath); } catch {
-          await fs.writeFile(descPath, `# ${appId}\n\nApplication description goes here.\n`);
-        }
-        console.log(chalk.gray(`  Created: site/, kb/${kbId}/, microservice/, assets/`));
-
-        console.log(chalk.green(`\n✓ ${appId} scaffolded (--local-only)`));
-        console.log(chalk.gray(`  Community: ${communityId}`));
-        console.log(chalk.gray(`  KB init deferred until Phase 2 (platform mutations gated by --local-only).\n`));
-        return;
-      }
-
-      // ── Default (platform-registering) branch — behavior unchanged from pre-WS-A ──
       const apiClient = new DeSciXApiClient();
       await requireAuth(apiClient);
+      const appId = options.app;
+      const kbId = options.kb || 'General';
 
       // Resolve community_id from Products registry
       let communityId;
