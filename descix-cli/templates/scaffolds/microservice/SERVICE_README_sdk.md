@@ -305,6 +305,44 @@ chat_with_kb({
 
 ---
 
+## Service wallet (`.descix/wallet.json`)
+
+Microservices authenticate to the Cloud using a service wallet — an Ethereum-compatible keypair stored at `{app}/microservice/.descix/wallet.json`. The file is emitted by `descix app init --local-only --service-wallet emit` and is used for `reconnect_by_wallet`-style authentication against the Cloud gateway.
+
+### File structure
+
+```json
+{
+  "walletAddress": "0x...",
+  "signature": "0x...",
+  "signature_message": "DeSciX service wallet bind: 0x... <nonce> <iso-timestamp>",
+  "issuedAt": "<iso-timestamp>",
+  "walletType": "service"
+}
+```
+
+### Permissions
+
+The file is written at mode `0600` — readable only by the owner. Never commit it to git, never log its contents.
+
+### Emitting the wallet
+
+```bash
+# Phase-1 scaffold with a service wallet (for microservice-bearing apps):
+descix app init -a {app_id} -c {community_id} --local-only --service-wallet emit
+
+# PWA-only apps skip wallet emission:
+descix app init -a {app_id} -c {community_id} --local-only --service-wallet skip
+```
+
+The `--local-only` flag skips all platform mutations (no `create_app_for_community`, no `init_git_mode_kb`, no Firestore writes). It is the canonical flag for Phase-1 scaffolding prior to CEO-authorized platform mutations.
+
+### Phase 2 note
+
+For Phase 1, the wallet file holds key material only — the wallet is not yet bound to a Firestore service-identity record. Phase 2 adds a service-identity binding step so that Cloud's `reconnect_by_wallet` can distinguish a service principal from a user principal.
+
+---
+
 ## Workspace Configuration
 
 ### workspace.json (Monorepo)

@@ -226,6 +226,52 @@ export class WalletFileManager {
     const success = await this.saveWalletFile(walletPath, walletData);
     return success ? walletPath : null;
   }
+
+  /**
+   * Generate a new Ethereum-compatible service wallet, sign a self-nonce message,
+   * and persist it to {microservicePath}/.descix/wallet.json at mode 0600.
+   *
+   * Phase 1 scope: signature is a self-signed nonce that satisfies validateWalletFile()
+   * and the Cloud's reconnect_by_wallet verification surface (wallet_address,
+   * signature, signature_message). Phase 2 work binds the wallet to a Firestore
+   * service-identity record.
+   *
+   * @param {string} microservicePath - Absolute path to the microservice directory
+   * @returns {Promise<string>} Absolute path to the saved wallet file
+   * @throws {Error} If generation, signing, or file write fails (no silent fallbacks)
+   */
+  static async generateAndSaveServiceWallet(microservicePath) {
+    if (!microservicePath || typeof microservicePath !== 'string') {
+      throw new Error('generateAndSaveServiceWallet: microservicePath is required');
+    }
+
+    // Lazy import so ethers is only loaded when service-wallet emission is requested.
+    const { Wallet } = await import('ethers');
+
+    // Fresh keypair. secp256k1 + Ethereum address derivation via ethers.
+    const wallet = Wallet.createRandom();
+
+    // Self-signed nonce message — compatible with reconnect_by_wallet verification.
+    const nonce = Math.random().toString(36).slice(2, 18) + Math.random().toString(36).slice(2, 18);
+    const issuedAt = new Date().toISOString();
+    const signatureMessage = `DeSciX service wallet bind: ${wallet.address} ${nonce} ${issuedAt}`;
+    const signature = await wallet.signMessage(signatureMessage);
+
+    const walletData = {
+      walletAddress: wallet.address,
+      signature,
+      signature_message: signatureMessage,
+      issuedAt,
+      walletType: 'service',
+    };
+
+    const walletPath = path.join(microservicePath, '.descix', 'wallet.json');
+    const ok = await this.saveWalletFile(walletPath, walletData);
+    if (!ok) {
+      throw new Error(`generateAndSaveServiceWallet: failed to write ${walletPath}`);
+    }
+    return walletPath;
+  }
 }
 
 export default WalletFileManager;
