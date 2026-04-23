@@ -1019,8 +1019,7 @@ appCommand
   .option('--kb <name>', 'Knowledge base name', 'General')
   .option('-p, --path <dir>', 'Local app directory (default: auto-detected or cwd)')
   .option('-c, --community <community_id>', 'Community to create app in (if not yet in Products registry)')
-  .option('--local-only', 'Skip all platform mutations (no create_app_for_community, no init_git_mode_kb, no Products write). Local scaffold + workspace.json + wallet emission only.')
-  .option('--service-wallet <mode>', 'Service wallet emission: emit | skip | external-path. Default: emit when a microservice slot is present, skip otherwise. Only used with --local-only.')
+  .option('--local-only', 'Skip all platform mutations (no create_app_for_community, no init_git_mode_kb, no Products write). Local scaffold + workspace.json only.')
   .action(async (options) => {
     try {
       const appId = options.app;
@@ -1080,35 +1079,6 @@ appCommand
           await fs.writeFile(descPath, `# ${appId}\n\nApplication description goes here.\n`);
         }
         console.log(chalk.gray(`  Created: site/, kb/${kbId}/, microservice/, assets/`));
-
-        // 3. Service wallet emission.
-        //    Default: 'emit' if a microservice slot is present (always true after mkdir above),
-        //             but callers explicitly opt in via --service-wallet to stay predictable.
-        const walletMode = options.serviceWallet; // emit | skip | external-path | undefined
-        if (walletMode === 'emit') {
-          const { WalletFileManager } = await import('../lib/wallet-file.js');
-          const savedPath = await WalletFileManager.generateAndSaveServiceWallet(msDir);
-          console.log(chalk.gray(`  service wallet: ${savedPath} (mode 0600)`));
-        } else if (walletMode === 'skip') {
-          console.log(chalk.gray(`  service wallet: skipped (--service-wallet skip)`));
-        } else if (walletMode && walletMode !== 'emit' && walletMode !== 'skip') {
-          // external-path mode — treat as a path string, validate existence, copy.
-          const extPath = walletMode;
-          try {
-            await fs.access(extPath);
-          } catch {
-            throw new Error(`--service-wallet external-path: source file does not exist: ${extPath}`);
-          }
-          const destDir = path.join(msDir, '.descix');
-          await fs.mkdir(destDir, { recursive: true });
-          const destPath = path.join(destDir, 'wallet.json');
-          const src = await fs.readFile(extPath, 'utf-8');
-          await fs.writeFile(destPath, src, { mode: 0o600 });
-          console.log(chalk.gray(`  service wallet: imported from ${extPath} → ${destPath}`));
-        } else {
-          // undefined: neither emit nor skip specified. Phase 1 convention: require explicit mode.
-          console.log(chalk.yellow(`  service wallet: no --service-wallet mode given; skipping. Pass 'emit' or 'skip' to be explicit.`));
-        }
 
         console.log(chalk.green(`\n✓ ${appId} scaffolded (--local-only)`));
         console.log(chalk.gray(`  Community: ${communityId}`));
