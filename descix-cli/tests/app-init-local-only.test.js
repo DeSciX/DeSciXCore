@@ -48,7 +48,7 @@ test('app init --local-only creates canonical directories without a DeSciXApiCli
   const cwd = await mkTempWorkspace();
   try {
     const result = await runCli(
-      ['app', 'init', '-a', 'smile-test', '-c', 'smile', '--local-only', '--service-wallet', 'skip'],
+      ['app', 'init', '-a', 'smile-test', '-c', 'smile', '--local-only'],
       cwd
     );
 
@@ -66,11 +66,11 @@ test('app init --local-only creates canonical directories without a DeSciXApiCli
     assert.ok(msStat.isDirectory());
     assert.ok(assetsStat.isDirectory());
 
-    // No service wallet because --service-wallet skip
+    // No service wallet emitted (flag removed; creator-session pattern via microservice init)
     let walletAccessErr = null;
     try { await fs.access(path.join(cwd, 'microservice', '.descix', 'wallet.json')); }
     catch (e) { walletAccessErr = e; }
-    assert.ok(walletAccessErr, '--service-wallet skip must NOT emit wallet.json');
+    assert.ok(walletAccessErr, 'app init --local-only must NOT emit wallet.json');
   } finally {
     await fs.rm(cwd, { recursive: true, force: true });
   }
@@ -80,7 +80,7 @@ test('app init --local-only requires --community OR workspace default', async ()
   const cwd = await mkTempWorkspace();
   try {
     const result = await runCli(
-      ['app', 'init', '-a', 'smile-test', '--local-only', '--service-wallet', 'skip'],
+      ['app', 'init', '-a', 'smile-test', '--local-only'],
       cwd
     );
 
