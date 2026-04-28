@@ -418,9 +418,13 @@ class CloudConfig {
                         console.log('[Config] Loaded Elevated Credentials');
                     }
                     if (process.env.CONTRACT_SECRET_NAME) {
+                        // DEPRECATED: greenfield-bootstrap-only path for root DeSciX community. Use chainStorageUtils.getContractAbi() / getContractAddressBySymbol() / admin-supplied PK for active code. — CEO-D 2026-04-28
+                        // Active B1 broadcast path no longer reads utils.DAITA_ABI; this loader is retained
+                        // only for greenfield-bootstrap of the root DeSciX community where descix-chain
+                        // Contracts/{address} is not yet populated.
                         const abiSecret = await this.accessSecretVersion(process.env.CONTRACT_SECRET_NAME, elevatedVersion);
                         this.DAITA_ABI = JSON.parse(abiSecret);
-                        console.log('[Config] Loaded Contract ABI');
+                        console.log('[Config] Loaded Contract ABI (DEPRECATED greenfield-bootstrap-only)');
                     }
                 } catch (e) {
                     console.error('[Config] Failed to load elevated credentials:', e.message);
