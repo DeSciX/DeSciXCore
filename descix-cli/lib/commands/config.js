@@ -1,13 +1,12 @@
 /**
  * Configuration Commands
- * 
+ *
  * Manage CLI configuration (.descix/workspace.json)
- * Uses PathContext for path resolution - no process.cwd() lookups
+ * Uses WorkspaceConfig for path resolution - no process.cwd() lookups
  */
 
 import chalk from 'chalk';
 import * as path from 'path';
-import { PathContext } from '../core/PathContext.js';
 import { WorkspaceConfig } from '../workspace-config.js';
 
 /**
@@ -15,33 +14,27 @@ import { WorkspaceConfig } from '../workspace-config.js';
  */
 export async function show() {
   try {
-    const ctx = await PathContext.load();
-    const config = ctx.getWorkspaceConfig();
-    const workspaceRoot = ctx.getWorkspaceRoot();
-    
+    const workspaceConfig = await WorkspaceConfig.load();
+    const workspaceRoot = workspaceConfig.getWorkspaceRoot();
+
     console.log(chalk.cyan('\n📋 DeSciX Workspace Configuration:\n'));
     console.log(chalk.white(`   Workspace:     ${workspaceRoot}`));
-    console.log(chalk.white(`   API URL:       ${config.apiUrl || 'https://descix.net (default)'}`));
-    console.log(chalk.white(`   Environment:   ${config.environment || 'production'}`));
-    
-    // Show communities/apps
-    const communities = Object.keys(config.communities || {});
-    if (communities.length > 0) {
-      console.log(chalk.white(`   Communities:   ${communities.join(', ')}`));
-      
-      for (const commId of communities) {
-        const apps = Object.keys(config.communities[commId]?.apps || {});
-        if (apps.length > 0) {
-          console.log(chalk.gray(`     └─ ${commId}: ${apps.join(', ')}`));
-        }
-      }
+    console.log(chalk.white(`   API URL:       ${workspaceConfig.getApiUrl()}`));
+    console.log(chalk.white(`   Environment:   ${workspaceConfig.env?.environment || 'production'}`));
+
+    // Show mapped apps (v2.1 env.products)
+    const platform = workspaceConfig.env?.platform;
+    const products = workspaceConfig.env?.products || [];
+    const allApps = [platform?.appId, ...products.map(p => p.appId)].filter(Boolean);
+    if (allApps.length > 0) {
+      console.log(chalk.white(`   Apps:          ${allApps.join(', ')}`));
     }
-    
+
     console.log('');
     const configPath = path.join(workspaceRoot, '.descix', 'workspace.json');
     console.log(chalk.gray(`   Config file: ${configPath}`));
     console.log('');
-    
+
   } catch (error) {
     console.error(chalk.red('Error loading config:', error.message));
     throw error;
@@ -53,18 +46,17 @@ export async function show() {
  */
 export async function setUrl(url, options = {}) {
   try {
-    const ctx = await PathContext.load();
-    const workspaceRoot = ctx.getWorkspaceRoot();
-    
-    const workspaceConfig = await WorkspaceConfig.load(workspaceRoot);
+    const workspaceConfig = await WorkspaceConfig.load();
+    const workspaceRoot = workspaceConfig.getWorkspaceRoot();
+
     workspaceConfig.apiUrl = url;
     workspaceConfig.environment = url.includes('localhost') ? 'development' : 'production';
     const configPath = await workspaceConfig.save(workspaceRoot);
-    
+
     console.log(chalk.green('\n✅ Configuration updated!\n'));
     console.log(chalk.white(`   API URL: ${url}`));
     console.log(chalk.gray(`   Saved to: ${configPath}\n`));
-    
+
   } catch (error) {
     console.error(chalk.red('Error updating config:', error.message));
     throw error;
@@ -76,10 +68,8 @@ export async function setUrl(url, options = {}) {
  */
 export async function init(env = 'prod', options = {}) {
   try {
-    const ctx = await PathContext.load();
-    const workspaceRoot = ctx.getWorkspaceRoot();
-    
-    const workspaceConfig = await WorkspaceConfig.load(workspaceRoot);
+    const workspaceConfig = await WorkspaceConfig.load();
+    const workspaceRoot = workspaceConfig.getWorkspaceRoot();
     
     // Set API URL based on environment
     if (env === 'dev') {
@@ -155,40 +145,35 @@ export async function setSyncMode(mode, options = {}) {
     if (!validModes.includes(mode)) {
       throw new Error(`Invalid sync_mode: "${mode}". Must be one of: ${validModes.join(', ')}`);
     }
-    
-    const ctx = await PathContext.load();
-    const workspaceRoot = ctx.getWorkspaceRoot();
-    
-    // Resolve community and app
-    const { communityId, appId } = ctx.requireContext(options);
-    
-    const workspaceConfig = await WorkspaceConfig.load(workspaceRoot);
-    
-    // Update app config
-    if (!workspaceConfig.communities[communityId]) {
-      throw new Error(`Community "${communityId}" not found in workspace.json`);
+
+    const workspaceConfig = await WorkspaceConfig.load();
+    const workspaceRoot = workspaceConfig.getWorkspaceRoot();
+
+    // Resolve app from options or workspace context
+    const { appId } = workspaceConfig.requireContext(options);
+
+    // Update app config in env.products
+    const products = workspaceConfig.env?.products || [];
+    const product = products.find(p => p.appId === appId);
+    if (!product) {
+      throw new Error(`App "${appId}" not found in workspace.json env.products.`);
     }
-    if (!workspaceConfig.communities[communityId].apps?.[appId]) {
-      throw new Error(`App "${appId}" not found in community "${communityId}"`);
-    }
-    
-    workspaceConfig.communities[communityId].apps[appId].sync_mode = mode;
-    
+    product.sync_mode = mode;
+
     const configPath = await workspaceConfig.save(workspaceRoot);
-    
+
     console.log(chalk.green('\n✅ Sync mode updated!\n'));
-    console.log(chalk.white(`   Community:  ${communityId}`));
     console.log(chalk.white(`   App:        ${appId}`));
     console.log(chalk.white(`   Sync Mode:  ${mode}`));
     console.log(chalk.gray(`   Saved to:   ${configPath}\n`));
-    
+
     if (mode === 'git') {
-      console.log(chalk.cyan('   Tip: Use "descix kb build" to process KB locally.'));
+      console.log(chalk.cyan('   Tip: Use "descix kb corpus sync" to sync KB via corpus manifest.'));
     } else {
-      console.log(chalk.cyan('   Tip: Use the PWA to upload KB files to Drive.'));
+      console.log(chalk.cyan('   Tip: Use "descix drive pull" to pull Drive content locally.'));
     }
     console.log('');
-    
+
   } catch (error) {
     console.error(chalk.red('Error updating sync mode:', error.message));
     throw error;
