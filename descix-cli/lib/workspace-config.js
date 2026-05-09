@@ -18,16 +18,11 @@ export class WorkspaceConfig {
     this.version = config.version || '1.0';
     this.type = config.type || 'workspace'; // 'workspace', 'community', or 'app'
     
-    // Legacy fields (v1 compatibility)
-    this.primaryCommunity = config.primaryCommunity;
-    this.directoryMappings = config.directoryMappings || {};
-    this.additionalContexts = config.additionalContexts || [];
+    // Legacy fields (kept for save() PWA response conversion compatibility)
     this.defaultContext = config.defaultContext;
     this.apiUrl = config.apiUrl;
     this.environment = config.environment;
-    
-    // V2 community tracking (root workspace)
-    this.communities = config.communities || {};
+    this.directoryMappings = config.directoryMappings || {};
 
     // V2.1 Product tracking (Unified Registry)
     this.products = config.products || {};
@@ -98,33 +93,29 @@ export class WorkspaceConfig {
       };
     }
 
-    // Legacy: products object
-    const product = this.products[appId];
-    if (product?.localPath) {
-      const absPath = product.absolutePath || path.join(this.workspaceRoot, product.localPath);
-      return {
-        localPath: product.localPath,
-        absolutePath: absPath,
-        communityId: product.context?.community || null,
-        kbId: product.kbId || 'General'
-      };
-    }
-
-    // Legacy: communities.apps
-    for (const [, comm] of Object.entries(this.communities || {})) {
-      const app = comm?.apps?.[appId];
-      if (app?.localPath) {
-        const absPath = app.absolutePath || path.join(this.workspaceRoot, app.localPath);
-        return {
-          localPath: app.localPath,
-          absolutePath: absPath,
-          communityId: null, // Will be derived from Products on backend
-          kbId: app.kbId || 'General'
-        };
-      }
-    }
-
     return null;
+  }
+
+  /**
+   * Get the absolute path to an app's site/ directory
+   * @param {string} appId - App identifier
+   * @returns {string|null} Absolute path to site/ or null if app not mapped
+   */
+  getSitePath(appId) {
+    const appConfig = this.getAppByAppId(appId);
+    if (!appConfig?.absolutePath) return null;
+    return path.join(appConfig.absolutePath, 'site');
+  }
+
+  /**
+   * Get the absolute path to an app's microservice/ directory
+   * @param {string} appId - App identifier
+   * @returns {string|null} Absolute path to microservice/ or null if app not mapped
+   */
+  getMicroservicePath(appId) {
+    const appConfig = this.getAppByAppId(appId);
+    if (!appConfig?.absolutePath) return null;
+    return path.join(appConfig.absolutePath, 'microservice');
   }
   
   /**
@@ -178,24 +169,30 @@ export class WorkspaceConfig {
    */
   static async load(startDir = process.cwd()) {
     // First, find workspace root by searching upward
-    // If startDir is provided, use it. If not, use process.cwd()
     const workspaceRoot = await WorkspaceConfig.findWorkspaceRoot(startDir);
     if (!workspaceRoot) {
-      // Fallback: Check if we are running from within a package in the repo
-      // and try to find the root by looking for .descix in parent directories
-      // This is redundant with findWorkspaceRoot but let's be explicit about the error
       throw new Error(
         'Workspace not configured.\n' +
         'Run "npx descix init" first to initialize your workspace.'
       );
     }
-    
+
     const configPath = path.join(workspaceRoot, '.descix', 'workspace.json');
     try {
       const data = await fs.readFile(configPath, 'utf-8');
       const parsed = JSON.parse(data);
+
+      // v1 format hard-error: has communities block but no env block
+      if (parsed.communities && !parsed.env) {
+        throw new Error(
+          'v1 workspace format is not supported. Migrate to v2.1.\n' +
+          'Delete .descix/workspace.json and re-run "descix app init" to create a v2.1 workspace.'
+        );
+      }
+
       return new WorkspaceConfig(parsed, workspaceRoot);
     } catch (error) {
+      if (error.message.includes('v1 workspace format')) throw error;
       throw new Error(
         'Workspace not configured.\n' +
         'Run "npx descix init" first to initialize your workspace.'
@@ -220,9 +217,7 @@ export class WorkspaceConfig {
   
   /**
    * Save workspace configuration in v2.1 format.
-   * Always writes env.platform / env.products structure — never v1 communities.
-   * If loaded from a v1 communities format (e.g. PWA device_check_status response),
-   * auto-converts communities.apps → env.products on write.
+   * Always writes env.platform / env.products structure.
    * @param {string} [workspaceRoot] - Workspace root directory (uses stored root if not provided)
    * @returns {Promise<string>} Path to saved config
    */
@@ -238,25 +233,8 @@ export class WorkspaceConfig {
 
     this.workspaceRoot = root;
 
-    // Build env block for v2.1 output.
-    // Native v2.1 path: this.env is already populated from env.platform/env.products.
-    // Legacy conversion path: this.env is absent but communities are populated (v1 PWA response).
-    let envBlock = (this.env && Object.keys(this.env).length > 0) ? this.env : null;
-
-    if (!envBlock && Object.keys(this.communities || {}).length > 0) {
-      const products = [];
-      for (const [, community] of Object.entries(this.communities)) {
-        for (const [appId, app] of Object.entries(community.apps || {})) {
-          if (app.localPath) {
-            products.push({ appId, localPath: app.localPath, kbId: app.kbId || 'General' });
-          }
-        }
-      }
-      envBlock = { products };
-      // Update in-memory state so callers see a consistent env after save
-      this.env = envBlock;
-      this._appIdToConfig = this._buildAppIdMap({ env: this.env, workspaceRoot: this.workspaceRoot });
-    }
+    // Build env block for v2.1 output
+    const envBlock = (this.env && Object.keys(this.env).length > 0) ? this.env : null;
 
     const configData = {
       version: '2.1',
@@ -279,20 +257,6 @@ export class WorkspaceConfig {
    */
   computeAbsolutePaths(workspaceRoot) {
     const absWorkspaceRoot = path.resolve(workspaceRoot);
-    
-    for (const [communityId, community] of Object.entries(this.communities || {})) {
-      // Compute community absolute path
-      if (community.localPath) {
-        community.absolutePath = path.join(absWorkspaceRoot, community.localPath);
-      }
-      
-      // Compute app absolute paths
-      for (const [appId, app] of Object.entries(community.apps || {})) {
-        if (app.localPath) {
-          app.absolutePath = path.join(absWorkspaceRoot, app.localPath);
-        }
-      }
-    }
 
     // Compute absolute paths for products
     for (const [productId, product] of Object.entries(this.products || {})) {
@@ -302,23 +266,8 @@ export class WorkspaceConfig {
     }
   }
   
-  // ============ Community Tracking Methods ============
-  
-  /**
-   * Register a community in the root workspace
-   * @param {string} communityId - Community identifier
-   * @param {Object} communityConfig - Community configuration
-   * @param {string} communityConfig.localPath - Local folder path
-   * @param {string} communityConfig.tokenSymbol - Token symbol
-   * @param {Object} [communityConfig.apps] - Apps in this community
-   * @returns {boolean} Success status
-   */
-  registerCommunity(communityId, communityConfig) {
-    // V2: Community identity is server-authoritative (Products registry).
-    // workspace.json does not track communities. No-op.
-    return true;
-  }
-  
+  // ============ App Registration Methods ============
+
   /**
    * Register an app in the v2.1 workspace (env.platform or env.products).
    * community_id is server-authoritative — not stored in workspace.json.
@@ -354,85 +303,6 @@ export class WorkspaceConfig {
     this._appIdToConfig = this._buildAppIdMap({ env: this.env, workspaceRoot: this.workspaceRoot });
     this.version = '2.1';
     return true;
-  }
-  
-  /**
-   * Get community configuration by ID
-   * @param {string} communityId - Community identifier
-   * @returns {Object|null} Community configuration or null
-   */
-  getCommunity(communityId) {
-    return this.communities[communityId] || null;
-  }
-  
-  /**
-   * Get app configuration from a community
-   * @param {string} communityId - Community identifier
-   * @param {string} appId - App identifier
-   * @returns {Object|null} App configuration or null
-   */
-  getApp(communityId, appId) {
-    const community = this.communities[communityId];
-    if (!community || !community.apps) return null;
-    return community.apps[appId] || null;
-  }
-  
-  /**
-   * List all registered communities
-   * @returns {Array} Array of community IDs
-   */
-  listCommunities() {
-    return Object.keys(this.communities);
-  }
-  
-  /**
-   * List all apps in a community
-   * @param {string} communityId - Community identifier
-   * @returns {Array} Array of app IDs
-   */
-  listApps(communityId) {
-    const community = this.communities[communityId];
-    if (!community || !community.apps) return [];
-    return Object.keys(community.apps);
-  }
-  
-  /**
-   * Remove a community registration
-   * @param {string} communityId - Community identifier
-   * @returns {boolean} Success status
-   */
-  unregisterCommunity(communityId) {
-    if (this.communities[communityId]) {
-      // Remove directory mappings for all apps
-      const apps = this.communities[communityId].apps || {};
-      for (const [appId, appConfig] of Object.entries(apps)) {
-        if (appConfig.localPath) {
-          delete this.directoryMappings[appConfig.localPath];
-        }
-      }
-      delete this.communities[communityId];
-      return true;
-    }
-    return false;
-  }
-  
-  /**
-   * Remove an app registration
-   * @param {string} communityId - Community identifier
-   * @param {string} appId - App identifier
-   * @returns {boolean} Success status
-   */
-  unregisterApp(communityId, appId) {
-    const community = this.communities[communityId];
-    if (community && community.apps && community.apps[appId]) {
-      const appConfig = community.apps[appId];
-      if (appConfig.localPath) {
-        delete this.directoryMappings[appConfig.localPath];
-      }
-      delete community.apps[appId];
-      return true;
-    }
-    return false;
   }
   
   /**
@@ -546,23 +416,6 @@ export class WorkspaceConfig {
       }
     }
     
-    for (const [commId, comm] of Object.entries(this.communities || {})) {
-      for (const [appId, app] of Object.entries(comm.apps || {})) {
-        let appPath = app.absolutePath;
-        if (!appPath && app.localPath && wsRoot) {
-          appPath = path.join(wsRoot, app.localPath);
-        }
-        
-        if (appPath && cwd.startsWith(appPath)) {
-          return {
-            communityId: commId,
-            appId,
-            kbId: app.kbId || 'General'
-          };
-        }
-      }
-    }
-
     // products object (legacy)
     for (const [productId, product] of Object.entries(this.products || {})) {
       let productPath = product.absolutePath;
@@ -729,44 +582,12 @@ export class WorkspaceConfig {
    */
   validate() {
     const errors = [];
-    
-    // For v2 root workspace with communities
-    if (this.version === '2.0' && Object.keys(this.communities).length > 0) {
-      for (const [communityId, community] of Object.entries(this.communities)) {
-        if (community.apps) {
-          for (const [appId, app] of Object.entries(community.apps)) {
-            if (!app.localPath) {
-              errors.push(`Community "${communityId}" app "${appId}" missing localPath`);
-            }
-          }
-        }
-      }
-      return {
-        isValid: errors.length === 0,
-        errors
-      };
+
+    // v2.1 validation: must have env block
+    if (!this.env || Object.keys(this.env).length === 0) {
+      errors.push('Missing env block — workspace.json must be v2.1 format with env.platform or env.products');
     }
-    
-    // Legacy v1 validation
-    if (!this.primaryCommunity) {
-      errors.push('Missing primaryCommunity');
-    }
-    
-    if (!this.defaultContext) {
-      errors.push('Missing defaultContext');
-    } else {
-      if (!this.defaultContext.communityId) errors.push('defaultContext missing communityId');
-      if (!this.defaultContext.appId) errors.push('defaultContext missing appId');
-      if (!this.defaultContext.kbId) errors.push('defaultContext missing kbId');
-    }
-    
-    // Validate directory mappings
-    for (const [dir, context] of Object.entries(this.directoryMappings)) {
-      if (!context.communityId) errors.push(`Directory "${dir}" mapping missing communityId`);
-      if (!context.appId) errors.push(`Directory "${dir}" mapping missing appId`);
-      if (!context.kbId) errors.push(`Directory "${dir}" mapping missing kbId`);
-    }
-    
+
     return {
       isValid: errors.length === 0,
       errors
