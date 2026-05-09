@@ -1057,6 +1057,13 @@ appCommand
       const alreadyMapped = workspaceConfig?.getAppByAppId(appId);
       let appPath = alreadyMapped?.absolutePath;
 
+      if (alreadyMapped && options.path) {
+        throw new Error(
+          `App '${appId}' is already mapped to '${alreadyMapped.localPath}'. ` +
+          `Use 'descix app set-localpath -a ${appId} -p <new-path>' to update.`
+        );
+      }
+
       if (!alreadyMapped) {
         const localPath = options.path || '.';
         const wsRoot = workspaceConfig?.workspaceRoot || process.cwd();
@@ -1067,14 +1074,12 @@ appCommand
         console.log(chalk.gray(`  workspace.json updated: ${appId} → ${localPath}`));
       }
 
-      // 2. Create rigid app folder structure (site, kb, microservice, assets)
+      // 2. Create app folder structure (site, microservice, assets)
       if (appPath) {
         const siteDir = path.join(appPath, 'site');
-        const kbDir = path.join(appPath, 'kb', kbId);
         const msDir = path.join(appPath, 'microservice');
         const assetsDir = path.join(appPath, 'assets');
         await fs.mkdir(siteDir, { recursive: true });
-        await fs.mkdir(kbDir, { recursive: true });
         await fs.mkdir(msDir, { recursive: true });
         await fs.mkdir(assetsDir, { recursive: true });
 
@@ -1091,7 +1096,7 @@ appCommand
         } catch {
           await fs.writeFile(descPath, `# ${appId}\n\nApplication description goes here.\n`);
         }
-        console.log(chalk.gray(`  Created: site/, kb/${kbId}/, microservice/, assets/`));
+        console.log(chalk.gray(`  Created: site/, microservice/, assets/`));
       }
 
       // 3. Create KnowledgeBase Firestore doc (Git Mode — no Drive required)
@@ -1102,8 +1107,9 @@ appCommand
       console.log(chalk.gray(`  Community: ${communityId}`));
       console.log(chalk.gray(`  KB: ${kbId} — ${kbResult.created ? 'created' : 'already exists'}\n`));
       console.log(chalk.cyan('Next steps:'));
-      console.log(chalk.gray(`  Add markdown files to kb/${kbId}/ then run:`));
-      console.log(chalk.white(`  descix update kb -a ${appId}\n`));
+      console.log(chalk.gray(`  Create a corpus manifest at apps/${appId}/.descix/manifests/${kbId}.json`));
+      console.log(chalk.gray(`  then run:`));
+      console.log(chalk.white(`  descix kb corpus sync -a ${appId}\n`));
     } catch (error) {
       console.error(chalk.red(error.message));
       process.exit(1);
@@ -1996,6 +2002,89 @@ appCommand
     }
   });
 
+appCommand
+  .command('set-localpath')
+  .description('Update the local directory path for a mapped app')
+  .requiredOption('-a, --app <app_id>', 'App ID')
+  .requiredOption('-p, --path <dir>', 'New local directory path')
+  .action(async (options) => {
+    try {
+      const appId = options.app;
+      const newPath = options.path;
+
+      const workspaceConfig = await WorkspaceConfig.load();
+      const appConfig = workspaceConfig.getAppByAppId(appId);
+      if (!appConfig) {
+        throw new Error(`App '${appId}' is not mapped. Run 'descix app init -a ${appId}' first.`);
+      }
+
+      // Hard-fail if path doesn't exist or is not a directory
+      let stat;
+      try {
+        stat = await fs.stat(newPath);
+      } catch {
+        throw new Error(`Path does not exist: ${newPath}`);
+      }
+      if (!stat.isDirectory()) {
+        throw new Error(`Path is not a directory: ${newPath}`);
+      }
+
+      // Update the localPath in workspace.json
+      const wsRoot = workspaceConfig.workspaceRoot || process.cwd();
+      const oldPath = appConfig.localPath;
+      appConfig.localPath = newPath;
+
+      // Update env.products entry
+      const products = workspaceConfig.env?.products || [];
+      for (const product of products) {
+        if (product.appId === appId || product.app_id === appId) {
+          product.localPath = newPath;
+          break;
+        }
+      }
+      await workspaceConfig.save(wsRoot);
+
+      console.log(chalk.green(`\n✓ ${appId} local path updated`));
+      console.log(chalk.gray(`  ${oldPath} → ${newPath}\n`));
+    } catch (error) {
+      console.error(chalk.red(error.message));
+      process.exit(1);
+    }
+  });
+
+appCommand
+  .command('unmap')
+  .description('Remove an app from the local workspace mapping (does not delete Firestore/Pinecone data)')
+  .requiredOption('-a, --app <app_id>', 'App ID')
+  .action(async (options) => {
+    try {
+      const appId = options.app;
+
+      const workspaceConfig = await WorkspaceConfig.load();
+      const appConfig = workspaceConfig.getAppByAppId(appId);
+      if (!appConfig) {
+        throw new Error(`App '${appId}' is not mapped.`);
+      }
+
+      // Remove from env.products
+      const products = workspaceConfig.env?.products || [];
+      const idx = products.findIndex(p => p.appId === appId || p.app_id === appId);
+      if (idx === -1) {
+        throw new Error(`App '${appId}' is not found in env.products.`);
+      }
+      products.splice(idx, 1);
+
+      const wsRoot = workspaceConfig.workspaceRoot || process.cwd();
+      await workspaceConfig.save(wsRoot);
+
+      console.log(chalk.green(`\n✓ ${appId} removed from workspace mapping`));
+      console.log(chalk.gray(`  Pinecone vectors, Firestore docs, and Drive data are not affected.\n`));
+    } catch (error) {
+      console.error(chalk.red(error.message));
+      process.exit(1);
+    }
+  });
+
 // ============ Knowledge Base Commands ============
 
 const kbCommand = program
@@ -2087,32 +2176,6 @@ kbCommand
   });
 
 // Phase 0 CLI-Centric KB Processing Commands
-kbCommand
-  .command('pull')
-  .description('Pull KB content from Drive and convert to local markdown')
-  .option('-c, --community <id>', 'Community ID')
-  .option('-a, --app <id>', 'App ID')
-  .option('-k, --kb <id>', 'Knowledge Base ID (default: General)')
-  .option('--folder <id_or_url>', 'Override Drive folder (raw ID or full Drive URL) — one-time import without modifying workspace.json')
-  .option('-v, --verbose', 'Show verbose output')
-  .option('--merge-mode <mode>', 'Merge mode: merge|overwrite|force-overwrite (default: merge)')
-  .option('--dry-run', 'Show what would happen without making changes')
-  .action(async (options) => {
-    try {
-      let apiClient = null;
-      try {
-        apiClient = new DeSciXApiClient();
-        await apiClient.loadCredentials();
-      } catch {
-        // Continue without API client
-      }
-      
-      await kbCommands.runKbPull(apiClient, options);
-    } catch (error) {
-      console.error(chalk.red(`\n❌ ${error.message}\n`));
-      process.exit(1);
-    }
-  });
 
 kbCommand
   .command('chunk')
@@ -2172,37 +2235,6 @@ kbCommand
       await requireAuth(apiClient);
       
       await kbCommands.runKbBuild(apiClient, options);
-    } catch (error) {
-      console.error(chalk.red(`\n❌ ${error.message}\n`));
-      process.exit(1);
-    }
-  });
-
-kbCommand
-  .command('push')
-  .description('Push staging files to Drive')
-  .option('-c, --community <id>', 'Community ID')
-  .option('-a, --app <id>', 'App ID')
-  .option('-k, --kb <id>', 'Knowledge Base ID (default: General)')
-  .option('-v, --verbose', 'Show verbose output')
-  .option('-i, --interactive', 'Enable interactive prompts for conflicts')
-  .option('--on-conflict <action>', 'Conflict handling: overwrite|skip (default: overwrite)')
-  .option('--no-move', 'Do not move files to .processed after upload')
-  .option('--dry-run', 'Show what would happen without making changes')
-  .action(async (options) => {
-    try {
-      let apiClient = null;
-      try {
-        apiClient = new DeSciXApiClient();
-        await apiClient.loadCredentials();
-      } catch {
-        // Continue without API client
-      }
-      
-      await kbCommands.runKbPush(apiClient, {
-        ...options,
-        moveToProcessed: options.move !== false
-      });
     } catch (error) {
       console.error(chalk.red(`\n❌ ${error.message}\n`));
       process.exit(1);
@@ -2284,6 +2316,70 @@ corpusCommand
       }
 
       await corpusCommands.runCorpusStatus(apiClient, options);
+    } catch (error) {
+      console.error(chalk.red(`\n❌ ${error.message}\n`));
+      process.exit(1);
+    }
+  });
+
+// ============ Drive Commands ============
+
+const driveCommand = program
+  .command('drive')
+  .description('Drive content authoring: pull from Drive, push staging to Drive');
+
+driveCommand
+  .command('pull')
+  .description('Pull content from Drive and convert to local markdown')
+  .option('-c, --community <id>', 'Community ID')
+  .option('-a, --app <id>', 'App ID')
+  .option('-k, --kb <id>', 'Knowledge Base ID (default: General)')
+  .option('--folder <id_or_url>', 'Override Drive folder (raw ID or full Drive URL) — one-time import without modifying workspace.json')
+  .option('-v, --verbose', 'Show verbose output')
+  .option('--merge-mode <mode>', 'Merge mode: merge|overwrite|force-overwrite (default: merge)')
+  .option('--dry-run', 'Show what would happen without making changes')
+  .action(async (options) => {
+    try {
+      let apiClient = null;
+      try {
+        apiClient = new DeSciXApiClient();
+        await apiClient.loadCredentials();
+      } catch {
+        // Continue without API client
+      }
+
+      await kbCommands.runKbPull(apiClient, options);
+    } catch (error) {
+      console.error(chalk.red(`\n❌ ${error.message}\n`));
+      process.exit(1);
+    }
+  });
+
+driveCommand
+  .command('push')
+  .description('Push staging files to Drive')
+  .option('-c, --community <id>', 'Community ID')
+  .option('-a, --app <id>', 'App ID')
+  .option('-k, --kb <id>', 'Knowledge Base ID (default: General)')
+  .option('-v, --verbose', 'Show verbose output')
+  .option('-i, --interactive', 'Enable interactive prompts for conflicts')
+  .option('--on-conflict <action>', 'Conflict handling: overwrite|skip (default: overwrite)')
+  .option('--no-move', 'Do not move files to .processed after upload')
+  .option('--dry-run', 'Show what would happen without making changes')
+  .action(async (options) => {
+    try {
+      let apiClient = null;
+      try {
+        apiClient = new DeSciXApiClient();
+        await apiClient.loadCredentials();
+      } catch {
+        // Continue without API client
+      }
+
+      await kbCommands.runKbPush(apiClient, {
+        ...options,
+        moveToProcessed: options.move !== false
+      });
     } catch (error) {
       console.error(chalk.red(`\n❌ ${error.message}\n`));
       process.exit(1);

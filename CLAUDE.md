@@ -49,21 +49,25 @@ Before any change, state which package boundary is being touched and confirm no 
 
 ---
 
-## V2 Pending Items (from audit)
+## V2.1 Pending Items (ws-cli-v2.1-purge)
 
-### P0 — Complete
+### Complete (WS-CLI-V2.1-PURGE Batch 2)
 - `update.js updateKB()`: Drive stages 1-3 removed; delegates to `runKbChunk()` + `runKbSync()` ✓
 - `kb.js`: PathContext replaced with WorkspaceConfig for v2 workspace format support ✓
 - `WorkspaceConfig.getApiUrl()` and `PathContext.getApiUrl()`: now derive from `env.platform.microservice.port` ✓
-- Remaining: `descix app list` + `descix app init` commands (see plan)
+- `app init` hardening: hard-fails if app already mapped and `-p` given ✓
+- `kb/General/` scaffold removed from `app init` ✓
+- `descix kb pull/push` removed; moved to `descix drive pull/push` ✓
+- `descix app set-localpath` and `descix app unmap` added ✓
 
-### P1 — Remove Legacy
+### Pending (PR #7 — Wave 3)
+- `PathContext.js`: delete entirely; migrate all import sites to `WorkspaceConfig`
+- `this.communities` block in `WorkspaceConfig`: remove; v1 format → hard error
+- Add `getSitePath(appId)` + `getMicroservicePath(appId)` to `WorkspaceConfig`
+
+### Pending (other)
 - `descix-cli/bin/mcp-server.js`: imports non-existent `vendor/mcp/tools.js` — determine canonical MCP entry point, remove `DeSciXMCPServer` legacy
 - `descix-cli/tests/mcp-flow.test.js`: imports `vendor/mcp/mcp-server.js` (missing) — remove or rewrite
-- `-c` and `-a` CLI flags: deprecated for local workspace operations — remove
-
-### P1 — Fix E2E Test Syntax
-- `DeSciX_Cloud/microservice/tests/cliE2ETest.js`: update `descix sync stage1` → `descix sync kb stage1`
 
 ---
 
@@ -75,22 +79,24 @@ The CLI never imports backend services directly. All operations are `POST /apifr
 ### CLI testing — use CLI, never curl
 After `descix login` / bootstrap, all testing must use `node DeSciX_Core/descix-cli/bin/descix.js [command]`. Curl bypasses session, auth middleware, and entitlement checks — it is not a valid substitute. This is how real bugs in auth and entitlement are caught.
 
-### workspace.json format — v1 vs v2
-- **v2 format** (current, canonical): `env.platform` + `env.products[]` — app UUIDs in unified product registry. `WorkspaceConfig._buildAppIdMap()` and `getAppByAppId()` read this. **Use this for all CLI workspace resolution.**
-- **v1 format** (legacy): `communities.{id}.apps.{id}` — `WorkspaceConfig.registerApp()` still writes this format; removal is a post-E2E refactor TODO.
-- When reading workspace config in CLI commands: use `WorkspaceConfig` (not `PathContext`) — it handles v2 format first, then falls back to v1.
+### workspace.json format — v2.1 (canonical)
+- **v2.1 format** (current, canonical): `env.platform` + `env.products[]` — app UUIDs in unified product registry. `WorkspaceConfig._buildAppIdMap()` and `getAppByAppId()` read this. **Use this for all CLI workspace resolution.**
+- **v1 format** (`communities`-based JSON) is not supported. Loading a v1 workspace.json hard-errors: `"v1 workspace format is not supported. Migrate to v2.1."`
+- When reading workspace config in CLI commands: use `WorkspaceConfig` only — `PathContext` is removed.
 
 ### KB Mode — Git Mode only in CLI
-- `descix update kb` and `descix kb build/chunk/sync` are Git Mode: local files → chunks → `kb_sync_chunks` → Pinecone
+- `descix kb corpus sync` is the canonical KB sync path: corpus manifest → chunks → Pinecone
+- `descix kb build/chunk/sync` are lower-level Git Mode operations: local files → chunks → `kb_sync_chunks` → Pinecone
 - Drive Mode (Drive → GCS → Pinecone) is server-side only for PWA users; never add Drive pipeline calls to CLI commands
-- `descix kb pull/push` manage the Drive source IPDoc store — they are correct and must be preserved
+- `descix drive pull/push` manage the Drive source IPDoc store — they are the correct commands for Drive content authoring
 
 ### Developer onboarding sequence (after bootstrap)
 ```bash
-node bin/descix.js app list          # discover available apps
-node bin/descix.js app init -a daita  # registers KB doc + local dirs
-node bin/descix.js update kb -a daita # chunk + sync to Pinecone
-node bin/descix.js chat -a daita "..."# verify RAG
+node bin/descix.js app list                   # discover available apps
+node bin/descix.js app init -a daita           # registers KB doc + scaffolds site/, microservice/, assets/
+# Create apps/daita/.descix/manifests/General.json corpus manifest, then:
+node bin/descix.js kb corpus sync -a daita     # sync corpus manifest → Pinecone
+node bin/descix.js chat -a daita "..."         # verify RAG
 ```
 
 ### MCP uses CLI
