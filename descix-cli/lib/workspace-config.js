@@ -512,6 +512,51 @@ export class WorkspaceConfig {
   };
 
   /**
+   * Update an app's site.port in env.products[] (or env.platform if it is the platform app).
+   *
+   * Pass `null` to remove site.port; if site.{} becomes empty, site.{} is also deleted.
+   * Persists via save() at the end — same auto-save pattern as setEnvironment().
+   * Hard-fails if appId is not mapped in env.platform or env.products.
+   *
+   * @param {string} appId - App identifier (must exist in env.platform or env.products)
+   * @param {number|string|null} port - Port number to set, or null to remove site.port
+   * @returns {Promise<string>} Path to saved config (from save())
+   */
+  async setSitePort(appId, port) {
+    if (!appId) throw new Error('appId is required');
+
+    // Find the live env entry (platform or products[]) — not a copy
+    let entry = null;
+    if (this.env?.platform?.appId === appId) {
+      entry = this.env.platform;
+    } else if (Array.isArray(this.env?.products)) {
+      entry = this.env.products.find(p => p.appId === appId) || null;
+    }
+
+    if (!entry) {
+      throw new Error(
+        `App "${appId}" is not mapped in workspace.json. ` +
+        'Use `descix app init` to register, or `descix app set-localpath -a <id> -p <path>` to repoint.'
+      );
+    }
+
+    if (port === null || port === undefined) {
+      // Remove site.port; clean up empty site.{}
+      if (entry.site) {
+        delete entry.site.port;
+        if (Object.keys(entry.site).length === 0) {
+          delete entry.site;
+        }
+      }
+    } else {
+      if (!entry.site) entry.site = {};
+      entry.site.port = port;
+    }
+
+    return this.save();
+  }
+
+  /**
    * Persistently set the target environment in workspace.json.
    *
    * Updates env.environment and env.apiUrl, then saves.

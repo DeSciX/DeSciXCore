@@ -60,10 +60,13 @@ Before any change, state which package boundary is being touched and confirm no 
 - `descix kb pull/push` removed; moved to `descix drive pull/push` ✓
 - `descix app set-localpath` and `descix app unmap` added ✓
 
-### Pending (PR #7 — Wave 3)
-- `PathContext.js`: delete entirely; migrate all import sites to `WorkspaceConfig`
-- `this.communities` block in `WorkspaceConfig`: remove; v1 format → hard error
-- Add `getSitePath(appId)` + `getMicroservicePath(appId)` to `WorkspaceConfig`
+### Complete (WS-CLI-V2.1-PURGE Batch 4)
+- `WorkspaceConfig.getApp(communityId, appId)` was removed in PR #7 but 6 call sites were missed. All 6 migrated or refactored ✓
+- `WorkspaceConfig.setSitePort(appId, port)` added — mutates live `env.products[]`/`env.platform` entry and auto-saves ✓
+- `descix site servelocal` and `update.js` port handler refactored to use `setSitePort` (eliminates stale-copy mutation) ✓
+- `descix update kb` v1 community-keyed fallback block (`if (!appConfig && ctx.communityId)`) deleted entirely ✓
+- Error message for unmapped app now references both `descix app init` and `descix app set-localpath` ✓
+- Meta-test `removed-methods-anti-regression.test.js` guards against future re-introduction of removed methods ✓
 
 ### Pending (other)
 - `descix-cli/bin/mcp-server.js`: imports non-existent `vendor/mcp/tools.js` — determine canonical MCP entry point, remove `DeSciXMCPServer` legacy
@@ -83,6 +86,13 @@ After `descix login` / bootstrap, all testing must use `node DeSciX_Core/descix-
 - **v2.1 format** (current, canonical): `env.platform` + `env.products[]` — app UUIDs in unified product registry. `WorkspaceConfig._buildAppIdMap()` and `getAppByAppId()` read this. **Use this for all CLI workspace resolution.**
 - **v1 format** (`communities`-based JSON) is not supported. Loading a v1 workspace.json hard-errors: `"v1 workspace format is not supported. Migrate to v2.1."`
 - When reading workspace config in CLI commands: use `WorkspaceConfig` only — `PathContext` is removed.
+
+### WorkspaceConfig — canonical methods (v2.1)
+- **`getAppByAppId(appId)`** — primary app lookup. Returns `{ localPath, absolutePath, communityId, kbId }` or `null`. Use this everywhere.
+- **`setSitePort(appId, port)`** — mutates the live `env.products[]` (or `env.platform`) entry and calls `save()`. Pass `null` to remove `site.port`; empty `site.{}` is cleaned up. Hard-fails if `appId` is not mapped. Always use this (not direct mutation of `getAppByAppId()` return value, which is a constructed copy).
+- **`getSitePath(appId)`** / **`getMicroservicePath(appId)`** — convenience wrappers returning `absolutePath/site` and `absolutePath/microservice` respectively.
+- **`setEnvironment(envName)`** — canonical way to persist environment to workspace.json.
+- **NEVER call `getApp(communityId, appId)`** — this method was removed in WS-CLI-V2.1-PURGE PR #7. `getAppByAppId(appId)` is the replacement. The meta-test `removed-methods-anti-regression.test.js` enforces this.
 
 ### KB Mode — Git Mode only in CLI
 - `descix kb corpus sync` is the canonical KB sync path: corpus manifest → chunks → Pinecone
