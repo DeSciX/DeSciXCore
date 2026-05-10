@@ -2410,16 +2410,16 @@ siteCommand
         process.exit(1);
       }
       
-      const appConfig = workspaceConfig.getApp(ctx.communityId, ctx.appId);
+      const appConfig = workspaceConfig.getAppByAppId(ctx.appId);
       if (!appConfig) {
         console.error(chalk.red('\n❌ App not found in workspace.json.'));
         console.log(chalk.gray('  Run "npx descix init" to set up your workspace.\n'));
         process.exit(1);
       }
-      
-      const appPath = appConfig.absolutePath || 
+
+      const appPath = appConfig.absolutePath ||
         path.join(workspaceConfig.getWorkspaceRoot(), appConfig.localPath);
-      
+
       console.log(chalk.cyan('\n📁 Adding site scaffold...\n'));
       
       const { copyScaffold } = await import('../lib/core/Hydrator.js');
@@ -2704,68 +2704,61 @@ siteCommand
     try {
       const workspaceConfig = await WorkspaceConfig.load();
       const ctx = workspaceConfig.resolveContextWithOptions(options);
-      
-      const communityId = ctx.communityId;
+
       const appId = ctx.appId;
-      
-      if (!communityId || !appId) {
-        console.error(chalk.red('\n❌ Community and App ID required.'));
-        console.log(chalk.gray('  Either provide -c and -a flags, or cd into an app directory\n'));
+
+      if (!appId) {
+        console.error(chalk.red('\n❌ App ID required.'));
+        console.log(chalk.gray('  Either provide -a flag, or cd into an app directory\n'));
         process.exit(1);
       }
-      
-      const appConfig = workspaceConfig.getApp(communityId, appId);
-      if (!appConfig) {
-        console.error(chalk.red('\n❌ App not found in workspace.json.'));
-        console.log(chalk.gray('  Run "npx descix init" to set up your workspace.\n'));
-        process.exit(1);
-      }
-      
-      // Handle disable case
+
+      // Handle disable case — setSitePort(appId, null) removes site.port / cleans site.{}
       if (port === 'n' || port === 'N') {
-        if (appConfig.site) {
-          delete appConfig.site.port;
-          if (Object.keys(appConfig.site).length === 0) {
-            delete appConfig.site;
-          }
-        }
-        await workspaceConfig.save();
-        console.log(chalk.green(`\n✅ Local site server disabled for ${communityId}/${appId}\n`));
+        await workspaceConfig.setSitePort(appId, null);
+        console.log(chalk.green(`\n✅ Local site server disabled for ${appId}\n`));
         return;
       }
-      
-      // Handle port registration
+
+      // Handle status query (no port argument)
       if (!port) {
-        // Show current status
-        const currentPort = appConfig.site?.port;
+        const appConfig = workspaceConfig.getAppByAppId(appId);
+        if (!appConfig) {
+          console.error(chalk.red('\n❌ App not found in workspace.json.'));
+          console.log(chalk.gray('  Run "npx descix init" to set up your workspace.\n'));
+          process.exit(1);
+        }
+        // Read site.port from the live env entry (not from the constructed copy)
+        let liveEntry = null;
+        if (workspaceConfig.env?.platform?.appId === appId) {
+          liveEntry = workspaceConfig.env.platform;
+        } else if (Array.isArray(workspaceConfig.env?.products)) {
+          liveEntry = workspaceConfig.env.products.find(p => p.appId === appId) || null;
+        }
+        const currentPort = liveEntry?.site?.port;
         if (currentPort) {
           console.log(chalk.cyan(`\n📍 Local site server: port ${currentPort}`));
-          console.log(chalk.gray(`  App: ${communityId}/${appId}\n`));
+          console.log(chalk.gray(`  App: ${appId}\n`));
         } else {
           console.log(chalk.yellow(`\n⚠️  No local site server configured.`));
           console.log(chalk.gray(`  Usage: descix site servelocal <port>\n`));
         }
         return;
       }
-      
+
       const portNum = parseInt(port);
       if (isNaN(portNum) || portNum < 1 || portNum > 65535) {
         console.error(chalk.red('\n❌ Invalid port number.\n'));
         process.exit(1);
       }
-      
-      if (!appConfig.site) appConfig.site = {};
-      appConfig.site.port = portNum;
-      if (!appConfig.site.devCommand) {
-        appConfig.site.devCommand = 'npm run dev';
-      }
-      
-      await workspaceConfig.save();
+
+      // setSitePort mutates the live env entry and saves — no stale-copy problem
+      await workspaceConfig.setSitePort(appId, portNum);
       console.log(chalk.green(`\n✅ Local site server registered!`));
       console.log(chalk.cyan(`  Port: ${portNum}`));
-      console.log(chalk.gray(`  App: ${communityId}/${appId}`));
-      console.log(chalk.gray(`\n  The PWA will proxy /apps/${communityId}/${appId}/* to localhost:${portNum}\n`));
-      
+      console.log(chalk.gray(`  App: ${appId}`));
+      console.log(chalk.gray(`\n  The gateway will proxy /p/${appId}/* to localhost:${portNum}\n`));
+
     } catch (error) {
       console.error(chalk.red(`\n❌ ${error.message}\n`));
       process.exit(1);
@@ -2971,16 +2964,16 @@ microserviceCommand
         process.exit(1);
       }
       
-      const appConfig = workspaceConfig.getApp(ctx.communityId, ctx.appId);
+      const appConfig = workspaceConfig.getAppByAppId(ctx.appId);
       if (!appConfig) {
         console.error(chalk.red('\n❌ App not found in workspace.json.'));
         console.log(chalk.gray('  Run "npx descix init" to set up your workspace.\n'));
         process.exit(1);
       }
-      
-      const appPath = appConfig.absolutePath || 
+
+      const appPath = appConfig.absolutePath ||
         path.join(workspaceConfig.getWorkspaceRoot(), appConfig.localPath);
-      
+
       console.log(chalk.cyan('\n📁 Adding microservice scaffold...\n'));
       
       const { copyScaffold } = await import('../lib/core/Hydrator.js');
@@ -3234,8 +3227,8 @@ microserviceCommand
             await fs.access(manifestPath);
           } catch {
             // If not in current directory, try to find the microservice path for detected context
-            if (ctx.communityId && ctx.appId && workspaceConfig.workspaceRoot) {
-              const appConfig = workspaceConfig.getApp(ctx.communityId, ctx.appId);
+            if (ctx.appId && workspaceConfig.workspaceRoot) {
+              const appConfig = workspaceConfig.getAppByAppId(ctx.appId);
               if (appConfig) {
                 const microservicePath = path.join(
                   workspaceConfig.workspaceRoot, 

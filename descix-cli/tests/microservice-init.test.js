@@ -1,0 +1,112 @@
+/**
+ * Tests for `descix microservice init` post-migration behavior.
+ *
+ * PRIMARY AC for Batch 4: `descix microservice init -c smile -a smile-fms` must
+ * succeed (no TypeError: workspaceConfig.getApp is not a function).
+ *
+ * Coverage:
+ *  - regression gate: getAppByAppId used (not removed getApp) — no TypeError
+ *  - happy path: mapped app returns config with absolutePath and localPath
+ *  - hard-fail: unmapped app throws a clean Error, not a TypeError
+ *
+ * Design: exercises WorkspaceConfig.getAppByAppId() directly against a temp
+ * workspace to validate the post-migration call site is correct.
+ *
+ * Run: `node --test tests/microservice-init.test.js` from descix-cli/.
+ */
+
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs/promises';
+import os from 'os';
+import path from 'path';
+import { WorkspaceConfig } from '../lib/workspace-config.js';
+
+/**
+ * Create an isolated temp workspace that mirrors a real smile-fms setup.
+ * Returns { wsRoot, appId }.
+ */
+async function makeSmileWorkspace(t) {
+  const wsRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'descix-test-ms-init-'));
+  await fs.mkdir(path.join(wsRoot, '.descix'), { recursive: true });
+  await fs.mkdir(path.join(wsRoot, 'smile-fms'), { recursive: true });
+
+  const appId = 'smile-fms';
+  const workspace = {
+    version: '2.1',
+    workspaceRoot: wsRoot,
+    type: 'workspace',
+    env: {
+      products: [{ appId, localPath: 'smile-fms', kbId: 'General' }]
+    }
+  };
+  await fs.writeFile(
+    path.join(wsRoot, '.descix', 'workspace.json'),
+    JSON.stringify(workspace, null, 2)
+  );
+
+  t.after(async () => {
+    await fs.rm(wsRoot, { recursive: true, force: true });
+  });
+
+  return { wsRoot, appId };
+}
+
+/**
+ * Simulate the post-migration microservice-init lookup
+ * (mirrors the fixed bin/descix.js action).
+ */
+async function runMicroserviceInitLookup(wsRoot, appId) {
+  const workspaceConfig = await WorkspaceConfig.load(wsRoot);
+  const appConfig = workspaceConfig.getAppByAppId(appId);
+  if (!appConfig) {
+    throw new Error(`App not found in workspace.json.`);
+  }
+  return appConfig;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('microservice-init — PRIMARY AC: smile-fms lookup succeeds with no TypeError', async (t) => {
+  const { wsRoot, appId } = await makeSmileWorkspace(t);
+
+  // This is the exact regression: getApp(communityId, appId) was called before Batch 4,
+  // which throws TypeError. Post-migration uses getAppByAppId(appId). Must not throw.
+  let threw = false;
+  let err;
+  try {
+    await runMicroserviceInitLookup(wsRoot, appId);
+  } catch (e) {
+    threw = true;
+    err = e;
+  }
+
+  assert.equal(threw, false, `lookup must not throw for mapped app — got: ${err?.message}`);
+});
+
+test('microservice-init — happy path: appConfig has absolutePath and localPath', async (t) => {
+  const { wsRoot, appId } = await makeSmileWorkspace(t);
+
+  const appConfig = await runMicroserviceInitLookup(wsRoot, appId);
+
+  assert.ok(appConfig.localPath, 'localPath must be present');
+  assert.ok(appConfig.absolutePath, 'absolutePath must be present');
+  assert.equal(
+    path.resolve(appConfig.absolutePath),
+    path.resolve(path.join(wsRoot, 'smile-fms')),
+    'absolutePath must point to the app directory'
+  );
+});
+
+test('microservice-init — hard-fail: unmapped app throws clean Error (not TypeError)', async (t) => {
+  const { wsRoot } = await makeSmileWorkspace(t);
+
+  await assert.rejects(
+    () => runMicroserviceInitLookup(wsRoot, 'totally-unknown-app'),
+    (err) => {
+      assert.ok(!(err instanceof TypeError), 'error must not be a TypeError (removed-method regression check)');
+      assert.match(err.message, /not found in workspace\.json/);
+      return true;
+    }
+  );
+});
