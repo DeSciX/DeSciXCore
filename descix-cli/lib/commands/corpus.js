@@ -26,7 +26,7 @@ import { WorkspaceConfig } from '../workspace-config.js';
 import { loadManifests } from '../core/ManifestLoader.js';
 import { walkCorpus } from '../core/CorpusWalker.js';
 import { chunkFile, categorizeFile } from '../core/Chunker.js';
-import { upsertChunks, deleteStaleChunks } from '../core/Syncer.js';
+import { upsertChunks, deleteStaleChunks, deleteStaleChunksByFileId, listRemoteFileIds } from '../core/Syncer.js';
 
 /**
  * Read a file and chunk it using the existing Chunker.
@@ -202,21 +202,46 @@ export async function runCorpusSync(apiClient, options) {
 
     spinner.succeed(`Found ${manifests.length} manifest(s)`);
 
-    // 3. Pre-check: verify the KB document exists in Firestore.
-    // Without it, vectors will be orphaned in Pinecone with no KB to query against.
-    // Run "descix app init -a <app_id>" to create the KB document first.
+    // 3. Pre-check (fail-loud): verify each manifest's target KB document exists in Firestore.
+    // Without the KB doc, chat queries against this KB will hard-fail in prepare_chat_context.
+    // We surface this BEFORE wasting time syncing vectors that no chat path can reach.
+    //
+    // Uses list_knowledge_bases (returns the actual KBs registered for the app) — NOT get_app,
+    // which returns only the App doc and lacks any knowledgebases field. The prior pre-check
+    // was reading a non-existent field and printing a false-positive warning on every sync.
+    let registeredKbNames = null;
     try {
-      const kbCheck = await apiClient.invoke('get_app', { app_id: appId, community_id: communityId });
-      const kbData = kbCheck?.message || kbCheck;
-      const kbs = kbData?.knowledgebases || kbData?.knowledge_bases || [];
-      if (Array.isArray(kbs) && kbs.length === 0) {
-        console.log(chalk.yellow(`\n  ⚠ No KnowledgeBase documents found for app "${appId}".`));
-        console.log(chalk.yellow(`    Vectors will sync to Pinecone but chat won't work until KB exists.`));
-        console.log(chalk.yellow(`    Run: descix app init -a ${appId}\n`));
-      }
+      const kbListResp = await apiClient.invoke('list_knowledge_bases', {
+        community_id: communityId,
+        app_id: appId
+      });
+      const kbListData = kbListResp?.message || kbListResp;
+      const kbs = kbListData?.knowledgebases || kbListData?.knowledge_bases || [];
+      registeredKbNames = new Set(
+        kbs.map(kb => kb.knowledgebase_name || kb.kb_name || kb.name).filter(Boolean)
+      );
     } catch (kbErr) {
-      console.log(chalk.yellow(`\n  ⚠ Could not verify KB exists for app "${appId}": ${kbErr.message}`));
-      console.log(chalk.yellow(`    If chat returns "KnowledgeBase not found", run: descix app init -a ${appId}\n`));
+      // If the call itself fails (network/auth), surface and bail — don't silently proceed.
+      spinner.fail(`Could not verify KB registry for app "${appId}": ${kbErr.message}`);
+      throw new Error(
+        `Failed to list KnowledgeBase docs for app "${appId}". ` +
+        `This is required so we can refuse to sync into an unregistered KB. ` +
+        `Underlying error: ${kbErr.message}`
+      );
+    }
+
+    const requestedKbNames = manifests.map(m => m.kb_name);
+    const missingKbNames = requestedKbNames.filter(name => !registeredKbNames.has(name));
+    if (missingKbNames.length > 0) {
+      // Hard-fail: every KB we are about to sync into must already be registered in Firestore.
+      // No hardcoded fallback. The user runs `descix app init` (or equivalent) to register first.
+      spinner.fail(`Unregistered KB(s) for app "${appId}"`);
+      throw new Error(
+        `KnowledgeBase document(s) missing in Firestore for app "${appId}": ${missingKbNames.join(', ')}.\n` +
+        `Registered KBs for this app: ${[...registeredKbNames].join(', ') || '(none)'}.\n` +
+        `Syncing vectors into Pinecone without a matching KB doc would orphan them (chat queries hard-fail).\n` +
+        `Fix: run \`descix app init -a ${appId}\` (creates the default KB doc) or extend the app's KB set first.`
+      );
     }
 
     // 4. Process each manifest
@@ -239,10 +264,52 @@ export async function runCorpusSync(apiClient, options) {
         continue;
       }
 
+      // 3b-rebuild: When --rebuild is set, enumerate ALL file_ids currently in Pinecone
+      // for this namespace and purge anything that is not in the current walk. This
+      // recovers from accumulated drift (e.g., the unk-vp_descix/Corpus 20k stale-chunk
+      // case from the WS-CLI-V2.1-PURGE-era delta-without-purge bug).
+      let rebuildPurged = 0;
+      if (options.rebuild) {
+        const rebuildSpinner = ora('  [rebuild] Enumerating Pinecone file_ids...').start();
+        try {
+          const remote = await listRemoteFileIds(apiClient, appId, kbName);
+          rebuildSpinner.text = `  [rebuild] Pinecone has ${remote.unique_count} unique file_id(s) / ${remote.total_chunks} chunks`;
+
+          // Compute valid file_ids from current local walk
+          const validFileIds = new Set(files.map(f => `corpus:${f.blob_sha}`));
+          const staleFileIds = remote.file_ids.filter(fid => !validFileIds.has(fid));
+
+          if (staleFileIds.length === 0) {
+            rebuildSpinner.succeed(`  [rebuild] No drift detected (${remote.unique_count} file_ids all current)`);
+          } else {
+            rebuildSpinner.text = `  [rebuild] Purging ${staleFileIds.length} stale file_id(s)...`;
+            // Chunked delete to avoid huge payloads on heavily-drifted namespaces
+            const REBUILD_BATCH = 50;
+            for (let i = 0; i < staleFileIds.length; i += REBUILD_BATCH) {
+              const batch = staleFileIds.slice(i, i + REBUILD_BATCH);
+              const result = await deleteStaleChunksByFileId(apiClient, communityId, appId, kbName, batch);
+              rebuildPurged += result.deleted;
+              rebuildSpinner.text = `  [rebuild] Purged ${i + batch.length}/${staleFileIds.length} stale file_id(s)...`;
+            }
+            rebuildSpinner.succeed(`  [rebuild] Purged ${rebuildPurged} chunk(s) across ${staleFileIds.length} stale file_id(s)`);
+          }
+        } catch (err) {
+          rebuildSpinner.fail(`  [rebuild] Failed: ${err.message}`);
+          // Re-throw — rebuild is opt-in and explicit; silent partial failure would
+          // leave the namespace half-purged, exactly the silent-degradation we are closing.
+          throw err;
+        }
+      }
+
       // 3b. Load previous sync state for delta computation
       // We use local sync state (stored blob SHAs) instead of querying Pinecone,
       // because Pinecone metadata queries don't scale (payload size limits).
-      const previousState = await loadSyncState(appRoot, kbName);
+      // For --rebuild runs we INVALIDATE prior state so every file re-chunks + re-upserts
+      // (otherwise unchanged-by-blob-sha files would be skipped despite the purge above).
+      let previousState = await loadSyncState(appRoot, kbName);
+      if (options.rebuild) {
+        previousState = null;
+      }
       const previousBlobShas = new Set(previousState?.synced_blob_shas || []);
       const previousChunkCount = previousState?.total_chunks || 0;
 
@@ -255,19 +322,23 @@ export async function runCorpusSync(apiClient, options) {
       // 3c. Compute delta — compare by blob SHA against local sync state
       const localBlobShas = new Set(files.map(f => f.blob_sha));
       const newOrChangedFiles = files.filter(f => !previousBlobShas.has(f.blob_sha));
-      const deletedBlobShas = [...previousBlobShas].filter(sha => !localBlobShas.has(sha));
 
-      // Note: we cannot efficiently delete individual chunks from Pinecone by blob SHA
-      // without querying for them first. For now, we track deletions in sync state
-      // and handle them on the next full re-sync if needed.
-      const idsToDelete = []; // Deferred — would need Pinecone query per deleted blob SHA
+      // Stale blob_shas: anything we synced previously that is no longer in the local
+      // walk. This covers BOTH cases:
+      //   (a) File deleted from the source corpus entirely.
+      //   (b) File modified in place — same source_path, new blob_sha → old blob_sha
+      //       is no longer in localBlobShas.
+      // Each stale blob_sha maps to a file_id of `corpus:{blob_sha}` in Pinecone metadata
+      // and is purged via the deleteStaleChunksByFileId primitive (multi-tenancy filter).
+      const deletedBlobShas = [...previousBlobShas].filter(sha => !localBlobShas.has(sha));
+      const fileIdsToDelete = deletedBlobShas.map(sha => `corpus:${sha}`);
 
       const unchangedCount = files.length - newOrChangedFiles.length;
 
       if (options.verbose) {
         console.log(chalk.gray(`  New/changed files: ${newOrChangedFiles.length}`));
         console.log(chalk.gray(`  Unchanged files: ${unchangedCount}`));
-        console.log(chalk.gray(`  Deleted blob SHAs: ${deletedBlobShas.length}`));
+        console.log(chalk.gray(`  Stale blob SHAs (delete): ${deletedBlobShas.length}`));
       }
 
       // 3d. Chunk new/changed files
@@ -360,12 +431,15 @@ export async function runCorpusSync(apiClient, options) {
         }
       }
 
-      if (idsToDelete.length > 0) {
-        const deleteSpinner = ora(`  Deleting ${idsToDelete.length} stale chunks...`).start();
+      if (fileIdsToDelete.length > 0) {
+        const deleteSpinner = ora(`  Purging stale chunks for ${fileIdsToDelete.length} blob SHA(s)...`).start();
         try {
-          const result = await deleteStaleChunks(apiClient, communityId, appId, kbName, idsToDelete);
+          // Use file_id-based delete: each stale blob_sha maps to file_id `corpus:{sha}`,
+          // and pineconeService::deleteVectorsByFileId scopes by full multi-tenancy filter
+          // (community_id, app_id, knowledgebase_name) — guarantees namespace isolation.
+          const result = await deleteStaleChunksByFileId(apiClient, communityId, appId, kbName, fileIdsToDelete);
           deleted = result.deleted;
-          deleteSpinner.succeed(`  Deleted: ${deleted} stale chunks`);
+          deleteSpinner.succeed(`  Purged: ${deleted} chunk(s) across ${fileIdsToDelete.length} stale blob SHA(s)`);
         } catch (err) {
           deleteSpinner.warn(`  Delete failed: ${err.message}`);
         }
@@ -388,7 +462,7 @@ export async function runCorpusSync(apiClient, options) {
       totalFilesProcessed += newOrChangedFiles.length;
       totalChunksCreated += upserted;
       totalFilesSkipped += unchangedCount;
-      totalFilesDeleted += deleted;
+      totalFilesDeleted += deleted + rebuildPurged;
     }
 
     // Summary
@@ -398,6 +472,8 @@ export async function runCorpusSync(apiClient, options) {
     console.log(chalk.white(`  Files unchanged: ${totalFilesSkipped}`));
     if (totalFilesDeleted > 0) {
       console.log(chalk.white(`  Chunks deleted:  ${totalFilesDeleted}`));
+    } else {
+      console.log(chalk.gray(`  Chunks deleted:  0`));
     }
     console.log('');
 

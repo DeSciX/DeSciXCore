@@ -2287,6 +2287,7 @@ corpusCommand
   .requiredOption('-a, --app <id>', 'App ID')
   .option('-k, --kb <name>', 'KB name (syncs specific manifest; default: all)')
   .option('-v, --verbose', 'Show verbose output')
+  .option('--rebuild', 'Reconcile Pinecone against the current manifest walk: enumerate remote file_ids, purge any not in the current corpus, then re-sync from scratch. Use to recover from accumulated stale-chunk drift.')
   .action(async (options) => {
     try {
       const apiClient = new DeSciXApiClient();
