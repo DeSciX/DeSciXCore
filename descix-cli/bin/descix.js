@@ -2974,32 +2974,70 @@ microserviceCommand
       const appPath = appConfig.absolutePath ||
         path.join(workspaceConfig.getWorkspaceRoot(), appConfig.localPath);
 
+      // Resolve microservice port from workspace.json before scaffold copy.
+      // Hard-fail early if missing — a scaffolded microservice without a known port
+      // cannot be routed by the gateway and cannot start on a deterministic port.
+      const env = workspaceConfig.env || {};
+      let microservicePort = null;
+      if (env.platform?.appId === ctx.appId) {
+        microservicePort = env.platform?.microservice?.port || null;
+      } else if (Array.isArray(env.products)) {
+        const productEntry = env.products.find(p => p.appId === ctx.appId);
+        microservicePort = productEntry?.microservice?.port || null;
+      }
+
+      if (!microservicePort) {
+        console.error(chalk.red(`\n❌ App '${ctx.appId}' has no microservice.port in workspace.json.`));
+        console.error(chalk.red(`   A port is required so the gateway knows where to route traffic.`));
+        console.log(chalk.gray(`\n   Add a port to workspace.json under env.products entry for '${ctx.appId}':`));
+        console.log(chalk.gray(`     "microservice": { "port": <your-port> }`));
+        console.log(chalk.gray(`\n   A 'descix app set-port' command for this is tracked as WS-CLI-MESH-ROUTING-GAP.\n`));
+        process.exit(1);
+      }
+
       console.log(chalk.cyan('\n📁 Adding microservice scaffold...\n'));
-      
+
       const { copyScaffold } = await import('../lib/core/Hydrator.js');
-      const stats = await copyScaffold('microservice', appPath, { 
-        verbose: true, 
-        force: options.force 
+      const stats = await copyScaffold('microservice', appPath, {
+        verbose: true,
+        force: options.force
       });
-      
+
       // Configuration Injection
       const microserviceDir = path.join(appPath, 'microservice');
       const defaultsPath = path.join(microserviceDir, 'defaults-config.json');
+      const manifestPath = path.join(microserviceDir, 'manifest.json');
       const overridesPath = path.join(microserviceDir, 'dev-overrides.json');
-      
-      // 1. Inject Context into defaults-config.json
+
+      // 1. Inject Context + Port into defaults-config.json
       try {
         const defaultsContent = await fs.readFile(defaultsPath, 'utf-8');
         const defaults = JSON.parse(defaultsContent);
         defaults.community_id = ctx.communityId;
         defaults.app_id = ctx.appId;
+        defaults.LOCAL_PORT = microservicePort;
         await fs.writeFile(defaultsPath, JSON.stringify(defaults, null, 2));
-        console.log(chalk.gray(`  ✓ Injected context into defaults-config.json`));
+        console.log(chalk.gray(`  ✓ Injected context + port into defaults-config.json`));
       } catch (err) {
         console.warn(chalk.yellow(`  ⚠ Could not update defaults-config.json: ${err.message}`));
       }
-      
-      // 2. Inject Credentials into dev-overrides.json
+
+      // 2. Inject Context + Port into manifest.json
+      try {
+        const manifestContent = await fs.readFile(manifestPath, 'utf-8');
+        const manifest = JSON.parse(manifestContent);
+        manifest.service.app_id = ctx.appId;
+        manifest.service.community_id = ctx.communityId;
+        manifest.service.name = ctx.appId;
+        manifest.service.domain = `${ctx.appId}.descix.net`;
+        manifest.service.debugPort = microservicePort;
+        await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2));
+        console.log(chalk.gray(`  ✓ Injected context + port into manifest.json`));
+      } catch (err) {
+        console.warn(chalk.yellow(`  ⚠ Could not update manifest.json: ${err.message}`));
+      }
+
+      // 3. Inject Credentials into dev-overrides.json
       try {
         const apiClient = new DeSciXApiClient();
         const credentials = await apiClient.loadCredentials();
