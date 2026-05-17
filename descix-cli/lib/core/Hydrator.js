@@ -706,7 +706,8 @@ export async function copyScaffold(scaffoldType, appPath, options = {}) {
   }
   
   // Find scaffold template directory (templates live inside CLI package)
-  const cliRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+  // Hydrator.js lives at descix-cli/lib/core/Hydrator.js — two '..' walks up to descix-cli/
+  const cliRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
   const scaffoldDir = path.join(cliRoot, 'templates', 'scaffolds', scaffoldType);
   
   // Check if scaffold exists

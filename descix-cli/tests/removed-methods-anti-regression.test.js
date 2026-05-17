@@ -108,3 +108,50 @@ test('removed-methods anti-regression: no removed method calls in lib/ or bin/ (
 
   assert.equal(hits.length, 0, 'Zero removed-method callers expected in lib/ and bin/');
 });
+
+// Batch 5: scaffold-dir existence anti-regression.
+//
+// Verifies that Hydrator.copyScaffold() resolves the scaffold template directory to
+// a path that ACTUALLY EXISTS at runtime. If the cliRoot path-walk ever drifts back
+// to three '..' (or the templates are moved), this test fails before a live CLI error
+// surfaces the bug.
+//
+// Design: calls copyScaffold() against real temp dirs and asserts the output files
+// exist. Because copyScaffold() internally resolves the scaffold dir and throws
+// "Scaffold template not found: <path>" if it doesn't exist, a failed access means
+// the path-walk is broken — the scaffold dir is not where Hydrator thinks it is.
+test('scaffold-dir anti-regression: copyScaffold resolves to an existing directory for both types', async (t) => {
+  const os = await import('os');
+
+  const siteAppDir = await fs.mkdtemp(path.join(os.default.tmpdir(), 'descix-antireg-site-'));
+  const msAppDir = await fs.mkdtemp(path.join(os.default.tmpdir(), 'descix-antireg-ms-'));
+
+  t.after(async () => {
+    await fs.rm(siteAppDir, { recursive: true, force: true });
+    await fs.rm(msAppDir, { recursive: true, force: true });
+  });
+
+  const { copyScaffold } = await import('../lib/core/Hydrator.js');
+
+  // site scaffold
+  await assert.doesNotReject(
+    () => copyScaffold('site', siteAppDir),
+    'copyScaffold("site") must not throw — scaffold dir must exist at the resolved cliRoot path'
+  );
+
+  // microservice scaffold
+  await assert.doesNotReject(
+    () => copyScaffold('microservice', msAppDir),
+    'copyScaffold("microservice") must not throw — scaffold dir must exist at the resolved cliRoot path'
+  );
+
+  // Confirm at least one expected output file exists for each type
+  await assert.doesNotReject(
+    () => fs.access(path.join(siteAppDir, 'site', 'app.js')),
+    'site/app.js must exist after copyScaffold("site")'
+  );
+  await assert.doesNotReject(
+    () => fs.access(path.join(msAppDir, 'microservice', 'app.js')),
+    'microservice/app.js must exist after copyScaffold("microservice")'
+  );
+});

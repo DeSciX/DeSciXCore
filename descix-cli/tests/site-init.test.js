@@ -102,3 +102,30 @@ test('site-init — hard-fail: unmapped app throws, not TypeError', async (t) =>
     }
   );
 });
+
+// Batch 5: scaffold-copy happy path — exercises copyScaffold() to close the test-coverage
+// gap that hid the Hydrator.js path-walk bug from Batch 4.
+test('site-init — Batch 5: copyScaffold("site") produces all expected files', async (t) => {
+  const appDir = await fs.mkdtemp(path.join(os.tmpdir(), 'descix-test-site-scaffold-'));
+  t.after(async () => {
+    await fs.rm(appDir, { recursive: true, force: true });
+  });
+
+  const { copyScaffold } = await import('../lib/core/Hydrator.js');
+  await copyScaffold('site', appDir);
+
+  const expectedFiles = [
+    path.join(appDir, 'site', 'app.js'),
+    path.join(appDir, 'site', 'index.html'),
+    path.join(appDir, 'site', 'styles.css'),
+    path.join(appDir, 'site', 'DeSciXAppSDK.js'),
+    path.join(appDir, 'site', 'README.md'),
+  ];
+
+  for (const filePath of expectedFiles) {
+    await assert.doesNotReject(
+      () => fs.access(filePath),
+      `Expected scaffold file to exist: ${path.relative(appDir, filePath)}`
+    );
+  }
+});
