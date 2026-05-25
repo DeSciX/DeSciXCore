@@ -26,6 +26,7 @@ import { runDoctor } from '../lib/commands/doctor.js';
 import { runHealth } from '../lib/commands/health.js';
 import * as kbCommands from '../lib/commands/kb.js';
 import * as corpusCommands from '../lib/commands/corpus.js';
+import * as brieferCommand from '../lib/commands/briefer/index.js';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
@@ -237,6 +238,28 @@ program
       await runHealth(options);
     } catch (error) {
       console.error(chalk.red(`\nHealth check error: ${error.message}\n`));
+      process.exit(1);
+    }
+  });
+
+// ============ Briefer Command (Code-Grounded Mental Model Regen) ============
+// WS-DESCIX-BRIEFER-CLI M1: CLI scaffolding + extractor contract.
+// See DeSciX/DeSciX_Core/descix-cli/lib/commands/briefer/ for implementation.
+// Scope doc: docs/design/ws-descix-briefer-cli.md
+// Briefer target: DeSciX/V2_docs/architecture/platform-must-know-briefer.md
+
+program
+  .command('briefer')
+  .description('Regenerate platform-must-know-briefer.md from live code + gcloud + Firestore (HARD-FAIL on drift)')
+  .option('--env <name>', 'Target environment: dev|demo|prod', 'dev')
+  .option('--out <path>', 'Override output path (default: workspace-root/DeSciX/V2_docs/architecture/platform-must-know-briefer.md)')
+  .option('--check', 'Drift-detection mode: regen to memory, diff against canonical, non-zero exit on drift')
+  .option('-v, --verbose', 'Print per-source paths, citations, and timings')
+  .action(async (options) => {
+    try {
+      await brieferCommand.runBriefer(options);
+    } catch (error) {
+      console.error(chalk.red(`\n❌ Briefer command failed: ${error.message}\n`));
       process.exit(1);
     }
   });
