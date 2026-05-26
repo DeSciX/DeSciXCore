@@ -18,6 +18,7 @@ import fs from 'fs';
 import crypto from 'crypto';
 import { EventEmitter } from 'events';
 import { createRequire } from 'module';
+import chokidar from 'chokidar';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -174,7 +175,13 @@ export function getCloudConfig() {
  */
 export function _resetCloudConfigForTests() {
     if (_instance && _instance.__watcher) {
-        try { _instance.__watcher.close(); } catch (_) { /* ignore */ }
+        try {
+            // chokidar's close() returns a Promise. We deliberately do NOT await it
+            // here — the test harness only needs the watcher to stop firing further
+            // callbacks; pending close I/O can settle in the background. Awaiting
+            // would force every test caller to become async-aware purely for cleanup.
+            _instance.__watcher.close();
+        } catch (_) { /* ignore */ }
         _instance.__watcher = null;
     }
     _instance = null;
@@ -206,9 +213,9 @@ class CloudConfig {
 
         // Watcher state (item #11 / option 2.B.1).
         this.__watcher = null;
-        this.__watch_debounce_timer = null;
-        // 250ms debounce. Editor atomic-saves (write tmp → rename) fire rename+change
-        // in rapid succession; debouncing collapses them into a single re-read.
+        // 250ms stability window. chokidar's awaitWriteFinish coalesces the
+        // rename+change burst from editor atomic-saves into a single callback,
+        // replacing the manual setTimeout debounce used by the old fs.watch impl.
         this.__watch_debounce_ms = 250;
 
         if (process.env.DEPLOY_ENV !== 'production') {
@@ -466,6 +473,12 @@ class CloudConfig {
      * Dev-only file watcher (item #11 / option 2.B.1). Watches defaults-config.json
      * and hot-reloads changed top-level keys into the singleton. Emits 'config:reloaded'.
      *
+     * Uses chokidar (not fs.watch) because macOS's fs.watch detaches when the
+     * watched file is replaced via inode swap — which is exactly how vim, VS Code
+     * (default), and `jq + mv` atomically save. After such a save, subsequent
+     * edits silently stop firing HOT-RELOAD. chokidar handles atomic-replace by
+     * watching the parent directory and re-attaching on rename automatically.
+     *
      * Cloud Functions don't have persistent watchers; this is a no-op outside dev.
      */
     _startConfigWatcher() {
@@ -474,26 +487,40 @@ class CloudConfig {
         if (this.__watcher) return; // already armed
 
         const watchPath = this.__defaults_config_path;
-        const arm = () => {
-            try {
-                this.__watcher = fs.watch(watchPath, (eventType) => {
-                    // fs.watch fires 'rename' on atomic-save (tmp file replace) and 'change'
-                    // on in-place writes. Debounce both into a single re-read.
-                    if (this.__watch_debounce_timer) clearTimeout(this.__watch_debounce_timer);
-                    this.__watch_debounce_timer = setTimeout(() => {
-                        this._reloadDefaults(eventType);
-                    }, this.__watch_debounce_ms);
-                });
-                this.__watcher.on('error', (err) => {
-                    console.warn(`[CloudConfig] file-watcher error: ${err.message}`);
-                });
-            } catch (e) {
-                console.warn(`[CloudConfig] failed to arm file-watcher: ${e.message}`);
-            }
-        };
+        try {
+            // atomic: true               — detect editor "tmp + rename" atomic saves
+            // awaitWriteFinish (250ms)   — coalesce multi-event saves into ONE callback;
+            //                              replaces the manual setTimeout debounce that
+            //                              fs.watch needed. Keeps the same effective
+            //                              debounce semantics (__watch_debounce_ms) so
+            //                              tests can still tune via the field.
+            // ignoreInitial: true        — don't fire on the synthetic 'add' that
+            //                              chokidar emits when first attaching.
+            this.__watcher = chokidar.watch(watchPath, {
+                atomic: true,
+                awaitWriteFinish: {
+                    stabilityThreshold: this.__watch_debounce_ms,
+                    pollInterval: 50,
+                },
+                ignoreInitial: true,
+            });
+            const onChange = (eventType) => {
+                // chokidar already coalesces via awaitWriteFinish; we just call through.
+                this._reloadDefaults(eventType);
+            };
+            this.__watcher.on('change', () => onChange('change'));
+            // 'add' fires when the file reappears after atomic-rename (inode swap).
+            // Treat it identically to 'change' so HOT-RELOAD survives editor saves.
+            this.__watcher.on('add', () => onChange('add'));
+            this.__watcher.on('error', (err) => {
+                console.warn(`[CloudConfig] file-watcher error: ${err.message}`);
+            });
+        } catch (e) {
+            console.warn(`[CloudConfig] failed to arm file-watcher: ${e.message}`);
+            return;
+        }
 
-        arm();
-        console.log(`[CloudConfig] dev file-watcher armed on defaults-config.json (debounce=${this.__watch_debounce_ms}ms)`);
+        console.log(`[CloudConfig] dev file-watcher armed on defaults-config.json (chokidar, awaitWriteFinish=${this.__watch_debounce_ms}ms)`);
     }
 
     /**

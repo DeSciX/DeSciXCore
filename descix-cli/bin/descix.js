@@ -2129,6 +2129,12 @@ appCommand
   .requiredOption('-a, --app <app_id>', 'App ID (e.g. unk-cos)')
   .option('-m, --model <model_name>', 'Gemini model name (e.g. gemini-3.1-flash-lite). Mutually exclusive with --clear.')
   .option('--clear', 'Delete App.default_app_model via FieldValue.delete() (resets to platform-default inheritance)')
+  .addHelpText('after', `
+NOTE: Pinning a "Pro" model (e.g., gemini-2.5-pro, gemini-3.1-pro-preview) as
+an app or KB override will fail at L1 — these models require thinking mode and
+reject L1's thinkingBudget=0. If you intend an L1-compatible override, use a
+"Flash" model (gemini-2.5-flash, gemini-3.1-flash-lite, gemini-3-flash-preview).
+`)
   .action(async (options) => {
     try {
       // Forward the parent --env flag so the audit log records the target environment.
@@ -2245,6 +2251,12 @@ kbCommand
   .requiredOption('-a, --app <app_id>', 'App ID')
   .requiredOption('-k, --kb <kb_name>', 'KB name')
   .requiredOption('-m, --model <model_name>', 'Gemini model name (e.g. gemini-2.5-pro)')
+  .addHelpText('after', `
+NOTE: Pinning a "Pro" model (e.g., gemini-2.5-pro, gemini-3.1-pro-preview) as
+an app or KB override will fail at L1 — these models require thinking mode and
+reject L1's thinkingBudget=0. If you intend an L1-compatible override, use a
+"Flash" model (gemini-2.5-flash, gemini-3.1-flash-lite, gemini-3-flash-preview).
+`)
   .action(async (options) => {
     try {
       const parentEnv = program.opts().env || null;

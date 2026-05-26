@@ -67,12 +67,33 @@ async function appendAudit({ action, env, app_id, kb_name, before, after, perfor
 
 /**
  * Best-effort identity from the API client wallet credentials.
- * Returns email or wallet address; null on any failure.
+ *
+ * Resolution order (mirrors backend's `params.user?.email || user_id || wallet`
+ * pattern so audit lines remain comparable whether identity is captured at the
+ * CLI or downstream):
+ *   1. c.email          — primary, human-readable
+ *   2. c.user_email     — alternate spelling some legacy wallet files used
+ *   3. c.userId         — Powch's user_id (often the email, but kept distinct
+ *                         in the wallet schema; was missing from this chain)
+ *   4. c.user_id        — snake_case variant for cross-service consistency
+ *   5. c.walletAddress  — 0x-address; durable identity even when email absent
+ *   6. c.wallet_address — snake_case variant
+ *   7. c.address        — generic last fallback
+ * Returns null on any failure; `appendAudit` then writes the literal
+ * "unknown" to make the audit line explicitly mark "identity could not be
+ * captured" rather than silently dropping the field.
  */
 function identityFromApiClient(apiClient) {
     try {
         const c = apiClient.credentials || {};
-        return c.email || c.user_email || c.wallet_address || c.address || null;
+        return c.email
+            || c.user_email
+            || c.userId
+            || c.user_id
+            || c.walletAddress
+            || c.wallet_address
+            || c.address
+            || null;
     } catch {
         return null;
     }
