@@ -60,6 +60,12 @@ function renderCitationTrail(citations) {
   if (!Array.isArray(citations) || citations.length === 0) return '';
   return citations.map(c => {
     const sha = c.sha || 'PENDING-M2';
+    if (c.source === 'gcloud' || c.source === 'firestore-rest') {
+      // M3 — live-state probe citation. Escapes single quotes in the probe
+      // string so the comment remains a single line + diff-friendly.
+      const probeEsc = (c.probe || '').replace(/'/g, "\\'");
+      return `<!-- briefer-cite: source=${c.source} env=${c.env} probe='${probeEsc}' sha=${sha} anchor=${c.anchor} lines=${c.lines || ''} -->`;
+    }
     return `<!-- briefer-cite: file=${c.file} lines=${c.lines} sha=${sha} anchor=${c.anchor} -->`;
   }).join('\n');
 }
@@ -93,7 +99,12 @@ export function stitchBriefer({ env, mechanism, regenBy, sections }) {
   }).join('\n\n');
 
   const sourcesNote = sections
-    .flatMap(s => (s.extract.citations || []).map(c => `${c.file}@${c.sha || 'PENDING-M2'}`))
+    .flatMap(s => (s.extract.citations || []).map(c => {
+      const key = c.source === 'gcloud' || c.source === 'firestore-rest'
+        ? `${c.source}:${c.anchor}@${c.sha || 'PENDING-M3'}`
+        : `${c.file}@${c.sha || 'PENDING-M2'}`;
+      return key;
+    }))
     .filter((v, i, a) => a.indexOf(v) === i)
     .join('; ');
   const provenanceRow = `| ${regenTs} | ${mechanism} | ${regenBy} | sources: ${sourcesNote || '(none)'} |`;
