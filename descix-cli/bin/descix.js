@@ -3345,6 +3345,27 @@ microserviceCommand
     }
   });
 
+// microservice restart - Kill + relaunch a local microservice (DEV only)
+microserviceCommand
+  .command('restart <name>')
+  .description('Restart a local microservice (DEV only; DEMO/PROD use deploy scripts)')
+  .option('--env <env>', 'Target environment: dev | demo | prod', 'dev')
+  .action(async (name, options) => {
+    try {
+      const { restartMicroservice } = await import('../lib/commands/microservice-restart.js');
+      const { runHealth } = await import('../lib/commands/health.js');
+      await restartMicroservice({
+        name,
+        env: options.env,
+        deps: { runHealth }
+      });
+      console.log();
+    } catch (error) {
+      console.error(chalk.red(`\n${error.message}\n`));
+      process.exit(1);
+    }
+  });
+
 // ============ Role Commands ============
 
 const roleCommand = program
