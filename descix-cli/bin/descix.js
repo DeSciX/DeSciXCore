@@ -231,12 +231,18 @@ program
 
 program
   .command('health')
-  .description('Check platform service health (environment-aware: port checks in DEV, HTTPS in prod)')
-  .option('-m, --microservice <name>', 'Check a specific service by appId')
+  .description('Check platform service health (env-aware: local-port in DEV, gcloud+HTTPS in DEMO/PROD)')
+  .option('--env <name>', 'Target environment: dev|demo|prod (default: dev). Also accepted at top level: descix --env=demo health ...')
+  .option('-m, --microservice <name>', 'Check a specific service/app by appId')
   .option('-j, --json', 'Output raw JSON')
   .action(async (options) => {
     try {
-      await runHealth(options);
+      // Resolve --env in priority order: subcommand explicit > program parent > 'dev'.
+      // Commander would otherwise silently default to 'dev' even when the parent
+      // --env=demo is supplied (because the subcommand owns its own flag space).
+      const parentEnv = program.opts().env || null;
+      const env = options.env || parentEnv || 'dev';
+      await runHealth({ ...options, env });
     } catch (error) {
       console.error(chalk.red(`\nHealth check error: ${error.message}\n`));
       process.exit(1);
