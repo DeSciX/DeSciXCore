@@ -68,7 +68,7 @@ export const VALID_ENVS = Object.freeze(['dev', 'demo', 'prod']);
 // via WorkspaceConfig.getWorkspaceRoot() — never a hardcoded absolute path.
 export const DEFAULT_OUT_RELATIVE = 'DeSciX/V2_docs/architecture/platform-must-know-briefer.md';
 
-const MECHANISM_TAG = 'descix briefer v1.0 (M1 scaffold)';
+const MECHANISM_TAG = 'descix briefer v1.0 (M2 — code-grounded extractors)';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -193,13 +193,12 @@ export async function runBriefer(options = {}) {
     process.exit(1);
   }
 
-  // NOTE (M2): scope doc §2.1 says hard-fail on --env=dev because DEV has no
-  // LB URL map (querying it would produce a malformed briefer). M1 stubs do
-  // NOT make gcloud calls, so we accept dev as the M1 default to let the AC
-  // ("descix briefer --out=/tmp/...md against DEV") flow. M2 must add:
-  //   if (env === 'dev' && requiresGcloud) hard-fail with pointer to demo/prod.
+  // Per scope §2.1: --env=dev is rejected by the routing extractor specifically
+  // (DEV has no LB URL map). Other extractors accept dev because they read
+  // only source files (no gcloud probe required). The rejection lives in
+  // sources/routing.js; this entry point passes env through unchanged.
   if (options.verbose) {
-    console.log(chalk.gray(`[briefer] env=${env} (M1 scaffold — gcloud/Firestore extractors are TODO stubs)`));
+    console.log(chalk.gray(`[briefer] env=${env}`));
   }
 
   const cliPaths = resolveCliPaths();
@@ -258,8 +257,6 @@ export async function runBriefer(options = {}) {
   console.log(chalk.gray (`  Out:       ${outPath}`));
   console.log(chalk.gray (`  Sections:  ${doc.sections.length}`));
   console.log(chalk.gray (`  Citations: ${doc.citationTrail.length}\n`));
-  console.log(chalk.yellow(`  ⚠ M1 scaffold — section bodies are TODO placeholders.`));
-  console.log(chalk.yellow(`  ⚠ Real extraction (AST + gcloud + Firestore) lands in M2/M3.\n`));
   return doc;
 }
 
@@ -302,11 +299,8 @@ async function runCheckMode({ doc, outPath, verbose }) {
     console.error(chalk.gray('  (Run with --verbose for the full diff.)\n'));
   }
 
-  // M1: the expected drift is the TODO placeholder vs. the manually-authored
-  // canonical briefer. We report this as a WARN with a non-zero exit, framed
-  // as "M2-pending" rather than a parser crash, per the M1 AC.
-  console.error(chalk.yellow(`  ⚠ M1 scaffold — drift is EXPECTED until M2 extractors land.`));
-  console.error(chalk.yellow(`  ⚠ This non-zero exit is the M1 "M2-pending" signal, not a crash.\n`));
-
+  // M2: drift means a source-of-truth file changed shape since last regen.
+  // Caller should regenerate (run `descix briefer` without --check) and commit
+  // the updated canonical briefer.
   process.exit(1);
 }
