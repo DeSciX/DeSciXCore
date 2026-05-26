@@ -12,6 +12,8 @@ export {
     createCloudConfig,
     getCloudConfig,
     initializeCloudConfig,
+    CloudConfigFatalError,
+    _resetCloudConfigForTests,
     ProductTypes,
     LoginStatus,
     NetworkStatus,

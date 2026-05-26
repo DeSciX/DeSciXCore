@@ -4,6 +4,9 @@
  *
  * Uses rootPath to resolve .env, defaults-config.json, dev-overrides.json.
  * Loads from Secret Manager via config-schema.json key definitions.
+ *
+ * WS-CONFIG-BOOTSTRAP-FIX item #2: required_keys enforcement at end of initialize().
+ * WS-CONFIG-BOOTSTRAP-FIX item #11: dev file-watcher + boot-time SHA drift check.
  */
 
 import { fileURLToPath } from 'url';
@@ -12,6 +15,8 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { SecretManagerServiceClient } from '@google-cloud/secret-manager';
 import fs from 'fs';
+import crypto from 'crypto';
+import { EventEmitter } from 'events';
 import { createRequire } from 'module';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -20,6 +25,23 @@ const require = createRequire(import.meta.url);
 
 const configSchemaPath = path.resolve(__dirname, '../config-schema.json');
 const configSchema = require(configSchemaPath);
+
+/**
+ * Non-retryable fatal error for CloudConfig bootstrap. Distinct from the
+ * generic Errors thrown for transient causes (Secret Manager network blips,
+ * GoogleAuth project resolution) — those are caught by initializeCloudConfig()
+ * and retried with backoff. A CloudConfigFatalError signals a misconfiguration
+ * that NO amount of retry will fix (missing required key on disk, schema gap).
+ * The retry wrapper rethrows this class without backoff so the process exits
+ * immediately and operators see the loud failure that `feedback_no_hardcoded_fallbacks`
+ * mandates.
+ */
+export class CloudConfigFatalError extends Error {
+    constructor(message) {
+        super(message);
+        this.name = 'CloudConfigFatalError';
+    }
+}
 
 // Constants exported for consumers
 class ProductTypes {
@@ -146,11 +168,48 @@ export function getCloudConfig() {
     return _instance;
 }
 
+/**
+ * TEST-ONLY: reset the singleton so anti-regression tests can construct a fresh
+ * instance against a temp-dir rootPath. Production code MUST NOT call this.
+ */
+export function _resetCloudConfigForTests() {
+    if (_instance && _instance.__watcher) {
+        try { _instance.__watcher.close(); } catch (_) { /* ignore */ }
+        _instance.__watcher = null;
+    }
+    _instance = null;
+    _rootPath = null;
+}
+
 class CloudConfig {
     constructor(rootPath) {
         this.__rootPath = path.resolve(rootPath);
         this.__appDir = this.__rootPath;
         this.__servicesDir = path.resolve(this.__appDir, 'services');
+
+        // Internal EventEmitter for config:reloaded events. We do NOT extend
+        // EventEmitter directly because CloudConfig dynamically assigns config keys
+        // as instance properties (this[key] = value in _mergeConfig) — extending
+        // would risk name collisions with EE's prototype methods (on, emit, _events,
+        // etc.). The composition pattern keeps the public surface intact.
+        this.__emitter = new EventEmitter();
+
+        // Drift-detection state (item #11 / option 2.B.3).
+        this.__defaults_config_sha = null;
+        this.__defaults_config_path = null;
+        this.__drift_check_counter = 0;
+        // Sampling N: every Nth request triggers checkDefaultsDrift(). N=100 chosen so
+        // a 1-rps service detects drift within ~100s, a 100-rps service within ~1s.
+        // No external dep, no auto-reload — drift just warns; operators must restart
+        // (or, in dev, rely on the file-watcher in option 2.B.1).
+        this.__drift_sample_n = 100;
+
+        // Watcher state (item #11 / option 2.B.1).
+        this.__watcher = null;
+        this.__watch_debounce_timer = null;
+        // 250ms debounce. Editor atomic-saves (write tmp → rename) fire rename+change
+        // in rapid succession; debouncing collapses them into a single re-read.
+        this.__watch_debounce_ms = 250;
 
         if (process.env.DEPLOY_ENV !== 'production') {
             dotenv.config({ path: path.resolve(this.__appDir, '.env'), override: false });
@@ -169,6 +228,24 @@ class CloudConfig {
         this.__port = process.env.PORT || this.LOCAL_PORT || this.DEFAULT_PORT;
         this.PORT = this.__port;
         console.log("[Config] PORT:", this.__port);
+    }
+
+    /**
+     * Subscribe to config events. Currently emits:
+     *   - 'config:reloaded' with { changedKeys: string[] } when the dev file-watcher
+     *     detects + applies a defaults-config.json change.
+     */
+    on(event, listener) {
+        this.__emitter.on(event, listener);
+        return this;
+    }
+
+    /**
+     * Unsubscribe a listener.
+     */
+    off(event, listener) {
+        this.__emitter.off(event, listener);
+        return this;
     }
 
     get expressPort() { return this.__port; }
@@ -213,7 +290,7 @@ class CloudConfig {
 
     _loadBootstrapKeys() {
         const { bootstrap_keys, boolean_keys } = configSchema;
-        
+
         // 1. Load from process.env first (Production priority)
         bootstrap_keys.keys.forEach(key => {
             const value = process.env[key];
@@ -328,13 +405,162 @@ class CloudConfig {
 
     _loadDefaults() {
         const defaultsPath = path.resolve(this.__appDir, 'defaults-config.json');
+        this.__defaults_config_path = defaultsPath;
         if (fs.existsSync(defaultsPath)) {
             try {
-                this._mergeConfig(require(defaultsPath));
-                console.log('[Config] Loaded defaults-config.json');
+                // Read raw bytes so we can compute a stable SHA — JSON.parse + re-stringify
+                // would normalize whitespace/key order and detect spurious "drift".
+                const raw = fs.readFileSync(defaultsPath, 'utf8');
+                const parsed = JSON.parse(raw);
+                this._mergeConfig(parsed);
+                this.__defaults_config_sha = crypto.createHash('sha256').update(raw).digest('hex');
+                // Boot snapshot of the parsed disk defaults — used by _reloadDefaults
+                // to diff disk-vs-disk (NOT disk-vs-merged-singleton). This is the only
+                // way to avoid overwriting Secret-Manager-supplied values with their
+                // disk-null placeholders on a benign on-disk edit.
+                this.__defaults_config_snapshot = parsed;
+                console.log(`[Config] Loaded defaults-config.json (sha256=${this.__defaults_config_sha.slice(0, 12)}…)`);
             } catch (e) {
                 console.error('[Config] Error loading defaults-config.json:', e.message);
             }
+        }
+    }
+
+    /**
+     * Boot-time SHA + sampled drift check (item #11 / option 2.B.3).
+     * Re-reads defaults-config.json, computes SHA, compares to the SHA captured at
+     * boot. If different, log a warning. Does NOT auto-reload — that is the dev
+     * file-watcher's job (option 2.B.1). On cloud/Cloud-Functions deploys, the
+     * watcher does not run; this warn is the only freshness signal, and operators
+     * must redeploy/restart to pick up the change.
+     */
+    checkDefaultsDrift() {
+        if (!this.__defaults_config_path || !this.__defaults_config_sha) return;
+        try {
+            const raw = fs.readFileSync(this.__defaults_config_path, 'utf8');
+            const currentSha = crypto.createHash('sha256').update(raw).digest('hex');
+            if (currentSha !== this.__defaults_config_sha) {
+                console.warn(
+                    `[CloudConfig] WARN: defaults-config.json on-disk SHA changed since boot ` +
+                    `(boot=${this.__defaults_config_sha.slice(0, 12)}…, current=${currentSha.slice(0, 12)}…). ` +
+                    `Service is serving stale config; restart to pick up changes.`
+                );
+            }
+        } catch (e) {
+            console.warn(`[CloudConfig] checkDefaultsDrift: re-read failed: ${e.message}`);
+        }
+    }
+
+    /**
+     * Sampling hook for HTTP middlewares. Call on every request; this method
+     * triggers checkDefaultsDrift() every Nth invocation (N = __drift_sample_n).
+     */
+    sampleDriftCheck() {
+        this.__drift_check_counter = (this.__drift_check_counter + 1) % this.__drift_sample_n;
+        if (this.__drift_check_counter === 0) {
+            this.checkDefaultsDrift();
+        }
+    }
+
+    /**
+     * Dev-only file watcher (item #11 / option 2.B.1). Watches defaults-config.json
+     * and hot-reloads changed top-level keys into the singleton. Emits 'config:reloaded'.
+     *
+     * Cloud Functions don't have persistent watchers; this is a no-op outside dev.
+     */
+    _startConfigWatcher() {
+        if (this.DEPLOY_ENV !== 'dev') return;
+        if (!this.__defaults_config_path || !fs.existsSync(this.__defaults_config_path)) return;
+        if (this.__watcher) return; // already armed
+
+        const watchPath = this.__defaults_config_path;
+        const arm = () => {
+            try {
+                this.__watcher = fs.watch(watchPath, (eventType) => {
+                    // fs.watch fires 'rename' on atomic-save (tmp file replace) and 'change'
+                    // on in-place writes. Debounce both into a single re-read.
+                    if (this.__watch_debounce_timer) clearTimeout(this.__watch_debounce_timer);
+                    this.__watch_debounce_timer = setTimeout(() => {
+                        this._reloadDefaults(eventType);
+                    }, this.__watch_debounce_ms);
+                });
+                this.__watcher.on('error', (err) => {
+                    console.warn(`[CloudConfig] file-watcher error: ${err.message}`);
+                });
+            } catch (e) {
+                console.warn(`[CloudConfig] failed to arm file-watcher: ${e.message}`);
+            }
+        };
+
+        arm();
+        console.log(`[CloudConfig] dev file-watcher armed on defaults-config.json (debounce=${this.__watch_debounce_ms}ms)`);
+    }
+
+    /**
+     * Re-read defaults-config.json and apply diffs into the singleton.
+     * Handles mid-write race by retrying once after 100ms on parse failure.
+     */
+    _reloadDefaults(triggerEvent, _retry = false) {
+        try {
+            const raw = fs.readFileSync(this.__defaults_config_path, 'utf8');
+            const fresh = JSON.parse(raw);
+            const newSha = crypto.createHash('sha256').update(raw).digest('hex');
+            if (newSha === this.__defaults_config_sha) {
+                // Identical content (e.g., editor wrote+restored the same bytes). Skip.
+                return;
+            }
+
+            // Diff against the BOOT-DISK SNAPSHOT, not the merged singleton. The
+            // singleton contains values from Secret Manager + dev-overrides that have
+            // no representation on disk; comparing against `this[key]` would falsely
+            // flag every Secret-Manager-supplied key whose disk-side is null as a
+            // "change" and clobber the Secret Manager value with null on reload.
+            // The correct semantic: if disk value changed (snapshot vs fresh), apply.
+            // If disk value is unchanged (still null, still old non-null), leave alone.
+            const snapshot = this.__defaults_config_snapshot || {};
+            const changedKeys = [];
+            const formatVal = (v) => {
+                if (v === null) return 'null';
+                if (v === undefined) return 'undefined';
+                if (typeof v === 'object') {
+                    const j = JSON.stringify(v);
+                    return j.length > 80 ? j.slice(0, 77) + '...' : j;
+                }
+                return JSON.stringify(v);
+            };
+            for (const [key, newVal] of Object.entries(fresh)) {
+                if (key.startsWith('_')) continue;
+                const snapVal = snapshot[key];
+                // Deep-compare via JSON.stringify covers INTELLIGENCE_LEVELS object diffs.
+                if (JSON.stringify(snapVal) === JSON.stringify(newVal)) continue;
+                // Disk value genuinely changed. Apply to singleton.
+                const prev = this[key];
+                console.log(`[CloudConfig] HOT-RELOAD: ${key} changed from ${formatVal(prev)} to ${formatVal(newVal)}`);
+                this[key] = newVal;
+                changedKeys.push(key);
+            }
+            // Also handle keys REMOVED from disk (present in snapshot, absent in fresh).
+            for (const key of Object.keys(snapshot)) {
+                if (key.startsWith('_')) continue;
+                if (key in fresh) continue;
+                // Key was on disk at boot, no longer on disk. We do NOT clear the
+                // singleton — Secret Manager / dev-overrides may legitimately own it
+                // now. Warn so the operator notices.
+                console.warn(`[CloudConfig] HOT-RELOAD: key ${key} was removed from defaults-config.json. Singleton value (${formatVal(this[key])}) NOT cleared — restart to re-derive precedence.`);
+            }
+
+            this.__defaults_config_sha = newSha;
+            this.__defaults_config_snapshot = fresh;
+            if (changedKeys.length > 0) {
+                this.__emitter.emit('config:reloaded', { changedKeys });
+            }
+        } catch (e) {
+            if (!_retry) {
+                // File may be mid-write (editor atomic-save mid-rename). Retry once.
+                setTimeout(() => this._reloadDefaults(triggerEvent, true), 100);
+                return;
+            }
+            console.warn(`[CloudConfig] hot-reload re-read failed (after retry): ${e.message}`);
         }
     }
 
@@ -377,9 +603,28 @@ class CloudConfig {
         return version.payload.data.toString('utf8');
     }
 
+    /**
+     * Enforce required_keys at end of bootstrap. Throws CloudConfigFatalError if any
+     * key in config-schema.json's required_keys.keys resolves to undefined or null.
+     * This is the loud boot failure mandated by `feedback_no_hardcoded_fallbacks`:
+     * surface misconfiguration immediately rather than silently degrade at request time.
+     */
+    _assertRequiredKeys() {
+        const { required_keys } = configSchema;
+        if (!required_keys || !Array.isArray(required_keys.keys)) return;
+        const missing = required_keys.keys.filter(k => this[k] === undefined || this[k] === null);
+        if (missing.length > 0) {
+            throw new CloudConfigFatalError(
+                `[CloudConfig] FATAL: required keys are unset after bootstrap: ${missing.join(', ')}. ` +
+                `Set them in microservice/defaults-config.json (recommended) or Secret Manager ` +
+                `(only if a per-env secret). Schema: descix-cloud-core/config-schema.json required_keys.`
+            );
+        }
+    }
+
     async initialize() {
         if (!this.DEPLOY_ENV) {
-            throw new Error('[CloudConfig] FATAL: DEPLOY_ENV not set. Cannot determine environment before Secret Manager call. Provide DEPLOY_ENV via .env (local dev), deployment env vars (cloud deploy), or ensure .descix/workspace.json is reachable from the service root.');
+            throw new CloudConfigFatalError('[CloudConfig] FATAL: DEPLOY_ENV not set. Cannot determine environment before Secret Manager call. Provide DEPLOY_ENV via .env (local dev), deployment env vars (cloud deploy), or ensure .descix/workspace.json is reachable from the service root.');
         }
 
         const auth = new GoogleAuth();
@@ -434,6 +679,15 @@ class CloudConfig {
             // PUB_SUB_DISCORD_BOT_REPLY is set as a complete topic name per-env
             // via deploy script --set-env-vars (bootstrap key). No suffix appending needed.
         }
+
+        // WS-CONFIG-BOOTSTRAP-FIX item #2: enforce required_keys at end of bootstrap.
+        // Must be the last action — runs AFTER Secret Manager + dev-overrides so any
+        // source can satisfy a required key.
+        this._assertRequiredKeys();
+
+        // WS-CONFIG-BOOTSTRAP-FIX item #11 (2.B.1): arm dev file-watcher AFTER required_keys
+        // passes. If the service fails to boot, no watcher is left running.
+        this._startConfigWatcher();
     }
 }
 
@@ -450,6 +704,14 @@ export async function initializeCloudConfig() {
             await config.initialize();
             return config;
         } catch (error) {
+            // CloudConfigFatalError signals a misconfiguration that NO retry will fix
+            // (missing required key, DEPLOY_ENV unset). Rethrow immediately so the
+            // process exits and operators see the loud failure. Generic Error (Secret
+            // Manager network blips, GoogleAuth) continues to retry with backoff.
+            if (error instanceof CloudConfigFatalError) {
+                console.error('[CloudConfig] FATAL non-retryable error:', error.message);
+                throw error;
+            }
             console.error('Error initializing CloudConfig:', error, `Retrying in ${backoff / 1000} seconds...`);
             await delay(backoff);
             backoff = Math.min(backoff * 2, maxBackoff);
