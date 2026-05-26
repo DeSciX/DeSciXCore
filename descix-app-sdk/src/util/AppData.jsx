@@ -568,8 +568,6 @@ export const GUEST_ALLOWED_COMMANDS = [
     'get_user_nfts',                 // User NFTs (demo for guests)
     // Wallet config (signature message for passkey registration - pre-auth)
     'get_wallet_config',            // Signature message for passkey registration
-    // Airdrop token gate (pre-auth — runs during Powch login before session exists)
-    'verify_airdrop_wallet',         // Verify wallet holds DAITA tokens (token-gated registration)
     // Powch Zero-Knowledge Authentication (NO PII sent to server)
     'powch_register_begin',          // Start WebAuthn registration (zero-knowledge)
     'powch_register_finish',         // Complete WebAuthn registration (zero-knowledge)
@@ -593,6 +591,13 @@ export const GUEST_ALLOWED_COMMANDS = [
     
     // Store Search (semantic search for browsing)
     'search_store',                  // Search communities and apps by description
+
+    // T-FLOW-PASSKEY-FIRST Chunk 6 — airdrop_check_pending + airdrop_enqueue_migration
+    // were previously GUEST-allowed for the pre-passkey TokenGateView preview. The
+    // consolidated flow (Chunk 4) removes that pre-passkey screen; the any-token gate
+    // now runs inside descix_accept_tos (NOT_AUTHENTICATED post-passkey). These two
+    // commands are no longer reachable from a guest session in the PWA; REMOVE from
+    // the client allowlist (REMOVE legacy per DeSciX CLAUDE.md policy).
 ];
 
 // --- Event dispatcher registration for session expiry handling ---

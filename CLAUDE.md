@@ -49,21 +49,39 @@ Before any change, state which package boundary is being touched and confirm no 
 
 ---
 
-## V2 Pending Items (from audit)
+## V2.1 Pending Items (ws-cli-v2.1-purge)
 
-### P0 — Complete
+### Complete (WS-CLI-V2.1-PURGE Batch 2)
 - `update.js updateKB()`: Drive stages 1-3 removed; delegates to `runKbChunk()` + `runKbSync()` ✓
 - `kb.js`: PathContext replaced with WorkspaceConfig for v2 workspace format support ✓
 - `WorkspaceConfig.getApiUrl()` and `PathContext.getApiUrl()`: now derive from `env.platform.microservice.port` ✓
-- Remaining: `descix app list` + `descix app init` commands (see plan)
+- `app init` hardening: hard-fails if app already mapped and `-p` given ✓
+- `kb/General/` scaffold removed from `app init` ✓
+- `descix kb pull/push` removed; moved to `descix drive pull/push` ✓
+- `descix app set-localpath` and `descix app unmap` added ✓
 
-### P1 — Remove Legacy
+### Complete (WS-CLI-V2.1-PURGE Batch 4)
+- `WorkspaceConfig.getApp(communityId, appId)` was removed in PR #7 but 6 call sites were missed. All 6 migrated or refactored ✓
+- `WorkspaceConfig.setSitePort(appId, port)` added — mutates live `env.products[]`/`env.platform` entry and auto-saves ✓
+- `descix site servelocal` and `update.js` port handler refactored to use `setSitePort` (eliminates stale-copy mutation) ✓
+- `descix update kb` v1 community-keyed fallback block (`if (!appConfig && ctx.communityId)`) deleted entirely ✓
+- Error message for unmapped app now references both `descix app init` and `descix app set-localpath` ✓
+- Meta-test `removed-methods-anti-regression.test.js` guards against future re-introduction of removed methods ✓
+
+### Complete (WS-CLI-V2.1-PURGE Batch 5)
+- `Hydrator.copyScaffold()` path-walk bug fixed: `lib/core/Hydrator.js:709` now walks two `'..'` from `lib/core/` to `descix-cli/` (was three, which reached `DeSciX_Core/` — one level too high) ✓
+- `microservice init` now injects `LOCAL_PORT` into `defaults-config.json` and `debugPort` + `app_id`/`community_id`/`name`/`domain` into `manifest.json` from `workspace.json` `env.products[<app>].microservice.port` ✓
+- `microservice init` hard-fails with canonical error if `microservice.port` is missing from workspace.json — port-allocation policy gap surfaced as `WS-CLI-MESH-ROUTING-GAP` ✓
+- Test coverage for `copyScaffold()` added to `site-init.test.js` and `microservice-init.test.js` (Batch 4 tests only exercised `WorkspaceConfig.getAppByAppId()`, not the scaffold copy path) ✓
+- Anti-regression meta-test extended in `removed-methods-anti-regression.test.js` to verify scaffold dir exists at runtime ✓
+
+### WorkspaceConfig — additional canonical method (v2.1)
+- **`workspaceConfig.env`** — raw `env` object from workspace.json. Use for reading `env.platform.microservice.port` / `env.products[i].microservice.port` when injecting port into scaffold files. Do not mutate directly — use `setSitePort()` for site port mutations.
+
+### Pending (other)
 - `descix-cli/bin/mcp-server.js`: imports non-existent `vendor/mcp/tools.js` — determine canonical MCP entry point, remove `DeSciXMCPServer` legacy
 - `descix-cli/tests/mcp-flow.test.js`: imports `vendor/mcp/mcp-server.js` (missing) — remove or rewrite
-- `-c` and `-a` CLI flags: deprecated for local workspace operations — remove
-
-### P1 — Fix E2E Test Syntax
-- `DeSciX_Cloud/microservice/tests/cliE2ETest.js`: update `descix sync stage1` → `descix sync kb stage1`
+- **Port-allocation policy gap (`WS-CLI-MESH-ROUTING-GAP`):** `microservice init` requires a `microservice.port` in workspace.json, but there is no CLI command to set/allocate one. Recommended: `descix app set-port -a <id> -p <port>` (explicit-only first; auto-allocate as a future enhancement once port constants are canonical). Until this command exists, developers must manually add `"microservice": { "port": <port> }` to the app's `env.products` entry in workspace.json before running `microservice init`.
 
 ---
 
@@ -75,22 +93,31 @@ The CLI never imports backend services directly. All operations are `POST /apifr
 ### CLI testing — use CLI, never curl
 After `descix login` / bootstrap, all testing must use `node DeSciX_Core/descix-cli/bin/descix.js [command]`. Curl bypasses session, auth middleware, and entitlement checks — it is not a valid substitute. This is how real bugs in auth and entitlement are caught.
 
-### workspace.json format — v1 vs v2
-- **v2 format** (current, canonical): `env.platform` + `env.products[]` — app UUIDs in unified product registry. `WorkspaceConfig._buildAppIdMap()` and `getAppByAppId()` read this. **Use this for all CLI workspace resolution.**
-- **v1 format** (legacy): `communities.{id}.apps.{id}` — `WorkspaceConfig.registerApp()` still writes this format; removal is a post-E2E refactor TODO.
-- When reading workspace config in CLI commands: use `WorkspaceConfig` (not `PathContext`) — it handles v2 format first, then falls back to v1.
+### workspace.json format — v2.1 (canonical)
+- **v2.1 format** (current, canonical): `env.platform` + `env.products[]` — app UUIDs in unified product registry. `WorkspaceConfig._buildAppIdMap()` and `getAppByAppId()` read this. **Use this for all CLI workspace resolution.**
+- **v1 format** (`communities`-based JSON) is not supported. Loading a v1 workspace.json hard-errors: `"v1 workspace format is not supported. Migrate to v2.1."`
+- When reading workspace config in CLI commands: use `WorkspaceConfig` only — `PathContext` is removed.
+
+### WorkspaceConfig — canonical methods (v2.1)
+- **`getAppByAppId(appId)`** — primary app lookup. Returns `{ localPath, absolutePath, communityId, kbId }` or `null`. Use this everywhere.
+- **`setSitePort(appId, port)`** — mutates the live `env.products[]` (or `env.platform`) entry and calls `save()`. Pass `null` to remove `site.port`; empty `site.{}` is cleaned up. Hard-fails if `appId` is not mapped. Always use this (not direct mutation of `getAppByAppId()` return value, which is a constructed copy).
+- **`getSitePath(appId)`** / **`getMicroservicePath(appId)`** — convenience wrappers returning `absolutePath/site` and `absolutePath/microservice` respectively.
+- **`setEnvironment(envName)`** — canonical way to persist environment to workspace.json.
+- **NEVER call `getApp(communityId, appId)`** — this method was removed in WS-CLI-V2.1-PURGE PR #7. `getAppByAppId(appId)` is the replacement. The meta-test `removed-methods-anti-regression.test.js` enforces this.
 
 ### KB Mode — Git Mode only in CLI
-- `descix update kb` and `descix kb build/chunk/sync` are Git Mode: local files → chunks → `kb_sync_chunks` → Pinecone
+- `descix kb corpus sync` is the canonical KB sync path: corpus manifest → chunks → Pinecone
+- `descix kb build/chunk/sync` are lower-level Git Mode operations: local files → chunks → `kb_sync_chunks` → Pinecone
 - Drive Mode (Drive → GCS → Pinecone) is server-side only for PWA users; never add Drive pipeline calls to CLI commands
-- `descix kb pull/push` manage the Drive source IPDoc store — they are correct and must be preserved
+- `descix drive pull/push` manage the Drive source IPDoc store — they are the correct commands for Drive content authoring
 
 ### Developer onboarding sequence (after bootstrap)
 ```bash
-node bin/descix.js app list          # discover available apps
-node bin/descix.js app init -a daita  # registers KB doc + local dirs
-node bin/descix.js update kb -a daita # chunk + sync to Pinecone
-node bin/descix.js chat -a daita "..."# verify RAG
+node bin/descix.js app list                   # discover available apps
+node bin/descix.js app init -a daita           # registers KB doc + scaffolds site/, microservice/, assets/
+# Create apps/daita/.descix/manifests/General.json corpus manifest, then:
+node bin/descix.js kb corpus sync -a daita     # sync corpus manifest → Pinecone
+node bin/descix.js chat -a daita "..."         # verify RAG
 ```
 
 ### MCP uses CLI

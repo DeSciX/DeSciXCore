@@ -144,6 +144,77 @@ descix app create --wizard
 descix kb build -c descix -a myapp
 ```
 
+
+### descix app set-default-model
+
+**Description:** Set or clear the App-level default Gemini model (`App.default_app_model`) used when no KB-level override is present.
+**Use when:** Promoting a new platform default model to a specific app, or resetting an app to inherit per-intelligence-level platform defaults.
+**Inheritance chain (CEO 2026-05-26):**
+`options.model > kb.kb_model_override > app.default_app_model > levelConfig.model > DEFAULT_AI_MODEL`
+
+**Options:**
+- `-a, --app <app_id>` (required): App ID (e.g. `unk-cos`)
+- `-m, --model <model_name>`: Gemini model name (e.g. `gemini-3.1-flash-lite`). Mutually exclusive with `--clear`.
+- `--clear`: Delete `App.default_app_model` via `FieldValue.delete()` (not null) so the resolver falls through to platform per-level defaults.
+- `--env <name>`: Target environment (dev, demo, prod). Inherited from the top-level CLI flag.
+
+**Examples:**
+```bash
+# Promote a new platform default model to one app
+descix app set-default-model -a unk-cos -m gemini-3.1-flash-lite --env=dev
+
+# Reset an app so platform per-level defaults apply
+descix app set-default-model -a unk-cos --clear --env=dev
+```
+
+Emits a JSONL audit entry to `docs/handoff/model-config-changes.jsonl`.
+
+Requires platform-admin permission.
+
+---
+
+### descix kb set-override-model
+
+**Description:** Set the KB-level model override (`KB.kb_model_override`) for a single KB within an app.
+**Use when:** A specific KB needs a model different from `App.default_app_model` (e.g., a tuned model that lives on one KB only). CEO practice: keep KB overrides minimized so platform/app default upgrades propagate cleanly.
+
+**Options:**
+- `-a, --app <app_id>` (required): App ID
+- `-k, --kb <kb_name>` (required): KB name (e.g. `Corpus`, `Role`, `Training`)
+- `-m, --model <model_name>` (required): Gemini model name (e.g. `gemini-2.5-pro`)
+- `--env <name>`: Target environment
+
+**Example:**
+```bash
+# Pin a tuned model on a single KB
+descix kb set-override-model -a unk-cos -k Corpus -m gemini-2.5-pro --env=dev
+```
+
+Emits a JSONL audit entry to `docs/handoff/model-config-changes.jsonl`.
+
+Requires platform-admin permission.
+
+---
+
+### descix kb clear-override-model
+
+**Description:** Delete `KB.kb_model_override` via `FieldValue.delete()` so the resolver falls through to `App.default_app_model` (and onward down the inheritance chain).
+**Use when:** A KB was specialized but should now follow the app default. Per tripwire #2 in the 2026-05-26 audit, the field is DELETED, not set to null — a null value still satisfies "field present" and would defeat the resolver's `undefined`-check.
+
+**Options:**
+- `-a, --app <app_id>` (required): App ID
+- `-k, --kb <kb_name>` (required): KB name
+- `--env <name>`: Target environment
+
+**Example:**
+```bash
+descix kb clear-override-model -a unk-cos -k Corpus --env=dev
+```
+
+Emits a JSONL audit entry to `docs/handoff/model-config-changes.jsonl`.
+
+Requires platform-admin permission.
+
 ---
 
 ### descix microservice vectorize

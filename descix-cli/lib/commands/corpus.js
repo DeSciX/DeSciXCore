@@ -22,11 +22,12 @@ import chalk from 'chalk';
 import ora from 'ora';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { createRequire } from 'module';
 import { WorkspaceConfig } from '../workspace-config.js';
 import { loadManifests } from '../core/ManifestLoader.js';
 import { walkCorpus } from '../core/CorpusWalker.js';
 import { chunkFile, categorizeFile } from '../core/Chunker.js';
-import { upsertChunks, deleteStaleChunks } from '../core/Syncer.js';
+import { upsertChunks, deleteStaleChunks, deleteStaleChunksByFileId, listRemoteFileIds } from '../core/Syncer.js';
 
 /**
  * Read a file and chunk it using the existing Chunker.
@@ -152,6 +153,103 @@ async function loadSyncState(appRoot, kbName) {
 }
 
 /**
+ * Detect the current git branch in workspaceRoot.
+ * Returns the branch name (e.g., "ws-admin-b1") or null if detached / not a repo.
+ *
+ * Used by `corpus sync` to emit a one-line advisory when the operator is on a
+ * non-main branch and --ref was not provided — flags the silent "synced main
+ * not your branch" gotcha that surfaced in WS-CLI-MANIFEST-REF-FEATURE-BRANCH.
+ */
+function getCurrentBranch(workspaceRoot) {
+  // Lazy-require child_process via createRequire — corpus.js is ESM and lacks
+  // a synchronous import path, but execSync is itself sync and we want to
+  // avoid making the advisory async (it runs once before the manifest loop).
+  try {
+    // eslint-disable-next-line no-undef
+    const requireFn = createRequire(import.meta.url);
+    const { execSync } = requireFn('child_process');
+    const branch = execSync('git symbolic-ref --short HEAD', {
+      cwd: workspaceRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe']
+    }).trim();
+    return branch || null;
+  } catch {
+    // detached HEAD, no git repo, or git not installed — advisory is skipped
+    return null;
+  }
+}
+
+/**
+ * Resolve the ref each manifest source should be walked at.
+ *
+ * Precedence (highest first):
+ *   1. CLI --ref flag (applies to all sources globally — explicit operator override).
+ *   2. Per-source manifest "ref" field, if explicitly set in the JSON.
+ *   3. ManifestLoader default "main".
+ *
+ * Returns a NEW manifest object (does not mutate the input) with each
+ * _resolvedSources[i].ref rewritten when --ref is supplied.
+ *
+ * Also returns metadata about the resolution so the sync output can name the
+ * ref used and so the status command can report it.
+ *
+ * @param {Object} manifest - Validated manifest from ManifestLoader
+ * @param {string|null} cliRef - Operator's --ref override, or null
+ * @returns {{ manifest: Object, resolvedRef: string, source: 'cli'|'manifest'|'default', allDefault: boolean }}
+ */
+function resolveRef(manifest, cliRef) {
+  // Detect whether every source uses the ManifestLoader default ("main") with
+  // no explicit override in the JSON. We can't see the raw JSON here, so we
+  // compare against the default. ManifestLoader rewrites src.ref to "main" if
+  // missing, so an explicit "main" in JSON is indistinguishable from default —
+  // intentional: the advisory triggers in both cases.
+  const allDefault = manifest._resolvedSources.every(s => s.ref === 'main');
+
+  if (cliRef) {
+    const rewritten = manifest._resolvedSources.map(s => ({ ...s, ref: cliRef }));
+    return {
+      manifest: { ...manifest, _resolvedSources: rewritten },
+      resolvedRef: cliRef,
+      source: 'cli',
+      allDefault
+    };
+  }
+
+  // No CLI override — report the ref(s) the manifest itself declares.
+  // If all sources share one ref, that is the resolved ref; otherwise we
+  // surface "mixed" so the status output is honest.
+  const refs = [...new Set(manifest._resolvedSources.map(s => s.ref))];
+  const resolvedRef = refs.length === 1 ? refs[0] : `mixed(${refs.join(',')})`;
+  return {
+    manifest,
+    resolvedRef,
+    source: allDefault ? 'default' : 'manifest',
+    allDefault
+  };
+}
+
+/**
+ * Prompt the operator for a y/N confirmation on stdin.
+ * Default-deny (returns false unless explicit y/yes).
+ *
+ * Bypassed when options.yes is set (for scripting). The caller is responsible
+ * for that bypass — this helper always actually prompts when called.
+ *
+ * @param {string} prompt - The question to display (no trailing space needed)
+ * @returns {Promise<boolean>}
+ */
+async function confirmYesNo(prompt) {
+  const readline = await import('readline');
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise(resolve => {
+    rl.question(`${prompt} [y/N] `, answer => {
+      rl.close();
+      const a = (answer || '').trim().toLowerCase();
+      resolve(a === 'y' || a === 'yes');
+    });
+  });
+}
+
+/**
  * Run corpus sync for an app.
  *
  * Algorithm:
@@ -209,21 +307,69 @@ export async function runCorpusSync(apiClient, options) {
 
     spinner.succeed(`Found ${manifests.length} manifest(s)`);
 
-    // 3. Pre-check: verify the KB document exists in Firestore.
-    // Without it, vectors will be orphaned in Pinecone with no KB to query against.
-    // Run "descix app init -a <app_id>" to create the KB document first.
-    try {
-      const kbCheck = await apiClient.invoke('get_app', { app_id: appId, community_id: communityId });
-      const kbData = kbCheck?.message || kbCheck;
-      const kbs = kbData?.knowledgebases || kbData?.knowledge_bases || [];
-      if (Array.isArray(kbs) && kbs.length === 0) {
-        console.log(chalk.yellow(`\n  ⚠ No KnowledgeBase documents found for app "${appId}".`));
-        console.log(chalk.yellow(`    Vectors will sync to Pinecone but chat won't work until KB exists.`));
-        console.log(chalk.yellow(`    Run: descix app init -a ${appId}\n`));
+    // Deliverable B: branch-mismatch advisory. We only emit this when:
+    //   - no --ref override was supplied, AND
+    //   - every loaded manifest's every source uses the default "main", AND
+    //   - the operator's git HEAD is on a non-main branch.
+    // The advisory is informational — it does NOT block the sync. The operator
+    // is free to keep going (e.g., they really do want to sync from main while
+    // working on a feature branch). This is the silent gotcha that the
+    // WS-CLI-MANIFEST-REF-FEATURE-BRANCH scope doc surfaced.
+    if (!options.ref) {
+      const allManifestsDefault = manifests.every(m =>
+        m._resolvedSources.every(s => s.ref === 'main')
+      );
+      if (allManifestsDefault) {
+        const currentBranch = getCurrentBranch(workspaceRoot);
+        if (currentBranch && currentBranch !== 'main') {
+          console.log(chalk.yellow(
+            `  Advisory: you are on branch "${currentBranch}" but every manifest is configured to walk "main". ` +
+            `Pass --ref ${currentBranch} to sync your branch instead.`
+          ));
+        }
       }
+    }
+
+    // 3. Pre-check (fail-loud): verify each manifest's target KB document exists in Firestore.
+    // Without the KB doc, chat queries against this KB will hard-fail in prepare_chat_context.
+    // We surface this BEFORE wasting time syncing vectors that no chat path can reach.
+    //
+    // Uses list_knowledge_bases (returns the actual KBs registered for the app) — NOT get_app,
+    // which returns only the App doc and lacks any knowledgebases field. The prior pre-check
+    // was reading a non-existent field and printing a false-positive warning on every sync.
+    let registeredKbNames = null;
+    try {
+      const kbListResp = await apiClient.invoke('list_knowledge_bases', {
+        community_id: communityId,
+        app_id: appId
+      });
+      const kbListData = kbListResp?.message || kbListResp;
+      const kbs = kbListData?.knowledgebases || kbListData?.knowledge_bases || [];
+      registeredKbNames = new Set(
+        kbs.map(kb => kb.knowledgebase_name || kb.kb_name || kb.name).filter(Boolean)
+      );
     } catch (kbErr) {
-      console.log(chalk.yellow(`\n  ⚠ Could not verify KB exists for app "${appId}": ${kbErr.message}`));
-      console.log(chalk.yellow(`    If chat returns "KnowledgeBase not found", run: descix app init -a ${appId}\n`));
+      // If the call itself fails (network/auth), surface and bail — don't silently proceed.
+      spinner.fail(`Could not verify KB registry for app "${appId}": ${kbErr.message}`);
+      throw new Error(
+        `Failed to list KnowledgeBase docs for app "${appId}". ` +
+        `This is required so we can refuse to sync into an unregistered KB. ` +
+        `Underlying error: ${kbErr.message}`
+      );
+    }
+
+    const requestedKbNames = manifests.map(m => m.kb_name);
+    const missingKbNames = requestedKbNames.filter(name => !registeredKbNames.has(name));
+    if (missingKbNames.length > 0) {
+      // Hard-fail: every KB we are about to sync into must already be registered in Firestore.
+      // No hardcoded fallback. The user runs `descix app init` (or equivalent) to register first.
+      spinner.fail(`Unregistered KB(s) for app "${appId}"`);
+      throw new Error(
+        `KnowledgeBase document(s) missing in Firestore for app "${appId}": ${missingKbNames.join(', ')}.\n` +
+        `Registered KBs for this app: ${[...registeredKbNames].join(', ') || '(none)'}.\n` +
+        `Syncing vectors into Pinecone without a matching KB doc would orphan them (chat queries hard-fail).\n` +
+        `Fix: run \`descix app init -a ${appId}\` (creates the default KB doc) or extend the app's KB set first.`
+      );
     }
 
     // 4. Process each manifest
@@ -232,24 +378,145 @@ export async function runCorpusSync(apiClient, options) {
     let totalFilesSkipped = 0;
     let totalFilesDeleted = 0;
 
-    for (const manifest of manifests) {
+    for (const rawManifest of manifests) {
+      // ── Deliverable B: resolve --ref override (CLI > manifest > default) ──
+      const refResolution = resolveRef(rawManifest, options.ref || null);
+      const manifest = refResolution.manifest;
       const kbName = manifest.kb_name;
+
       console.log(chalk.cyan(`\nSyncing corpus: ${kbName}`));
+      // Always name the ref used so the operator can see exactly what was walked.
+      const refLabel = refResolution.source === 'cli'
+        ? `${refResolution.resolvedRef} (--ref override)`
+        : refResolution.source === 'manifest'
+          ? `${refResolution.resolvedRef} (manifest)`
+          : `${refResolution.resolvedRef} (default)`;
+      console.log(chalk.gray(`  Ref: ${refLabel}`));
 
       // 3a. Walk corpus
       const walkSpinner = ora('  Walking source directories...').start();
       const { files, commitSha } = await walkCorpus(manifest, workspaceRoot);
       walkSpinner.succeed(`  Found ${files.length} files (commit: ${commitSha.substring(0, 8)})`);
 
+      // ── Deliverable A: --show-walk prints the resolved ref + first 50 files
+      // BEFORE any Pinecone read/write so the operator can sanity-check the
+      // walk results without trusting downstream output.
+      if (options.showWalk) {
+        console.log(chalk.cyan(`  [show-walk] Resolved ref: ${refResolution.resolvedRef} (source=${refResolution.source})`));
+        console.log(chalk.cyan(`  [show-walk] Walked ${files.length} file(s). First ${Math.min(50, files.length)}:`));
+        for (const f of files.slice(0, 50)) {
+          console.log(chalk.gray(`    ${f.blob_sha.substring(0, 8)}  ${f.relative_path}`));
+        }
+        if (files.length > 50) {
+          console.log(chalk.gray(`    ... and ${files.length - 50} more`));
+        }
+      }
+
       if (files.length === 0) {
         console.log(chalk.yellow('  No files found in sources. Skipping.'));
         continue;
       }
 
+      // 3b-rebuild: When --rebuild is set, enumerate ALL file_ids currently in Pinecone
+      // for this namespace and purge anything that is not in the current walk. This
+      // recovers from accumulated drift (e.g., the unk-vp_descix/Corpus 20k stale-chunk
+      // case from the WS-CLI-V2.1-PURGE-era delta-without-purge bug).
+      //
+      // Deliverable A: --dry-run, interactive confirmation (--yes to skip).
+      // Read-only enumeration is allowed in dry-run; writes/deletes are NOT.
+      let rebuildPurged = 0;
+      let rebuildStaleFileIds = [];
+      let rebuildRemoteUniqueCount = 0;
+      let rebuildRemoteTotalChunks = 0;
+      if (options.rebuild) {
+        const rebuildSpinner = ora('  [rebuild] Enumerating Pinecone file_ids...').start();
+        try {
+          const remote = await listRemoteFileIds(apiClient, appId, kbName);
+          rebuildRemoteUniqueCount = remote.unique_count;
+          rebuildRemoteTotalChunks = remote.total_chunks;
+          rebuildSpinner.text = `  [rebuild] Pinecone has ${remote.unique_count} unique file_id(s) / ${remote.total_chunks} chunks`;
+
+          // Compute valid file_ids from current local walk
+          const validFileIds = new Set(files.map(f => `corpus:${f.blob_sha}`));
+          const staleFileIds = remote.file_ids.filter(fid => !validFileIds.has(fid));
+          rebuildStaleFileIds = staleFileIds;
+
+          if (staleFileIds.length === 0) {
+            rebuildSpinner.succeed(`  [rebuild] No drift detected (${remote.unique_count} file_ids all current)`);
+          } else if (options.dryRun) {
+            // DRY-RUN: enumerate what WOULD be purged. No writes.
+            rebuildSpinner.succeed(`  [rebuild][dry-run] ${staleFileIds.length} stale file_id(s) WOULD be purged (no action taken)`);
+            console.log(chalk.yellow(`  [dry-run] Stale file_ids (first 10 shown of ${staleFileIds.length}):`));
+            for (const fid of staleFileIds.slice(0, 10)) {
+              console.log(chalk.gray(`    ${fid}`));
+            }
+            if (staleFileIds.length > 10) {
+              console.log(chalk.gray(`    ... and ${staleFileIds.length - 10} more`));
+            }
+          } else {
+            // Interactive confirmation guard. --yes skips for scripting/CI.
+            //
+            // We cannot count chunks-per-file_id without a separate read, so we
+            // surface the chunk delta in aggregate (remote.total_chunks is a
+            // ceiling; the per-file purge is what actually runs). Honesty over
+            // false precision.
+            const confirmLines = [
+              `\n  About to purge up to ${rebuildRemoteTotalChunks} chunk(s) across ${staleFileIds.length} file_id(s) from app=${appId} kb=${kbName}.`,
+              `  First ${Math.min(10, staleFileIds.length)} file_ids that will be purged:`
+            ];
+            console.log(chalk.yellow(confirmLines.join('\n')));
+            for (const fid of staleFileIds.slice(0, 10)) {
+              console.log(chalk.gray(`    ${fid}`));
+            }
+            if (staleFileIds.length > 10) {
+              console.log(chalk.gray(`    ... and ${staleFileIds.length - 10} more`));
+            }
+
+            if (!options.yes) {
+              rebuildSpinner.stop();
+              const ok = await confirmYesNo('  Proceed with purge?');
+              if (!ok) {
+                console.log(chalk.cyan('  [rebuild] Aborted by operator. No Pinecone changes made.'));
+                // Skip THIS manifest's rebuild + delta phases. Don't break the
+                // outer loop — operator might want to keep going for other KBs.
+                continue;
+              }
+              rebuildSpinner.start(`  [rebuild] Purging ${staleFileIds.length} stale file_id(s)...`);
+            } else {
+              rebuildSpinner.text = `  [rebuild] (--yes) Purging ${staleFileIds.length} stale file_id(s)...`;
+            }
+
+            // Chunked delete to avoid huge payloads on heavily-drifted namespaces
+            const REBUILD_BATCH = 50;
+            for (let i = 0; i < staleFileIds.length; i += REBUILD_BATCH) {
+              const batch = staleFileIds.slice(i, i + REBUILD_BATCH);
+              const result = await deleteStaleChunksByFileId(apiClient, communityId, appId, kbName, batch);
+              rebuildPurged += result.deleted;
+              rebuildSpinner.text = `  [rebuild] Purged ${i + batch.length}/${staleFileIds.length} stale file_id(s)...`;
+            }
+            rebuildSpinner.succeed(`  [rebuild] Purged ${rebuildPurged} chunk(s) across ${staleFileIds.length} stale file_id(s)`);
+          }
+        } catch (err) {
+          rebuildSpinner.fail(`  [rebuild] Failed: ${err.message}`);
+          // Re-throw — rebuild is opt-in and explicit; silent partial failure would
+          // leave the namespace half-purged, exactly the silent-degradation we are closing.
+          throw err;
+        }
+      }
+
       // 3b. Load previous sync state for delta computation
       // We use local sync state (stored blob SHAs) instead of querying Pinecone,
       // because Pinecone metadata queries don't scale (payload size limits).
-      const previousState = await loadSyncState(appRoot, kbName);
+      // For --rebuild runs we INVALIDATE prior state so every file re-chunks + re-upserts
+      // (otherwise unchanged-by-blob-sha files would be skipped despite the purge above).
+      //
+      // Deliverable A note: in dry-run + rebuild we ALSO null previousState so
+      // the count below reflects what a real rebuild would upsert (all files),
+      // not what an incremental sync would upsert.
+      let previousState = await loadSyncState(appRoot, kbName);
+      if (options.rebuild) {
+        previousState = null;
+      }
       const previousBlobShas = new Set(previousState?.synced_blob_shas || []);
       const previousChunkCount = previousState?.total_chunks || 0;
 
@@ -262,19 +529,23 @@ export async function runCorpusSync(apiClient, options) {
       // 3c. Compute delta — compare by blob SHA against local sync state
       const localBlobShas = new Set(files.map(f => f.blob_sha));
       const newOrChangedFiles = files.filter(f => !previousBlobShas.has(f.blob_sha));
-      const deletedBlobShas = [...previousBlobShas].filter(sha => !localBlobShas.has(sha));
 
-      // Note: we cannot efficiently delete individual chunks from Pinecone by blob SHA
-      // without querying for them first. For now, we track deletions in sync state
-      // and handle them on the next full re-sync if needed.
-      const idsToDelete = []; // Deferred — would need Pinecone query per deleted blob SHA
+      // Stale blob_shas: anything we synced previously that is no longer in the local
+      // walk. This covers BOTH cases:
+      //   (a) File deleted from the source corpus entirely.
+      //   (b) File modified in place — same source_path, new blob_sha → old blob_sha
+      //       is no longer in localBlobShas.
+      // Each stale blob_sha maps to a file_id of `corpus:{blob_sha}` in Pinecone metadata
+      // and is purged via the deleteStaleChunksByFileId primitive (multi-tenancy filter).
+      const deletedBlobShas = [...previousBlobShas].filter(sha => !localBlobShas.has(sha));
+      const fileIdsToDelete = deletedBlobShas.map(sha => `corpus:${sha}`);
 
       const unchangedCount = files.length - newOrChangedFiles.length;
 
       if (options.verbose) {
         console.log(chalk.gray(`  New/changed files: ${newOrChangedFiles.length}`));
         console.log(chalk.gray(`  Unchanged files: ${unchangedCount}`));
-        console.log(chalk.gray(`  Deleted blob SHAs: ${deletedBlobShas.length}`));
+        console.log(chalk.gray(`  Stale blob SHAs (delete): ${deletedBlobShas.length}`));
       }
 
       // 3d. Chunk new/changed files
@@ -302,6 +573,27 @@ export async function runCorpusSync(apiClient, options) {
         }
 
         chunkSpinner.succeed(`  Chunked: ${allChunks.length} chunks from ${newOrChangedFiles.length} files`);
+      }
+
+      // Deliverable A: dry-run summary + early continue. We do all the
+      // counting work above (walk + chunk + remote enumeration) so the operator
+      // sees the EXACT plan that --rebuild (without --dry-run) would execute,
+      // but we never call upsertChunks / deleteStaleChunksByFileId.
+      if (options.dryRun) {
+        console.log(chalk.cyan(`\n  [dry-run] Plan for ${kbName}:`));
+        console.log(chalk.white(`    Would upsert: ${allChunks.length} chunks from ${newOrChangedFiles.length} file(s)`));
+        console.log(chalk.white(`    Would delete (stale-file): ${fileIdsToDelete.length} blob SHA(s)`));
+        if (options.rebuild) {
+          console.log(chalk.white(`    Would purge (rebuild): ${rebuildStaleFileIds.length} file_id(s) (up to ${rebuildRemoteTotalChunks} chunks)`));
+        }
+        // Track for the summary exit-code computation at the end of the loop.
+        totalFilesProcessed += newOrChangedFiles.length;
+        totalChunksCreated += allChunks.length;
+        totalFilesSkipped += unchangedCount;
+        totalFilesDeleted += fileIdsToDelete.length + rebuildStaleFileIds.length;
+        // Do NOT call upsertChunks, deleteStaleChunksByFileId, deleteStaleChunks,
+        // or saveSyncState in dry-run. Continue to next manifest.
+        continue;
       }
 
       // 3e. Sync to Pinecone with rate limiting
@@ -371,12 +663,15 @@ export async function runCorpusSync(apiClient, options) {
         }
       }
 
-      if (idsToDelete.length > 0) {
-        const deleteSpinner = ora(`  Deleting ${idsToDelete.length} stale chunks...`).start();
+      if (fileIdsToDelete.length > 0) {
+        const deleteSpinner = ora(`  Purging stale chunks for ${fileIdsToDelete.length} blob SHA(s)...`).start();
         try {
-          const result = await deleteStaleChunks(apiClient, communityId, appId, kbName, idsToDelete);
+          // Use file_id-based delete: each stale blob_sha maps to file_id `corpus:{sha}`,
+          // and pineconeService::deleteVectorsByFileId scopes by full multi-tenancy filter
+          // (community_id, app_id, knowledgebase_name) — guarantees namespace isolation.
+          const result = await deleteStaleChunksByFileId(apiClient, communityId, appId, kbName, fileIdsToDelete);
           deleted = result.deleted;
-          deleteSpinner.succeed(`  Deleted: ${deleted} stale chunks`);
+          deleteSpinner.succeed(`  Purged: ${deleted} chunk(s) across ${fileIdsToDelete.length} stale blob SHA(s)`);
         } catch (err) {
           deleteSpinner.warn(`  Delete failed: ${err.message}`);
         }
@@ -399,18 +694,38 @@ export async function runCorpusSync(apiClient, options) {
       totalFilesProcessed += newOrChangedFiles.length;
       totalChunksCreated += upserted;
       totalFilesSkipped += unchangedCount;
-      totalFilesDeleted += deleted;
+      totalFilesDeleted += deleted + rebuildPurged;
     }
 
     // Summary
+    if (options.dryRun) {
+      const driftCount = totalFilesProcessed + totalFilesDeleted;
+      console.log(chalk.cyan('\nCorpus sync dry-run complete:'));
+      console.log(chalk.white(`  Would-upsert files:  ${totalFilesProcessed}`));
+      console.log(chalk.white(`  Would-upsert chunks: ${totalChunksCreated}`));
+      console.log(chalk.white(`  Would-delete refs:   ${totalFilesDeleted}`));
+      console.log(chalk.white(`  Unchanged files:     ${totalFilesSkipped}`));
+      if (driftCount === 0) {
+        console.log(chalk.green('  Drift: NONE. No changes would be made.\n'));
+        // Return value drives the bin/descix.js wrapper's process.exit code.
+        return { dryRun: true, drift: false, driftCount: 0 };
+      } else {
+        console.log(chalk.yellow(`  Drift: ${driftCount} change(s) would be applied.\n`));
+        return { dryRun: true, drift: true, driftCount };
+      }
+    }
+
     console.log(chalk.green('\nCorpus sync complete:'));
     console.log(chalk.white(`  Files synced:    ${totalFilesProcessed}`));
     console.log(chalk.white(`  Chunks created:  ${totalChunksCreated}`));
     console.log(chalk.white(`  Files unchanged: ${totalFilesSkipped}`));
     if (totalFilesDeleted > 0) {
       console.log(chalk.white(`  Chunks deleted:  ${totalFilesDeleted}`));
+    } else {
+      console.log(chalk.gray(`  Chunks deleted:  0`));
     }
     console.log('');
+    return { dryRun: false };
 
   } catch (error) {
     if (spinner.isSpinning) spinner.fail('Corpus sync failed');
@@ -461,12 +776,28 @@ export async function runCorpusStatus(apiClient, options) {
 
     spinner.stop();
 
-    for (const manifest of manifests) {
+    for (const rawManifest of manifests) {
+      // Apply the same ref resolution the sync command uses, so `status`
+      // reports the EXACT ref the next sync would walk.
+      const refResolution = resolveRef(rawManifest, options.ref || null);
+      const manifest = refResolution.manifest;
       const kbName = manifest.kb_name;
       const syncState = await loadSyncState(appRoot, kbName);
 
       console.log(chalk.cyan(`\nCorpus Status: ${appId} / ${kbName}`));
       console.log(chalk.gray('─'.repeat(50)));
+      console.log(chalk.white(`  Resolved ref:    ${refResolution.resolvedRef} (source=${refResolution.source})`));
+
+      // File count from a fresh walk so the operator sees the LIVE file count
+      // at the resolved ref, not the count from the last sync. This is the
+      // single most useful piece of information for diagnosing "why does this
+      // not match what I expect" and is cheap (no Pinecone read).
+      try {
+        const { files } = await walkCorpus(manifest, workspaceRoot);
+        console.log(chalk.white(`  Live file count: ${files.length}`));
+      } catch (err) {
+        console.log(chalk.gray(`  Live file count: (walk error: ${err.message})`));
+      }
 
       if (!syncState) {
         console.log(chalk.yellow('  Never synced. Run "descix kb corpus sync" first.'));
