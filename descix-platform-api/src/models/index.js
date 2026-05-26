@@ -318,7 +318,11 @@ export class App {
         knowledgebase_name = null, icon_url = "",
         create_date = new Date(), ip_site_gcs_path_url = "", owner_id = "",
         price = 0, token_symbol = null, drive_folder_id = "",
-        initial_daita_value = 0, api_base_url = null
+        initial_daita_value = 0, api_base_url = null,
+        // default_app_model: per CEO 2026-05-26 inheritance chain — when null/absent the
+        // platform per-level model (levelConfig.model) wins. Only set when an app team
+        // wants to pin a specific model regardless of intelligence level.
+        default_app_model = null
     ) {
         const utils = getCloudConfig();
         this.community_id = String(community_id);
@@ -330,7 +334,10 @@ export class App {
         this.ip_site_gcs_path_url = String(ip_site_gcs_path_url);
         this.create_date = create_date instanceof Date ? create_date : new Date(create_date);
         this.owner_id = String(owner_id);
-        this.default_app_model = utils.DEFAULT_AI_MODEL;
+        // default_app_model: keep as null/absent unless the caller passed an explicit value.
+        // This avoids re-populating the doc with utils.DEFAULT_AI_MODEL on every hydration,
+        // which would shadow the per-level platform default at request time.
+        this.default_app_model = default_app_model || null;
         this.default_prompt = utils.DEFAULT_COMMUNITY_PROMPT;
         this.price = price;
         this.token_symbol = token_symbol;
@@ -383,7 +390,8 @@ export class App {
             doc.knowledgebase_name, doc.icon_url, create_date_obj, doc.ip_site_gcs_path_url,
             doc.owner_id || "", doc.price || 0, doc.token_symbol || null, doc.drive_folder_id || "",
             doc.initial_daita_value || 0,
-            doc.api_base_url || null
+            doc.api_base_url || null,
+            doc.default_app_model || null   // hydrate from Firestore (null = use platform per-level)
         );
         app.repo_url = doc.repo_url || null;
         app.repo_branch = doc.repo_branch || null;
@@ -422,7 +430,8 @@ export class App {
             data.token_symbol || null,
             data.drive_folder_id || "",
             data.initial_daita_value || 0,
-            data.api_base_url || null
+            data.api_base_url || null,
+            data.default_app_model || null   // hydrate from data dict
         );
         app.repo_url = data.repo_url || null;
         app.repo_branch = data.repo_branch || null;
