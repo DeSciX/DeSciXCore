@@ -9,11 +9,7 @@
     "descix-mcp": "bin/mcp-server.js"
   },
   "scripts": {
-<<<<<<< HEAD
     "test": "node --test \"tests/*.test.js\"",
-=======
-    "test": "node --test tests/*.test.js",
->>>>>>> worktree-microservice-restart/ws-cli-microservice-restart-command
     "pack": "npm pack"
   },
   "keywords": [
