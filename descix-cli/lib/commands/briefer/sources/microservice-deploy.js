@@ -19,7 +19,8 @@ import {
   readSourceFile,
   findInLines,
   makeCitation,
-  sliceRange
+  sliceRange,
+  probeGcloudJson
 } from '../util/source-reader.js';
 import { BrieferExtractorError, BRIEFER_ERROR_CODES } from '../errors.js';
 
@@ -159,6 +160,30 @@ export async function extract({ env, cliPaths } = {}) {
     }
   }
 
+  // ── M3: live Cloud Run probe (HARD-FAIL on demo/prod, skipped on dev) ──
+  const probeCitations = [];
+  let runProbeNote = '';
+  if (env === 'dev') {
+    runProbeNote = '\n_DEV: gcloud probes skipped (local dev — no Cloud Run services to probe)._\n';
+  } else {
+    const runProbe = await probeGcloudJson({
+      command: ['run', 'services', 'list', '--region=us-central1', `--filter=metadata.name~^.*-${env}$`, '--format=json'],
+      env,
+      section: `§${SECTION.number} ${SECTION.heading}`,
+      anchor: 'cloud-run-services-list',
+      expected: `JSON array of Cloud Run services matching \`-${env}$\` in us-central1`,
+      recovery: `Run 'gcloud auth login' and 'gcloud config set project descix'. The Cloud Run services cross-check is required for env=${env}.`
+    });
+    const services = (runProbe.json || [])
+      .map(svc => ({
+        name: (svc.metadata && svc.metadata.name) || '(unknown)',
+        region: (svc.metadata && svc.metadata.labels && svc.metadata.labels['cloud.googleapis.com/location']) || 'us-central1'
+      }));
+    const names = services.map(s => '\`' + s.name + '\`').join(', ');
+    runProbeNote = `\n**Live Cloud Run state** (probed \`${runProbe.citation.probe}\`, env=\`${env}\`):\n- Services found: \`${services.length}\`\n- Names: ${names || '_(none)_'}\n`;
+    probeCitations.push(runProbe.citation);
+  }
+
   // ── Render the markdown ──
   const lines = [
     `Today (regen target: \`${env}\`), microservice deploy is **3 separate steps NOT chained**:`,
@@ -188,6 +213,7 @@ export async function extract({ env, cliPaths } = {}) {
       `**KNOWN GAP:** there is NO \`descix microservice deploy\` command that chains all three. Step 2 today is a manual admin-script invocation, not a CLI subcommand. Closing this gap is part of WS-DESCIX-BRIEFER-CLI scope (or a sibling workstream). _Detected dynamically: grep on \`bin/descix.js\` returned no \`microserviceCommand.command('deploy')\` declaration._`
     );
   }
+  if (runProbeNote) lines.push(runProbeNote);
 
   const markdown = lines.join('\n');
 
@@ -195,7 +221,8 @@ export async function extract({ env, cliPaths } = {}) {
     makeCitation({ file: POWCH_DEPLOY, lines: `${powchRun.lineNumber}-${powchDeployEnd}`, anchor: 'gcloud run deploy (Powch)', fileLines: powch.lines }),
     makeCitation({ file: CLOUD_DEPLOY, lines: String(cloudRun.lineNumber), anchor: 'gcloud run deploy (Cloud canonical)', fileLines: cloud.lines }),
     makeCitation({ file: MESH_FILE, lines: String(mainMatch.lineNumber), anchor: 'update-mesh-routing.js main()', fileLines: mesh.lines }),
-    makeCitation({ file: CLI_FILE, lines: String(registerMatch.lineNumber), anchor: 'descix microservice register', fileLines: cli.lines })
+    makeCitation({ file: CLI_FILE, lines: String(registerMatch.lineNumber), anchor: 'descix microservice register', fileLines: cli.lines }),
+    ...probeCitations
   ];
 
   return { markdown, citations };

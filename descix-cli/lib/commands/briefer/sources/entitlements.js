@@ -19,7 +19,8 @@ import {
   readSourceFile,
   findInLines,
   makeCitation,
-  grepFiles
+  grepFiles,
+  probeFirestoreRest
 } from '../util/source-reader.js';
 import { BrieferExtractorError, BRIEFER_ERROR_CODES } from '../errors.js';
 
@@ -132,6 +133,40 @@ export async function extract({ env, cliPaths } = {}) {
     runtimeReadersList = unique.map(f => `  - \`${f}\``).join('\n');
   }
 
+  // ── M3: live Firestore Products probe (HARD-FAIL on demo/prod, skipped on dev) ──
+  // Uses Firestore REST API via gcloud-derived access token. Per AC-7
+  // anti-regression: no @google-cloud/firestore import — this is a different
+  // API surface (REST + gcloud-CLI token), explicitly permitted.
+  const probeCitations = [];
+  let productsLiveNote = '';
+  if (env === 'dev') {
+    productsLiveNote = '\n_DEV: Firestore probe skipped (local dev — no cloud Firestore for the descix-dev database in this regen scope)._\n';
+  } else {
+    const productsProbe = await probeFirestoreRest({
+      dbPath: `descix-${env}/documents/Products`,
+      query: { pageSize: 200, 'mask.fieldPaths': 'app_id' },
+      env,
+      section: `§${SECTION.number} ${SECTION.heading}`,
+      anchor: 'products-collection-list',
+      expected: `Firestore Products list for env=${env}`,
+      recovery: `Run 'gcloud auth login' and ensure the account has Firestore read scope. The Products collection cross-check is required for env=${env}.`
+    });
+    const docs = (productsProbe.json && productsProbe.json.documents) || [];
+    const names = docs
+      .map(d => (d.name || '').split('/').pop())
+      .filter(Boolean)
+      .sort();
+    const sample = names.slice(0, 8);
+    productsLiveNote = [
+      '',
+      `**Live Products collection** (probed \`Firestore REST listDocuments\` against \`descix-${env}/documents/Products\`):`,
+      `- Docs returned: \`${names.length}\` (pageSize=200; further pages not enumerated this milestone)`,
+      `- Sample app_ids: ${sample.length > 0 ? sample.map(n => '\`' + n + '\`').join(', ') : '_(none)_'}${names.length > sample.length ? ` (+ ${names.length - sample.length} more)` : ''}`,
+      ''
+    ].join('\n');
+    probeCitations.push(productsProbe.citation);
+  }
+
   // ── Render markdown ──
   const markdown = [
     `\`Products/{app_id}\` in \`descix-{env}\` Firestore holds:`,
@@ -158,14 +193,16 @@ export async function extract({ env, cliPaths } = {}) {
     `4. \`levelConfig.model\` (platform per-level mapping from \`defaults-config.json\`)`,
     `5. \`utils.DEFAULT_AI_MODEL\` (platform-wide fallback from \`defaults-config.json\`)`,
     ``,
-    `Setting \`app.default_app_model\` to a non-null value SHADOWS the \`--level\` flag — intentional pinning, not "a default the level overrides." Apps that want per-level routing leave \`default_app_model = null/absent\`.`
+    `Setting \`app.default_app_model\` to a non-null value SHADOWS the \`--level\` flag — intentional pinning, not "a default the level overrides." Apps that want per-level routing leave \`default_app_model = null/absent\`.`,
+    productsLiveNote
   ].join('\n');
 
   const citations = [
     makeCitation({ file: ENTITLEMENTS_FILE, lines: String(hydrateMatch.lineNumber), anchor: 'hydrateCommunityIdFromProducts (canonical)', fileLines: ent.lines }),
     makeCitation({ file: CM_FILE, lines: String(reExportMatch.lineNumber), anchor: 'hydrate re-export', fileLines: cm.lines }),
     makeCitation({ file: BOOTSTRAP_FILE, lines: String(hydrateEnvMatch.lineNumber), anchor: 'hydrate-env writer', fileLines: bootstrap.lines }),
-    makeCitation({ file: GEMINI_FILE, lines: String(resolverMatch.lineNumber), anchor: 'resolveModelName (app-level config bridge)', fileLines: gemini.lines })
+    makeCitation({ file: GEMINI_FILE, lines: String(resolverMatch.lineNumber), anchor: 'resolveModelName (app-level config bridge)', fileLines: gemini.lines }),
+    ...probeCitations
   ];
 
   return { markdown, citations };
