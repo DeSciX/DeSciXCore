@@ -161,10 +161,12 @@ test('Extractor scaffolds — extract({env}) returns {markdown, citations[]}', a
     assert.ok(Array.isArray(result.citations), `${f}: citations not an array`);
     // Citations may be empty for a section that's purely editorial (rare).
     for (const c of result.citations) {
-      assert.ok(c.file, `${f}: citation.file required`);
+      // M3 — citations are EITHER code citations (have .file) OR live-state
+      // probe citations (have .source = 'gcloud' | 'firestore-rest').
+      assert.ok(c.file || c.source, `${f}: citation must have .file or .source`);
       assert.ok(c.lines, `${f}: citation.lines required`);
       assert.ok(c.anchor, `${f}: citation.anchor required`);
-      assert.ok('sha' in c, `${f}: citation.sha key required (may be null for M1)`);
+      assert.ok('sha' in c, `${f}: citation.sha key required`);
     }
   }
 });
@@ -196,9 +198,10 @@ test('Stitcher — buildBrieferDoc + stitchBriefer produce a coherent doc', asyn
   assert.match(doc.markdown, /## 7\. Where to look for canonical answers/);
   assert.match(doc.markdown, /## Provenance \/ regeneration history/);
   assert.ok(doc.citationTrail.length > 0, 'citation trail must be non-empty');
-  // Every trail entry must include file= and anchor=.
+  // Every trail entry must include anchor= and EITHER file= (code citation)
+  // OR source= (M3 live-state probe citation).
   for (const t of doc.citationTrail) {
-    assert.match(t, /file=/);
+    assert.match(t, /(?:file=|source=)/);
     assert.match(t, /anchor=/);
   }
 });

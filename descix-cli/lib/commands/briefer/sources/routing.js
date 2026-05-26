@@ -19,7 +19,7 @@ import {
   findInLines,
   makeCitation,
   sliceRange,
-  tryGcloudJson
+  probeGcloudJson
 } from '../util/source-reader.js';
 import { BrieferExtractorError, BRIEFER_ERROR_CODES } from '../errors.js';
 
@@ -176,30 +176,34 @@ export async function extract({ env, cliPaths } = {}) {
     section: `§${SECTION.number} ${SECTION.heading}`
   });
 
-  // ── Optional: live gcloud probe (best-effort, never hard-fails) ──
+  // ── M3: live gcloud probe (HARD-FAIL on demo/prod, skipped on dev) ──
+  // routing.js already hard-rejects --env=dev above (no LB URL map in DEV),
+  // so this probe ALWAYS runs for demo/prod and MUST succeed. probeGcloudJson
+  // throws BRIEFER-GCLOUD-FAIL with an actionable recovery message otherwise.
   let gcloudBlock = '';
-  const gcloudResult = tryGcloudJson([
-    'compute', 'url-maps', 'describe', 'descix-discord-app-lb', '--format=json'
-  ]);
-  if (gcloudResult.ok) {
-    const hostRuleCount = (gcloudResult.json.hostRules || []).length;
-    const pathMatcherCount = (gcloudResult.json.pathMatchers || []).length;
-    const fingerprint = gcloudResult.json.fingerprint || 'unknown';
-    gcloudBlock = [
-      '',
-      '**Live LB state** (live `gcloud compute url-maps describe descix-discord-app-lb` at regen time):',
-      `- Host rules: \`${hostRuleCount}\``,
-      `- Path matchers: \`${pathMatcherCount}\``,
-      `- URL map fingerprint: \`${fingerprint}\``,
-      ''
-    ].join('\n');
-  } else {
-    gcloudBlock = [
-      ``,
-      `_Live LB verification block skipped: \`gcloud compute url-maps describe descix-discord-app-lb\` unavailable in this environment (${shortenGcloudErr(gcloudResult.error)})._`,
-      ``
-    ].join('\n');
-  }
+  let gcloudCitation = null;
+  const lbProbe = await probeGcloudJson({
+    command: ['compute', 'url-maps', 'describe', 'descix-discord-app-lb', '--format=json'],
+    env,
+    section: `§${SECTION.number} ${SECTION.heading}`,
+    anchor: 'lb-url-map',
+    expected: 'JSON describing the descix-discord-app-lb URL map',
+    recovery: `Run 'gcloud auth login' and 'gcloud config set project descix'. If the URL map does not exist for env=${env}, that is a real platform-state issue — investigate before regenerating the briefer.`
+  });
+  // lbProbe is non-null for demo/prod (dev is rejected upstream).
+  const hostRuleCount = (lbProbe.json.hostRules || []).length;
+  const pathMatcherCount = (lbProbe.json.pathMatchers || []).length;
+  const fingerprint = lbProbe.json.fingerprint || 'unknown';
+  gcloudBlock = [
+    '',
+    '**Live LB state** (live `gcloud compute url-maps describe descix-discord-app-lb` at regen time):',
+    `- Host rules: \`${hostRuleCount}\``,
+    `- Path matchers: \`${pathMatcherCount}\``,
+    `- URL map fingerprint: \`${fingerprint}\``,
+    `- Probed: \`${lbProbe.citation.probe}\` (env=\`${env}\`)`,
+    ''
+  ].join('\n');
+  gcloudCitation = lbProbe.citation;
 
   // Slice the pathRules block for embedding
   const pathRulesEnd = findArrayEnd(mesh.lines, pathRulesMatch.lineNumber);
@@ -235,7 +239,8 @@ export async function extract({ env, cliPaths } = {}) {
     makeCitation({ file: APIFRONT_FILE, lines: String(invokeMatch.lineNumber), anchor: 'CommandHandler.invoke', fileLines: apiFront.lines }),
     makeCitation({ file: APIFRONT_FILE, lines: String(externalDispatchMatch.lineNumber), anchor: '_invokeExternalCommand', fileLines: apiFront.lines }),
     makeCitation({ file: GATEWAY_FILE, lines: `1-${gateway.lines.length}`, anchor: 'local serve gateway', fileLines: gateway.lines }),
-    makeCitation({ file: PROXY_CONFIG_FILE, lines: `1-${proxyConfig.lines.length}`, anchor: 'vite proxy rules', fileLines: proxyConfig.lines })
+    makeCitation({ file: PROXY_CONFIG_FILE, lines: `1-${proxyConfig.lines.length}`, anchor: 'vite proxy rules', fileLines: proxyConfig.lines }),
+    gcloudCitation
   ];
 
   return { markdown, citations };

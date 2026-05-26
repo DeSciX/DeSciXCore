@@ -19,7 +19,7 @@ import {
   findInLines,
   makeCitation,
   sliceRange,
-  tryGcloudJson
+  probeGcloudJson
 } from '../util/source-reader.js';
 import { BrieferExtractorError, BRIEFER_ERROR_CODES } from '../errors.js';
 
@@ -117,30 +117,43 @@ export async function extract({ env, cliPaths } = {}) {
     recovery: `Re-locate the Secret Manager isolation table in ${CLOUD_CLAUDE}.`
   });
 
-  // ── Optional gcloud cross-checks ──
+  // ── M3: live gcloud probes (HARD-FAIL on demo/prod, skipped on dev) ──
+  const probeCitations = [];
   let gcloudCfNote = '';
-  const cfResult = tryGcloudJson([
-    'functions', 'list', '--gen2', '--format=json'
-  ]);
-  if (cfResult.ok) {
-    const apiFrontCfs = (cfResult.json || [])
+  let gcloudFsNote = '';
+
+  if (env === 'dev') {
+    // DEV is local. Probe is intentionally skipped; emit a stanza so the
+    // operator knows live state was not verified for this regen.
+    gcloudCfNote = '\n_DEV: gcloud probes skipped (local dev environment — no Cloud Functions or Firestore to probe)._\n';
+  } else {
+    const cfProbe = await probeGcloudJson({
+      command: ['functions', 'list', '--v2', '--format=json'],
+      env,
+      section: `§${SECTION.number} ${SECTION.heading}`,
+      anchor: 'cloud-functions-list',
+      expected: 'JSON array of gen2 Cloud Functions for project descix',
+      recovery: `Run 'gcloud auth login' and 'gcloud config set project descix'. The Cloud Functions list cross-check is required for env=${env}.`
+    });
+    const apiFrontCfs = (cfProbe.json || [])
       .filter(f => /apiFront-http/.test(f.name || ''))
       .map(f => (f.name || '').split('/').pop());
-    if (apiFrontCfs.length > 0) {
-      gcloudCfNote = `\n_Live Cloud Functions matching \`apiFront-http\`:_ ${apiFrontCfs.map(n => '`' + n + '`').join(', ')}\n`;
-    }
-  }
-  let gcloudFsNote = '';
-  const fsResult = tryGcloudJson([
-    'firestore', 'databases', 'list', '--format=json'
-  ]);
-  if (fsResult.ok) {
-    const dbs = (fsResult.json || [])
+    gcloudCfNote = `\n_Live Cloud Functions matching \`apiFront-http\` (probed \`${cfProbe.citation.probe}\`, env=\`${env}\`):_ ${apiFrontCfs.length > 0 ? apiFrontCfs.map(n => '\`' + n + '\`').join(', ') : '_(none found)_'}\n`;
+    probeCitations.push(cfProbe.citation);
+
+    const fsProbe = await probeGcloudJson({
+      command: ['firestore', 'databases', 'list', '--format=json'],
+      env,
+      section: `§${SECTION.number} ${SECTION.heading}`,
+      anchor: 'firestore-databases-list',
+      expected: 'JSON array of Firestore databases for project descix',
+      recovery: `Run 'gcloud auth login' and 'gcloud config set project descix'. The Firestore databases cross-check is required for env=${env}.`
+    });
+    const dbs = (fsProbe.json || [])
       .map(d => (d.name || '').split('/').pop())
       .filter(n => /^descix/.test(n));
-    if (dbs.length > 0) {
-      gcloudFsNote = `\n_Live Firestore databases matching \`descix*\`:_ ${dbs.map(n => '`' + n + '`').join(', ')}\n`;
-    }
+    gcloudFsNote = `\n_Live Firestore databases matching \`descix*\` (probed \`${fsProbe.citation.probe}\`, env=\`${env}\`):_ ${dbs.length > 0 ? dbs.map(n => '\`' + n + '\`').join(', ') : '_(none found)_'}\n`;
+    probeCitations.push(fsProbe.citation);
   }
 
   // ── Render markdown ──
@@ -169,7 +182,8 @@ export async function extract({ env, cliPaths } = {}) {
     makeCitation({ file: MESH_FILE, lines: `${envConfigMatch.lineNumber}-${envConfigEnd}`, anchor: 'ENV_CONFIG', fileLines: mesh.lines }),
     makeCitation({ file: CONFIG_FILE, lines: String(deployEnvBoundMatch.lineNumber), anchor: 'DEPLOY_ENV bound-once', fileLines: config.lines }),
     makeCitation({ file: RUNTIME_MM, lines: `1-${rmm.lines.length}`, anchor: 'DEV/DEMO/PROD parallelism', fileLines: rmm.lines }),
-    makeCitation({ file: CLOUD_CLAUDE, lines: String(secretTableMatch.lineNumber), anchor: 'Secret Manager per-env isolation', fileLines: claude.lines })
+    makeCitation({ file: CLOUD_CLAUDE, lines: String(secretTableMatch.lineNumber), anchor: 'Secret Manager per-env isolation', fileLines: claude.lines }),
+    ...probeCitations
   ];
 
   return { markdown, citations };
