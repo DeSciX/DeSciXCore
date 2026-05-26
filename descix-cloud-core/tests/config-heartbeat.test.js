@@ -190,3 +190,59 @@ test('2.B.1: watcher is NOT armed when DEPLOY_ENV !== dev', async (t) => {
     cfg._startConfigWatcher();
     assert.equal(cfg.__watcher, null, 'watcher must NOT be armed outside dev');
 });
+
+test('2.B.1: file-watcher survives atomic-rename save (vim/VS Code default pattern)', async (t) => {
+    // macOS fs.watch detaches when the inode under a watched path is swapped (which is
+    // exactly what vim, VS Code default save, and `jq + mv` do — write to a temp file,
+    // then rename over the original). The previous fs.watch implementation silently
+    // stopped firing HOT-RELOAD after such a save. chokidar handles this by watching
+    // the parent directory and re-attaching on rename. This test guards the
+    // regression: edit-1 (in-place) followed by edit-2 (atomic-rename) followed by
+    // edit-3 (in-place again) — all three must hot-reload the singleton.
+    const dir = await mkConfigDir(t, fullDefaults());
+    _resetCloudConfigForTests();
+    const cfg = createCloudConfig({ rootPath: dir });
+
+    cfg.DEPLOY_ENV = 'dev';
+    cfg.__watch_debounce_ms = 50;
+    cfg._startConfigWatcher();
+    assert.ok(cfg.__watcher, 'watcher must be armed in dev mode');
+    t.after(() => {
+        if (cfg.__watcher) {
+            cfg.__watcher.close();
+            cfg.__watcher = null;
+        }
+    });
+
+    const target = path.join(dir, 'defaults-config.json');
+
+    const waitFor = async (predicate, deadlineMs = 2500) => {
+        const deadline = Date.now() + deadlineMs;
+        while (Date.now() < deadline) {
+            if (predicate()) return true;
+            await sleep(25);
+        }
+        return false;
+    };
+
+    // --- Edit 1: in-place write (baseline; this also worked under fs.watch) ---
+    await fsp.writeFile(target, JSON.stringify(fullDefaults({ DEFAULT_AI_MODEL: 'edit-1-inplace' }), null, 2));
+    const got1 = await waitFor(() => cfg.DEFAULT_AI_MODEL === 'edit-1-inplace');
+    assert.ok(got1, `edit-1 (in-place) did not hot-reload; current=${cfg.DEFAULT_AI_MODEL}`);
+
+    // --- Edit 2: atomic-rename (write to tmp, then rename over original) ---
+    // This is the macOS regression case fs.watch could not survive.
+    const tmp = path.join(dir, 'defaults-config.json.tmp');
+    await fsp.writeFile(tmp, JSON.stringify(fullDefaults({ DEFAULT_AI_MODEL: 'edit-2-atomic-rename' }), null, 2));
+    await fsp.rename(tmp, target);
+    const got2 = await waitFor(() => cfg.DEFAULT_AI_MODEL === 'edit-2-atomic-rename');
+    assert.ok(got2, `edit-2 (atomic-rename) did not hot-reload; current=${cfg.DEFAULT_AI_MODEL}`);
+
+    // --- Edit 3: in-place write AFTER atomic-rename ---
+    // Critical: this is the exact subsequent-edit that fs.watch could not detect
+    // because its inode binding had been severed by edit 2. chokidar's
+    // re-attachment must keep the watch live across the rename.
+    await fsp.writeFile(target, JSON.stringify(fullDefaults({ DEFAULT_AI_MODEL: 'edit-3-after-rename' }), null, 2));
+    const got3 = await waitFor(() => cfg.DEFAULT_AI_MODEL === 'edit-3-after-rename');
+    assert.ok(got3, `edit-3 (in-place after rename) did not hot-reload; current=${cfg.DEFAULT_AI_MODEL}`);
+});
