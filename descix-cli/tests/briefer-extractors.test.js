@@ -69,11 +69,13 @@ test('identifiers.extract HARD-FAILS with BRIEFER-SRC-NOT-FOUND if the source mo
 
 test('identifiers.extract HARD-FAILS with PARSE_FAIL if the host construct moves outside the expected line range', async () => {
   // Build a temp fake repo where update-mesh-routing.js has the host pattern
-  // at line 9999 (way outside the expected [100, 140] slack range).
+  // at line 500+ (way outside the expected [100, 260] slack range — range was
+  // expanded from [100, 140] in 2026-05-26 to accommodate WS-DESCIX-SINGLETON-PROVISIONER
+  // additions to the SINGLETON_APPS / buildSingletonMatcher tables).
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'briefer-m2-'));
   const meshPath = path.join(tmp, 'DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy');
   await fs.mkdir(meshPath, { recursive: true });
-  const padded = Array(200).fill('// pad').join('\n') +
+  const padded = Array(500).fill('// pad').join('\n') +
     "\nconst host = env === 'prod' ? `${app}.descix.net` : `${app}.${env}.descix.net`;\n" +
     "const pathPrefix = `/${env}/${app}/site`;\n";
   await fs.writeFile(path.join(meshPath, 'update-mesh-routing.js'), padded);
