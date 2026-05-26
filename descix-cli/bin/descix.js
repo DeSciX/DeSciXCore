@@ -17,6 +17,7 @@ import * as authCommands from '../lib/commands/auth.js';
 import * as configCommands from '../lib/commands/config.js';
 import { runAppWizard } from '../lib/commands/app-wizard.js';
 import * as buyCommands from '../lib/commands/buy.js';
+import * as airdropCommands from '../lib/commands/airdrop.js';
 import { runInit } from '../lib/commands/init.js';
 import * as folderCommands from '../lib/commands/folder.js';
 import * as updateCommands from '../lib/commands/update.js';
@@ -25,6 +26,8 @@ import { runDoctor } from '../lib/commands/doctor.js';
 import { runHealth } from '../lib/commands/health.js';
 import * as kbCommands from '../lib/commands/kb.js';
 import * as corpusCommands from '../lib/commands/corpus.js';
+import * as modelConfigCommands from '../lib/commands/model-config.js';
+import * as brieferCommand from '../lib/commands/briefer/index.js';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
@@ -228,14 +231,47 @@ program
 
 program
   .command('health')
-  .description('Check platform service health (environment-aware: port checks in DEV, HTTPS in prod)')
-  .option('-m, --microservice <name>', 'Check a specific service by appId')
+  .description('Check platform service health (env-aware: local-port in DEV, gcloud+HTTPS in DEMO/PROD)')
+  .option('--env <name>', 'Target environment: dev|demo|prod (default: dev). Also accepted at top level: descix --env=demo health ...')
+  .option('-m, --microservice <name>', 'Check a specific service/app by appId')
   .option('-j, --json', 'Output raw JSON')
   .action(async (options) => {
     try {
-      await runHealth(options);
+      // Resolve --env in priority order: subcommand explicit > program parent > 'dev'.
+      // Commander would otherwise silently default to 'dev' even when the parent
+      // --env=demo is supplied (because the subcommand owns its own flag space).
+      const parentEnv = program.opts().env || null;
+      const env = options.env || parentEnv || 'dev';
+      await runHealth({ ...options, env });
     } catch (error) {
       console.error(chalk.red(`\nHealth check error: ${error.message}\n`));
+      process.exit(1);
+    }
+  });
+
+// ============ Briefer Command (Code-Grounded Mental Model Regen) ============
+// WS-DESCIX-BRIEFER-CLI M1: CLI scaffolding + extractor contract.
+// See DeSciX/DeSciX_Core/descix-cli/lib/commands/briefer/ for implementation.
+// Scope doc: docs/design/ws-descix-briefer-cli.md
+// Briefer target: DeSciX/V2_docs/architecture/platform-must-know-briefer.md
+
+program
+  .command('briefer')
+  .description('Regenerate platform-must-know-briefer.md from live code + gcloud + Firestore (HARD-FAIL on drift)')
+  .option('--env <name>', 'Target environment: dev|demo|prod (also accepted at the top level: descix --env=demo briefer ...)')
+  .option('--out <path>', 'Override output path (default: workspace-root/DeSciX/V2_docs/architecture/platform-must-know-briefer.md)')
+  .option('--check', 'Drift-detection mode: regen to memory, diff against canonical, non-zero exit on drift')
+  .option('-v, --verbose', 'Print per-source paths, citations, and timings')
+  .action(async (options) => {
+    try {
+      // Resolve --env in priority order: subcommand explicit > program parent > 'dev'.
+      // Commander would otherwise silently default to 'dev' even when the parent
+      // --env=demo is supplied (because the subcommand owns its own flag space).
+      const parentEnv = program.opts().env || null;
+      const env = options.env || parentEnv || 'dev';
+      await brieferCommand.runBriefer({ ...options, env });
+    } catch (error) {
+      console.error(chalk.red(`\n❌ Briefer command failed: ${error.message}\n`));
       process.exit(1);
     }
   });
@@ -294,6 +330,32 @@ buyCommand
   .description('List supported blockchains for payments')
   .action(() => {
     buyCommands.listChains();
+  });
+
+// ============ Airdrop Commands (WS-ADMIN-B1 manual-trigger) ============
+// Per CEO-D-MANUAL-TRIGGER-NO-CRON (2026-04-20), airdrop batch execution is operator-triggered
+// via this CLI command group rather than Cloud Scheduler cron. Server-side access is gated on
+// platform-admin membership (`isPlatformAdmin(user)`); the server emits an on_chain_log row
+// with `caller.operator_email` for audit.
+
+const airdropCommand = program
+  .command('airdrop')
+  .description('Admin airdrop migration operations (WS-ADMIN-B1)');
+
+airdropCommand
+  .command('execute-queue')
+  .description('Manually trigger airdrop_execute_queue on the target env (admin-only)')
+  .option('--community <slug>', 'Community slug for per-community batch scoping (REQUIRED for --apply)')
+  .option('--dry-run', 'Read-only preview: encode calldata, estimate gas, validate net-zero invariant. No PK, no tx, no state mutation.')
+  .option('--apply', 'Live execution: requires --signer-pk-file or interactive prompt-password. Mutually exclusive with --dry-run.')
+  .option('--signer-pk-file <path>', 'Path to file containing admin signer PK (0x + 64 hex). Required for --apply unless prompted interactively.')
+  .option('--batch-size <n>', 'Cap on users processed this run (server caps at AIRDROP_MAX_RUN_USERS)')
+  .action(async (options) => {
+    try {
+      await airdropCommands.executeQueue(options);
+    } catch (error) {
+      process.exit(1);
+    }
   });
 
 // ============ Sync Commands ============
@@ -1030,6 +1092,13 @@ appCommand
       const alreadyMapped = workspaceConfig?.getAppByAppId(appId);
       let appPath = alreadyMapped?.absolutePath;
 
+      if (alreadyMapped && options.path) {
+        throw new Error(
+          `App '${appId}' is already mapped to '${alreadyMapped.localPath}'. ` +
+          `Use 'descix app set-localpath -a ${appId} -p <new-path>' to update.`
+        );
+      }
+
       if (!alreadyMapped) {
         const localPath = options.path || '.';
         const wsRoot = workspaceConfig?.workspaceRoot || process.cwd();
@@ -1040,14 +1109,12 @@ appCommand
         console.log(chalk.gray(`  workspace.json updated: ${appId} → ${localPath}`));
       }
 
-      // 2. Create rigid app folder structure (site, kb, microservice, assets)
+      // 2. Create app folder structure (site, microservice, assets)
       if (appPath) {
         const siteDir = path.join(appPath, 'site');
-        const kbDir = path.join(appPath, 'kb', kbId);
         const msDir = path.join(appPath, 'microservice');
         const assetsDir = path.join(appPath, 'assets');
         await fs.mkdir(siteDir, { recursive: true });
-        await fs.mkdir(kbDir, { recursive: true });
         await fs.mkdir(msDir, { recursive: true });
         await fs.mkdir(assetsDir, { recursive: true });
 
@@ -1064,7 +1131,7 @@ appCommand
         } catch {
           await fs.writeFile(descPath, `# ${appId}\n\nApplication description goes here.\n`);
         }
-        console.log(chalk.gray(`  Created: site/, kb/${kbId}/, microservice/, assets/`));
+        console.log(chalk.gray(`  Created: site/, microservice/, assets/`));
       }
 
       // 3. Create KnowledgeBase Firestore doc (Git Mode — no Drive required)
@@ -1075,8 +1142,9 @@ appCommand
       console.log(chalk.gray(`  Community: ${communityId}`));
       console.log(chalk.gray(`  KB: ${kbId} — ${kbResult.created ? 'created' : 'already exists'}\n`));
       console.log(chalk.cyan('Next steps:'));
-      console.log(chalk.gray(`  Add markdown files to kb/${kbId}/ then run:`));
-      console.log(chalk.white(`  descix update kb -a ${appId}\n`));
+      console.log(chalk.gray(`  Create a corpus manifest at apps/${appId}/.descix/manifests/${kbId}.json`));
+      console.log(chalk.gray(`  then run:`));
+      console.log(chalk.white(`  descix kb corpus sync -a ${appId}\n`));
     } catch (error) {
       console.error(chalk.red(error.message));
       process.exit(1);
@@ -1969,6 +2037,121 @@ appCommand
     }
   });
 
+appCommand
+  .command('set-localpath')
+  .description('Update the local directory path for a mapped app')
+  .requiredOption('-a, --app <app_id>', 'App ID')
+  .requiredOption('-p, --path <dir>', 'New local directory path')
+  .action(async (options) => {
+    try {
+      const appId = options.app;
+      const newPath = options.path;
+
+      const workspaceConfig = await WorkspaceConfig.load();
+      const appConfig = workspaceConfig.getAppByAppId(appId);
+      if (!appConfig) {
+        throw new Error(`App '${appId}' is not mapped. Run 'descix app init -a ${appId}' first.`);
+      }
+
+      // Hard-fail if path doesn't exist or is not a directory
+      let stat;
+      try {
+        stat = await fs.stat(newPath);
+      } catch {
+        throw new Error(`Path does not exist: ${newPath}`);
+      }
+      if (!stat.isDirectory()) {
+        throw new Error(`Path is not a directory: ${newPath}`);
+      }
+
+      // Update the localPath in workspace.json
+      const wsRoot = workspaceConfig.workspaceRoot || process.cwd();
+      const oldPath = appConfig.localPath;
+      appConfig.localPath = newPath;
+
+      // Update env.products entry
+      const products = workspaceConfig.env?.products || [];
+      for (const product of products) {
+        if (product.appId === appId || product.app_id === appId) {
+          product.localPath = newPath;
+          break;
+        }
+      }
+      await workspaceConfig.save(wsRoot);
+
+      console.log(chalk.green(`\n✓ ${appId} local path updated`));
+      console.log(chalk.gray(`  ${oldPath} → ${newPath}\n`));
+    } catch (error) {
+      console.error(chalk.red(error.message));
+      process.exit(1);
+    }
+  });
+
+appCommand
+  .command('unmap')
+  .description('Remove an app from the local workspace mapping (does not delete Firestore/Pinecone data)')
+  .requiredOption('-a, --app <app_id>', 'App ID')
+  .action(async (options) => {
+    try {
+      const appId = options.app;
+
+      const workspaceConfig = await WorkspaceConfig.load();
+      const appConfig = workspaceConfig.getAppByAppId(appId);
+      if (!appConfig) {
+        throw new Error(`App '${appId}' is not mapped.`);
+      }
+
+      // Remove from env.products
+      const products = workspaceConfig.env?.products || [];
+      const idx = products.findIndex(p => p.appId === appId || p.app_id === appId);
+      if (idx === -1) {
+        throw new Error(`App '${appId}' is not found in env.products.`);
+      }
+      products.splice(idx, 1);
+
+      const wsRoot = workspaceConfig.workspaceRoot || process.cwd();
+      await workspaceConfig.save(wsRoot);
+
+      console.log(chalk.green(`\n✓ ${appId} removed from workspace mapping`));
+      console.log(chalk.gray(`  Pinecone vectors, Firestore docs, and Drive data are not affected.\n`));
+    } catch (error) {
+      console.error(chalk.red(error.message));
+      process.exit(1);
+    }
+  });
+
+
+// ============ App: set-default-model (WS-CONFIG-BOOTSTRAP-FIX item #10) ============
+//
+// Updates Community/{c}/Apps/{a}.default_app_model. Per CEO inheritance chain:
+//   options.model > kb.kb_model_override > app.default_app_model > levelConfig.model > DEFAULT_AI_MODEL
+//
+// --clear deletes the field via FieldValue.delete() (NOT null) so the resolver falls through
+// cleanly to per-level platform defaults.
+
+appCommand
+  .command('set-default-model')
+  .description('Set or clear App.default_app_model (model used when no KB override is set)')
+  .requiredOption('-a, --app <app_id>', 'App ID (e.g. unk-cos)')
+  .option('-m, --model <model_name>', 'Gemini model name (e.g. gemini-3.1-flash-lite). Mutually exclusive with --clear.')
+  .option('--clear', 'Delete App.default_app_model via FieldValue.delete() (resets to platform-default inheritance)')
+  .addHelpText('after', `
+NOTE: Pinning a "Pro" model (e.g., gemini-2.5-pro, gemini-3.1-pro-preview) as
+an app or KB override will fail at L1 — these models require thinking mode and
+reject L1's thinkingBudget=0. If you intend an L1-compatible override, use a
+"Flash" model (gemini-2.5-flash, gemini-3.1-flash-lite, gemini-3-flash-preview).
+`)
+  .action(async (options) => {
+    try {
+      // Forward the parent --env flag so the audit log records the target environment.
+      const parentEnv = program.opts().env || null;
+      await modelConfigCommands.runAppSetDefaultModel({ ...options, env: parentEnv });
+    } catch (error) {
+      console.error(chalk.red(`\n\u274c ${error.message}\n`));
+      process.exit(1);
+    }
+  });
+
 // ============ Knowledge Base Commands ============
 
 const kbCommand = program
@@ -2059,33 +2242,53 @@ kbCommand
     }
   });
 
-// Phase 0 CLI-Centric KB Processing Commands
+
+// ============ KB: set-/clear-override-model (WS-CONFIG-BOOTSTRAP-FIX item #10) ============
+//
+// Updates Community/{c}/Apps/{a}/KnowledgeBases/{k}.kb_model_override.
+// Per CEO practice, KB overrides should be MINIMIZED — only use when a specific KB needs
+// a model different from App.default_app_model (e.g., a tuned model for one KB).
+//
+// clear-override-model deletes the field via FieldValue.delete() (NOT null) per tripwire #2.
+
 kbCommand
-  .command('pull')
-  .description('Pull KB content from Drive and convert to local markdown')
-  .option('-c, --community <id>', 'Community ID')
-  .option('-a, --app <id>', 'App ID')
-  .option('-k, --kb <id>', 'Knowledge Base ID (default: General)')
-  .option('--folder <id_or_url>', 'Override Drive folder (raw ID or full Drive URL) — one-time import without modifying workspace.json')
-  .option('-v, --verbose', 'Show verbose output')
-  .option('--merge-mode <mode>', 'Merge mode: merge|overwrite|force-overwrite (default: merge)')
-  .option('--dry-run', 'Show what would happen without making changes')
+  .command('set-override-model')
+  .description('Set KB.kb_model_override (per-KB model selection)')
+  .requiredOption('-a, --app <app_id>', 'App ID')
+  .requiredOption('-k, --kb <kb_name>', 'KB name')
+  .requiredOption('-m, --model <model_name>', 'Gemini model name (e.g. gemini-2.5-pro)')
+  .addHelpText('after', `
+NOTE: Pinning a "Pro" model (e.g., gemini-2.5-pro, gemini-3.1-pro-preview) as
+an app or KB override will fail at L1 — these models require thinking mode and
+reject L1's thinkingBudget=0. If you intend an L1-compatible override, use a
+"Flash" model (gemini-2.5-flash, gemini-3.1-flash-lite, gemini-3-flash-preview).
+`)
   .action(async (options) => {
     try {
-      let apiClient = null;
-      try {
-        apiClient = new DeSciXApiClient();
-        await apiClient.loadCredentials();
-      } catch {
-        // Continue without API client
-      }
-      
-      await kbCommands.runKbPull(apiClient, options);
+      const parentEnv = program.opts().env || null;
+      await modelConfigCommands.runKbSetOverrideModel({ ...options, env: parentEnv });
     } catch (error) {
-      console.error(chalk.red(`\n❌ ${error.message}\n`));
+      console.error(chalk.red(`\n\u274c ${error.message}\n`));
       process.exit(1);
     }
   });
+
+kbCommand
+  .command('clear-override-model')
+  .description('Delete KB.kb_model_override via FieldValue.delete() (resets to App.default_app_model inheritance)')
+  .requiredOption('-a, --app <app_id>', 'App ID')
+  .requiredOption('-k, --kb <kb_name>', 'KB name')
+  .action(async (options) => {
+    try {
+      const parentEnv = program.opts().env || null;
+      await modelConfigCommands.runKbClearOverrideModel({ ...options, env: parentEnv });
+    } catch (error) {
+      console.error(chalk.red(`\n\u274c ${error.message}\n`));
+      process.exit(1);
+    }
+  });
+
+// Phase 0 CLI-Centric KB Processing Commands
 
 kbCommand
   .command('chunk')
@@ -2152,37 +2355,6 @@ kbCommand
   });
 
 kbCommand
-  .command('push')
-  .description('Push staging files to Drive')
-  .option('-c, --community <id>', 'Community ID')
-  .option('-a, --app <id>', 'App ID')
-  .option('-k, --kb <id>', 'Knowledge Base ID (default: General)')
-  .option('-v, --verbose', 'Show verbose output')
-  .option('-i, --interactive', 'Enable interactive prompts for conflicts')
-  .option('--on-conflict <action>', 'Conflict handling: overwrite|skip (default: overwrite)')
-  .option('--no-move', 'Do not move files to .processed after upload')
-  .option('--dry-run', 'Show what would happen without making changes')
-  .action(async (options) => {
-    try {
-      let apiClient = null;
-      try {
-        apiClient = new DeSciXApiClient();
-        await apiClient.loadCredentials();
-      } catch {
-        // Continue without API client
-      }
-      
-      await kbCommands.runKbPush(apiClient, {
-        ...options,
-        moveToProcessed: options.move !== false
-      });
-    } catch (error) {
-      console.error(chalk.red(`\n❌ ${error.message}\n`));
-      process.exit(1);
-    }
-  });
-
-kbCommand
   .command('status')
   .description('Show KB sync status (local vs Pinecone)')
   .option('-c, --community <id>', 'Community ID')
@@ -2228,12 +2400,21 @@ corpusCommand
   .requiredOption('-a, --app <id>', 'App ID')
   .option('-k, --kb <name>', 'KB name (syncs specific manifest; default: all)')
   .option('-v, --verbose', 'Show verbose output')
+  .option('--ref <ref>', 'Override the git ref for ALL manifest sources (e.g., --ref ws-admin-b1). Precedence: --ref > manifest source.ref > "main".')
+  .option('--rebuild', 'Reconcile Pinecone against the current manifest walk: enumerate remote file_ids, purge any not in the current corpus, then re-sync from scratch. Use to recover from accumulated stale-chunk drift. Prompts before deleting unless --yes is supplied.')
+  .option('--dry-run', 'Enumerate would-be-purged file_ids and would-be-upserted chunks without ANY Pinecone writes. Exit 0 if no drift, 1 if drift. Read-only.')
+  .option('--show-walk', 'Print the resolved ref + the first 50 walked files BEFORE any Pinecone operations. Useful for verifying --ref / manifest source resolution.')
+  .option('--yes', 'Skip the interactive purge confirmation in --rebuild mode. Use in scripting/CI.')
   .action(async (options) => {
     try {
       const apiClient = new DeSciXApiClient();
       await requireAuth(apiClient);
 
-      await corpusCommands.runCorpusSync(apiClient, options);
+      const result = await corpusCommands.runCorpusSync(apiClient, options);
+      // Dry-run exit code per Deliverable A: 0 if no drift, 1 if drift would be applied.
+      if (result && result.dryRun) {
+        process.exit(result.drift ? 1 : 0);
+      }
     } catch (error) {
       console.error(chalk.red(`\n❌ ${error.message}\n`));
       process.exit(1);
@@ -2242,9 +2423,10 @@ corpusCommand
 
 corpusCommand
   .command('status')
-  .description('Show corpus sync state (files, chunks, last sync)')
+  .description('Show corpus sync state (files, chunks, last sync, resolved ref)')
   .requiredOption('-a, --app <id>', 'App ID')
   .option('-k, --kb <name>', 'KB name (default: all)')
+  .option('--ref <ref>', 'Preview status as if --ref were applied to a sync (does not change manifests)')
   .option('-v, --verbose', 'Show verbose output including change detection')
   .action(async (options) => {
     try {
@@ -2283,6 +2465,70 @@ kbCommand
     }
   });
 
+// ============ Drive Commands ============
+
+const driveCommand = program
+  .command('drive')
+  .description('Drive content authoring: pull from Drive, push staging to Drive');
+
+driveCommand
+  .command('pull')
+  .description('Pull content from Drive and convert to local markdown')
+  .option('-c, --community <id>', 'Community ID')
+  .option('-a, --app <id>', 'App ID')
+  .option('-k, --kb <id>', 'Knowledge Base ID (default: General)')
+  .option('--folder <id_or_url>', 'Override Drive folder (raw ID or full Drive URL) — one-time import without modifying workspace.json')
+  .option('-v, --verbose', 'Show verbose output')
+  .option('--merge-mode <mode>', 'Merge mode: merge|overwrite|force-overwrite (default: merge)')
+  .option('--dry-run', 'Show what would happen without making changes')
+  .action(async (options) => {
+    try {
+      let apiClient = null;
+      try {
+        apiClient = new DeSciXApiClient();
+        await apiClient.loadCredentials();
+      } catch {
+        // Continue without API client
+      }
+
+      await kbCommands.runKbPull(apiClient, options);
+    } catch (error) {
+      console.error(chalk.red(`\n❌ ${error.message}\n`));
+      process.exit(1);
+    }
+  });
+
+driveCommand
+  .command('push')
+  .description('Push staging files to Drive')
+  .option('-c, --community <id>', 'Community ID')
+  .option('-a, --app <id>', 'App ID')
+  .option('-k, --kb <id>', 'Knowledge Base ID (default: General)')
+  .option('-v, --verbose', 'Show verbose output')
+  .option('-i, --interactive', 'Enable interactive prompts for conflicts')
+  .option('--on-conflict <action>', 'Conflict handling: overwrite|skip (default: overwrite)')
+  .option('--no-move', 'Do not move files to .processed after upload')
+  .option('--dry-run', 'Show what would happen without making changes')
+  .action(async (options) => {
+    try {
+      let apiClient = null;
+      try {
+        apiClient = new DeSciXApiClient();
+        await apiClient.loadCredentials();
+      } catch {
+        // Continue without API client
+      }
+
+      await kbCommands.runKbPush(apiClient, {
+        ...options,
+        moveToProcessed: options.move !== false
+      });
+    } catch (error) {
+      console.error(chalk.red(`\n❌ ${error.message}\n`));
+      process.exit(1);
+    }
+  });
+
 // ============ Site Commands ============
 
 const siteCommand = program
@@ -2307,16 +2553,16 @@ siteCommand
         process.exit(1);
       }
       
-      const appConfig = workspaceConfig.getApp(ctx.communityId, ctx.appId);
+      const appConfig = workspaceConfig.getAppByAppId(ctx.appId);
       if (!appConfig) {
         console.error(chalk.red('\n❌ App not found in workspace.json.'));
         console.log(chalk.gray('  Run "npx descix init" to set up your workspace.\n'));
         process.exit(1);
       }
-      
-      const appPath = appConfig.absolutePath || 
+
+      const appPath = appConfig.absolutePath ||
         path.join(workspaceConfig.getWorkspaceRoot(), appConfig.localPath);
-      
+
       console.log(chalk.cyan('\n📁 Adding site scaffold...\n'));
       
       const { copyScaffold } = await import('../lib/core/Hydrator.js');
@@ -2601,68 +2847,61 @@ siteCommand
     try {
       const workspaceConfig = await WorkspaceConfig.load();
       const ctx = workspaceConfig.resolveContextWithOptions(options);
-      
-      const communityId = ctx.communityId;
+
       const appId = ctx.appId;
-      
-      if (!communityId || !appId) {
-        console.error(chalk.red('\n❌ Community and App ID required.'));
-        console.log(chalk.gray('  Either provide -c and -a flags, or cd into an app directory\n'));
+
+      if (!appId) {
+        console.error(chalk.red('\n❌ App ID required.'));
+        console.log(chalk.gray('  Either provide -a flag, or cd into an app directory\n'));
         process.exit(1);
       }
-      
-      const appConfig = workspaceConfig.getApp(communityId, appId);
-      if (!appConfig) {
-        console.error(chalk.red('\n❌ App not found in workspace.json.'));
-        console.log(chalk.gray('  Run "npx descix init" to set up your workspace.\n'));
-        process.exit(1);
-      }
-      
-      // Handle disable case
+
+      // Handle disable case — setSitePort(appId, null) removes site.port / cleans site.{}
       if (port === 'n' || port === 'N') {
-        if (appConfig.site) {
-          delete appConfig.site.port;
-          if (Object.keys(appConfig.site).length === 0) {
-            delete appConfig.site;
-          }
-        }
-        await workspaceConfig.save();
-        console.log(chalk.green(`\n✅ Local site server disabled for ${communityId}/${appId}\n`));
+        await workspaceConfig.setSitePort(appId, null);
+        console.log(chalk.green(`\n✅ Local site server disabled for ${appId}\n`));
         return;
       }
-      
-      // Handle port registration
+
+      // Handle status query (no port argument)
       if (!port) {
-        // Show current status
-        const currentPort = appConfig.site?.port;
+        const appConfig = workspaceConfig.getAppByAppId(appId);
+        if (!appConfig) {
+          console.error(chalk.red('\n❌ App not found in workspace.json.'));
+          console.log(chalk.gray('  Run "npx descix init" to set up your workspace.\n'));
+          process.exit(1);
+        }
+        // Read site.port from the live env entry (not from the constructed copy)
+        let liveEntry = null;
+        if (workspaceConfig.env?.platform?.appId === appId) {
+          liveEntry = workspaceConfig.env.platform;
+        } else if (Array.isArray(workspaceConfig.env?.products)) {
+          liveEntry = workspaceConfig.env.products.find(p => p.appId === appId) || null;
+        }
+        const currentPort = liveEntry?.site?.port;
         if (currentPort) {
           console.log(chalk.cyan(`\n📍 Local site server: port ${currentPort}`));
-          console.log(chalk.gray(`  App: ${communityId}/${appId}\n`));
+          console.log(chalk.gray(`  App: ${appId}\n`));
         } else {
           console.log(chalk.yellow(`\n⚠️  No local site server configured.`));
           console.log(chalk.gray(`  Usage: descix site servelocal <port>\n`));
         }
         return;
       }
-      
+
       const portNum = parseInt(port);
       if (isNaN(portNum) || portNum < 1 || portNum > 65535) {
         console.error(chalk.red('\n❌ Invalid port number.\n'));
         process.exit(1);
       }
-      
-      if (!appConfig.site) appConfig.site = {};
-      appConfig.site.port = portNum;
-      if (!appConfig.site.devCommand) {
-        appConfig.site.devCommand = 'npm run dev';
-      }
-      
-      await workspaceConfig.save();
+
+      // setSitePort mutates the live env entry and saves — no stale-copy problem
+      await workspaceConfig.setSitePort(appId, portNum);
       console.log(chalk.green(`\n✅ Local site server registered!`));
       console.log(chalk.cyan(`  Port: ${portNum}`));
-      console.log(chalk.gray(`  App: ${communityId}/${appId}`));
-      console.log(chalk.gray(`\n  The PWA will proxy /apps/${communityId}/${appId}/* to localhost:${portNum}\n`));
-      
+      console.log(chalk.gray(`  App: ${appId}`));
+      console.log(chalk.gray(`\n  The gateway will proxy /p/${appId}/* to localhost:${portNum}\n`));
+
     } catch (error) {
       console.error(chalk.red(`\n❌ ${error.message}\n`));
       process.exit(1);
@@ -2868,42 +3107,80 @@ microserviceCommand
         process.exit(1);
       }
       
-      const appConfig = workspaceConfig.getApp(ctx.communityId, ctx.appId);
+      const appConfig = workspaceConfig.getAppByAppId(ctx.appId);
       if (!appConfig) {
         console.error(chalk.red('\n❌ App not found in workspace.json.'));
         console.log(chalk.gray('  Run "npx descix init" to set up your workspace.\n'));
         process.exit(1);
       }
-      
-      const appPath = appConfig.absolutePath || 
+
+      const appPath = appConfig.absolutePath ||
         path.join(workspaceConfig.getWorkspaceRoot(), appConfig.localPath);
-      
+
+      // Resolve microservice port from workspace.json before scaffold copy.
+      // Hard-fail early if missing — a scaffolded microservice without a known port
+      // cannot be routed by the gateway and cannot start on a deterministic port.
+      const env = workspaceConfig.env || {};
+      let microservicePort = null;
+      if (env.platform?.appId === ctx.appId) {
+        microservicePort = env.platform?.microservice?.port || null;
+      } else if (Array.isArray(env.products)) {
+        const productEntry = env.products.find(p => p.appId === ctx.appId);
+        microservicePort = productEntry?.microservice?.port || null;
+      }
+
+      if (!microservicePort) {
+        console.error(chalk.red(`\n❌ App '${ctx.appId}' has no microservice.port in workspace.json.`));
+        console.error(chalk.red(`   A port is required so the gateway knows where to route traffic.`));
+        console.log(chalk.gray(`\n   Add a port to workspace.json under env.products entry for '${ctx.appId}':`));
+        console.log(chalk.gray(`     "microservice": { "port": <your-port> }`));
+        console.log(chalk.gray(`\n   A 'descix app set-port' command for this is tracked as WS-CLI-MESH-ROUTING-GAP.\n`));
+        process.exit(1);
+      }
+
       console.log(chalk.cyan('\n📁 Adding microservice scaffold...\n'));
-      
+
       const { copyScaffold } = await import('../lib/core/Hydrator.js');
-      const stats = await copyScaffold('microservice', appPath, { 
-        verbose: true, 
-        force: options.force 
+      const stats = await copyScaffold('microservice', appPath, {
+        verbose: true,
+        force: options.force
       });
-      
+
       // Configuration Injection
       const microserviceDir = path.join(appPath, 'microservice');
       const defaultsPath = path.join(microserviceDir, 'defaults-config.json');
+      const manifestPath = path.join(microserviceDir, 'manifest.json');
       const overridesPath = path.join(microserviceDir, 'dev-overrides.json');
-      
-      // 1. Inject Context into defaults-config.json
+
+      // 1. Inject Context + Port into defaults-config.json
       try {
         const defaultsContent = await fs.readFile(defaultsPath, 'utf-8');
         const defaults = JSON.parse(defaultsContent);
         defaults.community_id = ctx.communityId;
         defaults.app_id = ctx.appId;
+        defaults.LOCAL_PORT = microservicePort;
         await fs.writeFile(defaultsPath, JSON.stringify(defaults, null, 2));
-        console.log(chalk.gray(`  ✓ Injected context into defaults-config.json`));
+        console.log(chalk.gray(`  ✓ Injected context + port into defaults-config.json`));
       } catch (err) {
         console.warn(chalk.yellow(`  ⚠ Could not update defaults-config.json: ${err.message}`));
       }
-      
-      // 2. Inject Credentials into dev-overrides.json
+
+      // 2. Inject Context + Port into manifest.json
+      try {
+        const manifestContent = await fs.readFile(manifestPath, 'utf-8');
+        const manifest = JSON.parse(manifestContent);
+        manifest.service.app_id = ctx.appId;
+        manifest.service.community_id = ctx.communityId;
+        manifest.service.name = ctx.appId;
+        manifest.service.domain = `${ctx.appId}.descix.net`;
+        manifest.service.debugPort = microservicePort;
+        await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2));
+        console.log(chalk.gray(`  ✓ Injected context + port into manifest.json`));
+      } catch (err) {
+        console.warn(chalk.yellow(`  ⚠ Could not update manifest.json: ${err.message}`));
+      }
+
+      // 3. Inject Credentials into dev-overrides.json
       try {
         const apiClient = new DeSciXApiClient();
         const credentials = await apiClient.loadCredentials();
@@ -3131,8 +3408,8 @@ microserviceCommand
             await fs.access(manifestPath);
           } catch {
             // If not in current directory, try to find the microservice path for detected context
-            if (ctx.communityId && ctx.appId && workspaceConfig.workspaceRoot) {
-              const appConfig = workspaceConfig.getApp(ctx.communityId, ctx.appId);
+            if (ctx.appId && workspaceConfig.workspaceRoot) {
+              const appConfig = workspaceConfig.getAppByAppId(ctx.appId);
               if (appConfig) {
                 const microservicePath = path.join(
                   workspaceConfig.workspaceRoot, 
@@ -3448,6 +3725,27 @@ microserviceCommand
       
     } catch (error) {
       console.error(chalk.red(`\n❌ Error: ${error.message}\n`));
+      process.exit(1);
+    }
+  });
+
+// microservice restart - Kill + relaunch a local microservice (DEV only)
+microserviceCommand
+  .command('restart <name>')
+  .description('Restart a local microservice (DEV only; DEMO/PROD use deploy scripts)')
+  .option('--env <env>', 'Target environment: dev | demo | prod', 'dev')
+  .action(async (name, options) => {
+    try {
+      const { restartMicroservice } = await import('../lib/commands/microservice-restart.js');
+      const { runHealth } = await import('../lib/commands/health.js');
+      await restartMicroservice({
+        name,
+        env: options.env,
+        deps: { runHealth }
+      });
+      console.log();
+    } catch (error) {
+      console.error(chalk.red(`\n${error.message}\n`));
       process.exit(1);
     }
   });

@@ -36,26 +36,13 @@ async function loadWorkspaceContext(options = {}) {
   const workspaceConfig = await WorkspaceConfig.load();
   const ctx = workspaceConfig.requireContext(options);
 
-  // Prefer getAppByAppId (env.platform/products, Unified Registry)
-  let appConfig = workspaceConfig.getAppByAppId(ctx.appId);
-  if (!appConfig && ctx.communityId) {
-    appConfig = workspaceConfig.getApp(ctx.communityId, ctx.appId);
-    if (appConfig) {
-      appConfig = {
-        localPath: appConfig.localPath,
-        absolutePath: appConfig.absolutePath || (workspaceConfig.workspaceRoot && appConfig.localPath
-          ? path.join(workspaceConfig.workspaceRoot, appConfig.localPath)
-          : null),
-        communityId: ctx.communityId,
-        kbId: appConfig.kbId || 'General'
-      };
-    }
-  }
+  // Unified Registry: getAppByAppId only — v1 community-keyed fallback removed
+  const appConfig = workspaceConfig.getAppByAppId(ctx.appId);
 
   if (!appConfig) {
     throw new Error(
       `App "${ctx.appId}" not found in workspace.json.\n` +
-      'Run "npx descix init" or ensure env.platform/env.products maps app_id to localPath.'
+      'Use `descix app init` to register, or `descix app set-localpath -a <id> -p <path>` to repoint.'
     );
   }
 
@@ -431,25 +418,12 @@ export async function updateSite(options = {}) {
     // Convention: site folder path
     const siteDir = path.join(ctx.appPath, 'site');
     
-    // Handle local port registration
+    // Handle local port registration — setSitePort mutates the live env entry and saves
     if (options.port) {
       spinner.text = `Registering local port: ${options.port}`;
       try {
-        const appConfig = ctx.workspaceConfig.getApp(ctx.communityId, ctx.appId);
-        
-        if (appConfig) {
-          if (!appConfig.site) appConfig.site = {};
-          appConfig.site.port = options.port;
-          // Also set devCommand if not present (default guess)
-          if (!appConfig.site.devCommand) {
-             appConfig.site.devCommand = 'npm run dev';
-          }
-          
-          await ctx.workspaceConfig.save();
-          console.log(chalk.green(`\n✅ Local port ${options.port} registered in workspace.json`));
-        } else {
-          console.log(chalk.yellow(`\n⚠️  App not found in workspace.json. Run 'descix init' first.`));
-        }
+        await ctx.workspaceConfig.setSitePort(ctx.appId, options.port);
+        console.log(chalk.green(`\n✅ Local port ${options.port} registered in workspace.json`));
       } catch (err) {
         console.log(chalk.yellow(`\n⚠️  Could not register port: ${err.message}`));
       }

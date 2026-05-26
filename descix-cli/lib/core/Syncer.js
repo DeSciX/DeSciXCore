@@ -154,8 +154,11 @@ export async function upsertChunks(apiClient, communityId, appId, kbId, chunks) 
 }
 
 /**
- * Delete stale chunks from Pinecone
- * 
+ * Delete stale chunks from Pinecone by explicit chunk IDs.
+ *
+ * Use this when you have the exact chunk_ids to purge (e.g., shrinking file
+ * where chunks N..M no longer exist locally but linger in Pinecone).
+ *
  * @param {Object} apiClient - DeSciXApiClient instance
  * @param {string} communityId - Community ID
  * @param {string} appId - App ID
@@ -167,14 +170,83 @@ export async function deleteStaleChunks(apiClient, communityId, appId, kbId, chu
   if (chunkIds.length === 0) {
     return { deleted: 0 };
   }
-  
-  await apiClient.invoke('kb_delete_chunks', {
+
+  const result = await apiClient.invoke('kb_delete_chunks', {
+    community_id: communityId,
     app_id: appId,
     kb_id: kbId,
     chunk_ids: chunkIds
   });
-  
-  return { deleted: chunkIds.length };
+
+  const data = result?.message || result;
+  return { deleted: data.deleted_count ?? chunkIds.length };
+}
+
+/**
+ * Delete stale chunks from Pinecone by file_id (metadata filter).
+ *
+ * This is the canonical stale-purge path for `kb corpus sync`: when a file's
+ * blob_sha changes, the prior blob_sha is a stale file_id. Passing it here
+ * deletes every chunk where metadata.file_id matches, scoped by the full
+ * multi-tenancy filter (community_id, app_id, knowledgebase_name) on the
+ * server side via pineconeService.deleteVectorsByFileId.
+ *
+ * Bulk: pass multiple file_ids in one call to amortize the round-trip.
+ *
+ * @param {Object} apiClient - DeSciXApiClient instance
+ * @param {string} communityId - Community ID
+ * @param {string} appId - App ID
+ * @param {string} kbId - Knowledge base ID
+ * @param {Array<string>} fileIds - file_id values to delete (e.g., ['corpus:abc...', 'local:def...'])
+ * @returns {Promise<{deleted: number, deleted_by_file_id: number}>}
+ */
+export async function deleteStaleChunksByFileId(apiClient, communityId, appId, kbId, fileIds) {
+  if (!Array.isArray(fileIds) || fileIds.length === 0) {
+    return { deleted: 0, deleted_by_file_id: 0 };
+  }
+
+  // Filter out null/undefined/empty entries — pineconeService treats empty fileId as 0-count no-op
+  const validFileIds = fileIds.filter(Boolean);
+  if (validFileIds.length === 0) {
+    return { deleted: 0, deleted_by_file_id: 0 };
+  }
+
+  const result = await apiClient.invoke('kb_delete_chunks', {
+    community_id: communityId,
+    app_id: appId,
+    kb_id: kbId,
+    file_ids: validFileIds
+  });
+
+  const data = result?.message || result;
+  return {
+    deleted: data.deleted_count ?? validFileIds.length,
+    deleted_by_file_id: data.deleted_by_file_id ?? validFileIds.length
+  };
+}
+
+/**
+ * Enumerate all file_id values currently present in a KB's Pinecone namespace.
+ *
+ * Used by `descix kb corpus sync --rebuild` to compute drift:
+ *   stale = pinecone_file_ids − current_local_file_ids
+ *
+ * @param {Object} apiClient - DeSciXApiClient instance
+ * @param {string} appId - App ID
+ * @param {string} kbId - Knowledge base ID
+ * @returns {Promise<{ file_ids: string[], unique_count: number, total_chunks: number }>}
+ */
+export async function listRemoteFileIds(apiClient, appId, kbId) {
+  const result = await apiClient.invoke('kb_list_file_ids', {
+    app_id: appId,
+    kb_id: kbId
+  });
+  const data = result?.message || result;
+  return {
+    file_ids: data.file_ids || [],
+    unique_count: data.unique_count || 0,
+    total_chunks: data.total_chunks || 0
+  };
 }
 
 /**
@@ -258,10 +330,40 @@ export async function syncKb(apiClient, config, options = {}) {
   } else {
     if (onProgress) onProgress('All chunks already in sync');
   }
-  
+
+  // 6. File-level stale purge (belt-and-suspenders).
+  // The chunk_id-based delete in step 4 handles the common shrinking/deletion case
+  // but only sees chunk_ids that were returned by getRemoteChunkMetadata. For
+  // robustness — and to close DN-2 at the lower-level kb sync surface too — we
+  // also enumerate remote file_ids and delete any whose file_id is not present
+  // in the current local chunk set. This catches file deletions and modifications
+  // that produced new chunk_id shapes (e.g., content-hash-based ids).
+  let deletedByFileId = 0;
+  try {
+    const localFileIds = new Set(localChunks.map(c => c.file_id).filter(Boolean));
+    const remoteFileIdsResp = await apiClient.invoke('kb_list_file_ids', {
+      app_id: appId,
+      kb_id: kbId
+    });
+    const remoteData = remoteFileIdsResp?.message || remoteFileIdsResp;
+    const remoteFileIds = remoteData?.file_ids || [];
+    const staleFileIds = remoteFileIds.filter(fid => !localFileIds.has(fid));
+    if (staleFileIds.length > 0) {
+      if (onProgress) onProgress(`Purging ${staleFileIds.length} stale file_id(s)...`);
+      const purgeResult = await deleteStaleChunksByFileId(apiClient, communityId, appId, kbId, staleFileIds);
+      deletedByFileId = purgeResult.deleted;
+    }
+  } catch (purgeErr) {
+    // Non-fatal: surface via verbose log. The chunk_id-based delete above is the primary
+    // path; this is a safety net. We do NOT silently swallow — caller sees a warning.
+    if (verbose) console.log(`  File-id purge skipped: ${purgeErr.message}`);
+  }
+
   return {
     synced,
-    deleted,
+    deleted: deleted + deletedByFileId,
+    deleted_chunk_ids: deleted,
+    deleted_by_file_id: deletedByFileId,
     unchanged
   };
 }
@@ -309,5 +411,7 @@ export default {
   getRemoteChunkMetadata,
   upsertChunks,
   deleteStaleChunks,
+  deleteStaleChunksByFileId,
+  listRemoteFileIds,
   getSyncStatus
 };

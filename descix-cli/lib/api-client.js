@@ -1,30 +1,30 @@
 /**
  * DeSciX HTTP-Only API Client
- * 
+ *
  * Self-contained HTTP client for CLI/MCP.
  * No service imports - all communication via HTTP.
- * Uses PathContext for workspace/config resolution.
+ * Uses WorkspaceConfig for workspace/config resolution.
  */
 
 import path from 'path';
 import axios from 'axios';
-import { PathContext } from './core/PathContext.js';
+import { WorkspaceConfig } from './workspace-config.js';
 
 export class DeSciXApiClient {
   constructor(options = {}) {
     this.baseUrl = options.baseUrl || null; // Will be loaded async
     this.credentials = null;
     this.workspaceRoot = options.workspaceRoot || null; // Set by initialize()
-    this._pathContext = null; // Cached PathContext
+    this._workspaceConfig = null; // Cached WorkspaceConfig
     this._initialized = false;
   }
 
   /**
    * Initialize the client by finding workspace root and loading config
    * This is the primary initialization method - call before any API operations
-   * 
-   * Uses PathContext for unified path resolution.
-   * 
+   *
+   * Uses WorkspaceConfig for unified path resolution.
+   *
    * @returns {Promise<void>}
    */
   async initialize() {
@@ -32,16 +32,16 @@ export class DeSciXApiClient {
       return;
     }
 
-    // Step 1: Try to load PathContext (will find IDE marker and load workspace.json)
-    this._pathContext = await PathContext.tryLoad();
+    // Step 1: Try to load WorkspaceConfig (finds .descix/workspace.json upward)
+    this._workspaceConfig = await WorkspaceConfig.tryLoad();
 
-    if (this._pathContext) {
-      this.workspaceRoot = this._pathContext.getWorkspaceRoot();
+    if (this._workspaceConfig) {
+      this.workspaceRoot = this._workspaceConfig.getWorkspaceRoot();
     } else {
       this.workspaceRoot = null;
     }
 
-    // Step 2: Set API URL from PathContext config or environment (only if not already set)
+    // Step 2: Set API URL from WorkspaceConfig or environment (only if not already set)
     if (!this.baseUrl) {
       this.baseUrl = await this.detectApiUrl();
     }
@@ -64,9 +64,9 @@ export class DeSciXApiClient {
       return process.env.DESCIX_API_URL;
     }
 
-    // Use PathContext config if loaded (but only if it has an explicit URL, not the production default)
-    if (this._pathContext) {
-      const apiUrl = this._pathContext.getApiUrl();
+    // Use WorkspaceConfig if loaded (only if it has an explicit URL, not the production default)
+    if (this._workspaceConfig) {
+      const apiUrl = this._workspaceConfig.getApiUrl();
       if (apiUrl && apiUrl !== PRODUCTION_URL) {
         return apiUrl;
       }
@@ -361,19 +361,18 @@ export class DeSciXApiClient {
       return this.credentials;
     }
 
-    // Use PathContext's workspace root if available
-    if (!this.workspaceRoot && this._pathContext) {
-      this.workspaceRoot = this._pathContext.getWorkspaceRoot();
+    // Use WorkspaceConfig's workspace root if available
+    if (!this.workspaceRoot && this._workspaceConfig) {
+      this.workspaceRoot = this._workspaceConfig.getWorkspaceRoot();
     }
 
-    // If still no workspace root, try: PathContext (IDE markers) → workspace.json → wallet.json
+    // If still no workspace root, try: WorkspaceConfig → wallet.json walk
     if (!this.workspaceRoot) {
-      const ctx = await PathContext.tryLoad();
-      if (ctx) {
-        this.workspaceRoot = ctx.getWorkspaceRoot();
-        this._pathContext = ctx;
+      const wsConfig = await WorkspaceConfig.tryLoad();
+      if (wsConfig) {
+        this.workspaceRoot = wsConfig.getWorkspaceRoot();
+        this._workspaceConfig = wsConfig;
       } else {
-        const { WorkspaceConfig } = await import('./workspace-config.js');
         this.workspaceRoot = await WorkspaceConfig.findWorkspaceRoot();
       }
       // Final fallback: walk up from cwd looking for .descix/wallet.json
@@ -437,12 +436,12 @@ export class DeSciXApiClient {
   }
 
   /**
-   * Get the PathContext instance (if loaded)
+   * Get the WorkspaceConfig instance (if loaded)
    * Useful for commands that need path resolution
-   * @returns {PathContext|null}
+   * @returns {WorkspaceConfig|null}
    */
-  getPathContext() {
-    return this._pathContext;
+  getWorkspaceConfig() {
+    return this._workspaceConfig;
   }
 }
 

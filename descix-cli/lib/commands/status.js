@@ -7,7 +7,7 @@
  * - Workspace context and mode
  * - Configuration state
  * 
- * Uses PathContext for workspace resolution - no scattered process.cwd() calls
+ * Uses WorkspaceConfig for workspace resolution - no scattered process.cwd() calls
  */
 
 import chalk from 'chalk';
@@ -18,8 +18,6 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { DeSciXApiClient } from '../api-client.js';
 import { GlobalConfig } from '../global-config.js';
-import { PathContext } from '../core/PathContext.js';
-import { detectWorkspaceMode } from '../workspace-utils.js';
 import { isAuthenticated } from '../auth-guard.js';
 
 const execAsync = promisify(exec);
@@ -94,19 +92,18 @@ export async function runStatus(options = {}) {
   console.log(`Environment:    ${globalConfig.environment} (${globalConfig.api_url})`);
   console.log();
 
-  // Try to load workspace context — WorkspaceConfig first (handles v2), fallback to PathContext
-  let ctx = null;
+  // Load workspace context via WorkspaceConfig
   let workspaceRoot = null;
   let workspaceConfig = null;
   try {
     const { WorkspaceConfig } = await import('../workspace-config.js');
-    const wsConfig = await WorkspaceConfig.load();
-    workspaceRoot = wsConfig.getWorkspaceRoot();
-    workspaceConfig = wsConfig;
+    const wsConfig = await WorkspaceConfig.tryLoad();
+    if (wsConfig) {
+      workspaceRoot = wsConfig.getWorkspaceRoot();
+      workspaceConfig = wsConfig;
+    }
   } catch {
-    // Fallback to PathContext
-    ctx = await PathContext.tryLoad();
-    workspaceRoot = ctx?.getWorkspaceRoot();
+    // workspace not found — workspaceConfig stays null
   }
 
   // 2. Authentication
@@ -141,45 +138,26 @@ export async function runStatus(options = {}) {
   console.log(chalk.white('Workspace Context'));
   console.log(chalk.white('-----------------'));
   
-  if (workspaceConfig || ctx) {
+  if (workspaceConfig) {
     console.log(`Config File:    ${path.join(workspaceRoot, '.descix', 'workspace.json')}`);
 
-    if (workspaceConfig) {
-      // V2 path — use WorkspaceConfig which handles env.platform/products format
-      try {
-        const defaultCtx = workspaceConfig.defaultContext;
-        if (defaultCtx) {
-          console.log(`Community:      ${defaultCtx.communityId || 'unknown'}`);
-          console.log(`App:            ${defaultCtx.appId || 'unknown'}`);
-        }
-
-        // List all configured apps
-        const platform = workspaceConfig.env?.platform;
-        const products = workspaceConfig.env?.products || [];
-        const allApps = [platform?.appId, ...products.map(p => p.appId)].filter(Boolean);
-        if (allApps.length > 0) {
-          console.log(`Local Apps:     ${allApps.join(', ')}`);
-        }
-
-        console.log(`API:            ${workspaceConfig.apiUrl || 'unknown'}`);
-        console.log(`Local Root:     ${workspaceRoot}`);
-      } catch (error) {
-        console.log(`Mode:           ${chalk.red('Unknown/Invalid')} (${error.message})`);
+    try {
+      // List all configured apps from env.platform + env.products
+      const platform = workspaceConfig.env?.platform;
+      const products = workspaceConfig.env?.products || [];
+      const allApps = [platform?.appId, ...products.map(p => p.appId)].filter(Boolean);
+      if (allApps.length > 0) {
+        console.log(`Local Apps:     ${allApps.join(', ')}`);
       }
-    } else {
-      // PathContext fallback — still uses detectWorkspaceMode for v2.1 format
-      const wsRawConfig = ctx.getWorkspaceConfig();
-      try {
-        const mode = detectWorkspaceMode(wsRawConfig);
-        console.log(`Mode:           ${chalk.green(mode)}`);
-        console.log(`Local Root:     ${workspaceRoot}`);
-      } catch (error) {
-        console.log(`Mode:           ${chalk.red('Unknown/Invalid')} (${error.message})`);
-      }
+
+      console.log(`API:            ${workspaceConfig.getApiUrl()}`);
+      console.log(`Local Root:     ${workspaceRoot}`);
+    } catch (error) {
+      console.log(`Mode:           ${chalk.red('Unknown/Invalid')} (${error.message})`);
     }
   } else {
     console.log(`Status:         ${chalk.yellow('No workspace found')}`);
-    console.log(`Action:         Run 'descix init -c <community> -a <app> -p .' to create a workspace`);
+    console.log(`Action:         Run 'descix app init -a <app_id>' to initialize a workspace`);
   }
   console.log();
 

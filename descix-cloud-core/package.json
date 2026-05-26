@@ -7,8 +7,20 @@
   "exports": {
     ".": "./src/index.js"
   },
-  "files": ["src", "config-schema.json"],
-  "keywords": ["descix", "cloud", "config", "firestore", "pubsub"],
+  "files": [
+    "src",
+    "config-schema.json"
+  ],
+  "scripts": {
+    "test": "node --test \"tests/*.test.js\""
+  },
+  "keywords": [
+    "descix",
+    "cloud",
+    "config",
+    "firestore",
+    "pubsub"
+  ],
   "license": "UNLICENSED",
   "engines": {
     "node": ">=24.0.0"
@@ -17,6 +29,7 @@
     "@google-cloud/firestore": "^8.0.0",
     "@google-cloud/pubsub": "^5.2.0",
     "@google-cloud/secret-manager": "^6.1.1",
+    "chokidar": "^4.0.3",
     "dotenv": "^16.4.5",
     "google-auth-library": "^9.0.0"
   }

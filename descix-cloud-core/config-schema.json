@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "description": "DeSciX Cloud Service Configuration Schema - Defines key categories for bootstrap and dev override",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "bootstrap_keys": {
     "description": "Keys loaded from .env/.yaml BEFORE Secret Manager access (required for bootstrap)",
     "keys": [
@@ -20,6 +20,22 @@
       "DISCORD_VERIFIED_ROLE_NAME"
     ]
   },
+  "required_keys": {
+    "description": "Keys that MUST resolve to a non-null value after bootstrap completes. CloudConfig.initialize() throws CloudConfigFatalError if any of these are null/undefined. Add a key here ONLY if a null value would cause silent runtime degradation (chat fall-through, opaque RAG/Firestore failures). Per `feedback_no_hardcoded_fallbacks` — surface misconfiguration loudly at boot, never paper over with defaults.",
+    "keys": [
+      "INTELLIGENCE_LEVELS",
+      "DEFAULT_AI_MODEL",
+      "DEFAULT_INTELLIGENCE_LEVEL",
+      "PINECONE_INDEX_NAME",
+      "PINECONE_API_KEY",
+      "PINECONE_NAMESPACE_MODE",
+      "PLATFORM_DEFAULT_CHAIN",
+      "FIRESTORE_DATABASE_ID",
+      "GOOGLE_PROJECT_ID",
+      "GEMINI_API_KEY",
+      "STORAGE_BUCKET"
+    ]
+  },
   "boolean_keys": {
     "description": "Keys that should be parsed as boolean (value === 'true')",
     "keys": [
@@ -31,7 +47,9 @@
       "BYPASS_PUBSUB",
       "CLOUDFLARED_AUTO_START",
       "EMAIL_VERIFICATION_REQUIRED",
-      "ENFORCE_ANY_TOKEN_GATE"
+      "ENFORCE_ANY_TOKEN_GATE",
+      "CRYPTOAPIS_WRITE_PATH_ENABLED",
+      "BATCH_UPDATE_BALANCES_BROADCAST_ENABLED"
     ]
   },
   "dev_override_keys": {
@@ -81,7 +99,9 @@
       "AIRDROP_SCHEDULER_INTERVAL_SECONDS",
       "GET_PLATFORM_HOLDINGS_CACHE_TTL_SECONDS",
       "SERVICE_MANIFEST_TTL_SECONDS",
-      "AIRDROP_COMMUNITY_IDS"
+      "AIRDROP_COMMUNITY_IDS",
+      "CRYPTOAPIS_WRITE_PATH_ENABLED",
+      "BATCH_UPDATE_BALANCES_BROADCAST_ENABLED"
     ]
   },
   "defaults": {
