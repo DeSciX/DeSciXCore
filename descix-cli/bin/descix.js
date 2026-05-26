@@ -26,6 +26,7 @@ import { runDoctor } from '../lib/commands/doctor.js';
 import { runHealth } from '../lib/commands/health.js';
 import * as kbCommands from '../lib/commands/kb.js';
 import * as corpusCommands from '../lib/commands/corpus.js';
+import * as modelConfigCommands from '../lib/commands/model-config.js';
 import * as brieferCommand from '../lib/commands/briefer/index.js';
 import fs from 'fs/promises';
 import path from 'path';
@@ -2108,6 +2109,32 @@ appCommand
     }
   });
 
+
+// ============ App: set-default-model (WS-CONFIG-BOOTSTRAP-FIX item #10) ============
+//
+// Updates Community/{c}/Apps/{a}.default_app_model. Per CEO inheritance chain:
+//   options.model > kb.kb_model_override > app.default_app_model > levelConfig.model > DEFAULT_AI_MODEL
+//
+// --clear deletes the field via FieldValue.delete() (NOT null) so the resolver falls through
+// cleanly to per-level platform defaults.
+
+appCommand
+  .command('set-default-model')
+  .description('Set or clear App.default_app_model (model used when no KB override is set)')
+  .requiredOption('-a, --app <app_id>', 'App ID (e.g. unk-cos)')
+  .option('-m, --model <model_name>', 'Gemini model name (e.g. gemini-3.1-flash-lite). Mutually exclusive with --clear.')
+  .option('--clear', 'Delete App.default_app_model via FieldValue.delete() (resets to platform-default inheritance)')
+  .action(async (options) => {
+    try {
+      // Forward the parent --env flag so the audit log records the target environment.
+      const parentEnv = program.opts().env || null;
+      await modelConfigCommands.runAppSetDefaultModel({ ...options, env: parentEnv });
+    } catch (error) {
+      console.error(chalk.red(`\n\u274c ${error.message}\n`));
+      process.exit(1);
+    }
+  });
+
 // ============ Knowledge Base Commands ============
 
 const kbCommand = program
@@ -2194,6 +2221,46 @@ kbCommand
       }
     } catch (error) {
       console.error(chalk.red(error.message));
+      process.exit(1);
+    }
+  });
+
+
+// ============ KB: set-/clear-override-model (WS-CONFIG-BOOTSTRAP-FIX item #10) ============
+//
+// Updates Community/{c}/Apps/{a}/KnowledgeBases/{k}.kb_model_override.
+// Per CEO practice, KB overrides should be MINIMIZED — only use when a specific KB needs
+// a model different from App.default_app_model (e.g., a tuned model for one KB).
+//
+// clear-override-model deletes the field via FieldValue.delete() (NOT null) per tripwire #2.
+
+kbCommand
+  .command('set-override-model')
+  .description('Set KB.kb_model_override (per-KB model selection)')
+  .requiredOption('-a, --app <app_id>', 'App ID')
+  .requiredOption('-k, --kb <kb_name>', 'KB name')
+  .requiredOption('-m, --model <model_name>', 'Gemini model name (e.g. gemini-2.5-pro)')
+  .action(async (options) => {
+    try {
+      const parentEnv = program.opts().env || null;
+      await modelConfigCommands.runKbSetOverrideModel({ ...options, env: parentEnv });
+    } catch (error) {
+      console.error(chalk.red(`\n\u274c ${error.message}\n`));
+      process.exit(1);
+    }
+  });
+
+kbCommand
+  .command('clear-override-model')
+  .description('Delete KB.kb_model_override via FieldValue.delete() (resets to App.default_app_model inheritance)')
+  .requiredOption('-a, --app <app_id>', 'App ID')
+  .requiredOption('-k, --kb <kb_name>', 'KB name')
+  .action(async (options) => {
+    try {
+      const parentEnv = program.opts().env || null;
+      await modelConfigCommands.runKbClearOverrideModel({ ...options, env: parentEnv });
+    } catch (error) {
+      console.error(chalk.red(`\n\u274c ${error.message}\n`));
       process.exit(1);
     }
   });
