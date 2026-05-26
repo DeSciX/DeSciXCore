@@ -71,28 +71,34 @@ export async function extract({ env, cliPaths } = {}) {
     section: `§${SECTION.number} ${SECTION.heading}`
   });
 
-  // Host pattern: line 120 in the canonical briefer. Use a flexible regex —
-  // accept the construct even if it moves a few lines up/down, but record
-  // the *actual* line in the citation so --check catches movement via SHA.
+  // Host pattern: canonical line shifted to L214 after WS-DESCIX-SINGLETON-PROVISIONER
+  // (CEO-D-2026-05-26-SINGLETON-PROVISIONER-UNIFIED, 2026-05-26) added the
+  // SINGLETON_APPS branch + buildSingletonMatcher helper near top of file. The
+  // line is the canonical UNIFORM host formula (which a singleton override then
+  // shadows via `effectiveHost` for daita) — briefer extractor still keys on
+  // this exact construct as the platform routing invariant. Range expanded to
+  // 100-260 to tolerate further additions to the SINGLETON_* tables.
   const hostMatch = findInLines({
     lines: mesh.lines,
     regex: /const\s+host\s*=\s*env\s*===\s*['"]prod['"]\s*\?/,
     section: `§${SECTION.number} ${SECTION.heading}`,
-    source: `${MESH_FILE}:120 (host pattern)`,
+    source: `${MESH_FILE}:214 (uniform host pattern; CEO-D-2026-05-26-LB-ROUTING-UNIFORM)`,
     expected: `const host = env === 'prod' ? ... : ... construct`,
     recovery: `Re-locate the host construct in ${MESH_FILE} and update sources/identifiers.js.`,
-    expectedRange: [100, 140]   // slack around canonical L120
+    expectedRange: [100, 260]
   });
 
-  // gcsPath pattern: line 123 in the canonical briefer.
+  // gcsPath pattern: canonical line shifted to L223 after WS-DESCIX-SINGLETON-PROVISIONER.
+  // This is the non-singleton (uniform) pathPrefix; the singleton override
+  // (pathPrefixSingletonOverride) is a few lines below. Range matches hostMatch.
   const gcsMatch = findInLines({
     lines: mesh.lines,
     regex: /const\s+pathPrefix\s*=\s*`\/\$\{env\}\/\$\{app\}\/site`/,
     section: `§${SECTION.number} ${SECTION.heading}`,
-    source: `${MESH_FILE}:123 (gcsPath pattern)`,
+    source: `${MESH_FILE}:223 (uniform gcsPath pattern; singleton override at ~L228)`,
     expected: 'const pathPrefix = `/${env}/${app}/site` (template literal)',
     recovery: `Re-locate the gcsPath construct in ${MESH_FILE}.`,
-    expectedRange: [100, 140]
+    expectedRange: [100, 260]
   });
 
   // ── Source 2: hydrateUtils.js — product_id===app_id invariant ──
