@@ -2400,13 +2400,21 @@ corpusCommand
   .requiredOption('-a, --app <id>', 'App ID')
   .option('-k, --kb <name>', 'KB name (syncs specific manifest; default: all)')
   .option('-v, --verbose', 'Show verbose output')
-  .option('--rebuild', 'Reconcile Pinecone against the current manifest walk: enumerate remote file_ids, purge any not in the current corpus, then re-sync from scratch. Use to recover from accumulated stale-chunk drift.')
+  .option('--ref <ref>', 'Override the git ref for ALL manifest sources (e.g., --ref ws-admin-b1). Precedence: --ref > manifest source.ref > "main".')
+  .option('--rebuild', 'Reconcile Pinecone against the current manifest walk: enumerate remote file_ids, purge any not in the current corpus, then re-sync from scratch. Use to recover from accumulated stale-chunk drift. Prompts before deleting unless --yes is supplied.')
+  .option('--dry-run', 'Enumerate would-be-purged file_ids and would-be-upserted chunks without ANY Pinecone writes. Exit 0 if no drift, 1 if drift. Read-only.')
+  .option('--show-walk', 'Print the resolved ref + the first 50 walked files BEFORE any Pinecone operations. Useful for verifying --ref / manifest source resolution.')
+  .option('--yes', 'Skip the interactive purge confirmation in --rebuild mode. Use in scripting/CI.')
   .action(async (options) => {
     try {
       const apiClient = new DeSciXApiClient();
       await requireAuth(apiClient);
 
-      await corpusCommands.runCorpusSync(apiClient, options);
+      const result = await corpusCommands.runCorpusSync(apiClient, options);
+      // Dry-run exit code per Deliverable A: 0 if no drift, 1 if drift would be applied.
+      if (result && result.dryRun) {
+        process.exit(result.drift ? 1 : 0);
+      }
     } catch (error) {
       console.error(chalk.red(`\n❌ ${error.message}\n`));
       process.exit(1);
@@ -2415,9 +2423,10 @@ corpusCommand
 
 corpusCommand
   .command('status')
-  .description('Show corpus sync state (files, chunks, last sync)')
+  .description('Show corpus sync state (files, chunks, last sync, resolved ref)')
   .requiredOption('-a, --app <id>', 'App ID')
   .option('-k, --kb <name>', 'KB name (default: all)')
+  .option('--ref <ref>', 'Preview status as if --ref were applied to a sync (does not change manifests)')
   .option('-v, --verbose', 'Show verbose output including change detection')
   .action(async (options) => {
     try {
