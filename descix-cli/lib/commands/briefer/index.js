@@ -74,7 +74,7 @@ const MECHANISM_TAG = 'descix briefer v1.0 (M2 — code-grounded extractors)';
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-function resolveCliPaths() {
+export function resolveCliPaths() {
   // Resolve the descix-cli root from this file's location, then walk up to
   // DeSciX_Core and the parent repo. M2/M3 extractors that read source files
   // will need these to anchor file reads.
@@ -86,17 +86,29 @@ function resolveCliPaths() {
   return { descixCliRoot, descixCoreRoot, desciXRoot, repoRoot };
 }
 
-function resolveOutPath(cliOut, workspaceConfig, cliPaths) {
+export function resolveOutPath(cliOut, workspaceConfig, cliPaths, cwd) {
+  // Explicit override always wins.
   if (cliOut) return path.resolve(cliOut);
+
   // Default: workspace-root-relative path.
   if (workspaceConfig) {
     const wsRoot = workspaceConfig.getWorkspaceRoot();
     return path.join(wsRoot, DEFAULT_OUT_RELATIVE);
   }
-  // Fallback: anchor to repoRoot computed from this file's location.
-  // Per feedback_no-hardcoded-fallbacks this is NOT a value fallback — it is
-  // a deterministic location derivation from the CLI's own file layout.
-  return path.join(cliPaths.repoRoot, DEFAULT_OUT_RELATIVE);
+
+  // HARD-FAIL per feedback_no-hardcoded-fallbacks. The previous implementation
+  // derived a default from cliPaths.repoRoot (computed from the CLI file
+  // location), which silently produced a wrong path like
+  // "Unkamon/DeSciX/DeSciX/V2_docs/..." (double DeSciX/) when invoked from
+  // inside descix-cli/ with no workspace.json in cwd. No silent path-guessing.
+  throw new BrieferExtractorError({
+    code: BRIEFER_ERROR_CODES.WORKSPACE_NOT_FOUND,
+    section: 'briefer entry',
+    source: cwd || '(unknown cwd)',
+    expected: 'either .descix/workspace.json reachable by upward search, OR --out=<path>',
+    recovery: 'Run from your workspace root (where .descix/workspace.json lives), or pass --out=<path> explicitly.',
+    detail: `cliPaths.repoRoot was previously used as a silent fallback (resolved to ${cliPaths.repoRoot}); that fallback is removed.`
+  });
 }
 
 async function resolveRegenBy() {
@@ -202,9 +214,10 @@ export async function runBriefer(options = {}) {
   }
 
   const cliPaths = resolveCliPaths();
+  const cwd = process.cwd();
   let workspaceConfig = null;
   try {
-    workspaceConfig = await WorkspaceConfig.tryLoad(process.cwd());
+    workspaceConfig = await WorkspaceConfig.tryLoad(cwd);
   } catch {
     // tryLoad returns null on missing workspace; an exception here means the
     // workspace.json file exists but is invalid. Hard-fail per philosophy —
@@ -218,7 +231,7 @@ export async function runBriefer(options = {}) {
     });
   }
 
-  const outPath = resolveOutPath(options.out, workspaceConfig, cliPaths);
+  const outPath = resolveOutPath(options.out, workspaceConfig, cliPaths, cwd);
   const regenBy = await resolveRegenBy();
 
   if (options.verbose) {
@@ -260,7 +273,7 @@ export async function runBriefer(options = {}) {
   return doc;
 }
 
-async function runCheckMode({ doc, outPath, verbose }) {
+export async function runCheckMode({ doc, outPath, verbose }) {
   let canonical = null;
   try {
     canonical = await fs.readFile(outPath, 'utf-8');
