@@ -143,9 +143,19 @@ test('Extractor scaffolds — extract() rejects missing env (NOT_IMPLEMENTED har
 });
 
 test('Extractor scaffolds — extract({env}) returns {markdown, citations[]}', async () => {
+  // M2 extractors actually read source files; provide real cliPaths.
+  // routing.js hard-rejects --env=dev (per scope §2.1), so use --env=demo
+  // for this contract test. Real gcloud probe is best-effort — extractors
+  // tolerate missing gcloud and still return {markdown, citations}.
+  const cliPaths = {
+    descixCliRoot: path.resolve(__dirname, '..'),
+    descixCoreRoot: path.resolve(__dirname, '..', '..'),
+    desciXRoot: path.resolve(__dirname, '..', '..', '..'),
+    repoRoot: path.resolve(__dirname, '..', '..', '..', '..')
+  };
   for (const f of EXPECTED_EXTRACTORS) {
     const mod = await import(`../lib/commands/briefer/sources/${f}`);
-    const result = await mod.extract({ env: 'dev' });
+    const result = await mod.extract({ env: 'demo', cliPaths });
     assert.equal(typeof result.markdown, 'string', `${f}: markdown not a string`);
     assert.ok(result.markdown.length > 0, `${f}: markdown must be non-empty`);
     assert.ok(Array.isArray(result.citations), `${f}: citations not an array`);
@@ -164,19 +174,21 @@ test('Extractor scaffolds — extract({env}) returns {markdown, citations[]}', a
 // ─────────────────────────────────────────────────────────────────────────────
 test('Stitcher — buildBrieferDoc + stitchBriefer produce a coherent doc', async () => {
   const briefer = await import('../lib/commands/briefer/index.js');
+  // M2: real repo paths so extractors can read source files. Use --env=demo
+  // because routing.js hard-rejects dev (per scope §2.1).
   const cliPaths = {
-    descixCliRoot: '/tmp/x',
-    descixCoreRoot: '/tmp/x',
-    desciXRoot: '/tmp/x',
-    repoRoot: '/tmp/x'
+    descixCliRoot: path.resolve(__dirname, '..'),
+    descixCoreRoot: path.resolve(__dirname, '..', '..'),
+    desciXRoot: path.resolve(__dirname, '..', '..', '..'),
+    repoRoot: path.resolve(__dirname, '..', '..', '..', '..')
   };
   const doc = await briefer.buildBrieferDoc({
-    env: 'dev',
+    env: 'demo',
     cliPaths,
     regenBy: 'test'
   });
 
-  assert.equal(doc.env, 'dev');
+  assert.equal(doc.env, 'demo');
   assert.equal(doc.sections.length, 7, 'must render all 7 sections');
   assert.match(doc.markdown, /^# DeSciX Platform Must-Know Briefer/);
   assert.match(doc.markdown, /## 1\. Identifiers & invariants/);

@@ -252,13 +252,18 @@ program
 program
   .command('briefer')
   .description('Regenerate platform-must-know-briefer.md from live code + gcloud + Firestore (HARD-FAIL on drift)')
-  .option('--env <name>', 'Target environment: dev|demo|prod', 'dev')
+  .option('--env <name>', 'Target environment: dev|demo|prod (also accepted at the top level: descix --env=demo briefer ...)')
   .option('--out <path>', 'Override output path (default: workspace-root/DeSciX/V2_docs/architecture/platform-must-know-briefer.md)')
   .option('--check', 'Drift-detection mode: regen to memory, diff against canonical, non-zero exit on drift')
   .option('-v, --verbose', 'Print per-source paths, citations, and timings')
   .action(async (options) => {
     try {
-      await brieferCommand.runBriefer(options);
+      // Resolve --env in priority order: subcommand explicit > program parent > 'dev'.
+      // Commander would otherwise silently default to 'dev' even when the parent
+      // --env=demo is supplied (because the subcommand owns its own flag space).
+      const parentEnv = program.opts().env || null;
+      const env = options.env || parentEnv || 'dev';
+      await brieferCommand.runBriefer({ ...options, env });
     } catch (error) {
       console.error(chalk.red(`\n❌ Briefer command failed: ${error.message}\n`));
       process.exit(1);
