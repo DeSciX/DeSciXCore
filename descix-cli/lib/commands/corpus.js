@@ -30,6 +30,30 @@ import { chunkFile, categorizeFile } from '../core/Chunker.js';
 import { upsertChunks, deleteStaleChunks, deleteStaleChunksByFileId, listRemoteFileIds } from '../core/Syncer.js';
 
 /**
+ * Resolve community_id for corpus sync — same precedence as site upload / update kb:
+ * CLI -c > workspace.json > Products registry (get_product_context). No hardcoded defaults.
+ */
+async function resolveCorpusCommunityId(apiClient, workspaceConfig, appId, options) {
+  const ctx = workspaceConfig.resolveContextWithOptions(options);
+  const appConfig = workspaceConfig.getAppByAppId(appId);
+  let communityId = ctx.communityId || appConfig?.communityId || null;
+
+  if (!communityId) {
+    const productCtx = await apiClient.invoke('get_product_context', { app_id: appId });
+    communityId = productCtx?.community_id ?? productCtx?.message?.community_id ?? null;
+  }
+
+  if (!communityId) {
+    throw new Error(
+      `Could not resolve community_id for app "${appId}".\n` +
+      `Pass -c <community_id> or ensure Products/${appId} is registered (bootstrap / descix app init).`
+    );
+  }
+
+  return communityId;
+}
+
+/**
  * Read a file and chunk it using the existing Chunker.
  * Returns chunk records with corpus-specific metadata and content-addressed IDs.
  *
@@ -293,7 +317,7 @@ export async function runCorpusSync(apiClient, options) {
     }
 
     const appRoot = appConfig.absolutePath;
-    const communityId = appConfig.communityId || 'unkamon'; // Default for unk-* apps
+    const communityId = await resolveCorpusCommunityId(apiClient, workspaceConfig, appId, options);
 
     // 2. Load manifests
     spinner.text = 'Loading manifests...';

@@ -32,6 +32,7 @@ import { runCorpusSync } from '../lib/commands/corpus.js';
 // each call as read-only vs write.
 const READ_ONLY_ENDPOINTS = new Set([
   'list_knowledge_bases',
+  'get_product_context',
   'kb_list_file_ids',
   'kb_get_chunk_metadata',
   'kb_get_chunk_ids'
@@ -61,6 +62,9 @@ class SpyApiClient {
           knowledgebases: this.registeredKbs.map(name => ({ knowledgebase_name: name }))
         }
       };
+    }
+    if (command === 'get_product_context') {
+      return { status: 'ok', community_id: payload?.app_id || 'testcommunity' };
     }
     if (command === 'kb_list_file_ids') {
       return {
