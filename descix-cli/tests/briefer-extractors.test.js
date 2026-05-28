@@ -7,7 +7,7 @@
  *
  * AC coverage:
  *   AC-4: Removing or moving the host-pattern construct in
- *         update-mesh-routing.js:120 makes routing.js HARD-FAIL with a clear
+ *         provision-platform-lb.js:120 makes routing.js HARD-FAIL with a clear
  *         error.
  *   AC-5: Tests cover at least the routing and identifiers extractors.
  *   AC-3 partial: routing.js --env=dev is rejected with a clear message.
@@ -40,7 +40,7 @@ test('identifiers.extract({env, cliPaths}) returns code-grounded markdown + non-
   const mod = await import('../lib/commands/briefer/sources/identifiers.js');
   const result = await mod.extract({ env: 'demo', cliPaths });
   assert.ok(result.markdown.length > 500, 'markdown should be substantial');
-  // The host pattern from update-mesh-routing.js:120 must appear verbatim
+  // The host pattern from provision-platform-lb.js:120 must appear verbatim
   // (or close to it) in the rendered markdown.
   assert.match(result.markdown, /const host = env === 'prod'/);
   // The GCS path pattern must appear.
@@ -63,12 +63,12 @@ test('identifiers.extract HARD-FAILS with BRIEFER-SRC-NOT-FOUND if the source mo
   const badPaths = { ...cliPaths, repoRoot: '/nonexistent-briefer-test-root' };
   await assert.rejects(
     () => mod.extract({ env: 'demo', cliPaths: badPaths }),
-    (err) => err.code === 'BRIEFER-SRC-NOT-FOUND' && /update-mesh-routing\.js/.test(err.source || err.message)
+    (err) => err.code === 'BRIEFER-SRC-NOT-FOUND' && /provision-platform-lb\.js/.test(err.source || err.message)
   );
 });
 
 test('identifiers.extract HARD-FAILS with PARSE_FAIL if the host construct moves outside the expected line range', async () => {
-  // Build a temp fake repo where update-mesh-routing.js has the host pattern
+  // Build a temp fake repo where provision-platform-lb.js has the host pattern
   // at line 500+ (way outside the expected [100, 260] slack range — range was
   // expanded from [100, 140] in 2026-05-26 to accommodate WS-DESCIX-SINGLETON-PROVISIONER
   // additions to the SINGLETON_APPS / buildSingletonMatcher tables).
@@ -78,7 +78,7 @@ test('identifiers.extract HARD-FAILS with PARSE_FAIL if the host construct moves
   const padded = Array(500).fill('// pad').join('\n') +
     "\nconst host = env === 'prod' ? `${app}.descix.net` : `${app}.${env}.descix.net`;\n" +
     "const pathPrefix = `/${env}/${app}/site`;\n";
-  await fs.writeFile(path.join(meshPath, 'update-mesh-routing.js'), padded);
+  await fs.writeFile(path.join(meshPath, 'provision-platform-lb.js'), padded);
   // ALSO create the other source files identifiers expects (hydrate, gemini,
   // beast record) so we isolate the PARSE_FAIL signal to the host pattern.
   // Copy the real files into the fake root so they DO resolve.
@@ -110,9 +110,9 @@ test('routing.extract({env=demo}) returns code-grounded markdown with verbatim p
   const result = await mod.extract({ env: 'demo', cliPaths });
   assert.ok(result.markdown.length > 500);
   // The verbatim pathRules block must appear.
-  assert.match(result.markdown, /const pathRules = \[/);
+  assert.match(result.markdown, /Broker-first mesh/);
+  assert.match(result.markdown, /ensureCoreNeg|buildSingletonMatcher/);
   assert.match(result.markdown, /proxyToExternalService/);
-  assert.match(result.markdown, /No runtime "Gateway" middleware/);
   // Citations: all non-null SHAs.
   for (const c of result.citations) {
     assert.ok(c.sha, `citation.sha missing for ${c.file}`);
@@ -129,26 +129,23 @@ test('routing.extract HARD-REJECTS --env=dev (per scope §2.1 — DEV has no LB 
   );
 });
 
-test('routing.extract HARD-FAILS if ensureServerlessBackend is missing from update-mesh-routing.js (AC-4)', async () => {
+test('routing.extract HARD-FAILS if ensureCoreNeg is missing from provision-platform-lb.js (AC-4)', async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'briefer-m2-routing-'));
   const meshPath = path.join(tmp, 'DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy');
   await fs.mkdir(meshPath, { recursive: true });
-  // A mesh-routing.js without the ensureServerlessBackend function.
   const broken = [
-    '// stripped of ensureServerlessBackend',
+    '// stripped of ensureCoreNeg',
     'const ENV_CONFIG = { prod: {}, demo: {}, dev: {} };',
-    Array(120).fill('//').join('\n'),
     "const host = env === 'prod' ? 'x' : 'y';",
-    'const pathPrefix = `/${env}/${app}/site`;',
-    'const pathRules = [];'
+    'const pathPrefix = `/${env}/${app}/site`;'
   ].join('\n');
-  await fs.writeFile(path.join(meshPath, 'update-mesh-routing.js'), broken);
+  await fs.writeFile(path.join(meshPath, 'provision-platform-lb.js'), broken);
 
   const mod = await import('../lib/commands/briefer/sources/routing.js');
   await assert.rejects(
     () => mod.extract({ env: 'demo', cliPaths: { ...cliPaths, repoRoot: tmp } }),
     (err) => err.code === 'BRIEFER-SRC-NOT-FOUND' &&
-             /ensureServerlessBackend/.test(err.source || err.expected || err.message)
+             /ensureCoreNeg/.test(err.source || err.expected || err.message)
   );
 });
 

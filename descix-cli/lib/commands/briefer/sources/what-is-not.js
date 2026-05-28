@@ -8,11 +8,11 @@
  *
  * Negative claims this extractor verifies:
  *  (1) No API Gateway middleware at runtime — grep services/ for gatewayDispatch/routeByProduct/etc.
- *  (2) No runtime Firestore lookup for routing — grep update-mesh-routing.js for CacheFirestore/admin.firestore
+ *  (2) No runtime Firestore lookup for routing — grep provision-platform-lb.js for CacheFirestore/admin.firestore
  *  (3) No per-app DNS provisioning — grep for `gcloud dns` / `domain-mappings` (recent CRUFT-8 fix)
- *  (4) No per-app TLS cert — verify wildcard cert config in update-mesh-routing.js
+ *  (4) No per-app TLS cert — verify wildcard cert config in provision-platform-lb.js
  *  (5) No `descix microservice deploy` CLI (TOGGLE) — grep bin/descix.js
- *  (6) No descix-chain runtime lookup for routing — grep update-mesh-routing.js for descix-chain
+ *  (6) No descix-chain runtime lookup for routing — grep provision-platform-lb.js for descix-chain
  *  (7) No path rewriting in `descix serve` for product sites — cite createViteProxyConfig.js
  *  (8) No `--env` flag for the MCP server — toggle, grep mcp-server.js
  */
@@ -29,13 +29,13 @@ export const SECTION = {
   heading: '6. What is NOT in the system',
   sourceFiles: [
     'DeSciX/DeSciX_Cloud/microservice/services',
-    'DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/update-mesh-routing.js',
+    'DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/provision-platform-lb.js',
     'DeSciX/DeSciX_Core/descix-cli/bin/descix.js',
     'DeSciX/DeSciX_Core/descix-app-sdk/src/dev/createViteProxyConfig.js'
   ]
 };
 
-const MESH_FILE = 'DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/update-mesh-routing.js';
+const MESH_FILE = 'DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/provision-platform-lb.js';
 const CLI_FILE = 'DeSciX/DeSciX_Core/descix-cli/bin/descix.js';
 const PROXY_CONFIG = 'DeSciX/DeSciX_Core/descix-app-sdk/src/dev/createViteProxyConfig.js';
 const SERVICES_DIR = 'DeSciX/DeSciX_Cloud/microservice/services';
@@ -79,7 +79,7 @@ export async function extract({ env, cliPaths } = {}) {
     });
   }
 
-  // (2) HARD: no CacheFirestore / admin.firestore in update-mesh-routing.js.
+  // (2) HARD: no CacheFirestore / admin.firestore in provision-platform-lb.js.
   const mesh = await readSourceFile({
     cliPaths,
     relPath: MESH_FILE,
@@ -91,7 +91,7 @@ export async function extract({ env, cliPaths } = {}) {
         code: BRIEFER_ERROR_CODES.NEGATIVE_CLAIM,
         section: `§${SECTION.number} ${SECTION.heading}`,
         source: `${MESH_FILE}:${i + 1}`,
-        expected: 'no runtime Firestore lookup in update-mesh-routing.js (LB wiring is deploy-time only)',
+        expected: 'no runtime Firestore lookup in provision-platform-lb.js (LB wiring is deploy-time only)',
         recovery: 'A Firestore lookup was added to the LB-wiring path. Reconcile: routing must not depend on runtime Firestore reads.',
         detail: `Match at ${MESH_FILE}:${i + 1} — ${mesh.lines[i].trim()}`
       });
@@ -114,7 +114,7 @@ export async function extract({ env, cliPaths } = {}) {
   // The briefer claim is rendered as-is; matches surface as a footnote.
 
   // (4) HARD: wildcard cert config (single managed cert) — grep
-  // update-mesh-routing.js to ensure no per-app cert provisioning was wired.
+  // provision-platform-lb.js to ensure no per-app cert provisioning was wired.
   for (let i = 0; i < mesh.lines.length; i++) {
     if (/ssl-certificates\s+create|managedCert/.test(mesh.lines[i])) {
       throw new BrieferExtractorError({

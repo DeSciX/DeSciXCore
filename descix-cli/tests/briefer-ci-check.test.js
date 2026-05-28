@@ -5,7 +5,7 @@
  * PR gate. The workflow runs `descix briefer --check --env=demo` and fails the
  * PR if the canonical briefer is out of sync with the 6 watched source files:
  *
- *   1. DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/update-mesh-routing.js
+ *   1. DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/provision-platform-lb.js
  *   2. DeSciX/DeSciX_Cloud/microservice/services/apiFront.js
  *   3. DeSciX/DeSciX_Cloud/microservice/services/serviceManifestManager.js
  *   4. DeSciX/DeSciX_Core/descix-cloud-core/src/config.js
@@ -98,7 +98,7 @@ function makeFixtureDoc({ env = 'demo', extraLine = '' } = {}) {
     '',
     '## §1 — Identifiers',
     '- app_id is a globally unique slug.',
-    '<!-- briefer-cite: file=DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/update-mesh-routing.js lines=120 sha=abc123def456 anchor=host-pattern -->',
+    '<!-- briefer-cite: file=DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/provision-platform-lb.js lines=120 sha=abc123def456 anchor=host-pattern -->',
     '',
     '## §3 — Routing',
     'Single global URL map.',
@@ -113,7 +113,7 @@ function makeFixtureDoc({ env = 'demo', extraLine = '' } = {}) {
     sections: [],
     markdown,
     citationTrail: [
-      '<!-- briefer-cite: file=DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/update-mesh-routing.js lines=120 sha=abc123def456 anchor=host-pattern -->',
+      '<!-- briefer-cite: file=DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/provision-platform-lb.js lines=120 sha=abc123def456 anchor=host-pattern -->',
       '<!-- briefer-cite: file=DeSciX/DeSciX_Cloud/microservice/services/apiFront.js lines=83-186 sha=789abcdef012 anchor=middleware-order -->'
     ]
   };
@@ -266,7 +266,7 @@ test('(5) .github/workflows/briefer-check.yml has the canonical paths filter + i
   }
 
   const watched = [
-    'DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/update-mesh-routing.js',
+    'DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/provision-platform-lb.js',
     'DeSciX/DeSciX_Cloud/microservice/services/apiFront.js',
     'DeSciX/DeSciX_Cloud/microservice/services/serviceManifestManager.js',
     'DeSciX/DeSciX_Core/descix-cloud-core/src/config.js',

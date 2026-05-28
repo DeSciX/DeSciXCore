@@ -10,7 +10,7 @@
  *     yesterday) is rendered.
  *
  * Files cited as canonical sources (all must exist at extract time):
- *   - update-mesh-routing.js (routing source)
+ *   - provision-platform-lb.js (routing source)
  *   - serviceManifestManager.js (dispatch source)
  *   - entitlements/index.js, communityManagement.js, bootstrap.js (Products)
  *   - dev/gateway.js, createViteProxyConfig.js (local dev)
@@ -30,7 +30,7 @@ export const SECTION = {
   number: 7,
   heading: '7. Where to look for canonical answers',
   sourceFiles: [
-    'DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/update-mesh-routing.js',
+    'DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/provision-platform-lb.js',
     'DeSciX/DeSciX_Cloud/microservice/services/serviceManifestManager.js',
     'DeSciX/DeSciX_Core/descix-platform-api/src/entitlements/index.js',
     'DeSciX/DeSciX_Cloud/microservice/services/communityManagement.js',
@@ -117,7 +117,7 @@ export async function extract({ env, cliPaths } = {}) {
     ``,
     `| Question | Canonical source (in this order) | Notes |`,
     `|---|---|---|`,
-    `| How does prod LB route? | \`DeSciX_Cloud/microservice/admin/scripts/deploy/update-mesh-routing.js\`; verify with \`gcloud compute url-maps describe descix-discord-app-lb\` | Code = signal |`,
+    `| How does prod LB route? | \`DeSciX_Cloud/microservice/admin/scripts/deploy/provision-platform-lb.js\`; verify with \`gcloud compute url-maps describe descix-discord-app-lb\` | Code = signal |`,
     `| How does the env command-broker dispatch external commands? | \`services/serviceManifestManager.js\` (\`proxyToExternalService\`) and \`services/apiFront.js\` | Code = signal |`,
     `| What is Products for? | \`descix-platform-api/src/entitlements/index.js\`, \`services/communityManagement.js\`, \`admin/bootstrap.js\` | Code = signal |`,
     `| How does local \`descix serve\` work? | \`descix-app-sdk/src/dev/gateway.js\` + \`createViteProxyConfig.js\` | Code = signal |`,

@@ -4,7 +4,7 @@
  * This is THE highest-scrutiny section per the 2026-05-25 audit. The earlier
  * cruft about "Gateway extracts productId + Firestore lookup" lives in V2_docs
  * prose; this extractor pulls the CANONICAL routing model from code:
- *   - update-mesh-routing.js — path rule construction (single URL map, two channels)
+ *   - provision-platform-lb.js — platform LB (core NEG + apex/peer hosts)
  *   - serviceManifestManager.js — proxyToExternalService dispatch
  *   - apiFront.js — invoke() dispatch (internal + external command split)
  *   - app-sdk dev/gateway.js + createViteProxyConfig.js — local dev mirror
@@ -27,7 +27,7 @@ export const SECTION = {
   number: 3,
   heading: '3. Request routing — the single canonical model',
   sourceFiles: [
-    'DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/update-mesh-routing.js',
+    'DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/provision-platform-lb.js',
     'DeSciX/DeSciX_Cloud/microservice/services/serviceManifestManager.js',
     'DeSciX/DeSciX_Cloud/microservice/services/apiFront.js',
     'DeSciX/DeSciX_Core/descix-app-sdk/src/dev/gateway.js',
@@ -35,7 +35,7 @@ export const SECTION = {
   ]
 };
 
-const MESH_FILE = 'DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/update-mesh-routing.js';
+const LB_FILE = 'DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/provision-platform-lb.js';
 const SMM_FILE = 'DeSciX/DeSciX_Cloud/microservice/services/serviceManifestManager.js';
 const APIFRONT_FILE = 'DeSciX/DeSciX_Cloud/microservice/services/apiFront.js';
 const GATEWAY_FILE = 'DeSciX/DeSciX_Core/descix-app-sdk/src/dev/gateway.js';
@@ -75,50 +75,38 @@ export async function extract({ env, cliPaths } = {}) {
     });
   }
 
-  // ── Source 1: update-mesh-routing.js — path rule construction ──
-  const mesh = await readSourceFile({
+  // ── Source 1: provision-platform-lb.js — platform LB standup ──
+  const lb = await readSourceFile({
     cliPaths,
-    relPath: MESH_FILE,
+    relPath: LB_FILE,
     section: `§${SECTION.number} ${SECTION.heading}`
   });
 
-  // ensureServerlessBackend anchor (canonical L82)
-  const ensureMatch = findInLines({
-    lines: mesh.lines,
-    regex: /function\s+ensureServerlessBackend\s*\(/,
+  const ensureCoreNegMatch = findInLines({
+    lines: lb.lines,
+    regex: /function\s+ensureCoreNeg\s*\(/,
     section: `§${SECTION.number} ${SECTION.heading}`,
-    source: `${MESH_FILE}:82-202 (ensureServerlessBackend + path-matcher insertion)`,
-    expected: 'function ensureServerlessBackend(serviceName) { ... }',
-    recovery: `Re-locate ensureServerlessBackend in ${MESH_FILE} and update the line range.`,
-    expectedRange: [60, 130]
+    source: `${LB_FILE} (ensureCoreNeg)`,
+    expected: 'function ensureCoreNeg(envCfg, dryRun)',
+    recovery: `Re-locate ensureCoreNeg in ${LB_FILE}.`,
+    expectedRange: [80, 140]
   });
 
-  // Per-app path matcher block: look for the first `pathRules` const inside main()
-  const pathRulesMatch = findInLines({
-    lines: mesh.lines,
-    regex: /const\s+pathRules\s*=\s*\[/,
+  const singletonMatcherMatch = findInLines({
+    lines: lb.lines,
+    regex: /function\s+buildSingletonMatcher\s*\(/,
     section: `§${SECTION.number} ${SECTION.heading}`,
-    source: `${MESH_FILE} (pathRules array)`,
-    expected: 'const pathRules = [ ... ] (the per-app path-rule list)',
-    recovery: `Re-locate the pathRules construct in ${MESH_FILE}.`,
-    expectedRange: [120, 200]
+    source: `${LB_FILE} (buildSingletonMatcher)`,
+    expected: 'function buildSingletonMatcher(...)',
+    recovery: `Re-locate buildSingletonMatcher in ${LB_FILE}.`
   });
 
-  // Look for the decentralized /api/* rule + command-broker /apifront/* rule
-  const decentralizedApiMatch = findInLines({
-    lines: mesh.lines,
-    regex: /`\/api\/v1\/\$\{app\}`/,
-    section: `§${SECTION.number} ${SECTION.heading}`,
-    source: `${MESH_FILE} (decentralized /api/v1/{app}/* rule)`,
-    expected: `'/api/v1/${'${app}'}' in pathRules`,
-    recovery: `Re-locate the decentralized API path rule.`
-  });
   const apiFrontRuleMatch = findInLines({
-    lines: mesh.lines,
+    lines: lb.lines,
     regex: /['"`]\/apifront['"`]/,
     section: `§${SECTION.number} ${SECTION.heading}`,
-    source: `${MESH_FILE} (command-broker /apifront/* rule)`,
-    expected: `'/apifront' in pathRules`,
+    source: `${LB_FILE} (command-broker /apifront rule)`,
+    expected: `'/apifront' in buildCommandBrokerRules`,
     recovery: `Re-locate the /apifront command-broker rule.`
   });
 
@@ -205,43 +193,41 @@ export async function extract({ env, cliPaths } = {}) {
   ].join('\n');
   gcloudCitation = lbProbe.citation;
 
-  // Slice the pathRules block for embedding
-  const pathRulesEnd = findArrayEnd(mesh.lines, pathRulesMatch.lineNumber);
-  const pathRulesBlock = sliceRange(mesh.lines, pathRulesMatch.lineNumber, pathRulesEnd);
+  const singletonBlockEnd = findFunctionEnd(lb.lines, singletonMatcherMatch.lineNumber);
+  const singletonBlock = sliceRange(lb.lines, singletonMatcherMatch.lineNumber, singletonBlockEnd);
 
   // ── Render the section markdown ──
   const markdown = [
-    `A single global GCP URL map \`descix-discord-app-lb\` is the runtime router. Per-app host rules + per-app path matchers route within \`{app}.{env}.descix.net\`. **No runtime "Gateway" middleware. No runtime Firestore lookup for routing.**`,
+    `Broker-first mesh (WS-MESH-BROKER-ONLY): sites call \`/apifront\`; Core validates entitlements and dispatches via Firestore \`ServiceManifests\`. **No NEG on routine deploy for non-core apps.** No runtime LB lookup for new apps.`,
     ``,
-    `Per-app path matcher (\`matcher-{app}-{env}\`):`,
+    `Platform LB (\`descix-discord-app-lb\`) is provisioned at platform standup by \`deploy-backend-env.sh\` → \`provision-platform-lb.js\` (re-run after \`deploy-service-env.sh powch\` for powch NEG):`,
     ``,
-    `- \`/api/v1/{app}/*\` → \`{app}-{env}-backend\` (Cloud Run NEG, the app's own microservice). Prefix rewritten to \`/api/\`. **Decentralized path.** — \`${MESH_FILE}:${decentralizedApiMatch.lineNumber}\``,
-    `- \`/api/*\` → \`{app}-{env}-backend\` (same — the app owns \`/api/*\` on its own host).`,
-    `- \`/apifront/*\`, \`/mcp/*\`, \`/api/v1/core/*\` → env-wide \`{env}-api-backend\` (central Cloud Function \`apiFront-http-{env}\`). **Command-broker path.** — \`${MESH_FILE}:${apiFrontRuleMatch.lineNumber}\``,
-    `- \`/\` and unmatched \`/*\` → GCS bucket \`{env}-assets-bucket\`, rewritten to \`/{env}/{app}/site/\`.`,
+    `- **daita** broker NEG: \`apifront-http-{env}-neg\` → \`{env}-api-backend\` → Cloud Function \`apiFront-http-{env}\` — \`${LB_FILE}:${ensureCoreNegMatch.lineNumber}\``,
+    `- Apex singleton (\`daita\`): \`demo.descix.net\` / \`descix.net\` → GCS \`/{env}/daita/site/\` + \`/apifront\`, \`/mcp\`, \`/api\` → daita broker — \`${LB_FILE}:${singletonMatcherMatch.lineNumber}\``,
+    `- **powch** core platform NEG: \`powch-{env}-neg\` → \`powch-{env}-backend\` → Cloud Run \`powch-{env}\` — \`${LB_FILE} (ensureCloudRunAppNeg)\``,
+    `- Platform peer host (\`powch.{env}.descix.net\`): GCS site + \`/apifront\`, \`/mcp\` → daita broker; \`/api/*\` → powch NEG`,
     ``,
-    `Path-rule construction (verbatim from \`${MESH_FILE}\` L${pathRulesMatch.lineNumber}-${pathRulesEnd}):`,
+    `Singleton matcher construction (verbatim from \`${LB_FILE}\` L${singletonMatcherMatch.lineNumber}-${singletonBlockEnd}):`,
     ``,
     '```js',
-    pathRulesBlock,
+    singletonBlock,
     '```',
     ``,
-    `The command-broker path (\`/apifront\`) is the channel where the central Cloud Function reads in-memory \`externalCommandRegistry\` (sourced from Firestore \`ServiceManifests\`) and dispatches commands to other microservices via \`proxyToExternalService()\` — HTTPS POST to \`https://{service.domain}/api/{commandName}\`. — \`${SMM_FILE}:${proxyMatch.lineNumber}\`, \`${APIFRONT_FILE}:${invokeMatch.lineNumber} (invoke), ${externalDispatchMatch.lineNumber} (_invokeExternalCommand)\``,
+    `Runtime dispatch: central CF reads \`externalCommandRegistry\` and calls \`proxyToExternalService()\`. — \`${SMM_FILE}:${proxyMatch.lineNumber}\`, \`${APIFRONT_FILE}:${invokeMatch.lineNumber} (invoke), ${externalDispatchMatch.lineNumber} (_invokeExternalCommand)\``,
     gcloudBlock,
-    `**Local \`descix serve\` mirror:** the dev gateway in \`${GATEWAY_FILE}\` and proxy rules in \`${PROXY_CONFIG_FILE}\` mirror the production LB path-rule shape. Port-based origin isolation in local dev = domain isolation in production. Each app sets its own framework base path; the gateway does NOT rewrite paths for product sites.`
+    `**Local \`descix serve\` mirror:** \`${GATEWAY_FILE}\` + \`${PROXY_CONFIG_FILE}\` proxy \`/apifront\`, \`/api\`, \`/mcp\` to Core. Product sites at \`/p/{appId}/\` or static plugin routes.`
   ].join('\n');
 
   const citations = [
-    makeCitation({ file: MESH_FILE, lines: `${ensureMatch.lineNumber}-${pathRulesEnd}`, anchor: 'ensureServerlessBackend + pathRules', fileLines: mesh.lines }),
-    makeCitation({ file: MESH_FILE, lines: String(decentralizedApiMatch.lineNumber), anchor: 'decentralized /api/v1/{app}', fileLines: mesh.lines }),
-    makeCitation({ file: MESH_FILE, lines: String(apiFrontRuleMatch.lineNumber), anchor: 'command-broker /apifront', fileLines: mesh.lines }),
+    makeCitation({ file: LB_FILE, lines: `${ensureCoreNegMatch.lineNumber}-${singletonBlockEnd}`, anchor: 'ensureCoreNeg + buildSingletonMatcher', fileLines: lb.lines }),
+    makeCitation({ file: LB_FILE, lines: String(apiFrontRuleMatch.lineNumber), anchor: 'command-broker /apifront', fileLines: lb.lines }),
     makeCitation({ file: SMM_FILE, lines: String(proxyMatch.lineNumber), anchor: 'proxyToExternalService', fileLines: smm.lines }),
     makeCitation({ file: APIFRONT_FILE, lines: String(invokeMatch.lineNumber), anchor: 'CommandHandler.invoke', fileLines: apiFront.lines }),
     makeCitation({ file: APIFRONT_FILE, lines: String(externalDispatchMatch.lineNumber), anchor: '_invokeExternalCommand', fileLines: apiFront.lines }),
     makeCitation({ file: GATEWAY_FILE, lines: `1-${gateway.lines.length}`, anchor: 'local serve gateway', fileLines: gateway.lines }),
     makeCitation({ file: PROXY_CONFIG_FILE, lines: `1-${proxyConfig.lines.length}`, anchor: 'vite proxy rules', fileLines: proxyConfig.lines }),
     gcloudCitation
-  ];
+  ].filter(Boolean);
 
   return { markdown, citations };
 }
@@ -250,6 +236,23 @@ export async function extract({ env, cliPaths } = {}) {
  * Walk forward from `const pathRules = [` until the matching `];`.
  * Bounded to 100 lines so a pathological refactor doesn't drag huge swaths.
  */
+function findFunctionEnd(lines, startLine) {
+  const MAX = Math.min(lines.length, startLine + 80);
+  let depth = 0;
+  let started = false;
+  for (let i = startLine - 1; i < MAX; i++) {
+    const line = lines[i];
+    for (const ch of line) {
+      if (ch === '{') { depth++; started = true; }
+      else if (ch === '}') {
+        depth--;
+        if (started && depth === 0) return i + 1;
+      }
+    }
+  }
+  return Math.min(lines.length, startLine + 40);
+}
+
 function findArrayEnd(lines, startLine) {
   const MAX = Math.min(lines.length, startLine + 100);
   let depth = 0;

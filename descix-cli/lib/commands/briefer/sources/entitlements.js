@@ -181,7 +181,7 @@ export async function extract({ env, cliPaths } = {}) {
     ``,
     `**Writers:** \`${BOOTSTRAP_FILE}\` \`hydrate-env\` (\`:${hydrateEnvMatch.lineNumber}\`), \`confirm_site_deploy\`, migration scripts.`,
     ``,
-    `**Consumer at deploy time:** the operator's choice of which apps to deploy IS sourced from Products, but \`update-mesh-routing.js\` does not currently read Products directly.`,
+    `**Consumer at deploy time:** Products drives bootstrap; platform peer hosts are configured in \`provision-platform-lb.js\` (\`PLATFORM_PEER_APPS\`), not read from Products at deploy time.`,
     ``,
     `### App-level config layer (§6.7 — added 2026-05-26)`,
     ``,
