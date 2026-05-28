@@ -2650,6 +2650,9 @@ siteCommand
           VITE_GTM_PREVIEW: buildConfigResult.message.VITE_GTM_PREVIEW,
           VITE_GTM_ENV_SUFFIX: buildConfigResult.message.VITE_GTM_ENV_SUFFIX,
           VITE_BASE_PATH: buildConfigResult.message.VITE_BASE_PATH,
+          VITE_API_URL: buildConfigResult.message.VITE_API_URL,
+          VITE_SITE_URL: buildConfigResult.message.VITE_SITE_URL,
+          VITE_POWCH_APP_URL: buildConfigResult.message.VITE_POWCH_APP_URL,
         };
         console.log(chalk.cyan(`  Build env: base=${buildConfigResult.message.VITE_BASE_PATH}, gtm=${buildConfigResult.message.VITE_GTM_ID}\n`));
 
