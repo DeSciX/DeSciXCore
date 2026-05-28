@@ -38,8 +38,8 @@ test('BrieferExtractorError — valid construction surfaces all fields', async (
   const err = new BrieferExtractorError({
     code: BRIEFER_ERROR_CODES.SRC_NOT_FOUND,
     section: '§3 routing',
-    source: 'update-mesh-routing.js:82-202',
-    expected: 'ensureServerlessBackend function',
+    source: 'provision-platform-lb.js:82-202',
+    expected: 'ensureCoreNeg function',
     recovery: 'Re-locate the function and update sources/routing.js'
   });
 
@@ -47,7 +47,7 @@ test('BrieferExtractorError — valid construction surfaces all fields', async (
   assert.equal(err.code, 'BRIEFER-SRC-NOT-FOUND');
   assert.equal(err.section, '§3 routing');
   assert.match(err.message, /BRIEFER-SRC-NOT-FOUND/);
-  assert.match(err.message, /update-mesh-routing\.js:82-202/);
+  assert.match(err.message, /provision-platform-lb\.js:82-202/);
   assert.match(err.message, /Re-locate the function/);
 });
 

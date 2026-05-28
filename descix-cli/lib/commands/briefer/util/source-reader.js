@@ -32,7 +32,7 @@ import { BrieferExtractorError, BRIEFER_ERROR_CODES } from '../errors.js';
  * Resolve an absolute path inside the repo root for an extractor target.
  *
  * @param {object} cliPaths   { repoRoot, ... } from index.js::resolveCliPaths()
- * @param {string} relPath    Repo-root-relative path (e.g., "DeSciX/DeSciX_Cloud/.../update-mesh-routing.js")
+ * @param {string} relPath    Repo-root-relative path (e.g., "DeSciX/DeSciX_Cloud/.../provision-platform-lb.js")
  */
 export function resolveRepoPath(cliPaths, relPath) {
   if (!cliPaths || !cliPaths.repoRoot) {
@@ -100,7 +100,7 @@ export function sha12OfRange(lines, start, end) {
  * @param {string[]} args.lines       file split by /\r?\n/
  * @param {RegExp}   args.regex
  * @param {string}   args.section     "§3 routing" etc.
- * @param {string}   args.source      "update-mesh-routing.js:120" etc.
+ * @param {string}   args.source      "provision-platform-lb.js:120" etc.
  * @param {string}   args.expected    Description of the construct shape expected
  * @param {string}   args.recovery    What the operator should do
  * @param {[number,number]} [args.expectedRange]  1-indexed inclusive expected line range

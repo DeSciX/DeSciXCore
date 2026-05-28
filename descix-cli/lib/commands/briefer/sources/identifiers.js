@@ -2,8 +2,8 @@
  * §1 — Identifiers & invariants extractor (M2 implementation).
  *
  * Per WS-DESCIX-BRIEFER-CLI scope doc §2.2 §1, this extractor reads:
- *   - Domain pattern from update-mesh-routing.js:120 (host construction)
- *   - GCS path pattern from update-mesh-routing.js:123 (pathPrefix)
+ *   - Domain pattern from provision-platform-lb.js:120 (host construction)
+ *   - GCS path pattern from provision-platform-lb.js:123 (pathPrefix)
  *   - product_id === app_id invariant from hydrateUtils.js
  *   - Agentic-app / communities-as-apps invariant from the BEAST CEO record
  *     `apps/unk-beast/kb/Org/agentic-app-invariant-2026-05-26.jsonl`
@@ -32,14 +32,14 @@ export const SECTION = {
   number: 1,
   heading: '1. Identifiers & invariants',
   sourceFiles: [
-    'DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/update-mesh-routing.js',
+    'DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/provision-platform-lb.js',
     'DeSciX/DeSciX_Core/descix-platform-api/src/entitlements/index.js',
     'DeSciX/DeSciX_Cloud/microservice/services/geminiInteractions.js',
     'apps/unk-beast/kb/Org/agentic-app-invariant-2026-05-26.jsonl'
   ]
 };
 
-const MESH_FILE = 'DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/update-mesh-routing.js';
+const MESH_FILE = 'DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/provision-platform-lb.js';
 const HYDRATE_FILE = 'DeSciX/DeSciX_Core/descix-platform-api/src/entitlements/index.js';
 const GEMINI_FILE = 'DeSciX/DeSciX_Cloud/microservice/services/geminiInteractions.js';
 const AGENTIC_RECORD = 'apps/unk-beast/kb/Org/agentic-app-invariant-2026-05-26.jsonl';
@@ -64,7 +64,7 @@ export async function extract({ env, cliPaths } = {}) {
     });
   }
 
-  // ── Source 1: update-mesh-routing.js — domain + gcsPath patterns ──
+  // ── Source 1: provision-platform-lb.js — domain + gcsPath patterns ──
   const mesh = await readSourceFile({
     cliPaths,
     relPath: MESH_FILE,
@@ -77,7 +77,7 @@ export async function extract({ env, cliPaths } = {}) {
   // line is the canonical UNIFORM host formula (which a singleton override then
   // shadows via `effectiveHost` for daita) — briefer extractor still keys on
   // this exact construct as the platform routing invariant. Range expanded to
-  // 100-260 to tolerate further additions to the SINGLETON_* tables.
+  // 100-350 to tolerate NEG helpers + matcher builders in provision-platform-lb.js.
   const hostMatch = findInLines({
     lines: mesh.lines,
     regex: /const\s+host\s*=\s*env\s*===\s*['"]prod['"]\s*\?/,
@@ -85,7 +85,7 @@ export async function extract({ env, cliPaths } = {}) {
     source: `${MESH_FILE}:214 (uniform host pattern; CEO-D-2026-05-26-LB-ROUTING-UNIFORM)`,
     expected: `const host = env === 'prod' ? ... : ... construct`,
     recovery: `Re-locate the host construct in ${MESH_FILE} and update sources/identifiers.js.`,
-    expectedRange: [100, 260]
+    expectedRange: [100, 350]
   });
 
   // gcsPath pattern: canonical line shifted to L223 after WS-DESCIX-SINGLETON-PROVISIONER.
@@ -98,7 +98,7 @@ export async function extract({ env, cliPaths } = {}) {
     source: `${MESH_FILE}:223 (uniform gcsPath pattern; singleton override at ~L228)`,
     expected: 'const pathPrefix = `/${env}/${app}/site` (template literal)',
     recovery: `Re-locate the gcsPath construct in ${MESH_FILE}.`,
-    expectedRange: [100, 260]
+    expectedRange: [100, 350]
   });
 
   // ── Source 2: hydrateUtils.js — product_id===app_id invariant ──

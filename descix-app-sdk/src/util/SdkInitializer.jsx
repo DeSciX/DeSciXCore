@@ -91,6 +91,8 @@ async function processOAuthCallback(provider, code) {
 const gtmId = import.meta.env.VITE_GTM_ID;
 const gtmAuth = import.meta.env.VITE_GTM_AUTH;
 const gtmPreview = import.meta.env.VITE_GTM_PREVIEW;
+const gtmEnvSuffix = import.meta.env.VITE_GTM_ENV_SUFFIX
+    || (gtmAuth && gtmPreview ? `&gtm_auth=${gtmAuth}&gtm_preview=${gtmPreview}&gtm_cookies_win=x` : '');
 
 // Remove 'isEmbedded' variable from SdkInitializer.js
 // const queryParams = new URLSearchParams(window.location.search);
@@ -124,8 +126,8 @@ const gtmPreview = import.meta.env.VITE_GTM_PREVIEW;
 
 
 const initializeGtm = (isEmbeddedEnvironment) => {
-    if (!gtmId || !gtmAuth || !gtmPreview) {
-        console.error('GTM Initializer: Missing GTM config — VITE_GTM_ID, VITE_GTM_AUTH, or VITE_GTM_PREVIEW not set at build time.');
+    if (!gtmId) {
+        console.error('GTM Initializer: Missing VITE_GTM_ID at build time.');
         return;
     }
     window.dataLayer = window.dataLayer || [];
@@ -155,7 +157,7 @@ const initializeGtm = (isEmbeddedEnvironment) => {
     const script = document.createElement('script');
     script.async = true;
 
-    const envParams = `&gtm_auth=${gtmAuth}&gtm_preview=${gtmPreview}&gtm_cookies_win=x`;
+    const envParams = gtmEnvSuffix;
     if (isEmbeddedEnvironment) {
         script.src = `/gtm/gtm.js?id=${gtmId}${envParams}`;
         console.log(`GTM Initializer: Injecting GTM script with mapped URL: ${script.src}`);

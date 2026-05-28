@@ -1,19 +1,11 @@
 /**
  * §4 — Microservice deploy extractor (M2 implementation).
  *
- * Per WS-DESCIX-BRIEFER-CLI scope doc §2.2 §4, this extractor documents the
- * 3-step deploy chain that is NOT chained today:
- *   1. `gcloud run deploy {app}-{env}` — cited at
- *      DeSciX_Cloud/microservice/admin/scripts/deploy/deploy-service-env.sh +
- *      DeSciX_Powch/microservice/scripts/deploy.sh
- *   2. `node admin/scripts/deploy/update-mesh-routing.js --app={app} --env={env}`
- *      — cited at update-mesh-routing.js (main() function)
- *   3. `descix microservice register` — cited at bin/descix.js (the
- *      microserviceCommand.command('register') block)
+ * Per-app microservice deploy (broker-first model):
+ *   1. `gcloud run deploy {app}-{env}` — deploy-service-env.sh
+ *   2. `descix microservice register` — Firestore manifest (or self-register on boot)
  *
- * The KNOWN GAP — there's no `descix microservice deploy` chaining the three —
- * is computed dynamically: grep bin/descix.js for the deploy subcommand. If
- * found, the gap is closed; if absent, the gap text is rendered into §4.
+ * No per-app LB/NEG step for non-core apps. Core platform app NEGs at env standup via provision-platform-lb.js.
  */
 import {
   readSourceFile,
@@ -30,14 +22,14 @@ export const SECTION = {
   sourceFiles: [
     'DeSciX/DeSciX_Powch/microservice/scripts/deploy.sh',
     'DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/deploy-service-env.sh',
-    'DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/update-mesh-routing.js',
+    'DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/provision-platform-lb.js',
     'DeSciX/DeSciX_Core/descix-cli/bin/descix.js'
   ]
 };
 
 const POWCH_DEPLOY = 'DeSciX/DeSciX_Powch/microservice/scripts/deploy.sh';
 const CLOUD_DEPLOY = 'DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/deploy-service-env.sh';
-const MESH_FILE = 'DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/update-mesh-routing.js';
+const LB_FILE = 'DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/provision-platform-lb.js';
 const CLI_FILE = 'DeSciX/DeSciX_Core/descix-cli/bin/descix.js';
 
 export async function extract({ env, cliPaths } = {}) {
@@ -95,22 +87,22 @@ export async function extract({ env, cliPaths } = {}) {
     recovery: `Re-locate the gcloud run deploy in ${CLOUD_DEPLOY}.`
   });
 
-  // ── Step 2: update-mesh-routing.js main() ──
-  const mesh = await readSourceFile({
+  // Platform LB (env standup only — not per-app)
+  const lb = await readSourceFile({
     cliPaths,
-    relPath: MESH_FILE,
+    relPath: LB_FILE,
     section: `§${SECTION.number} ${SECTION.heading}`
   });
-  const mainMatch = findInLines({
-    lines: mesh.lines,
-    regex: /async\s+function\s+main\s*\(\s*\)/,
+  const ensureCoreNegMatch = findInLines({
+    lines: lb.lines,
+    regex: /function\s+ensureCoreNeg\s*\(/,
     section: `§${SECTION.number} ${SECTION.heading}`,
-    source: `${MESH_FILE}:82-202 (main() function)`,
-    expected: 'async function main() { ... }',
-    recovery: `Re-locate main() in ${MESH_FILE}.`
+    source: `${LB_FILE} (ensureCoreNeg)`,
+    expected: 'function ensureCoreNeg(envCfg, dryRun)',
+    recovery: `Re-locate ensureCoreNeg in ${LB_FILE}.`
   });
 
-  // ── Step 3: descix microservice register CLI command ──
+  // ── Step 2: descix microservice register CLI command ──
   const cli = await readSourceFile({
     cliPaths,
     relPath: CLI_FILE,
@@ -186,9 +178,9 @@ export async function extract({ env, cliPaths } = {}) {
 
   // ── Render the markdown ──
   const lines = [
-    `Today (regen target: \`${env}\`), microservice deploy is **3 separate steps NOT chained**:`,
+    `Today (regen target: \`${env}\`), per-app microservice deploy is **2 steps** (broker-first — no NEG for non-core apps):`,
     ``,
-    `**Step 1.** \`gcloud run deploy {app}-{env} ...\` — deploys the per-app Cloud Run service.`,
+    `**Step 1.** \`gcloud run deploy {app}-{env} ...\` — deploys the Cloud Run service.`,
     `- Reference (Powch): \`${POWCH_DEPLOY}:${powchRun.lineNumber}\``,
     `- Reference (Cloud canonical): \`${CLOUD_DEPLOY}:${cloudRun.lineNumber}\``,
     ``,
@@ -198,9 +190,9 @@ export async function extract({ env, cliPaths } = {}) {
     powchDeployBlock,
     '```',
     ``,
-    `**Step 2.** \`node admin/scripts/deploy/update-mesh-routing.js --app={app} --env={env}\` — wires LB. Creates serverless NEG, backend service, host rule, path matcher. Idempotent. — \`${MESH_FILE}:${mainMatch.lineNumber}\` (main())`,
+    `**Step 2.** \`descix microservice register\` — writes manifest to Firestore \`ServiceManifests\` so Core dispatches via \`proxyToExternalService\`. Self-registration on boot is equivalent. — \`${CLI_FILE}:${registerMatch.lineNumber}\``,
     ``,
-    `**Step 3.** \`descix microservice register\` — writes manifest to Firestore \`ServiceManifests\` so the central apifront can dispatch commands via \`proxyToExternalService\`. SEPARATE from LB wiring. — \`${CLI_FILE}:${registerMatch.lineNumber}\``,
+    `**Platform LB (core platform apps at standup):** \`deploy-backend-env.sh\` → \`provision-platform-lb.js\` — daita broker NEG + powch NEG + apex/peer URL map. \`deploy-service-env.sh powch\` re-runs provision for powch NEG. — \`${LB_FILE}:${ensureCoreNegMatch.lineNumber}\``,
     ``
   ];
 
@@ -220,7 +212,7 @@ export async function extract({ env, cliPaths } = {}) {
   const citations = [
     makeCitation({ file: POWCH_DEPLOY, lines: `${powchRun.lineNumber}-${powchDeployEnd}`, anchor: 'gcloud run deploy (Powch)', fileLines: powch.lines }),
     makeCitation({ file: CLOUD_DEPLOY, lines: String(cloudRun.lineNumber), anchor: 'gcloud run deploy (Cloud canonical)', fileLines: cloud.lines }),
-    makeCitation({ file: MESH_FILE, lines: String(mainMatch.lineNumber), anchor: 'update-mesh-routing.js main()', fileLines: mesh.lines }),
+    makeCitation({ file: LB_FILE, lines: String(ensureCoreNegMatch.lineNumber), anchor: 'provision-platform-lb.js ensureCoreNeg', fileLines: lb.lines }),
     makeCitation({ file: CLI_FILE, lines: String(registerMatch.lineNumber), anchor: 'descix microservice register', fileLines: cli.lines }),
     ...probeCitations
   ];

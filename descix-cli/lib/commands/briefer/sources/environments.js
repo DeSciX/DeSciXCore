@@ -4,7 +4,7 @@
  * Per WS-DESCIX-BRIEFER-CLI scope doc §2.2 §2, this extractor reads:
  *   - DEV/DEMO/PROD parallelism — architectural fact distilled from
  *     V2_docs/architecture/platform-runtime-mental-model.md (cite the doc).
- *   - ENV_CONFIG block from update-mesh-routing.js:32-47.
+ *   - ENV_CONFIG block from provision-platform-lb.js:32-47.
  *   - DEPLOY_ENV-bound-once hard-fail from descix-cloud-core/src/config.js
  *     (locate dynamically; canonical briefer line range is allowed to drift).
  *   - Secret Manager config name pattern from DeSciX_Cloud/CLAUDE.md (cite the
@@ -28,14 +28,14 @@ export const SECTION = {
   heading: '2. Environments',
   sourceFiles: [
     'DeSciX/V2_docs/architecture/platform-runtime-mental-model.md',
-    'DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/update-mesh-routing.js',
+    'DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/provision-platform-lb.js',
     'DeSciX/DeSciX_Core/descix-cloud-core/src/config.js',
     'DeSciX/DeSciX_Cloud/CLAUDE.md'
   ]
 };
 
 const RUNTIME_MM = 'DeSciX/V2_docs/architecture/platform-runtime-mental-model.md';
-const MESH_FILE = 'DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/update-mesh-routing.js';
+const MESH_FILE = 'DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/provision-platform-lb.js';
 const CONFIG_FILE = 'DeSciX/DeSciX_Core/descix-cloud-core/src/config.js';
 const CLOUD_CLAUDE = 'DeSciX/DeSciX_Cloud/CLAUDE.md';
 
@@ -59,7 +59,7 @@ export async function extract({ env, cliPaths } = {}) {
     });
   }
 
-  // ── Source 1: ENV_CONFIG in update-mesh-routing.js ──
+  // ── Source 1: ENV_CONFIG in provision-platform-lb.js ──
   const mesh = await readSourceFile({
     cliPaths,
     relPath: MESH_FILE,

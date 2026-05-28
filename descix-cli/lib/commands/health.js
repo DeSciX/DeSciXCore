@@ -39,7 +39,7 @@ const execAsync = promisify(exec);
 const SUPPORTED_ENVS = new Set(['dev', 'demo', 'prod']);
 
 /**
- * In-scope PROD hosts per ws-v2.1-prod-preflight.md §1a (cutover #1).
+ * In-scope PROD hosts per platform-must-know-briefer.md §2 (cutover #1).
  * Probing any other host in PROD is a misconfig and hard-fails.
  */
 const PROD_INSCOPE_APPS = new Set(['daita', 'egpt', 'powch']);
