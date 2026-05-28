@@ -2398,6 +2398,7 @@ corpusCommand
   .command('sync')
   .description('Sync corpus files to Pinecone using manifest definitions')
   .requiredOption('-a, --app <id>', 'App ID')
+  .option('-c, --community <community_id>', 'Community ID (optional; resolved from Products when omitted)')
   .option('-k, --kb <name>', 'KB name (syncs specific manifest; default: all)')
   .option('-v, --verbose', 'Show verbose output')
   .option('--ref <ref>', 'Override the git ref for ALL manifest sources (e.g., --ref ws-admin-b1). Precedence: --ref > manifest source.ref > "main".')

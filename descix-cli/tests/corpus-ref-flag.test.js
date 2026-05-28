@@ -40,6 +40,9 @@ class SpyApiClient {
     if (command === 'list_knowledge_bases') {
       return { status: 'ok', message: { knowledgebases: this.registeredKbs.map(n => ({ knowledgebase_name: n })) } };
     }
+    if (command === 'get_product_context') {
+      return { status: 'ok', community_id: payload?.app_id || 'testcommunity' };
+    }
     if (command === 'kb_list_file_ids') {
       return { status: 'ok', message: { file_ids: this.remoteFileIds, unique_count: this.remoteFileIds.length, total_chunks: 0 } };
     }
