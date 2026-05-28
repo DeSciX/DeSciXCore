@@ -2639,14 +2639,37 @@ siteCommand
         // ── Manifest-driven flow ──
         const { walkSite } = await import('../lib/core/SiteWalker.js');
 
+        // Get env-specific build config from backend (GTM vars + base path)
+        const buildConfigResult = await apiClient.invoke('get_site_build_config', {
+          app_id: appId,
+          community_id: communityId
+        });
+        const buildEnvVars = {
+          VITE_GTM_ID: buildConfigResult.message.VITE_GTM_ID,
+          VITE_GTM_AUTH: buildConfigResult.message.VITE_GTM_AUTH,
+          VITE_GTM_PREVIEW: buildConfigResult.message.VITE_GTM_PREVIEW,
+          VITE_GTM_ENV_SUFFIX: buildConfigResult.message.VITE_GTM_ENV_SUFFIX,
+          VITE_BASE_PATH: buildConfigResult.message.VITE_BASE_PATH,
+        };
+        console.log(chalk.cyan(`  Build env: base=${buildConfigResult.message.VITE_BASE_PATH}, gtm=${buildConfigResult.message.VITE_GTM_ID}\n`));
+
         // Run buildCommand if specified
         if (siteManifest.buildCommand) {
-          console.log(chalk.cyan(`\n  Running build: ${siteManifest.buildCommand}\n`));
-          const { exec } = await import('child_process');
-          const { promisify } = await import('util');
-          const execAsync = promisify(exec);
-          await execAsync(siteManifest.buildCommand, { cwd: appRoot });
-          console.log(chalk.green('  Build completed.\n'));
+          if (options.dryRun) {
+            console.log(chalk.yellow(`\n  Dry run - skipping build (${siteManifest.buildCommand})`));
+            console.log(chalk.gray('  Build env vars that would be injected:'));
+            Object.entries(buildEnvVars).forEach(([k, v]) => console.log(chalk.gray(`    ${k}=${v}`)));
+          } else {
+            console.log(chalk.cyan(`\n  Running build: ${siteManifest.buildCommand}\n`));
+            const { exec } = await import('child_process');
+            const { promisify } = await import('util');
+            const execAsync = promisify(exec);
+            await execAsync(siteManifest.buildCommand, {
+              cwd: appRoot,
+              env: { ...process.env, ...buildEnvVars }
+            });
+            console.log(chalk.green('  Build completed.\n'));
+          }
         }
 
         const walkResult = await walkSite(siteManifest, appRoot);
@@ -3214,6 +3237,122 @@ microserviceCommand
       console.log(chalk.gray('  - Run descix microservice register to register with gateway\n'));
     } catch (error) {
       console.error(chalk.red(`\n❌ ${error.message}\n`));
+      process.exit(1);
+    }
+  });
+
+// microservice deploy - Cloud Run deploy (broker-first; no per-app LB for non-core apps)
+microserviceCommand
+  .command('deploy')
+  .description('Deploy microservice to Cloud Run (uses deploy-service-env.sh; powch re-provisions platform NEG only)')
+  .option('-c, --community <id>', 'Community ID (auto-detects from context)')
+  .option('-a, --app <id>', 'App ID (auto-detects from context)')
+  .option('--env <env>', 'Target environment: dev|demo|prod')
+  .option('--dry-run', 'Print deploy plan without executing gcloud')
+  .option('--skip-register', 'Skip manifest registration after deploy (service may self-register on boot)')
+  .action(async (options) => {
+    try {
+      const apiClient = new DeSciXApiClient();
+      await requireAuth(apiClient);
+
+      const workspaceConfig = await WorkspaceConfig.load();
+      const ctx = workspaceConfig.resolveContextWithOptions(options);
+      const appId = ctx.appId;
+
+      if (!appId) {
+        console.error(chalk.red('\n❌ App ID required.'));
+        console.log(chalk.gray('  cd into an app directory, or use -a flag\n'));
+        process.exit(1);
+      }
+
+      const deployEnv = options.env || workspaceConfig.env?.environment?.toLowerCase();
+      if (!deployEnv || !['dev', 'demo', 'prod'].includes(deployEnv)) {
+        console.error(chalk.red('\n❌ --env is required (dev|demo|prod).'));
+        console.log(chalk.gray('  Example: descix --env demo microservice deploy -a powch\n'));
+        process.exit(1);
+      }
+
+      const workspaceRoot = workspaceConfig.getWorkspaceRoot();
+      if (!workspaceRoot) {
+        throw new Error('Could not resolve workspace root (.descix/workspace.json not found)');
+      }
+
+      const deployScript = path.join(
+        workspaceRoot,
+        'DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/deploy-service-env.sh'
+      );
+
+      try {
+        await fs.access(deployScript);
+      } catch {
+        throw new Error(`Deploy script not found: ${deployScript}`);
+      }
+
+      console.log(chalk.cyan(`\n🚀 Deploying microservice: ${appId} (${deployEnv})\n`));
+      if (options.dryRun) {
+        console.log(chalk.yellow('  Dry run — gcloud deploy will not execute\n'));
+      }
+
+      const { spawnSync } = await import('child_process');
+      const result = spawnSync('bash', [deployScript, appId, deployEnv], {
+        cwd: path.dirname(deployScript),
+        env: {
+          ...process.env,
+          ECHO_MODE: options.dryRun ? 'true' : 'false'
+        },
+        stdio: 'inherit'
+      });
+
+      if (result.status !== 0) {
+        process.exit(result.status || 1);
+      }
+
+      if (options.skipRegister) {
+        console.log(chalk.gray('\n  Skipped manifest registration (--skip-register).\n'));
+        return;
+      }
+
+      const microserviceDir = workspaceConfig.getMicroservicePath(appId);
+      if (!microserviceDir) {
+        console.log(chalk.yellow('\n⚠️  Deploy complete. Run descix microservice register to register manifest.\n'));
+        return;
+      }
+
+      const manifestPath = path.join(microserviceDir, 'manifest.json');
+      try {
+        await fs.access(manifestPath);
+      } catch {
+        console.log(chalk.yellow('\n⚠️  Deploy complete. No manifest.json — run descix microservice register when ready.\n'));
+        return;
+      }
+
+      console.log(chalk.cyan('\n📦 Registering microservice manifest...\n'));
+      const registerArgs = [
+        process.argv[1],
+        'microservice',
+        'register',
+        '-m', manifestPath,
+        '-a', appId
+      ];
+      if (ctx.communityId) {
+        registerArgs.push('-c', ctx.communityId);
+      }
+
+      const registerResult = spawnSync(process.execPath, registerArgs, {
+        cwd: process.cwd(),
+        stdio: 'inherit',
+        env: process.env
+      });
+
+      if (registerResult.status !== 0) {
+        console.log(chalk.yellow('\n⚠️  Cloud Run deploy succeeded but manifest registration failed.'));
+        console.log(chalk.gray(`  Retry: descix microservice register -m ${manifestPath} -a ${appId}\n`));
+        process.exit(registerResult.status || 1);
+      }
+
+      console.log(chalk.green('\n✅ Microservice deploy complete (Cloud Run + manifest registration).\n'));
+    } catch (error) {
+      console.error(chalk.red(`\n❌ Deploy failed: ${error.message}\n`));
       process.exit(1);
     }
   });
