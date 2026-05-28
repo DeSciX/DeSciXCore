@@ -22,6 +22,7 @@ export const SECTION = {
   sourceFiles: [
     'DeSciX/DeSciX_Powch/microservice/scripts/deploy.sh',
     'DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/deploy-service-env.sh',
+    'DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/lib/cloud-run-deploy.js',
     'DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/provision-platform-lb.js',
     'DeSciX/DeSciX_Core/descix-cli/bin/descix.js'
   ]
@@ -29,6 +30,7 @@ export const SECTION = {
 
 const POWCH_DEPLOY = 'DeSciX/DeSciX_Powch/microservice/scripts/deploy.sh';
 const CLOUD_DEPLOY = 'DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/deploy-service-env.sh';
+const CLOUD_RUN_LIB = 'DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/lib/cloud-run-deploy.js';
 const LB_FILE = 'DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/provision-platform-lb.js';
 const CLI_FILE = 'DeSciX/DeSciX_Core/descix-cli/bin/descix.js';
 
@@ -70,22 +72,36 @@ export async function extract({ env, cliPaths } = {}) {
   const powchDeployEnd = findContinuationEnd(powch.lines, powchRun.lineNumber);
   const powchDeployBlock = sliceRange(powch.lines, powchRun.lineNumber, powchDeployEnd);
 
-  // Cloud-side deploy script is also canonical per scope doc §4 — verify it
-  // exists at the documented path. If not, surface as a moved-source error
-  // rather than silently dropping the citation.
+  // Cloud-side deploy: bash script shells out to shared lib (deployToCloudRun)
   const cloud = await readSourceFile({
     cliPaths,
     relPath: CLOUD_DEPLOY,
     section: `§${SECTION.number} ${SECTION.heading}`
   });
-  const cloudRun = findInLines({
+  findInLines({
     lines: cloud.lines,
-    regex: /gcloud\s+run\s+deploy/,
+    regex: /deployToCloudRun/,
     section: `§${SECTION.number} ${SECTION.heading}`,
-    source: `${CLOUD_DEPLOY} (gcloud run deploy invocation)`,
-    expected: 'gcloud run deploy ... in deploy-service-env.sh',
-    recovery: `Re-locate the gcloud run deploy in ${CLOUD_DEPLOY}.`
+    source: `${CLOUD_DEPLOY} (deployToCloudRun import)`,
+    expected: 'deploy-service-env.sh invokes deployToCloudRun from lib/cloud-run-deploy.js',
+    recovery: `Re-locate deployToCloudRun in ${CLOUD_DEPLOY}.`
   });
+
+  const cloudRunLib = await readSourceFile({
+    cliPaths,
+    relPath: CLOUD_RUN_LIB,
+    section: `§${SECTION.number} ${SECTION.heading}`
+  });
+  const cloudRun = findInLines({
+    lines: cloudRunLib.lines,
+    regex: /gcloud run deploy \$\{serviceName\}/,
+    section: `§${SECTION.number} ${SECTION.heading}`,
+    source: `${CLOUD_RUN_LIB} (gcloud run deploy invocation)`,
+    expected: 'gcloud run deploy ${serviceName} ... in cloud-run-deploy.js',
+    recovery: `Re-locate the gcloud run deploy in ${CLOUD_RUN_LIB}.`
+  });
+  const cloudDeployEnd = findContinuationEnd(cloudRunLib.lines, cloudRun.lineNumber);
+  const cloudDeployBlock = sliceRange(cloudRunLib.lines, cloudRun.lineNumber, cloudDeployEnd);
 
   // Platform LB (env standup only — not per-app)
   const lb = await readSourceFile({
@@ -180,14 +196,14 @@ export async function extract({ env, cliPaths } = {}) {
   const lines = [
     `Today (regen target: \`${env}\`), per-app microservice deploy is **2 steps** (broker-first — no NEG for non-core apps):`,
     ``,
-    `**Step 1.** \`gcloud run deploy {app}-{env} ...\` — deploys the Cloud Run service.`,
+    `**Step 1.** \`gcloud run deploy {app}-{env} ...\` — deploys the Cloud Run service (via \`deploy-service-env.sh\` → \`lib/cloud-run-deploy.js\`; CLI: \`descix microservice deploy\`).`,
     `- Reference (Powch): \`${POWCH_DEPLOY}:${powchRun.lineNumber}\``,
-    `- Reference (Cloud canonical): \`${CLOUD_DEPLOY}:${cloudRun.lineNumber}\``,
+    `- Reference (Cloud canonical): \`${CLOUD_RUN_LIB}:${cloudRun.lineNumber}\``,
     ``,
-    'Verbatim from `' + POWCH_DEPLOY + '` (the canonical example):',
+    'Verbatim from `' + CLOUD_RUN_LIB + '` (shared deploy lib):',
     ``,
     '```bash',
-    powchDeployBlock,
+    cloudDeployBlock,
     '```',
     ``,
     `**Step 2.** \`descix microservice register\` — writes manifest to Firestore \`ServiceManifests\` so Core dispatches via \`proxyToExternalService\`. Self-registration on boot is equivalent. — \`${CLI_FILE}:${registerMatch.lineNumber}\``,
@@ -211,7 +227,8 @@ export async function extract({ env, cliPaths } = {}) {
 
   const citations = [
     makeCitation({ file: POWCH_DEPLOY, lines: `${powchRun.lineNumber}-${powchDeployEnd}`, anchor: 'gcloud run deploy (Powch)', fileLines: powch.lines }),
-    makeCitation({ file: CLOUD_DEPLOY, lines: String(cloudRun.lineNumber), anchor: 'gcloud run deploy (Cloud canonical)', fileLines: cloud.lines }),
+    makeCitation({ file: CLOUD_RUN_LIB, lines: `${cloudRun.lineNumber}-${cloudDeployEnd}`, anchor: 'gcloud run deploy (Cloud canonical lib)', fileLines: cloudRunLib.lines }),
+    makeCitation({ file: CLOUD_DEPLOY, lines: 'deployToCloudRun', anchor: 'deploy-service-env.sh → lib', fileLines: cloud.lines }),
     makeCitation({ file: LB_FILE, lines: String(ensureCoreNegMatch.lineNumber), anchor: 'provision-platform-lb.js ensureCoreNeg', fileLines: lb.lines }),
     makeCitation({ file: CLI_FILE, lines: String(registerMatch.lineNumber), anchor: 'descix microservice register', fileLines: cli.lines }),
     ...probeCitations

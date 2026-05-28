@@ -17,7 +17,8 @@
       "POWCH_APP_URL",
       "PUB_SUB_DISCORD_BOT_REPLY",
       "PUB_SUB_DISCORD_EVENTS",
-      "DISCORD_VERIFIED_ROLE_NAME"
+      "DISCORD_VERIFIED_ROLE_NAME",
+      "CDN_URL_MAP_NAME"
     ]
   },
   "required_keys": {
