@@ -12,7 +12,7 @@
  *
  * --clear flows use FieldValue.delete() server-side (NOT null) per tripwire #2.
  *
- * Every action appends a JSONL audit-log line to {workspace-root}/docs/handoff/model-config-changes.jsonl.
+ * Every action appends a JSONL audit-log line to {workspace-root}/docs/audit/model-config-changes.jsonl.
  *
  * This module performs NO Firestore I/O directly — it is HTTP-only, routing to backend handlers
  * via DeSciXApiClient.invoke (set_app_default_model, clear_app_default_model, set_kb_model_override,
@@ -26,7 +26,7 @@ import { DeSciXApiClient } from '../api-client.js';
 import { requireAuth } from '../auth-guard.js';
 import { WorkspaceConfig } from '../workspace-config.js';
 
-const AUDIT_LOG_RELATIVE = 'docs/handoff/model-config-changes.jsonl';
+const AUDIT_LOG_RELATIVE = 'docs/audit/model-config-changes.jsonl';
 
 /**
  * Resolve the audit-log absolute path. Anchored at workspace root so the JSONL lives in

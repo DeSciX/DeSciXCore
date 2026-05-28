@@ -167,7 +167,7 @@ descix app set-default-model -a unk-cos -m gemini-3.1-flash-lite --env=dev
 descix app set-default-model -a unk-cos --clear --env=dev
 ```
 
-Emits a JSONL audit entry to `docs/handoff/model-config-changes.jsonl`.
+Emits a JSONL audit entry to `docs/audit/model-config-changes.jsonl`.
 
 Requires platform-admin permission.
 
@@ -190,7 +190,7 @@ Requires platform-admin permission.
 descix kb set-override-model -a unk-cos -k Corpus -m gemini-2.5-pro --env=dev
 ```
 
-Emits a JSONL audit entry to `docs/handoff/model-config-changes.jsonl`.
+Emits a JSONL audit entry to `docs/audit/model-config-changes.jsonl`.
 
 Requires platform-admin permission.
 
@@ -211,7 +211,7 @@ Requires platform-admin permission.
 descix kb clear-override-model -a unk-cos -k Corpus --env=dev
 ```
 
-Emits a JSONL audit entry to `docs/handoff/model-config-changes.jsonl`.
+Emits a JSONL audit entry to `docs/audit/model-config-changes.jsonl`.
 
 Requires platform-admin permission.
 
