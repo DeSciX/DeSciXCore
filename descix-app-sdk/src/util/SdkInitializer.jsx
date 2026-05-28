@@ -88,7 +88,9 @@ async function processOAuthCallback(provider, code) {
 }
 
 
-const gtmId = 'GTM-5NT5X5WK'; // Define your GTM ID here
+const gtmId = import.meta.env.VITE_GTM_ID;
+const gtmAuth = import.meta.env.VITE_GTM_AUTH;
+const gtmPreview = import.meta.env.VITE_GTM_PREVIEW;
 
 // Remove 'isEmbedded' variable from SdkInitializer.js
 // const queryParams = new URLSearchParams(window.location.search);
@@ -121,16 +123,13 @@ const gtmId = 'GTM-5NT5X5WK'; // Define your GTM ID here
 
 
 
-// Function to initialize Google Tag Manager
 const initializeGtm = (isEmbeddedEnvironment) => {
-    if (!gtmId) {
-        console.warn('GTM Initializer: No GTM ID provided.');
+    if (!gtmId || !gtmAuth || !gtmPreview) {
+        console.error('GTM Initializer: Missing GTM config — VITE_GTM_ID, VITE_GTM_AUTH, or VITE_GTM_PREVIEW not set at build time.');
         return;
     }
-    // Ensure dataLayer exists
     window.dataLayer = window.dataLayer || [];
 
-    // Function to check if GTM script is already added
     const isGtmScriptPresent = () => {
         const scripts = document.getElementsByTagName('script');
         for (let i = 0; i < scripts.length; i++) {
@@ -141,7 +140,6 @@ const initializeGtm = (isEmbeddedEnvironment) => {
         return false;
     };
 
-    // Prevent duplicate injection
     if (isGtmScriptPresent()) {
         console.log('GTM Initializer: GTM script already present.');
         return;
@@ -149,35 +147,24 @@ const initializeGtm = (isEmbeddedEnvironment) => {
 
     console.log('GTM Initializer: Initializing GTM...');
 
-    // Standard GTM setup push
     window.dataLayer.push({
         'gtm.start': new Date().getTime(),
         event: 'gtm.js'
     });
 
-    // Create script element
     const script = document.createElement('script');
     script.async = true;
 
-    // *** IMPORTANT: Modify URL based on environment ***
+    const envParams = `&gtm_auth=${gtmAuth}&gtm_preview=${gtmPreview}&gtm_cookies_win=x`;
     if (isEmbeddedEnvironment) {
-        // Use the mapped prefix for embedded context
-        // Ensure patchUrlMappings([{prefix: '/gtm', target: 'www.googletagmanager.com'}]) was called before this
-        script.src = `/gtm/gtm.js?id=${gtmId}`;
+        script.src = `/gtm/gtm.js?id=${gtmId}${envParams}`;
         console.log(`GTM Initializer: Injecting GTM script with mapped URL: ${script.src}`);
     } else {
-        // Use the standard URL for non-embedded context
-        script.src = `https://www.googletagmanager.com/gtm.js?id=${gtmId}`;
+        script.src = `https://www.googletagmanager.com/gtm.js?id=${gtmId}${envParams}`;
         console.log(`GTM Initializer: Injecting GTM script with standard URL: ${script.src}`);
     }
 
-    // Append the script to the <head>
     document.head.appendChild(script);
-
-    // --- We omit the <noscript> injection via JS ---
-    // It's not practical or effective to inject <noscript> using React/JS.
-    // If GTM is critical even without JS, the <noscript> should ideally be in the static index.html,
-    // but its tracking capabilities are limited anyway. The core tracking relies on the main script.
 };
 
 

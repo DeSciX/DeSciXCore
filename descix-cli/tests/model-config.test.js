@@ -13,7 +13,7 @@
  * model-config.js. The CLI command module imports DeSciXApiClient + requireAuth at
  * module top-level; we intercept via a small loader that swaps the api-client module
  * in node's import cache. We use isolated tmp workspaces so the audit-log JSONL lands
- * in a sandbox and never touches the real docs/handoff/ tree.
+ * in a sandbox and never touches the real docs/audit/ tree.
  *
  * Run: `node --test tests/model-config.test.js` from descix-cli/.
  */
@@ -384,7 +384,7 @@ test('audit log — JSONL line written with correct schema after app set-default
 
   await mod.runAppSetDefaultModel({ app: 'unk-cos', model: 'gemini-3.1-flash-lite', env: 'dev' });
 
-  const auditPath = path.join(wsRoot, 'docs', 'handoff', 'model-config-changes.jsonl');
+  const auditPath = path.join(wsRoot, 'docs', 'audit', 'model-config-changes.jsonl');
   const txt = await fs.readFile(auditPath, 'utf8');
   const lines = txt.trim().split('\n').filter(Boolean);
   assert.equal(lines.length, 1, 'exactly one line written');
@@ -425,7 +425,7 @@ test('audit log — kb action includes kb field in schema', async (t) => {
 
   await mod.runKbSetOverrideModel({ app: 'unk-cos', kb: 'Corpus', model: 'gemini-2.5-pro', env: 'dev' });
 
-  const auditPath = path.join(wsRoot, 'docs', 'handoff', 'model-config-changes.jsonl');
+  const auditPath = path.join(wsRoot, 'docs', 'audit', 'model-config-changes.jsonl');
   const txt = await fs.readFile(auditPath, 'utf8');
   const entry = JSON.parse(txt.trim().split('\n')[0]);
 
@@ -460,7 +460,7 @@ test('audit log — multiple actions append (not overwrite)', async (t) => {
   await mod.runAppSetDefaultModel({ app: 'unk-cos', model: 'gemini-3.1-flash-lite', env: 'dev' });
   await mod.runAppSetDefaultModel({ app: 'unk-cos', clear: true, env: 'dev' });
 
-  const auditPath = path.join(wsRoot, 'docs', 'handoff', 'model-config-changes.jsonl');
+  const auditPath = path.join(wsRoot, 'docs', 'audit', 'model-config-changes.jsonl');
   const txt = await fs.readFile(auditPath, 'utf8');
   const lines = txt.trim().split('\n').filter(Boolean);
   assert.equal(lines.length, 2, 'two appends → two lines');
@@ -515,7 +515,7 @@ test('audit-log path — anchored at workspace root, not cwd-relative', async (t
   const { mod, cleanup } = await loadModelConfigWithFakeApi({});
   t.after(cleanup);
 
-  // cd into a sub-dir; resolveAuditLogPath should still return wsRoot/docs/handoff/...
+  // cd into a sub-dir; resolveAuditLogPath should still return wsRoot/docs/audit/...
   const sub = path.join(wsRoot, 'some', 'deep', 'sub');
   await fs.mkdir(sub, { recursive: true });
   process.chdir(sub);
