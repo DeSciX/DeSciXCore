@@ -3,6 +3,6 @@ instance_class: F1
 automatic_scaling:
   max_instances: 1
 env_variables:
-  DEPLOY_ENV: "production"
-  CONFIG_SECRET_NAME: "descix_config"
+  DEPLOY_ENV: "prod"
+  CONFIG_SECRET_NAME: "descix_config_prod"
   CONFIG_SECRET_VERSION: "latest"

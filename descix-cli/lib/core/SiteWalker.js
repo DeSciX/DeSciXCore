@@ -196,10 +196,10 @@ export async function walkSite(manifest, appRoot) {
         const size = await getFileSize(filePath);
         totalSize += size;
 
-        // Deploy path preserves the source entry's path prefix + relative path within
-        // e.g., source.path = "www" → www/GravitySim/index.html
+        // Deploy path is relative to the source directory root (not the source entry label).
+        // e.g. source.path = "site/dist" → dist/index.html under {env}/{app}/site/
         const relativeToSource = path.relative(absolutePath, filePath);
-        const deployPath = path.join(sourcePath, relativeToSource);
+        const deployPath = relativeToSource.split(path.sep).join('/');
 
         files.push({
           absolutePath: filePath,
