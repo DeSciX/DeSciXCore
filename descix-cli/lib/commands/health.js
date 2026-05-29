@@ -16,7 +16,7 @@
  *   Per feedback_no-hardcoded-fallbacks: no defaults, no silent fallback. Probe
  *   surface mismatches surface as failures.
  *
- *   See: docs/design/ws-cli-health-env-pivot.md
+ *   See: DeSciX/V2_docs/architecture/platform-must-know-briefer.md §2 (health probes)
  *
  * Output format (all probes):
  *   <PASS|FAIL> <name> [<env>] (<probe>)

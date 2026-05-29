@@ -1,7 +1,7 @@
 /**
  * WS-CLI-HEALTH-ENV-PIVOT — tests for `descix health --env <env>` probe-surface pivot.
  *
- * AC (from docs/design/ws-cli-health-env-pivot.md §4):
+ * AC (WS-CLI-HEALTH-ENV-PIVOT, closed 2026-05-26 — see platform-must-know-briefer.md §2):
  *   1. `descix health --env=dev` runs local-port path (regression — no behavior change).
  *   2. `descix health --env=demo` invokes gcloud + synthetic HTTPS probes
  *      (NOT local-port checks).
