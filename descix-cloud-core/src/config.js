@@ -218,10 +218,10 @@ class CloudConfig {
         // replacing the manual setTimeout debounce used by the old fs.watch impl.
         this.__watch_debounce_ms = 250;
 
-        if (process.env.DEPLOY_ENV !== 'production') {
+        if (process.env.DEPLOY_ENV !== 'prod') {
             dotenv.config({ path: path.resolve(this.__appDir, '.env'), override: false });
         } else {
-            console.log("Running in production mode. Skipping .env file load.");
+            console.log("Running in prod. Skipping .env file load.");
         }
 
         this._loadBootstrapKeys();
@@ -362,6 +362,9 @@ class CloudConfig {
      */
     _getElevatedSecretVersion() {
         if (this.CONFIG_SECRET_VERSION !== 'latest') return this.CONFIG_SECRET_VERSION;
+        const env = (this.DEPLOY_ENV || '').toLowerCase();
+        // Shared elevated_credentials_descix uses the LIVE alias for prod; no PROD alias exists.
+        if (env === 'prod') return 'LIVE';
         return this.DEPLOY_ENV.toUpperCase();
     }
 

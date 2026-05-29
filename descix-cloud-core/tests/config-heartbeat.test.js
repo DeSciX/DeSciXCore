@@ -186,7 +186,7 @@ test('2.B.1: watcher is NOT armed when DEPLOY_ENV !== dev', async (t) => {
     const cfg = createCloudConfig({ rootPath: dir });
 
     // Default DEPLOY_ENV is undefined here (no .env loaded with tests).
-    cfg.DEPLOY_ENV = 'production';
+    cfg.DEPLOY_ENV = 'prod';
     cfg._startConfigWatcher();
     assert.equal(cfg.__watcher, null, 'watcher must NOT be armed outside dev');
 });

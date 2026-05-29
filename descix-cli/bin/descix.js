@@ -3254,7 +3254,7 @@ microserviceCommand
   .option('--env <env>', 'Target environment: dev|demo|prod')
   .option('--dry-run', 'Print deploy plan without executing gcloud')
   .option('--skip-register', 'Skip manifest registration after deploy (service may self-register on boot)')
-  .action(async (options) => {
+  .action(async (options, command) => {
     try {
       const apiClient = new DeSciXApiClient();
       await requireAuth(apiClient);
@@ -3269,7 +3269,8 @@ microserviceCommand
         process.exit(1);
       }
 
-      const deployEnv = options.env || workspaceConfig.env?.environment?.toLowerCase();
+      const parentEnv = command?.parent?.opts?.()?.env;
+      const deployEnv = (options.env || parentEnv || workspaceConfig.env?.environment)?.toLowerCase();
       if (!deployEnv || !['dev', 'demo', 'prod'].includes(deployEnv)) {
         console.error(chalk.red('\n❌ --env is required (dev|demo|prod).'));
         console.log(chalk.gray('  Example: descix --env demo microservice deploy -a powch\n'));
