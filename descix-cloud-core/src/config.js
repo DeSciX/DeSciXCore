@@ -2,8 +2,21 @@
  * CloudConfig - Universal Service Configuration
  * Shared bootstrap for DeSciX platform microservices (Core, Powch, Discord, etc.)
  *
- * Uses rootPath to resolve .env, defaults-config.json, dev-overrides.json.
- * Loads from Secret Manager via config-schema.json key definitions.
+ * Uses rootPath to resolve .env, defaults-config-{env}.json, defaults-config.json,
+ * dev-overrides.json. Loads from Secret Manager via config-schema.json key definitions.
+ *
+ * Bootstrap precedence (highest → lowest), WS-CONFIG-ARCH Phase 1:
+ *   1. process.env                    — bootstrap keys (_loadBootstrapKeys)
+ *   2. defaults-config-{env}.json     — per-env NON-SECRET config (_loadEnvDefaults)
+ *   3. defaults-config.json           — env-invariant NON-SECRET base (_loadDefaults)
+ *   4. Secret Manager                 — SECRETS ONLY (_mergeConfig in initialize())
+ *   + dev only: dev-overrides.json + .env FORCE-WIN over all the above for keys in
+ *     config-schema.json dev_override_keys (_loadDevOverrides).
+ * Merge is first-write-wins (_mergeConfig), so more-specific layers load FIRST.
+ * "Secret Manager is for secrets only" — non-secret per-env config belongs in the
+ * defaults-config-{env}.json layer, not in descix_config_{env} (CEO-D-2026-05-30-
+ * CONFIG-ARCHITECTURE-DEFAULTS-PER-ENV). No hardcoded fallbacks: a missing required
+ * key raises CloudConfigFatalError at boot (_assertRequiredKeys).
  *
  * WS-CONFIG-BOOTSTRAP-FIX item #2: required_keys enforcement at end of initialize().
  * WS-CONFIG-BOOTSTRAP-FIX item #11: dev file-watcher + boot-time SHA drift check.
@@ -155,7 +168,11 @@ export function createCloudConfig(options = {}) {
         throw new Error('[CloudConfig] rootPath is required on first call: createCloudConfig({ rootPath: "path/to/app" })');
     }
     _rootPath = rootPath;
-    _instance = new CloudConfig(rootPath);
+    // additionalRequiredKeys: per-service required keys NOT in the shared schema's
+    // required_keys (which applies to every cloud-core consumer). e.g. Powch requires
+    // CORE_API_URL for its Cloud loopback, but the Cloud service does not — so it
+    // cannot live in the global schema. Enforced at boot by _assertRequiredKeys.
+    _instance = new CloudConfig(rootPath, options.additionalRequiredKeys || []);
     return _instance;
 }
 
@@ -189,10 +206,14 @@ export function _resetCloudConfigForTests() {
 }
 
 class CloudConfig {
-    constructor(rootPath) {
+    constructor(rootPath, additionalRequiredKeys = []) {
         this.__rootPath = path.resolve(rootPath);
         this.__appDir = this.__rootPath;
         this.__servicesDir = path.resolve(this.__appDir, 'services');
+
+        // Per-service required keys layered on top of the shared schema's
+        // required_keys. Enforced in _assertRequiredKeys.
+        this.__additionalRequiredKeys = Array.isArray(additionalRequiredKeys) ? additionalRequiredKeys : [];
 
         // Internal EventEmitter for config:reloaded events. We do NOT extend
         // EventEmitter directly because CloudConfig dynamically assigns config keys
@@ -229,6 +250,17 @@ class CloudConfig {
         this.secretClient = null;
         this.__googleApplicationCredentials = null;
         this.DAITA_ABI = null;
+
+        // WS-CONFIG-ARCH Phase 1 — per-env config layer.
+        // Loads defaults-config-{DEPLOY_ENV}.json BEFORE the env-invariant
+        // defaults-config.json. Because _mergeConfig is first-write-wins, the
+        // env-specific layer WINS over the base file. Both still load in the
+        // constructor (before Secret Manager runs in initialize()), preserving
+        // the existing disk-before-Secret-Manager semantics. DEPLOY_ENV is
+        // already resolved here: from process.env (cloud) or workspace.json
+        // (dev, via _tryLoadWorkspaceConfig inside _loadBootstrapKeys). If
+        // DEPLOY_ENV is unset, this is a no-op (no hardcoded env fallback).
+        this._loadEnvDefaults();
 
         this._loadDefaults();
 
@@ -410,6 +442,51 @@ class CloudConfig {
                     ? value === 'true'
                     : value;
             }
+        }
+    }
+
+    /**
+     * WS-CONFIG-ARCH Phase 1 — load the per-environment defaults layer.
+     *
+     * Reads `defaults-config-{DEPLOY_ENV}.json` from the service root and merges
+     * it via the same first-write-wins _mergeConfig path used by _loadDefaults().
+     * This method MUST be called BEFORE _loadDefaults() so the env-specific layer
+     * wins over the env-invariant base file.
+     *
+     * Full bootstrap precedence (highest → lowest):
+     *   1. process.env                       (_loadBootstrapKeys, constructor)
+     *   2. defaults-config-{env}.json        (this method, constructor)
+     *   3. defaults-config.json              (_loadDefaults, constructor)
+     *   4. Secret Manager (secrets ONLY)     (_mergeConfig in initialize())
+     *   + In dev only, dev-overrides.json and .env FORCE-WIN over all of the
+     *     above for keys listed in config-schema.json dev_override_keys
+     *     (_loadDevOverrides, after Secret Manager).
+     *
+     * No hardcoded fallbacks: if DEPLOY_ENV is unset or the file is absent, this
+     * is a no-op. A required key that ends up null is caught by _assertRequiredKeys
+     * and raises CloudConfigFatalError at boot (anti-pattern #7 — fail loud).
+     */
+    _loadEnvDefaults() {
+        if (!this.DEPLOY_ENV) {
+            // DEPLOY_ENV not yet known (e.g. cloud deploy that sets it via env vars
+            // but somehow not present, or a non-workspace local run). No env layer
+            // to load — do NOT guess an environment. _assertRequiredKeys will catch
+            // any resulting null required key loudly.
+            return;
+        }
+        const envDefaultsPath = path.resolve(this.__appDir, `defaults-config-${this.DEPLOY_ENV}.json`);
+        if (!fs.existsSync(envDefaultsPath)) {
+            console.log(`[Config] No per-env defaults file at ${envDefaultsPath} — skipping env layer.`);
+            return;
+        }
+        try {
+            const raw = fs.readFileSync(envDefaultsPath, 'utf8');
+            const parsed = JSON.parse(raw);
+            this._mergeConfig(parsed);
+            const sha = crypto.createHash('sha256').update(raw).digest('hex');
+            console.log(`[Config] Loaded defaults-config-${this.DEPLOY_ENV}.json (sha256=${sha.slice(0, 12)}…) — env layer wins over base defaults.`);
+        } catch (e) {
+            console.error(`[Config] Error loading defaults-config-${this.DEPLOY_ENV}.json:`, e.message);
         }
     }
 
@@ -641,13 +718,19 @@ class CloudConfig {
      */
     _assertRequiredKeys() {
         const { required_keys } = configSchema;
-        if (!required_keys || !Array.isArray(required_keys.keys)) return;
-        const missing = required_keys.keys.filter(k => this[k] === undefined || this[k] === null);
+        const schemaKeys = (required_keys && Array.isArray(required_keys.keys)) ? required_keys.keys : [];
+        // Union of shared-schema required keys and any per-service required keys
+        // supplied via createCloudConfig({ additionalRequiredKeys }).
+        const allRequired = [...new Set([...schemaKeys, ...this.__additionalRequiredKeys])];
+        if (allRequired.length === 0) return;
+        const missing = allRequired.filter(k => this[k] === undefined || this[k] === null);
         if (missing.length > 0) {
             throw new CloudConfigFatalError(
                 `[CloudConfig] FATAL: required keys are unset after bootstrap: ${missing.join(', ')}. ` +
-                `Set them in microservice/defaults-config.json (recommended) or Secret Manager ` +
-                `(only if a per-env secret). Schema: descix-cloud-core/config-schema.json required_keys.`
+                `Set NON-SECRET per-env values in microservice/defaults-config-{env}.json (recommended), ` +
+                `env-invariant values in defaults-config.json, or true secrets in Secret Manager. ` +
+                `Schema: descix-cloud-core/config-schema.json required_keys ` +
+                `(+ per-service additionalRequiredKeys passed to createCloudConfig).`
             );
         }
     }
