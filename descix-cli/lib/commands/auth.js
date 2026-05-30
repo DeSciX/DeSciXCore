@@ -424,7 +424,13 @@ export async function adminLogin(options = {}) {
     const apiClient = new DeSciXApiClient();
     await apiClient.ensureBaseUrl();
 
-    const result = await apiClient.invokeRaw('admin_bootstrap_login', { email });
+    // admin_bootstrap_login is a bootstrap command: it must be sent guest-like,
+    // never carrying a previously-stored access_token. Targeting a DIFFERENT env
+    // than the one that minted the stored token (e.g. CLI configured for dev but
+    // logging into prod via --env prod) would otherwise send a token prod's auth
+    // middleware rejects with HTTP 401 BEFORE admin_bootstrap_login runs. Force
+    // guest by skipping the session token, same as device_request_login.
+    const result = await apiClient.invokeRaw('admin_bootstrap_login', { email }, null, { skipSessionCheck: true });
     const data = result.data || result;
 
     if (data.status === 'ERROR') {
