@@ -2432,6 +2432,118 @@ kbCommand
     }
   });
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// kb records — KB-as-Database record store (CEO-D-2026-06-01-KB-AS-DB-API)
+// Treat your app's KB as a queryable record store: put/query/get/delete records
+// with custom metadata. `query` is a STRUCTURED metadata-filtered scan (non-ANN)
+// returning full records; for semantic ANN search use `descix chat`.
+// ─────────────────────────────────────────────────────────────────────────────
+const kbRecordsCommand = kbCommand
+  .command('records')
+  .description('Use your KB as a queryable record store (put/query/get/delete records with custom metadata)');
+
+kbRecordsCommand
+  .command('put')
+  .description('Store/replace records in a KB with custom metadata (your KB as a database table)')
+  .requiredOption('-a, --app <app_id>', 'App ID')
+  .requiredOption('-k, --kb <kb_id>', 'Knowledge Base ID')
+  .requiredOption('-r, --records <json>', 'JSON array of records: [{ "id", "text", "file_id", ...customMetadata }]')
+  .action(async (options) => {
+    try {
+      const apiClient = new DeSciXApiClient();
+      await requireAuth(apiClient);
+      let records;
+      try { records = JSON.parse(options.records); } catch (e) { throw new Error(`--records must be valid JSON array: ${e.message}`); }
+      if (!Array.isArray(records)) throw new Error('--records must be a JSON array');
+      const response = await apiClient.invoke('kb_records_put', { app_id: options.app, kb_id: options.kb, records });
+      const result = response.message || response;
+      console.log(chalk.green(`\n✓ ${result.message || 'records put'}\n`));
+    } catch (error) {
+      console.error(chalk.red(`\n❌ ${error.message}\n`));
+      process.exit(1);
+    }
+  });
+
+kbRecordsCommand
+  .command('query')
+  .description('STRUCTURED metadata-filtered scan (non-ANN) returning full records: "all records where type=episode AND show=X"')
+  .requiredOption('-a, --app <app_id>', 'App ID')
+  .requiredOption('-k, --kb <kb_id>', 'Knowledge Base ID')
+  .option('-f, --filter <json>', 'Metadata predicate JSON, e.g. \'{"type":"episode","show":{"$eq":"X"}}\'', '{}')
+  .option('--fields <csv>', 'Comma-separated metadata projection (omit or "*" for all metadata)')
+  .option('--limit <n>', 'Cap on returned records', (v) => parseInt(v, 10))
+  .action(async (options) => {
+    try {
+      const apiClient = new DeSciXApiClient();
+      await requireAuth(apiClient);
+      let filter;
+      try { filter = JSON.parse(options.filter); } catch (e) { throw new Error(`--filter must be valid JSON: ${e.message}`); }
+      const fields = options.fields ? options.fields.split(',').map(s => s.trim()).filter(Boolean) : undefined;
+      const params = { app_id: options.app, kb_id: options.kb, filter };
+      if (fields) params.fields = fields;
+      if (options.limit) params.limit = options.limit;
+      const response = await apiClient.invoke('kb_records_query', params);
+      const result = response.message || response;
+      console.log(chalk.gray(`\n${result.message || ''}`));
+      console.log(JSON.stringify(result.records || [], null, 2));
+      console.log();
+    } catch (error) {
+      console.error(chalk.red(`\n❌ ${error.message}\n`));
+      process.exit(1);
+    }
+  });
+
+kbRecordsCommand
+  .command('get')
+  .description('Fetch specific records by id (point lookup) with an arbitrary metadata projection')
+  .requiredOption('-a, --app <app_id>', 'App ID')
+  .requiredOption('-k, --kb <kb_id>', 'Knowledge Base ID')
+  .requiredOption('-i, --ids <csv>', 'Comma-separated record ids to fetch')
+  .option('--fields <csv>', 'Comma-separated metadata projection (omit or "*" for all metadata)')
+  .action(async (options) => {
+    try {
+      const apiClient = new DeSciXApiClient();
+      await requireAuth(apiClient);
+      const ids = options.ids.split(',').map(s => s.trim()).filter(Boolean);
+      const fields = options.fields ? options.fields.split(',').map(s => s.trim()).filter(Boolean) : undefined;
+      const params = { app_id: options.app, kb_id: options.kb, ids };
+      if (fields) params.fields = fields;
+      const response = await apiClient.invoke('kb_records_get', params);
+      const result = response.message || response;
+      console.log(chalk.gray(`\n${result.message || ''}`));
+      console.log(JSON.stringify(result.records || [], null, 2));
+      console.log();
+    } catch (error) {
+      console.error(chalk.red(`\n❌ ${error.message}\n`));
+      process.exit(1);
+    }
+  });
+
+kbRecordsCommand
+  .command('delete')
+  .description('Delete records by id (or by file_id grouping key)')
+  .requiredOption('-a, --app <app_id>', 'App ID')
+  .requiredOption('-k, --kb <kb_id>', 'Knowledge Base ID')
+  .option('-i, --ids <csv>', 'Comma-separated record ids to delete')
+  .option('--file-ids <csv>', 'Comma-separated file_id grouping keys to delete')
+  .action(async (options) => {
+    try {
+      const apiClient = new DeSciXApiClient();
+      await requireAuth(apiClient);
+      const ids = options.ids ? options.ids.split(',').map(s => s.trim()).filter(Boolean) : [];
+      const file_ids = options.fileIds ? options.fileIds.split(',').map(s => s.trim()).filter(Boolean) : [];
+      if (ids.length === 0 && file_ids.length === 0) throw new Error('Provide --ids and/or --file-ids');
+      const response = await apiClient.invoke('kb_records_delete', { app_id: options.app, kb_id: options.kb, ids, file_ids });
+      const result = response.message || response;
+      console.log(chalk.green(`\n✓ ${result.message || 'records deleted'}\n`));
+    } catch (error) {
+      console.error(chalk.red(`\n❌ ${error.message}\n`));
+      process.exit(1);
+    }
+  });
+
+
 // Corpus sub-commands (git-aware RAG sync via manifests)
 const corpusCommand = kbCommand
   .command('corpus')
