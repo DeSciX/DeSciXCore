@@ -1,17 +1,35 @@
 {
-  "name": "cryptoapis-sdk",
-  "version": "1.0.0",
-  "description": "Node.js SDK for CryptoAPIs - Generated from OpenAPI specification",
-  "main": "dist/api.js",
-  "types": "dist/api.d.ts",
-  "files": ["dist"],
-  "keywords": ["cryptoapis", "crypto", "api", "sdk", "blockchain", "bitcoin", "ethereum", "openapi"],
-  "license": "MIT",
-  "dependencies": {
-    "bluebird": "^3.7.2",
-    "request": "^2.88.2"
-  },
-  "engines": {
-    "node": ">=14.0.0"
-  }
+    "name": "cryptoapis-sdk",
+    "version": "2024-12-12",
+    "description": "CryptoAPIs typescript-node client, generated from cryptoapis-openapi.json (version 2024-12-12) via openapi-generator 7.22.0. Regenerate per README.md — do not hand-edit.",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/descix/DeSciX_Core.git"
+    },
+    "main": "dist/api.js",
+    "types": "dist/api.d.ts",
+    "files": [
+        "dist",
+        "api",
+        "model",
+        "api.ts",
+        "tsconfig.json"
+    ],
+    "scripts": {
+        "clean": "rm -Rf dist",
+        "build": "tsc",
+        "smoke": "node smoke.mjs"
+    },
+    "author": "OpenAPI-Generator Contributors",
+    "license": "Unlicense",
+    "dependencies": {
+        "bluebird": "^3.7.2",
+        "request": "^2.88.2"
+    },
+    "devDependencies": {
+        "@types/bluebird": "^3.5.33",
+        "@types/node": "^12",
+        "@types/request": "^2.48.8",
+        "typescript": "^4.0 || ^5.0"
+    }
 }

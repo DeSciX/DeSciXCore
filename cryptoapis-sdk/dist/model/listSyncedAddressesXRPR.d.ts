@@ -1,0 +1,18 @@
+import { ListSyncedAddressesXRPRData } from './listSyncedAddressesXRPRData';
+export declare class ListSyncedAddressesXRPR {
+    'apiVersion': string;
+    'requestId': string;
+    'context'?: string;
+    'data': ListSyncedAddressesXRPRData;
+    static discriminator: string | undefined;
+    static attributeTypeMap: Array<{
+        name: string;
+        baseName: string;
+        type: string;
+    }>;
+    static getAttributeTypeMap(): {
+        name: string;
+        baseName: string;
+        type: string;
+    }[];
+}
