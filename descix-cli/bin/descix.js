@@ -2120,6 +2120,49 @@ appCommand
     }
   });
 
+// ============ App: set-port (WS-CLI-MESH-ROUTING-GAP) ============
+//
+// Canonical write path for an app's microservice.port in workspace.json.
+// `descix microservice init` READS env.products[<app>].microservice.port and hard-fails
+// if it is missing; this command is how that port is set, without hand-editing workspace.json.
+// Backed by WorkspaceConfig.setMicroservicePort (parallel to setSitePort).
+appCommand
+  .command('set-port')
+  .description('Set the microservice port for a mapped app (writes env.products[<app>].microservice.port). Pass "n" to remove.')
+  .requiredOption('-a, --app <app_id>', 'App ID (must be mapped in workspace.json)')
+  .requiredOption('-p, --port <port>', 'Microservice port number (1-65535), or "n" to remove')
+  .action(async (options) => {
+    try {
+      const appId = options.app;
+      const workspaceConfig = await WorkspaceConfig.load();
+
+      // Disable case — setMicroservicePort(appId, null) removes microservice.port / cleans microservice.{}
+      if (options.port === 'n' || options.port === 'N') {
+        await workspaceConfig.setMicroservicePort(appId, null);
+        console.log(chalk.green(`\n✓ Microservice port removed for ${appId}\n`));
+        return;
+      }
+
+      const portNum = parseInt(options.port, 10);
+      if (isNaN(portNum) || portNum < 1 || portNum > 65535) {
+        console.error(chalk.red('\n❌ Invalid port number. Provide an integer 1-65535, or "n" to remove.\n'));
+        process.exit(1);
+      }
+
+      // setMicroservicePort mutates the live env entry and saves — and hard-fails (canonical
+      // "not mapped in workspace.json" error) for an unmapped app, surfaced in the catch below.
+      await workspaceConfig.setMicroservicePort(appId, portNum);
+
+      console.log(chalk.green(`\n✓ Microservice port set for ${appId}`));
+      console.log(chalk.cyan(`  Port: ${portNum}`));
+      console.log(chalk.gray(`  Written to env.products[${appId}].microservice.port in workspace.json.`));
+      console.log(chalk.gray(`  The gateway routes the microservice on this port; \`descix microservice init -a ${appId}\` can now scaffold it.\n`));
+    } catch (error) {
+      console.error(chalk.red(error.message));
+      process.exit(1);
+    }
+  });
+
 
 // ============ App: set-default-model (WS-CONFIG-BOOTSTRAP-FIX item #10) ============
 //

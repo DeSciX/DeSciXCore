@@ -557,6 +557,56 @@ export class WorkspaceConfig {
   }
 
   /**
+   * Update an app's microservice.port in env.products[] (or env.platform if it is the platform app).
+   *
+   * Parallel to setSitePort(), but operates on the entry's microservice.{} slot.
+   * This is the canonical write path for the microservice port that `descix microservice init`
+   * reads (and hard-fails on if missing). Backs the `descix app set-port` command, closing
+   * WS-CLI-MESH-ROUTING-GAP without hand-editing workspace.json.
+   *
+   * Pass `null` to remove microservice.port; if microservice.{} becomes empty, it is also deleted.
+   * Persists via save() at the end — same auto-save pattern as setSitePort()/setEnvironment().
+   * Hard-fails if appId is not mapped in env.platform or env.products.
+   *
+   * @param {string} appId - App identifier (must exist in env.platform or env.products)
+   * @param {number|string|null} port - Port number to set, or null to remove microservice.port
+   * @returns {Promise<string>} Path to saved config (from save())
+   */
+  async setMicroservicePort(appId, port) {
+    if (!appId) throw new Error('appId is required');
+
+    // Find the live env entry (platform or products[]) — not a copy
+    let entry = null;
+    if (this.env?.platform?.appId === appId) {
+      entry = this.env.platform;
+    } else if (Array.isArray(this.env?.products)) {
+      entry = this.env.products.find(p => p.appId === appId) || null;
+    }
+
+    if (!entry) {
+      throw new Error(
+        `App "${appId}" is not mapped in workspace.json. ` +
+        'Use `descix app init` to register, or `descix app set-localpath -a <id> -p <path>` to repoint.'
+      );
+    }
+
+    if (port === null || port === undefined) {
+      // Remove microservice.port; clean up empty microservice.{}
+      if (entry.microservice) {
+        delete entry.microservice.port;
+        if (Object.keys(entry.microservice).length === 0) {
+          delete entry.microservice;
+        }
+      }
+    } else {
+      if (!entry.microservice) entry.microservice = {};
+      entry.microservice.port = port;
+    }
+
+    return this.save();
+  }
+
+  /**
    * Persistently set the target environment in workspace.json.
    *
    * Updates env.environment and env.apiUrl, then saves.
