@@ -2445,10 +2445,10 @@ const kbRecordsCommand = kbCommand
 
 kbRecordsCommand
   .command('put')
-  .description('Store/replace records in a KB with custom metadata (your KB as a database table)')
+  .description('Store/replace records in a KB with custom metadata (your KB as a database table). You supply file_id (+ optional chunk_idx); the id is built for you.')
   .requiredOption('-a, --app <app_id>', 'App ID')
   .requiredOption('-k, --kb <kb_id>', 'Knowledge Base ID')
-  .requiredOption('-r, --records <json>', 'JSON array of records: [{ "id", "text", "file_id", ...customMetadata }]')
+  .requiredOption('-r, --records <json>', 'JSON array of records: [{ "file_id", "text", "chunk_idx"?, ...customMetadata }] — id is built from file_id (+ chunk_idx); pass a full "id" only for back-compat. Example: \'[{"file_id":"e1","text":"...","type":"episode","show":"x"}]\'')
   .action(async (options) => {
     try {
       const apiClient = new DeSciXApiClient();
