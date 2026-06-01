@@ -75,13 +75,19 @@ Before any change, state which package boundary is being touched and confirm no 
 - Test coverage for `copyScaffold()` added to `site-init.test.js` and `microservice-init.test.js` (Batch 4 tests only exercised `WorkspaceConfig.getAppByAppId()`, not the scaffold copy path) ✓
 - Anti-regression meta-test extended in `removed-methods-anti-regression.test.js` to verify scaffold dir exists at runtime ✓
 
+### Complete (WS-CLI-MESH-ROUTING-GAP — `descix app set-port`)
+- `WorkspaceConfig.setMicroservicePort(appId, port)` added — parallel to `setSitePort()`; mutates the live `env.products[]`/`env.platform` entry's `microservice.port`, auto-saves; pass `null` to remove (empty `microservice.{}` cleaned up); hard-fails with the canonical "not mapped in workspace.json" error for an unmapped app ✓
+- `descix app set-port -a <id> -p <port>` command added (`bin/descix.js`, in the `app` group next to `set-localpath`/`unmap`) — wired to `setMicroservicePort`; validates port 1-65535; accepts `-p n` to remove; hard-fails clearly on unmapped app / bad port ✓
+- This is the canonical write path for the `microservice.port` that `descix microservice init` reads — no more hand-editing workspace.json ✓
+- Test coverage in `tests/app-set-port.test.js` (mirrors `site-servelocal.test.js`: happy path, disable/cleanup, disable-no-op, unmapped hard-fail, platform-app, plus a method-exists anti-regression assertion) ✓
+
 ### WorkspaceConfig — additional canonical method (v2.1)
-- **`workspaceConfig.env`** — raw `env` object from workspace.json. Use for reading `env.platform.microservice.port` / `env.products[i].microservice.port` when injecting port into scaffold files. Do not mutate directly — use `setSitePort()` for site port mutations.
+- **`workspaceConfig.env`** — raw `env` object from workspace.json. Use for reading `env.platform.microservice.port` / `env.products[i].microservice.port` when injecting port into scaffold files. Do not mutate directly — use `setSitePort()` for site port mutations and `setMicroservicePort()` for microservice port mutations.
 
 ### Pending (other)
 - `descix-cli/bin/mcp-server.js`: imports non-existent `vendor/mcp/tools.js` — determine canonical MCP entry point, remove `DeSciXMCPServer` legacy
 - `descix-cli/tests/mcp-flow.test.js`: imports `vendor/mcp/mcp-server.js` (missing) — remove or rewrite
-- **Port-allocation policy gap (`WS-CLI-MESH-ROUTING-GAP`):** `microservice init` requires a `microservice.port` in workspace.json, but there is no CLI command to set/allocate one. Recommended: `descix app set-port -a <id> -p <port>` (explicit-only first; auto-allocate as a future enhancement once port constants are canonical). Until this command exists, developers must manually add `"microservice": { "port": <port> }` to the app's `env.products` entry in workspace.json before running `microservice init`.
+- **Port-allocation policy gap (`WS-CLI-MESH-ROUTING-GAP`) — RESOLVED:** `microservice init` requires a `microservice.port` in workspace.json. The canonical way to set one is now `descix app set-port -a <id> -p <port>` (backed by `WorkspaceConfig.setMicroservicePort`, parallel to `setSitePort`). Explicit-only — there is no auto-allocation (a possible future enhancement once port constants are canonical). Hand-editing workspace.json is no longer needed.
 
 ---
 
