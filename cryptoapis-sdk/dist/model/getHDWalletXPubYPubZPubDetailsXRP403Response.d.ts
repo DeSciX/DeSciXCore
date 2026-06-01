@@ -1,0 +1,18 @@
+import { GetHDWalletXPubYPubZPubDetailsXRPE403 } from './getHDWalletXPubYPubZPubDetailsXRPE403';
+export declare class GetHDWalletXPubYPubZPubDetailsXRP403Response {
+    'apiVersion': string;
+    'requestId': string;
+    'context'?: string;
+    'error': GetHDWalletXPubYPubZPubDetailsXRPE403;
+    static discriminator: string | undefined;
+    static attributeTypeMap: Array<{
+        name: string;
+        baseName: string;
+        type: string;
+    }>;
+    static getAttributeTypeMap(): {
+        name: string;
+        baseName: string;
+        type: string;
+    }[];
+}

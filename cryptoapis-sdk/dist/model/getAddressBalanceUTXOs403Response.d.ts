@@ -1,0 +1,18 @@
+import { GetAddressBalanceUTXOsE403 } from './getAddressBalanceUTXOsE403';
+export declare class GetAddressBalanceUTXOs403Response {
+    'apiVersion': string;
+    'requestId': string;
+    'context'?: string;
+    'error': GetAddressBalanceUTXOsE403;
+    static discriminator: string | undefined;
+    static attributeTypeMap: Array<{
+        name: string;
+        baseName: string;
+        type: string;
+    }>;
+    static getAttributeTypeMap(): {
+        name: string;
+        baseName: string;
+        type: string;
+    }[];
+}

@@ -1,0 +1,18 @@
+import { ListHDWalletXPubYPubZPubTransactionsXRPRData } from './listHDWalletXPubYPubZPubTransactionsXRPRData';
+export declare class ListHDWalletXPubYPubZPubTransactionsXRPR {
+    'apiVersion': string;
+    'requestId': string;
+    'context'?: string;
+    'data': ListHDWalletXPubYPubZPubTransactionsXRPRData;
+    static discriminator: string | undefined;
+    static attributeTypeMap: Array<{
+        name: string;
+        baseName: string;
+        type: string;
+    }>;
+    static getAttributeTypeMap(): {
+        name: string;
+        baseName: string;
+        type: string;
+    }[];
+}

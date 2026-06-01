@@ -1,0 +1,15 @@
+import { DeleteSyncedHDWalletXPubYPubZPubRI } from './deleteSyncedHDWalletXPubYPubZPubRI';
+export declare class DeleteSyncedHDWalletXPubYPubZPubRData {
+    'item': DeleteSyncedHDWalletXPubYPubZPubRI;
+    static discriminator: string | undefined;
+    static attributeTypeMap: Array<{
+        name: string;
+        baseName: string;
+        type: string;
+    }>;
+    static getAttributeTypeMap(): {
+        name: string;
+        baseName: string;
+        type: string;
+    }[];
+}
