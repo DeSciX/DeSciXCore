@@ -146,6 +146,83 @@ const TOOLS = [
       },
     },
   },
+  // -------------------------------------------------------------------------
+  // KB-as-Database record store (CEO-D-2026-06-01-KB-AS-DB-API)
+  // Treat an app's KB as a queryable record store. `kb_records_query` is a
+  // STRUCTURED metadata-filtered scan (non-ANN) returning full records; use
+  // `ask_question_to_app` for semantic ANN search over the same records.
+  // -------------------------------------------------------------------------
+  {
+    name: 'kb_records_put',
+    description:
+      'Use your KB as a database: store/replace records with custom metadata. Each record is ' +
+      '{ id, text, file_id, ...any custom metadata }. Custom fields (string/number/boolean/string[]) ' +
+      'are stored as filterable metadata you can later query structurally. The `text` field is also ' +
+      'semantically searchable via ask_question_to_app.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string', description: 'App ID (your app)' },
+        kb_id: { type: 'string', description: 'Knowledge Base ID (acts like a table)' },
+        records: {
+          type: 'array',
+          description: 'Records to upsert: [{ id, text, file_id, ...customMetadata }]',
+          items: { type: 'object' },
+        },
+      },
+      required: ['app_id', 'kb_id', 'records'],
+    },
+  },
+  {
+    name: 'kb_records_query',
+    description:
+      'Query your KB like a database: a STRUCTURED, metadata-filtered scan (NOT ANN/semantic) that ' +
+      'returns ALL records matching a predicate — e.g. "all records where type=episode AND show=X". ' +
+      'Supports $eq/$in/$ne and a field projection. Use this for exact structured lookups; use ' +
+      'ask_question_to_app for fuzzy semantic search.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string', description: 'App ID' },
+        kb_id: { type: 'string', description: 'Knowledge Base ID' },
+        filter: { type: 'object', description: 'Metadata predicate, e.g. { "type": "episode", "show": { "$eq": "X" } }' },
+        fields: { type: 'array', items: { type: 'string' }, description: 'Projection of metadata fields to return (omit or ["*"] for all)' },
+        limit: { type: 'number', description: 'Max records to return (post-filter)' },
+      },
+      required: ['app_id', 'kb_id'],
+    },
+  },
+  {
+    name: 'kb_records_get',
+    description:
+      'Fetch specific records from your KB by id (point lookup), with an arbitrary metadata projection. ' +
+      'Returns full custom metadata for each requested record.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string', description: 'App ID' },
+        kb_id: { type: 'string', description: 'Knowledge Base ID' },
+        ids: { type: 'array', items: { type: 'string' }, description: 'Record ids to fetch' },
+        fields: { type: 'array', items: { type: 'string' }, description: 'Projection of metadata fields (omit or ["*"] for all)' },
+      },
+      required: ['app_id', 'kb_id', 'ids'],
+    },
+  },
+  {
+    name: 'kb_records_delete',
+    description:
+      'Delete records from your KB by id (or by file_id grouping key).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string', description: 'App ID' },
+        kb_id: { type: 'string', description: 'Knowledge Base ID' },
+        ids: { type: 'array', items: { type: 'string' }, description: 'Record ids to delete' },
+        file_ids: { type: 'array', items: { type: 'string' }, description: 'file_id grouping keys to delete (deletes all records with each file_id)' },
+      },
+      required: ['app_id', 'kb_id'],
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------------

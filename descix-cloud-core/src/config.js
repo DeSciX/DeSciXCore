@@ -191,6 +191,26 @@ export function getCloudConfig() {
  * instance against a temp-dir rootPath. Production code MUST NOT call this.
  */
 export function _resetCloudConfigForTests() {
+    // CEO-D-2026-06-01-RAG-PATHJOIN-GUARD isolation guardrail: the org RAG read path
+    // went down because a config negative-test nulled STORAGE_BUCKET in the LIVE
+    // in-memory singleton and only restored the file. Resetting/mutating the config
+    // singleton inside a running service is the footgun. Refuse unless we are clearly
+    // in a test process (node:test sets NODE_TEST_CONTEXT) or the caller explicitly
+    // opts in. A live service NEVER sets these — so this hard-fails the dangerous path
+    // instead of silently corrupting a running backend.
+    const inTestProcess = !!process.env.NODE_TEST_CONTEXT
+        || !!process.env.DESCIX_ALLOW_CONFIG_RESET
+        || (Array.isArray(process.execArgv) && process.execArgv.some(a => a === "--test" || a.startsWith("--test")))
+        || process.argv.includes("--test");
+    if (!inTestProcess) {
+        throw new Error(
+            "[CloudConfig] _resetCloudConfigForTests() called outside a test process. " +
+            "Resetting the config singleton in a live service nulls config (e.g. STORAGE_BUCKET) " +
+            "in-memory and takes down the RAG read path (CEO-D-2026-06-01-RAG-PATHJOIN-GUARD). " +
+            "Run config negative-tests in an ISOLATED `node --test` process, or set " +
+            "DESCIX_ALLOW_CONFIG_RESET=1 only in a context where corrupting the singleton is intended."
+        );
+    }
     if (_instance && _instance.__watcher) {
         try {
             // chokidar's close() returns a Promise. We deliberately do NOT await it
