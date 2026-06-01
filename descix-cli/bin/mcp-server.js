@@ -156,9 +156,11 @@ const TOOLS = [
     name: 'kb_records_put',
     description:
       'Use your KB as a database: store/replace records with custom metadata. Each record is ' +
-      '{ id, text, file_id, ...any custom metadata }. Custom fields (string/number/boolean/string[]) ' +
-      'are stored as filterable metadata you can later query structurally. The `text` field is also ' +
-      'semantically searchable via ask_question_to_app.',
+      '{ file_id, text, chunk_idx?, ...any custom metadata }. You do NOT build the record id — ' +
+      'supply a human-meaningful file_id (the grouping key) plus an optional chunk_idx (default 0) ' +
+      'and the composite id is built for you. (A pre-built full "id" is still accepted for back-compat.) ' +
+      'Custom fields (string/number/boolean/string[]) are stored as filterable metadata you can later ' +
+      'query structurally; the `text` field is also semantically searchable via ask_question_to_app.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -166,7 +168,7 @@ const TOOLS = [
         kb_id: { type: 'string', description: 'Knowledge Base ID (acts like a table)' },
         records: {
           type: 'array',
-          description: 'Records to upsert: [{ id, text, file_id, ...customMetadata }]',
+          description: 'Records to upsert: [{ file_id (required), text, chunk_idx? (default 0), ...customMetadata }]. The id is derived from file_id+chunk_idx; pass a full "id" only for back-compat.',
           items: { type: 'object' },
         },
       },
@@ -179,7 +181,10 @@ const TOOLS = [
       'Query your KB like a database: a STRUCTURED, metadata-filtered scan (NOT ANN/semantic) that ' +
       'returns ALL records matching a predicate — e.g. "all records where type=episode AND show=X". ' +
       'Supports $eq/$in/$ne and a field projection. Use this for exact structured lookups; use ' +
-      'ask_question_to_app for fuzzy semantic search.',
+      'ask_question_to_app for fuzzy semantic search. ' +
+      'EVENTUAL CONSISTENCY: this scan is backed by a Pinecone prefix-list, so a query run immediately ' +
+      'after kb_records_put may not yet see the just-written record(s). For read-after-write workflows, ' +
+      'briefly retry until the expected count appears rather than trusting a first empty result.',
     inputSchema: {
       type: 'object',
       properties: {
