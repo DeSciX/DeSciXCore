@@ -3917,7 +3917,7 @@ microserviceCommand
 // microservice register-delegate - Register delegate key
 microserviceCommand
   .command('register-delegate')
-  .description('Register service delegate key for Intelligent Mesh')
+  .description('Provision the service delegate key (SERVICE_KEY) that authenticates mesh/loopback calls — run this if your service gets HTTP 401 calling /apifront or another service')
   .option('-c, --community <id>', 'Community ID (auto-detects from context)')
   .option('-a, --app <id>', 'App ID (auto-detects from context)')
   .option('-s, --slot <id>', 'Service slot ID (uses first available if not provided)')

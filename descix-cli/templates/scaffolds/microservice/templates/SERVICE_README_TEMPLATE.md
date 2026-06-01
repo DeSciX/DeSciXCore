@@ -6,6 +6,28 @@
 Include the key use cases, benefits, and target users.
 This section is critical for tell_me_how discovery - be descriptive about WHEN to use this service.}
 
+## Onboarding — Canonical Mesh Microservice Setup
+
+Run this sequence ONCE to stand up a microservice that can call the mesh
+(Core Tools like `query_knowledge_base`, or other services' tools) over the
+`/apifront` broker:
+
+```bash
+descix app create   -c {community} -a {app}     # create the app (or hydrate an existing one)
+descix app init      -a {community}-{app}        # scaffold site/ kb/ microservice/
+descix app set-port  -a {community}-{app} -p {port}   # assign the microservice's loopback port in workspace.json
+descix microservice register                     # register the service manifest with the Core gateway
+descix microservice register-delegate            # provision the SERVICE_KEY that signs mesh calls  <-- REQUIRED for loopback auth
+```
+
+> **Loopback calls failing with HTTP 401?** Your service has no provisioned
+> delegate key. The pre-stored `OWNER_SIGNATURE` fallback is NOT a valid mesh
+> credential. Run **`descix microservice register-delegate`** — it generates an
+> EC key pair, registers the public key with Core, and writes `SERVICE_KEY` into
+> `dev-overrides.json`. The scaffold `mcpClient` automatically signs every mesh
+> call with that key (`utils.SERVICE_KEY` → `Signer`). This is THE canonical
+> mesh-authentication step. If unsure: `descix tell-me-how "my service gets 401 on a loopback call"`.
+
 ## Prerequisites
 
 - {Any setup requirements}

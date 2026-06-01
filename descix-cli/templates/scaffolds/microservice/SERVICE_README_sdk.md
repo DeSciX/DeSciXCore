@@ -146,6 +146,33 @@ descix kb build -c descix -a myapp
 
 ---
 
+### descix microservice register-delegate
+
+**Description:** Provision the service's delegate key (`SERVICE_KEY`) so it can authenticate mesh/loopback calls
+**Use when:** Your microservice calls Core Tools or other services via the `/apifront` broker — REQUIRED before any loopback call, or you will get HTTP 401
+**What it does:**
+1. Generates an EC (secp256k1) key pair
+2. Registers the public key with Core against one of your service slots (Runner NFT / subscription)
+3. Writes `SERVICE_KEY` into `dev-overrides.json` — the scaffold `mcpClient` signs every mesh call with it
+
+**Options:**
+- `-c, --community <id>`: Community ID (auto-detects from context/manifest.json)
+- `-a, --app <id>`: App ID (auto-detects from context/manifest.json)
+- `-s, --slot <id>`: Service slot ID (uses first available if not provided)
+
+**Canonical mesh microservice onboarding sequence:**
+```bash
+descix app create   -c <community> -a <app>
+descix app init      -a <community>-<app>
+descix app set-port  -a <community>-<app> -p <port>
+descix microservice register
+descix microservice register-delegate   # <-- the mesh-auth step; without it loopback calls return 401
+```
+
+**Note:** The pre-stored `OWNER_SIGNATURE` in the scaffold is NOT a valid mesh credential — it returns 401 for live loopback calls. `register-delegate` is the canonical fix.
+
+---
+
 ### descix microservice vectorize
 
 **Description:** Vectorize a SERVICE_README for tell_me_how discovery
@@ -383,6 +410,11 @@ For individual app folders, create `.descix/context.json`:
 1. Run `descix setup` in workspace root
 2. Restart Cursor completely
 3. Check `.cursor/mcp.json` exists with `descix` server
+
+### "401 Unauthorized on a loopback / mesh call"
+Your service has no provisioned delegate key. The scaffold's `OWNER_SIGNATURE` fallback is not a valid mesh credential.
+Run `descix microservice register-delegate` (writes `SERVICE_KEY` to `dev-overrides.json`). Then restart the service.
+Discover it via `descix tell-me-how "my service gets 401 on a loopback call"`.
 
 ### "Session expired"
 Run `descix reconnect` or `descix login`

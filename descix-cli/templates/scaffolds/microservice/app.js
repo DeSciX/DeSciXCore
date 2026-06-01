@@ -16,8 +16,12 @@ const app = express();
 // In a real app, we might want to block startup until config is loaded
 initializeServiceConfig().then(() => {
     
-    // Kill any existing instances of this service in debug mode
-    killExistingProcess(import.meta.url, utils.DEBUG_LOCAL);
+    // Resolve this service's own port up front so process cleanup is scoped to it.
+    const port = utils.PORT;
+
+    // Kill ONLY a prior instance of THIS service (scoped to its own port) in debug mode.
+    // Port-scoping guarantees we never kill an unrelated app.js (e.g. the Core :4000 backend).
+    killExistingProcess(import.meta.url, utils.DEBUG_LOCAL, port);
     
     // Middleware
     app.use(cors({ origin: true })); // Allow all origins (controlled by Core proxy)
@@ -32,10 +36,8 @@ initializeServiceConfig().then(() => {
     app.use('/api', apiRouter);
 
     // Start Server
-    const port = utils.PORT || 8080;
-    
-    if (port === 'auto') {
-        console.error('[Service] CRITICAL ERROR: Port is "auto". Gateway registration failed.');
+    if (!port || port === 'auto') {
+        console.error('[Service] CRITICAL ERROR: Port is missing or "auto". Gateway registration failed.');
         process.exit(1);
     }
 

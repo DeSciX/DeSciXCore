@@ -6,8 +6,30 @@
  */
 
 import axios from 'axios';
+import https from 'https';
 import { utils } from './utils.js';
 import { Signer } from '@descix/sdk'; // Assuming descix-sdk is available in the container
+
+/**
+ * In local dev the Core broker is served over HTTPS with a self-signed cert
+ * (https://localhost:4000). Node's axios will reject it ('self-signed certificate
+ * in certificate chain'). Trust it ONLY in dev AND only when the target is a
+ * localhost loopback — NEVER in demo/prod, and NEVER for a non-local host.
+ *
+ * Gated, not unconditional: prod traffic keeps full TLS verification.
+ */
+function buildDevLoopbackAgent() {
+    const isDev = !utils.DEPLOY_ENV || utils.DEPLOY_ENV === 'dev';
+    const coreUrl = utils.CORE_API_URL || '';
+    const isLocalhost = /^https:\/\/(localhost|127\.0\.0\.1)(:|\/)/.test(coreUrl);
+    if (isDev && isLocalhost) {
+        return new https.Agent({ rejectUnauthorized: false });
+    }
+    return undefined; // prod / non-local: default agent, full cert verification
+}
+
+// Built once at module load — reflects DEPLOY_ENV + CORE_API_URL at boot.
+const devLoopbackAgent = buildDevLoopbackAgent();
 
 class McpClient {
     constructor() {
@@ -61,7 +83,11 @@ class McpClient {
                 headers['Authorization'] = `Bearer ${utils.SERVICE_SECRET}`;
             }
             
-            const response = await axios.post(utils.CORE_API_URL, payload, { headers });
+            const response = await axios.post(utils.CORE_API_URL, payload, {
+                headers,
+                // dev-only: trust the localhost self-signed cert. undefined in prod.
+                ...(devLoopbackAgent ? { httpsAgent: devLoopbackAgent } : {})
+            });
 
             if (response.data?.status === 'OK') {
                 return response.data.message;
