@@ -5,12 +5,52 @@
  */
 
 import express from 'express';
+import http from 'http';
 import cors from 'cors';
 import { initializeServiceConfig, utils } from './services/utils.js';
 import { killExistingProcess } from '@descix/cloud-core';
 import apiRouter from './services/apiFront.js';
 
 const app = express();
+
+/**
+ * Bind the http.Server with a bounded retry on EADDRINUSE.
+ *
+ * DEV RESTART RACE (CEO-D-2026-06-01-SCAFFOLD-RESIDUALS, fix #2):
+ *   killExistingProcess() SIGKILLs the prior instance on THIS port and returns
+ *   synchronously, then we bind immediately. The kernel may not have fully released
+ *   the old listening socket yet (it can linger briefly after a kill -9), so the first
+ *   bind can throw EADDRINUSE on a fast kill-then-restart. We retry the bind a few times
+ *   with a short backoff so dev restarts don't flake. Any non-EADDRINUSE listen error
+ *   fails loud (no swallowing); after the retries are exhausted we exit 1.
+ *
+ * NOTE: we bind an explicit http.Server (not app.listen) so the 'error'/'listening'
+ * handlers attach to the SAME object we retry on. A server that failed to bind is left
+ * unbound and can be re-listened safely.
+ */
+function listenWithRetry(server, port, { retries = 10, delayMs = 150 } = {}) {
+    let attempt = 0;
+
+    const onError = (err) => {
+        if (err && err.code === 'EADDRINUSE' && attempt < retries) {
+            attempt += 1;
+            console.warn(`[Service] Port ${port} busy (EADDRINUSE), retry ${attempt}/${retries} in ${delayMs}ms...`);
+            setTimeout(() => server.listen(port), delayMs);
+            return;
+        }
+        // Not a transient bind race (or retries exhausted) — fail loud.
+        console.error(`[Service] Failed to bind port ${port}:`, err?.message || err);
+        process.exit(1);
+    };
+
+    server.on('error', onError);
+    server.on('listening', () => {
+        console.log(`[Service] Listening on port ${port}`);
+        console.log(`[Service] Environment: ${utils.DEPLOY_ENV || 'unknown'}`);
+    });
+
+    server.listen(port);
+}
 
 // Initialize Config (Async)
 // In a real app, we might want to block startup until config is loaded
@@ -41,10 +81,9 @@ initializeServiceConfig().then(() => {
         process.exit(1);
     }
 
-    app.listen(port, () => {
-        console.log(`[Service] Listening on port ${port}`);
-        console.log(`[Service] Environment: ${utils.DEPLOY_ENV || 'unknown'}`);
-    });
+    // Bind with a bounded retry so a fast dev kill-then-restart doesn't flake on EADDRINUSE.
+    const server = http.createServer(app);
+    listenWithRetry(server, port);
 
 }).catch(err => {
     console.error('[Service] Failed to initialize config:', err);

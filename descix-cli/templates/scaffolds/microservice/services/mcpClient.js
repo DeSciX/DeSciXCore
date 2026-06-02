@@ -45,12 +45,19 @@ function buildDevLoopbackAgent() {
 const devLoopbackAgent = buildDevLoopbackAgent();
 
 class McpClient {
-    constructor() {
-        // SERVICE_KEY is provisioned by `descix microservice register-delegate`
-        // (dev-overrides.json in dev / Secret Manager in deployed envs).
-        if (utils.SERVICE_KEY?.privateKey) {
-            this.signer = new Signer(utils.SERVICE_KEY.privateKey, utils.SERVICE_KEY.slotId);
+    /**
+     * Build the delegate Signer LAZILY (on first use), not in the constructor.
+     * mcpClient is imported (and constructed) before initializeServiceConfig() runs,
+     * and SERVICE_KEY is loaded from dev-overrides.json during initialize() — so a
+     * constructor-time Signer would always be missing the key. Memoize after init.
+     */
+    _getSigner() {
+        if (this._signer === undefined) {
+            this._signer = utils.SERVICE_KEY?.privateKey
+                ? new Signer(utils.SERVICE_KEY.privateKey, utils.SERVICE_KEY.slotId)
+                : null;
         }
+        return this._signer;
     }
 
     /**
@@ -63,7 +70,8 @@ class McpClient {
         if (!utils.CORE_API_URL) {
             throw new Error('CORE_API_URL not configured');
         }
-        if (!this.signer) {
+        const signer = this._getSigner();
+        if (!signer) {
             throw new Error('SERVICE_KEY not configured — run `descix microservice register-delegate` to provision a delegate before making mesh calls.');
         }
 
@@ -75,7 +83,7 @@ class McpClient {
 
         // Serialize ONCE and sign exactly what we send (byte-for-byte).
         const bodyString = JSON.stringify(body);
-        const signatureHeaders = this.signer.getHeaders(bodyString); // X-NFT-ID / X-Signature / X-Timestamp
+        const signatureHeaders = signer.getHeaders(bodyString); // X-NFT-ID / X-Signature / X-Timestamp
 
         if (!signatureHeaders['X-Signature']) {
             throw new Error('Signer produced no signature — SERVICE_KEY.privateKey is missing or invalid.');
