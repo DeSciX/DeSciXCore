@@ -18,6 +18,9 @@ export { AppManager, createAppManager } from './managers/appManager.js';
 // Auth
 export { Signer } from './auth/signer.js';
 
+// Mesh asset client — service-side fetch-by-reference (media-via-API-surface)
+export { fetchAppAsset } from './mesh/assetClient.js';
+
 // Import classes for factory function
 import { GitUtils } from './integrations/gitUtils.js';
 import { WizardOrchestrator, WIZARD_STEPS } from './orchestrators/wizardOrchestrator.js';

@@ -15,7 +15,6 @@ import { WorkspaceConfig } from '../lib/workspace-config.js';
 import { GlobalConfig } from '../lib/global-config.js';
 import * as authCommands from '../lib/commands/auth.js';
 import * as configCommands from '../lib/commands/config.js';
-import { runAppWizard } from '../lib/commands/app-wizard.js';
 import * as buyCommands from '../lib/commands/buy.js';
 import * as airdropCommands from '../lib/commands/airdrop.js';
 import { runInit } from '../lib/commands/init.js';
@@ -1184,7 +1183,7 @@ appCommand
   .description('Create an app in a community. --quick with -c/-a for CLI-driven creation.')
   .option('-c, --community <id>', 'Community ID')
   .option('-a, --app <name>', 'App name')
-  .option('--quick', 'Create app via CLI (registers in Products, creates Drive skeleton); requires -c and -a')
+  .option('--quick', 'Create app via CLI (registers in Products + Firestore, grants entitlement; Drive-free); requires -c and -a')
   .option('--overwrite', 'Overwrite existing (with --quick)')
   .action(async (options) => {
     try {
@@ -1192,52 +1191,15 @@ appCommand
         const apiClient = new DeSciXApiClient();
         await requireAuth(apiClient);
 
-        // Ensure Drive base folder is registered in workspace.json
-        let wsConfig;
-        try {
-          wsConfig = await WorkspaceConfig.load(process.cwd());
-        } catch {
-          console.error(chalk.red('\n❌ No workspace found. Run `descix init` first.\n'));
-          process.exit(1);
-        }
-        const baseFolderId = wsConfig.driveConfig?.base_folder_id;
-
-        if (!baseFolderId) {
-          console.log(chalk.yellow('\n⚠  No Drive base folder registered in workspace.json.'));
-          console.log(chalk.white('  App creation requires a shared Drive folder for KB and asset storage.'));
-          console.log(chalk.white('  Share a Google Drive folder with dip@descix.net, then provide its URL.\n'));
-
-          const readline = await import('readline');
-          const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-          const folderUrl = await new Promise((resolve) => {
-            rl.question(chalk.cyan('  Drive folder URL or ID: '), (answer) => {
-              rl.close();
-              resolve(answer.trim());
-            });
-          });
-
-          if (!folderUrl) {
-            console.error(chalk.red('\n❌ Drive folder is required for app creation.\n'));
-            process.exit(1);
-          }
-
-          // Register the folder via backend (validates sharing + extracts folder ID)
-          const regResponse = await apiClient.invoke('register_base_folder', {
-            folder_url: folderUrl
-          });
-          const regResult = regResponse.message || regResponse;
-          console.log(chalk.green(`  ✓ Folder registered: ${regResult.folder_name} (${regResult.folder_id})`));
-
-          // Persist to workspace.json
-          wsConfig.driveConfig = { base_folder_id: regResult.folder_id };
-          await wsConfig.save();
-          console.log(chalk.green('  ✓ Saved to workspace.json\n'));
-        }
-
+        // V2 app creation is Drive-free (WS-V1-PURGE Phase 1, audit #1).
+        // create_app_for_community registers Products + Firestore App doc + grants
+        // entitlement (developer-permission checked server-side). No Drive base folder
+        // is required: KB sync is the Git manifest path (`descix kb corpus sync`),
+        // never Drive. create_skeleton is OFF — the Drive skeleton is a removed V1 step.
         const response = await apiClient.invoke('create_app_for_community', {
           community_id: options.community,
           app_name: options.app,
-          create_skeleton: true,
+          create_skeleton: false,
           overwrite: options.overwrite
         });
         const result = response.message || response;
@@ -1246,17 +1208,148 @@ appCommand
         console.log(chalk.cyan(`  Community:  ${result.community_id}`));
         console.log(chalk.gray(`  Products:   Products/${result.app_id}`));
         console.log(chalk.gray(`  Firestore:  Community/${result.community_id}/Apps/${result.app_id}`));
-        if (result.skeleton_result) {
-          console.log(chalk.gray(`  Drive:      ${result.skeleton_result.folder_id || 'created'}`));
-        }
         console.log(chalk.cyan('\n  Next: descix app init -a ' + result.app_id + '\n'));
         return;
       }
       console.log(chalk.cyan('\n📦 App creation\n'));
       console.log(chalk.white('Create apps in the PWA (Device Setup / App Manager) or via CLI:\n'));
       console.log(chalk.white('  descix app create --quick -c <community> -a <app-name>\n'));
-      console.log(chalk.gray('This registers the app in the Products registry, creates Firestore'));
-      console.log(chalk.gray('documents, grants entitlement, and creates Drive skeleton.\n'));
+      console.log(chalk.gray('This registers the app in the Products registry, creates the Firestore'));
+      console.log(chalk.gray('App doc, and grants entitlement. KB sync is `descix kb corpus sync`'));
+      console.log(chalk.gray('(Git manifest) — no Drive folder is required.\n'));
+    } catch (error) {
+      console.error(chalk.red(`\n❌ ${error.message}\n`));
+      process.exit(1);
+    }
+  });
+
+// descix app media-upload — upload media/asset files to an app's GCS assets prefix via the
+// API surface (WS-V1-PURGE Phase 1, item 2; media-via-API-surface PLATFORM half).
+// This is the canonical, filesystem-free way to get app media (podcast audio, cover art,
+// etc.) into the platform: request a short-lived signed PUT token from the API surface
+// (`get_asset_upload_token` over /apifront, user-session authed), upload each file straight
+// to GCS, and print the ASSET REFERENCES. An app microservice then fetches an uploaded asset
+// by reference over the Core broker via `get_app_asset` (no shared local filesystem needed).
+appCommand
+  .command('media-upload')
+  .description('Upload media/asset files to an app\'s GCS assets prefix via the API surface (returns asset references)')
+  .requiredOption('-a, --app <id>', 'App ID (community is resolved server-side from Products)')
+  .requiredOption('-f, --file <path...>', 'One or more local file paths to upload')
+  .option('--prefix <relPath>', 'Optional sub-path under the app assets/ prefix (e.g. "shows/myshow")', '')
+  .option('--json', 'Print the asset references as JSON (for scripting)')
+  .action(async (options) => {
+    try {
+      const apiClient = new DeSciXApiClient();
+      await requireAuth(apiClient);
+
+      const path = await import('path');
+      const mime = (await import('mime-types')).default;
+
+      const appId = options.app;
+      const localFiles = Array.isArray(options.file) ? options.file : [options.file];
+      const subPrefix = (options.prefix || '').replace(/^\/+|\/+$/g, '');
+
+      // Build the upload descriptor list: object path under assets/ = [subPrefix/]basename.
+      const fileDescriptors = [];
+      for (const localPath of localFiles) {
+        const abs = path.resolve(localPath);
+        let stat;
+        try {
+          stat = await fs.stat(abs);
+        } catch {
+          console.error(chalk.red(`\n❌ File not found: ${abs}\n`));
+          process.exit(1);
+        }
+        if (!stat.isFile()) {
+          console.error(chalk.red(`\n❌ Not a file: ${abs}\n`));
+          process.exit(1);
+        }
+        const base = path.basename(abs);
+        const objectPath = subPrefix ? `${subPrefix}/${base}` : base;
+        fileDescriptors.push({
+          path: objectPath,
+          content_type: mime.lookup(abs) || 'application/octet-stream',
+          size: stat.size,
+          _absolutePath: abs
+        });
+      }
+
+      console.log(chalk.cyan(`\n  Media Upload: ${appId} → GCS assets/\n`));
+      fileDescriptors.forEach(f => console.log(chalk.gray(`  • ${f.path} (${(f.size / 1024).toFixed(1)}KB, ${f.content_type})`)));
+
+      // 1. Request a signed-PUT upload token over the API surface.
+      const tokenResponse = await apiClient.invoke('get_asset_upload_token', {
+        app_id: appId,
+        files: fileDescriptors.map(f => ({ path: f.path, content_type: f.content_type, size: f.size }))
+      });
+      const token = tokenResponse.message || tokenResponse;
+      const { signed_urls, objects } = token;
+
+      // 2. PUT each file directly to GCS using its signed URL.
+      console.log(chalk.gray(`\n  Uploading ${fileDescriptors.length} file(s)...`));
+      const uploaded = [];
+      const errors = [];
+      for (const f of fileDescriptors) {
+        const signedUrl = signed_urls?.[f.path];
+        if (!signedUrl) {
+          errors.push(`No signed URL for: ${f.path}`);
+          console.log(chalk.red(`  x ${f.path}`));
+          continue;
+        }
+        try {
+          const content = await fs.readFile(f._absolutePath);
+          const resp = await fetch(signedUrl, {
+            method: 'PUT',
+            headers: { 'Content-Type': f.content_type },
+            body: content
+          });
+          if (!resp.ok) {
+            errors.push(`Failed ${f.path}: ${resp.status} ${resp.statusText}`);
+            console.log(chalk.red(`  x ${f.path}`));
+          } else {
+            const obj = (objects || []).find(o => o.path === f.path) || {};
+            // The asset REFERENCE an app handler / get_app_asset consumes: the gs:// URI.
+            const gcsRef = obj.gcs_path
+              ? `gs://${token.bucket}/${obj.gcs_path}`
+              : null;
+            uploaded.push({
+              path: f.path,
+              ref: gcsRef,
+              gcs_path: obj.gcs_path || null,
+              public_url: obj.public_url || null,
+              content_type: f.content_type,
+              size: f.size
+            });
+            console.log(chalk.green(`  + ${f.path}`));
+          }
+        } catch (err) {
+          errors.push(`Error ${f.path}: ${err.message}`);
+          console.log(chalk.red(`  x ${f.path}`));
+        }
+      }
+
+      if (errors.length > 0) {
+        console.log(chalk.yellow(`\n  ${errors.length} error(s):`));
+        errors.forEach(e => console.log(chalk.red(`  - ${e}`)));
+      }
+
+      if (uploaded.length === 0) {
+        console.error(chalk.red('\n❌ No files uploaded.\n'));
+        process.exit(1);
+      }
+
+      if (options.json) {
+        console.log('\n' + JSON.stringify({ app_id: appId, assets: uploaded }, null, 2) + '\n');
+      } else {
+        console.log(chalk.green(`\n  ✅ Uploaded ${uploaded.length} asset(s).\n`));
+        console.log(chalk.cyan('  Asset references (pass these to your app handler; the service fetches via get_app_asset):'));
+        uploaded.forEach(u => {
+          console.log(chalk.white(`    ${u.path}`));
+          console.log(chalk.gray(`      ref:        ${u.ref}`));
+          console.log(chalk.gray(`      public_url: ${u.public_url}`));
+        });
+        console.log();
+      }
     } catch (error) {
       console.error(chalk.red(`\n❌ ${error.message}\n`));
       process.exit(1);
