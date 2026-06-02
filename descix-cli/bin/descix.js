@@ -2163,6 +2163,76 @@ appCommand
     }
   });
 
+// ============ App: set-site (WS-SSGPOD — site.static workspace gap) ============
+//
+// Canonical write path for an app's site config in workspace.json — specifically site.static,
+// the relative path the dev gateway's staticSitePlugin serves at /p/{appId}/ (resolved against
+// the app's localPath; "." means the localPath itself). Optionally sets site.port for
+// dev-server sites. Parallel to `descix app set-port` (microservice.port); closes the
+// site.static gap so workspace.json never needs hand-editing (CEO-D-2026-06-02-SSGPOD-SITE-PREPROD).
+// Backed by WorkspaceConfig.setStaticSite (parallel to setSitePort/setMicroservicePort).
+//
+// NOTE: This is NOT `set-codesite` — that writes the Firestore ip_site_gcs_path_url (a prod
+// concern). set-site writes ONLY the local workspace.json site.{} slot.
+appCommand
+  .command('set-site')
+  .description("Set a mapped app static-site config (writes env.products[<app>].site.static, the relative dir served at /p/<app>/). Optionally --port; --unset clears site.{}.")
+  .requiredOption('-a, --app <app_id>', 'App ID (must be mapped in workspace.json)')
+  .option('--static <path>', 'Relative static-site path under the app localPath (e.g. "site"; "." = the localPath itself)')
+  .option('--port <port>', 'Site dev-server port (1-65535) for framework dev sites; mutually optional with --static')
+  .option('--unset', 'Remove site.static (and site.port) for the app, clearing the site.{} slot')
+  .action(async (options) => {
+    try {
+      const appId = options.app;
+      const workspaceConfig = await WorkspaceConfig.load();
+
+      // --unset: remove both site.static and site.port (setStaticSite cleans up empty site.{})
+      if (options.unset) {
+        await workspaceConfig.setStaticSite(appId, { static: null, port: null });
+        console.log(chalk.green(`\n✓ site config cleared for ${appId}\n`));
+        return;
+      }
+
+      // Require at least one field to set — do not silently no-op.
+      if (options.static === undefined && options.port === undefined) {
+        console.error(chalk.red('\n❌ Nothing to set. Provide --static <path> and/or --port <n>, or --unset to clear.\n'));
+        process.exit(1);
+      }
+
+      const fields = {};
+
+      if (options.static !== undefined) {
+        if (typeof options.static !== 'string' || options.static.trim() === '') {
+          console.error(chalk.red('\n❌ --static requires a non-empty relative path (e.g. "site" or ".").\n'));
+          process.exit(1);
+        }
+        fields.static = options.static;
+      }
+
+      if (options.port !== undefined) {
+        const portNum = parseInt(options.port, 10);
+        if (isNaN(portNum) || portNum < 1 || portNum > 65535) {
+          console.error(chalk.red('\n❌ Invalid port number. Provide an integer 1-65535.\n'));
+          process.exit(1);
+        }
+        fields.port = portNum;
+      }
+
+      // setStaticSite mutates the live env entry and saves — and hard-fails (canonical
+      // "not mapped in workspace.json" error) for an unmapped app, surfaced in the catch below.
+      await workspaceConfig.setStaticSite(appId, fields);
+
+      console.log(chalk.green(`\n✓ site config set for ${appId}`));
+      if (fields.static !== undefined) console.log(chalk.cyan(`  site.static: ${fields.static}`));
+      if (fields.port !== undefined)   console.log(chalk.cyan(`  site.port:   ${fields.port}`));
+      console.log(chalk.gray(`  Written to env.products[${appId}].site in workspace.json.`));
+      console.log(chalk.gray(`  The gateway serves site.static at /p/${appId}/ (staticSitePlugin); \`descix serve\` picks it up.\n`));
+    } catch (error) {
+      console.error(chalk.red(error.message));
+      process.exit(1);
+    }
+  });
+
 
 // ============ App: set-default-model (WS-CONFIG-BOOTSTRAP-FIX item #10) ============
 //
