@@ -54,7 +54,7 @@ test('accepts a relative assets/ path as ref (passed through verbatim to Core)',
 });
 
 test('hard-fails on missing callTool / appId / ref (no silent fallback)', async () => {
-  await assert.rejects(() => fetchAppAsset(null, { appId: 'a', ref: 'r' }), /callTool must be a function/);
+  await assert.rejects(() => fetchAppAsset(null, { appId: 'a', ref: 'r' }), /invoke must be a function/);
   await assert.rejects(() => fetchAppAsset(async () => ({}), { ref: 'r' }), /appId is required/);
   await assert.rejects(() => fetchAppAsset(async () => ({}), { appId: 'a' }), /ref is required/);
 });
