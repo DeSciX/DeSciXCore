@@ -3520,7 +3520,7 @@ microserviceCommand
 // microservice register - Register with gateway
 microserviceCommand
   .command('register')
-  .description('Register microservice with gateway (requires SERVICE_README)')
+  .description('Register microservice with gateway (-r <local SERVICE_README>; git-mode only — no Drive)')
   .option('-m, --manifest <path>', 'Path to manifest.json', './manifest.json')
   .option('-r, --readme <path>', 'Path to local SERVICE_README file')
   .option('-c, --community <id>', 'Community ID (auto-detects from context)')
@@ -3616,49 +3616,11 @@ microserviceCommand
         console.log(chalk.gray(`  Commands: ${Object.keys(manifest.commands || {}).length}`));
         console.log(chalk.gray(`  README vectorized for tell_me_how discovery\n`));
         
-      // Option 2: Check for SERVICE_README in Drive folder
-      } else if (!options.skipReadmeCheck) {
-        console.log(chalk.cyan(`🔍 Checking for ${readmeFileName} in app Drive folder...\n`));
-        
-        const checkResponse = await apiClient.invoke('check_service_readme_exists', {
-          community_id: communityId,
-          app_id: appId,
-          service_name: serviceName
-        });
-        
-        const readmeExists = checkResponse.message?.exists || checkResponse.exists || false;
-        
-        if (!readmeExists) {
-          // Output AI-friendly instructions for creating the README
-          outputServiceReadmeInstructions(serviceName, appId, communityId, manifest);
-          process.exit(1);
-        }
-        
-        console.log(chalk.green(`✅ Found ${readmeFileName}\n`));
-        
-        // Read README content from Drive
-        const readmeResponse = await apiClient.invoke('get_service_readme_content', {
-          community_id: communityId,
-          app_id: appId,
-          service_name: serviceName
-        });
-        
-        const readmeContent = readmeResponse.message?.content || readmeResponse.content || '';
-        
-        // Register with README content for vectorization
-        const response = await apiClient.invoke('register_service', { 
-          manifest,
-          readme_content: readmeContent
-        });
-        
-        console.log(chalk.green('✅ Microservice registered successfully!\n'));
-        console.log(chalk.cyan(`  Service: ${serviceName}`));
-        console.log(chalk.gray(`  Commands: ${Object.keys(manifest.commands || {}).length}`));
-        console.log(chalk.gray(`  README vectorized for tell_me_how discovery\n`));
-        
-      // Option 3: Skip README check
-      } else {
-        // Skip README check - register without vectorization
+      // Option 2: Explicit skip — register without README vectorization (git-mode only).
+      // (Drive-folder README fallback removed per CEO-D-2026-06-01-MESH-AUTH-DRIVE-REMOVAL:
+      //  git corpus sync is the only canonical KB sync; -r <local README> is the only
+      //  README source. Nothing reads SERVICE_README from Drive anymore.)
+      } else if (options.skipReadmeCheck) {
         console.log(chalk.yellow('⚠️  Skipping README check (tool discovery will be limited)\n'));
         
         const response = await apiClient.invoke('register_service', { manifest });
@@ -3667,6 +3629,11 @@ microserviceCommand
         console.log(chalk.cyan(`  Service: ${serviceName}`));
         console.log(chalk.gray(`  Commands: ${Object.keys(manifest.commands || {}).length}`));
         console.log(chalk.yellow(`  ⚠️  No README - service won't appear in tell_me_how results\n`));
+        
+      // No -r and no --skip-readme-check: instruct the LOCAL README path (never Drive).
+      } else {
+        outputServiceReadmeInstructions(serviceName, appId, communityId, manifest);
+        process.exit(1);
       }
       
     } catch (error) {
@@ -3956,20 +3923,28 @@ microserviceCommand
       // Fetch entitlements
       const entitlementsResponse = await apiClient.invoke('fetch_my_purchases', {});
       const entitlements = entitlementsResponse.message || {};
-      const serviceSlots = entitlements.service_slots || [];
-      
+      const allSlots = entitlements.service_slots || [];
+
+      // Service slots come ONLY from subscriptions right now. NFT-based slots are FUTURE
+      // functionality (app/NFT association is not wired yet) — never select them here.
+      // CEO-D-2026-06-01-MESH-AUTH-DRIVE-REMOVAL (Fix C).
+      const serviceSlots = allSlots.filter(slot => slot.type === 'subscription');
+
       if (serviceSlots.length === 0) {
-        console.error(chalk.red('❌ No service slots available.'));
-        console.log(chalk.white('   You need a "Runner NFT" or Subscription to create a service.'));
+        console.error(chalk.red('❌ No subscription service slot available.'));
+        console.log(chalk.white('   Service slots are provided by a subscription. A subscription is required to'));
+        console.log(chalk.white('   provision a delegate. (NFT-based slots are future functionality and are'));
+        console.log(chalk.white('   not selectable yet.)'));
         process.exit(1);
       }
-      
-      // Select slot
+
+      // Select slot (subscription slots only)
       let selectedSlot = serviceSlots[0];
       if (options.slot) {
-        selectedSlot = serviceSlots.find(s => (s.nft_id || s.id) === options.slot);
+        selectedSlot = serviceSlots.find(s => (s.id || s.nft_id) === options.slot);
         if (!selectedSlot) {
-          console.error(chalk.red(`❌ Slot ${options.slot} not found in your entitlements.`));
+          console.error(chalk.red(`❌ Subscription slot ${options.slot} not found in your entitlements.`));
+          console.log(chalk.gray('   Only subscription slots are selectable. Run without -s to use the first available.'));
           process.exit(1);
         }
       }
@@ -4791,8 +4766,9 @@ function outputServiceReadmeInstructions(serviceName, appId, communityId, manife
 
   console.log(chalk.white(`Your microservice needs a ${readmeFileName} file for tool discovery.
 
-📁 Required file: ${readmeFileName}
-📍 Location: Google Drive folder for app '${appId}' in community '${communityId}'
+📁 Required file: ${readmeFileName} (local file in your microservice directory)
+▶️  Pass it explicitly:  descix microservice register -r ./${readmeFileName}
+   (or re-run with --skip-readme-check to register without tool discovery)
 
 This README is vectorized and used by the \`tell_me_how\` command to help
 users and AI agents discover your service's capabilities.
