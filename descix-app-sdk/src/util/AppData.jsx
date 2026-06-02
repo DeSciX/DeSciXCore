@@ -40,6 +40,19 @@ export class AppData {
     return AppData._workspaceProducts;
   }
 
+  /**
+   * Live-update the workspace product map at runtime (dev only).
+   * Called by the @descix/app-sdk/dev workspaceProductsPlugin HMR client runtime
+   * when .descix/workspace.json changes, so the app store reflects added/changed
+   * product sites WITHOUT a dev-server restart. getProductUrl() reads this same
+   * mutable field, so the store re-resolves URLs from the new map on next render.
+   * @param {Object|null} products - { [appId]: 'proto://localhost:port' } or null
+   */
+  static setWorkspaceProducts(products) {
+    AppData._workspaceProducts = products && typeof products === 'object' ? products : null;
+    return AppData._workspaceProducts;
+  }
+
   static getProductUrl(product) {
     if (AppData._workspaceProducts && AppData._workspaceProducts[product.app_id]) {
       return AppData._workspaceProducts[product.app_id];

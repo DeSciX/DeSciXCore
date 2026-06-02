@@ -2234,6 +2234,58 @@ appCommand
   });
 
 
+// ============ App: open (WS-SSGPOD — dev URL resolver) ============
+//
+// Resolves an app's LOCAL GATEWAY URL (the URL served by `descix serve`, which mirrors
+// the production LB) and prints it; with --open, launches the default browser.
+// Reuses the SDK resolver resolveAppGatewayUrl() — the same workspace.json read path
+// behind buildWorkspaceProducts() that the PWA bakes into __WORKSPACE_PRODUCTS__ — so
+// the URL matches what the app store routes to:
+//   - env.platform        → https://localhost:{gatewayPort}/
+//   - product (static)    → https://localhost:{gatewayPort}/p/{appId}
+//   - product (dev-server)→ https://localhost:{gatewayPort}/p/{appId}
+// Hard-fails clearly if the app is unmapped or has no site config.
+appCommand
+  .command('open')
+  .description('Resolve (and optionally open) an app\'s local gateway dev URL. Hard-fails if the app has no site config.')
+  .requiredOption('-a, --app <app_id>', 'App ID (must be mapped in workspace.json with a site)')
+  .option('--open', 'Open the resolved URL in the default browser')
+  .action(async (options) => {
+    try {
+      const appId = options.app;
+      const { resolveAppGatewayUrl } = await import('@descix/app-sdk/dev');
+      const workspaceConfig = await WorkspaceConfig.load();
+      const workspaceRoot = workspaceConfig.workspaceRoot || process.cwd();
+
+      // resolveAppGatewayUrl hard-fails (no site / unmapped / no workspace) — surfaced in catch.
+      const resolved = resolveAppGatewayUrl(workspaceRoot, appId);
+
+      console.log(chalk.green(`\n${appId} → ${resolved.url}`));
+      console.log(chalk.gray(`  kind: ${resolved.kind}`));
+      console.log(chalk.gray(`  via:  ${resolved.via}`));
+      console.log(chalk.gray(`  (start the gateway with \`descix serve\` on port ${resolved.gatewayPort} if it is not already running)\n`));
+
+      if (options.open) {
+        // Use the platform-native opener — no extra npm dependency, no hardcoded fallback.
+        const { spawn } = await import('node:child_process');
+        const platform = process.platform;
+        const opener = platform === 'darwin' ? 'open'
+          : platform === 'win32' ? 'cmd'
+          : 'xdg-open';
+        const args = platform === 'win32' ? ['/c', 'start', '', resolved.url] : [resolved.url];
+        const child = spawn(opener, args, { stdio: 'ignore', detached: true });
+        child.on('error', (err) => {
+          console.error(chalk.yellow(`  Could not launch browser (${err.message}). Open the URL above manually.`));
+        });
+        child.unref();
+      }
+    } catch (error) {
+      console.error(chalk.red(error.message));
+      process.exit(1);
+    }
+  });
+
+
 // ============ App: set-default-model (WS-CONFIG-BOOTSTRAP-FIX item #10) ============
 //
 // Updates Community/{c}/Apps/{a}.default_app_model. Per CEO inheritance chain:
