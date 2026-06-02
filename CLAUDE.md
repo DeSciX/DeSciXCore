@@ -81,8 +81,15 @@ Before any change, state which package boundary is being touched and confirm no 
 - This is the canonical write path for the `microservice.port` that `descix microservice init` reads — no more hand-editing workspace.json ✓
 - Test coverage in `tests/app-set-port.test.js` (mirrors `site-servelocal.test.js`: happy path, disable/cleanup, disable-no-op, unmapped hard-fail, platform-app, plus a method-exists anti-regression assertion) ✓
 
+### Complete (WS-SSGPOD — `descix app set-site` closes the site.static gap)
+- `WorkspaceConfig.setStaticSite(appId, { static, port })` added — parallel to `setSitePort()`/`setMicroservicePort()`; mutates the live `env.products[]`/`env.platform` entry's `site.{}` slot, auto-saves; pass `static: null` / `port: null` to remove a field (empty `site.{}` cleaned up); hard-fails with the canonical "not mapped in workspace.json" error for an unmapped app ✓
+- `descix app set-site -a <id> --static <path>` command added (`bin/descix.js`, in the `app` group next to `set-port`/`set-localpath`/`unmap`) — wired to `setStaticSite`; also accepts `--port <n>` (1-65535) and `--unset` to clear `site.{}`; hard-fails clearly on unmapped app / bad port / nothing-to-set ✓
+- This is the canonical write path for `site.static` — the relative path (under the app's `localPath`; `.` = the localPath itself) that the dev gateway's `staticSitePlugin` serves at `/p/{appId}/`. It closes the `site.static` workspace gap the same way `set-port` closed `microservice.port`: no more hand-editing workspace.json (the org rule forbids it; CEO-D-2026-06-02-SSGPOD-SITE-PREPROD) ✓
+- NOT to be confused with `set-codesite` (which writes the Firestore `ip_site_gcs_path_url` — a prod concern). `set-site` writes ONLY the local workspace.json `site.{}` slot ✓
+- Test coverage in `tests/app-set-site.test.js` (mirrors `app-set-port.test.js`: happy path, static+port combined, disable/cleanup, disable-no-op, port-preservation, unmapped hard-fail, platform-app, plus a method-exists anti-regression assertion) ✓
+
 ### WorkspaceConfig — additional canonical method (v2.1)
-- **`workspaceConfig.env`** — raw `env` object from workspace.json. Use for reading `env.platform.microservice.port` / `env.products[i].microservice.port` when injecting port into scaffold files. Do not mutate directly — use `setSitePort()` for site port mutations and `setMicroservicePort()` for microservice port mutations.
+- **`workspaceConfig.env`** — raw `env` object from workspace.json. Use for reading `env.platform.microservice.port` / `env.products[i].microservice.port` when injecting port into scaffold files. Do not mutate directly — use `setSitePort()` for site port mutations, `setStaticSite()` for `site.static` (static-site) mutations, and `setMicroservicePort()` for microservice port mutations.
 
 ### Pending (other)
 - `descix-cli/bin/mcp-server.js`: imports non-existent `vendor/mcp/tools.js` — determine canonical MCP entry point, remove `DeSciXMCPServer` legacy

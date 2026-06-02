@@ -607,6 +607,74 @@ export class WorkspaceConfig {
   }
 
   /**
+   * Update an app's site config in env.products[] (or env.platform if it is the platform app).
+   *
+   * Parallel to setSitePort()/setMicroservicePort(), but operates on the entry's site.{} slot's
+   * static-site fields. This is the canonical write path for site.static — the relative path the
+   * dev gateway's staticSitePlugin serves at /p/{appId}/ (see createViteProxyConfig:
+   * site.static is resolved against the app's localPath; "." means the localPath itself).
+   * Backs the `descix app set-site` command, closing the site.static workspace gap without
+   * hand-editing workspace.json (the org rule forbids hand edits — CEO-D-2026-06-02-SSGPOD-SITE-PREPROD).
+   *
+   * Mutates site.static and/or site.port. Pass static === null to remove site.static; pass
+   * port === null to remove site.port. If site.{} becomes empty after removals it is deleted.
+   * Persists via save() at the end — same auto-save pattern as setSitePort()/setMicroservicePort().
+   * Hard-fails if appId is not mapped in env.platform or env.products.
+   *
+   * @param {string} appId - App identifier (must exist in env.platform or env.products)
+   * @param {Object} fields - Fields to set on site.{}
+   * @param {string|null} [fields.static] - Relative static-site path to set, or null to remove site.static
+   * @param {number|string|null} [fields.port] - Site dev-server port to set, or null to remove site.port
+   * @returns {Promise<string>} Path to saved config (from save())
+   */
+  async setStaticSite(appId, fields = {}) {
+    if (!appId) throw new Error('appId is required');
+    if (!fields || typeof fields !== 'object') throw new Error('fields object is required');
+
+    // Find the live env entry (platform or products[]) — not a copy
+    let entry = null;
+    if (this.env?.platform?.appId === appId) {
+      entry = this.env.platform;
+    } else if (Array.isArray(this.env?.products)) {
+      entry = this.env.products.find(p => p.appId === appId) || null;
+    }
+
+    if (!entry) {
+      throw new Error(
+        `App "${appId}" is not mapped in workspace.json. ` +
+        'Use `descix app init` to register, or `descix app set-localpath -a <id> -p <path>` to repoint.'
+      );
+    }
+
+    if (!entry.site) entry.site = {};
+
+    // site.static — set or remove
+    if ('static' in fields) {
+      if (fields.static === null || fields.static === undefined) {
+        delete entry.site.static;
+      } else {
+        entry.site.static = fields.static;
+      }
+    }
+
+    // site.port — set or remove (parallel to setSitePort, for static+devCommand sites)
+    if ('port' in fields) {
+      if (fields.port === null || fields.port === undefined) {
+        delete entry.site.port;
+      } else {
+        entry.site.port = fields.port;
+      }
+    }
+
+    // Clean up an empty site.{} so we never leave a bare {} behind
+    if (Object.keys(entry.site).length === 0) {
+      delete entry.site;
+    }
+
+    return this.save();
+  }
+
+  /**
    * Persistently set the target environment in workspace.json.
    *
    * Updates env.environment and env.apiUrl, then saves.
