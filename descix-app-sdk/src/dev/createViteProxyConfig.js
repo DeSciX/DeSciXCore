@@ -101,6 +101,38 @@ export function createViteProxyConfig(workspacePath, options = {}) {
     changeOrigin: true,
     secure: false,
   };
+  // OAuth Authorization Server endpoints (WS-MCP-OAUTH) — served by the Core API
+  // backend at the same paths (no rewrite). /oauth is a prefix covering
+  // /oauth/register, /oauth/authorize, /oauth/github/callback, /oauth/token.
+  proxy['/oauth'] = {
+    target: apiGatewayUrl,
+    changeOrigin: true,
+    secure: false,
+  };
+  // Exact-path .well-known entries only — do NOT blanket-proxy all of /.well-known.
+  proxy['/.well-known/oauth-protected-resource'] = {
+    target: apiGatewayUrl,
+    changeOrigin: true,
+    secure: false,
+  };
+  proxy['/.well-known/oauth-authorization-server'] = {
+    target: apiGatewayUrl,
+    changeOrigin: true,
+    secure: false,
+  };
+  // RFC 8414 / RFC 9728 path-inserted metadata locations (WS-MCP-OAUTH). Because
+  // the issuer has a path (/oauth) and the resource has a path (/mcp), spec-strict
+  // clients (Claude.ai) probe these path-inserted .well-known URLs. Exact paths only.
+  proxy['/.well-known/oauth-authorization-server/oauth'] = {
+    target: apiGatewayUrl,
+    changeOrigin: true,
+    secure: false,
+  };
+  proxy['/.well-known/oauth-protected-resource/mcp'] = {
+    target: apiGatewayUrl,
+    changeOrigin: true,
+    secure: false,
+  };
 
   // Debug Proxy (if VITE_DEBUG_PROXY is set)
   proxy['/.proxy/api_debug'] = {
