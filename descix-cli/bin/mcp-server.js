@@ -147,28 +147,34 @@ const TOOLS = [
     },
   },
   // -------------------------------------------------------------------------
-  // KB-as-Database record store (CEO-D-2026-06-01-KB-AS-DB-API)
-  // Treat an app's KB as a queryable record store. `kb_records_query` is a
-  // STRUCTURED metadata-filtered scan (non-ANN) returning full records; use
-  // `ask_question_to_app` for semantic ANN search over the same records.
+  // -------------------------------------------------------------------------
+  // APP DATA PLANE — structured record store
+  // (CEO-D-2026-06-01-KB-AS-DB-API → re-backed CEO-D-2026-06-02-APP-DATA-PLANE)
+  // Treat an app like a database table. Records live in the app data plane
+  // (Firestore document collections at AppData/{app_id}/{kb_id}/{file_id}) — NOT
+  // the Pinecone KB. `app_records_query` is a STRUCTURED, strongly-consistent
+  // metadata-filtered scan (non-ANN) returning full records; use
+  // `ask_question_to_app` for semantic ANN search over KB content.
+  // Canonical surface: app_records_*. kb_records_* are deprecated back-compat aliases.
   // -------------------------------------------------------------------------
   {
-    name: 'kb_records_put',
+    name: 'app_records_put',
     description:
-      'Use your KB as a database: store/replace records with custom metadata. Each record is ' +
-      '{ file_id, text, chunk_idx?, ...any custom metadata }. You do NOT build the record id — ' +
+      'Use your app like a database: store/replace structured records with custom metadata in the ' +
+      'app data plane (Firestore-backed, strongly consistent — NOT the Pinecone KB). Each record is ' +
+      '{ file_id, text?, chunk_idx?, ...any custom metadata }. You do NOT build the record id — ' +
       'supply a human-meaningful file_id (the grouping key) plus an optional chunk_idx (default 0) ' +
       'and the composite id is built for you. (A pre-built full "id" is still accepted for back-compat.) ' +
       'Custom fields (string/number/boolean/string[]) are stored as filterable metadata you can later ' +
-      'query structurally; the `text` field is also semantically searchable via ask_question_to_app.',
+      'query structurally with app_records_query.',
     inputSchema: {
       type: 'object',
       properties: {
         app_id: { type: 'string', description: 'App ID (your app)' },
-        kb_id: { type: 'string', description: 'Knowledge Base ID (acts like a table)' },
+        kb_id: { type: 'string', description: 'Record collection ID (acts like a database table)' },
         records: {
           type: 'array',
-          description: 'Records to upsert: [{ file_id (required), text, chunk_idx? (default 0), ...customMetadata }]. The id is derived from file_id+chunk_idx; pass a full "id" only for back-compat.',
+          description: 'Records to upsert: [{ file_id (required), text?, chunk_idx? (default 0), ...customMetadata }]. The id is derived from file_id+chunk_idx; pass a full "id" only for back-compat.',
           items: { type: 'object' },
         },
       },
@@ -176,20 +182,19 @@ const TOOLS = [
     },
   },
   {
-    name: 'kb_records_query',
+    name: 'app_records_query',
     description:
-      'Query your KB like a database: a STRUCTURED, metadata-filtered scan (NOT ANN/semantic) that ' +
-      'returns ALL records matching a predicate — e.g. "all records where type=episode AND show=X". ' +
-      'Supports $eq/$in/$ne and a field projection. Use this for exact structured lookups; use ' +
-      'ask_question_to_app for fuzzy semantic search. ' +
-      'EVENTUAL CONSISTENCY: this scan is backed by a Pinecone prefix-list, so a query run immediately ' +
-      'after kb_records_put may not yet see the just-written record(s). For read-after-write workflows, ' +
-      'briefly retry until the expected count appears rather than trusting a first empty result.',
+      'Query your app like a database: a STRUCTURED, metadata-filtered scan (NOT ANN/semantic) over the ' +
+      'app data plane (Firestore-backed) that returns ALL records matching a predicate — e.g. "all records ' +
+      'where type=episode AND show=X". Supports $eq/$in/$ne and a field projection. STRONGLY CONSISTENT: a ' +
+      'query run immediately after app_records_put deterministically sees the just-written record(s) (no ' +
+      'read-after-write lag). Use this for exact structured lookups; use ask_question_to_app for fuzzy ' +
+      'semantic search over KB content.',
     inputSchema: {
       type: 'object',
       properties: {
         app_id: { type: 'string', description: 'App ID' },
-        kb_id: { type: 'string', description: 'Knowledge Base ID' },
+        kb_id: { type: 'string', description: 'Record collection ID' },
         filter: { type: 'object', description: 'Metadata predicate, e.g. { "type": "episode", "show": { "$eq": "X" } }' },
         fields: { type: 'array', items: { type: 'string' }, description: 'Projection of metadata fields to return (omit or ["*"] for all)' },
         limit: { type: 'number', description: 'Max records to return (post-filter)' },
@@ -198,15 +203,15 @@ const TOOLS = [
     },
   },
   {
-    name: 'kb_records_get',
+    name: 'app_records_get',
     description:
-      'Fetch specific records from your KB by id (point lookup), with an arbitrary metadata projection. ' +
-      'Returns full custom metadata for each requested record.',
+      'Fetch specific records from your app data plane by id (point lookup), with an arbitrary metadata ' +
+      'projection. Firestore-backed, strongly consistent. Returns full custom metadata for each requested record.',
     inputSchema: {
       type: 'object',
       properties: {
         app_id: { type: 'string', description: 'App ID' },
-        kb_id: { type: 'string', description: 'Knowledge Base ID' },
+        kb_id: { type: 'string', description: 'Record collection ID' },
         ids: { type: 'array', items: { type: 'string' }, description: 'Record ids to fetch' },
         fields: { type: 'array', items: { type: 'string' }, description: 'Projection of metadata fields (omit or ["*"] for all)' },
       },
@@ -214,16 +219,79 @@ const TOOLS = [
     },
   },
   {
-    name: 'kb_records_delete',
+    name: 'app_records_delete',
     description:
-      'Delete records from your KB by id (or by file_id grouping key).',
+      'Delete records from your app data plane by id (or by file_id grouping key). Firestore-backed.',
     inputSchema: {
       type: 'object',
       properties: {
         app_id: { type: 'string', description: 'App ID' },
-        kb_id: { type: 'string', description: 'Knowledge Base ID' },
+        kb_id: { type: 'string', description: 'Record collection ID' },
         ids: { type: 'array', items: { type: 'string' }, description: 'Record ids to delete' },
         file_ids: { type: 'array', items: { type: 'string' }, description: 'file_id grouping keys to delete (deletes all records with each file_id)' },
+      },
+      required: ['app_id', 'kb_id'],
+    },
+  },
+  // --- DEPRECATED back-compat aliases (still functional; prefer app_records_*) ---
+  {
+    name: 'kb_records_put',
+    description:
+      'DEPRECATED — use app_records_put. Back-compat alias for the app-data-plane record store ' +
+      '(the structured store is the app data plane / Firestore, not the Pinecone KB). Identical contract.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string', description: 'App ID' },
+        kb_id: { type: 'string', description: 'Record collection ID' },
+        records: { type: 'array', description: 'Records to upsert (see app_records_put)', items: { type: 'object' } },
+      },
+      required: ['app_id', 'kb_id', 'records'],
+    },
+  },
+  {
+    name: 'kb_records_query',
+    description:
+      'DEPRECATED — use app_records_query. Back-compat alias for the app-data-plane structured scan ' +
+      '(Firestore-backed, strongly consistent — not the Pinecone KB). Identical contract.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string', description: 'App ID' },
+        kb_id: { type: 'string', description: 'Record collection ID' },
+        filter: { type: 'object', description: 'Metadata predicate (see app_records_query)' },
+        fields: { type: 'array', items: { type: 'string' }, description: 'Projection of metadata fields' },
+        limit: { type: 'number', description: 'Max records to return (post-filter)' },
+      },
+      required: ['app_id', 'kb_id'],
+    },
+  },
+  {
+    name: 'kb_records_get',
+    description:
+      'DEPRECATED — use app_records_get. Back-compat alias for app-data-plane point lookups. Identical contract.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string', description: 'App ID' },
+        kb_id: { type: 'string', description: 'Record collection ID' },
+        ids: { type: 'array', items: { type: 'string' }, description: 'Record ids to fetch' },
+        fields: { type: 'array', items: { type: 'string' }, description: 'Projection of metadata fields' },
+      },
+      required: ['app_id', 'kb_id', 'ids'],
+    },
+  },
+  {
+    name: 'kb_records_delete',
+    description:
+      'DEPRECATED — use app_records_delete. Back-compat alias for app-data-plane deletes. Identical contract.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string', description: 'App ID' },
+        kb_id: { type: 'string', description: 'Record collection ID' },
+        ids: { type: 'array', items: { type: 'string' }, description: 'Record ids to delete' },
+        file_ids: { type: 'array', items: { type: 'string' }, description: 'file_id grouping keys to delete' },
       },
       required: ['app_id', 'kb_id'],
     },
