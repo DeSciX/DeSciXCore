@@ -15,7 +15,8 @@
     "./integrations/git": "./src/integrations/gitUtils.js",
     "./orchestrators/wizard": "./src/orchestrators/wizardOrchestrator.js",
     "./managers/community": "./src/managers/communityManager.js",
-    "./managers/app": "./src/managers/appManager.js"
+    "./managers/app": "./src/managers/appManager.js",
+    "./mesh/asset": "./src/mesh/assetClient.js"
   },
   "keywords": [
     "descix",
