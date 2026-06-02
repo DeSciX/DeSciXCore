@@ -16,7 +16,8 @@
     "./orchestrators/wizard": "./src/orchestrators/wizardOrchestrator.js",
     "./managers/community": "./src/managers/communityManager.js",
     "./managers/app": "./src/managers/appManager.js",
-    "./mesh/asset": "./src/mesh/assetClient.js"
+    "./mesh/asset": "./src/mesh/assetClient.js",
+    "./mesh/loopback": "./src/mesh/meshLoopback.js"
   },
   "keywords": [
     "descix",
@@ -35,6 +36,7 @@
     "node": ">=24.0.0"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.25.1"
+    "@modelcontextprotocol/sdk": "^1.25.1",
+    "google-auth-library": "^9.15.1"
   }
 }
