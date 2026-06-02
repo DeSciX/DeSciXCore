@@ -1,7 +1,7 @@
 /**
  * DeSciX MCP Loopback Client
  *
- * Enables the service to call Core Tools (e.g. RAG, kb_records) or other Service Tools
+ * Enables the service to call Core Tools (e.g. RAG, app_records) or other Service Tools
  * via the Federated MCP Broker (DeSciX_Cloud) at /apifront.
  *
  * AUTH MODEL — DELEGATE SIGNATURE (CEO-D-2026-06-01-MESH-AUTH-DRIVE-REMOVAL, Fix A):
@@ -62,7 +62,7 @@ class McpClient {
 
     /**
      * Call a command via the Core Broker (/apifront), authenticated as this service's delegate.
-     * @param {string} command - Command name (e.g. 'kb_records_put', 'ask_question_to_app')
+     * @param {string} command - Command name (e.g. 'app_records_put', 'ask_question_to_app')
      * @param {Object} args    - Command params
      * @returns {Promise<any>} - Core's `message` payload on success
      */
