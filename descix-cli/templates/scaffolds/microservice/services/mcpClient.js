@@ -1,22 +1,36 @@
 /**
  * DeSciX MCP Loopback Client
- * 
- * Enables the service to call Core Tools (e.g. RAG, Purchase) or other Service Tools
- * via the Federated MCP Broker (DeSciX_Cloud).
+ *
+ * Enables the service to call Core Tools (e.g. RAG, kb_records) or other Service Tools
+ * via the Federated MCP Broker (DeSciX_Cloud) at /apifront.
+ *
+ * AUTH MODEL — DELEGATE SIGNATURE (CEO-D-2026-06-01-MESH-AUTH-DRIVE-REMOVAL, Fix A):
+ *   This service authenticates as the DELEGATE of its service slot. At `descix microservice
+ *   register-delegate` time, an EC key pair was generated; the PUBLIC key was stored in the
+ *   Core VirtualRegistry against the slot id, and the PRIVATE key was saved as SERVICE_KEY.
+ *   To call /apifront we sign the EXACT request-body JSON string with that private key and
+ *   present three headers the Core validates against the registered public key:
+ *       X-NFT-ID    = SERVICE_KEY.slotId   (the slot the delegate was registered against)
+ *       X-Signature = base64(SHA256 sign(bodyString))
+ *       X-Timestamp = Date.now()
+ *   The signature IS the auth. We do NOT send user_id / access_token, and we do NOT stuff a
+ *   static OWNER_SIGNATURE into params. The Core resolves the slot owner and runs the command
+ *   on their behalf.
+ *
+ * CRITICAL: we must sign the byte-for-byte string we send. So we serialize the body ONCE
+ * (bodyString), sign THAT, and POST THAT raw string — never let axios re-serialize a separate
+ * object (key order / spacing could diverge and break verification).
  */
 
 import axios from 'axios';
 import https from 'https';
 import { utils } from './utils.js';
-import { Signer } from '@descix/sdk'; // Assuming descix-sdk is available in the container
+import { Signer } from '@descix/sdk';
 
 /**
  * In local dev the Core broker is served over HTTPS with a self-signed cert
- * (https://localhost:4000). Node's axios will reject it ('self-signed certificate
- * in certificate chain'). Trust it ONLY in dev AND only when the target is a
+ * (https://localhost:4000). Trust it ONLY in dev AND only when the target is a
  * localhost loopback — NEVER in demo/prod, and NEVER for a non-local host.
- *
- * Gated, not unconditional: prod traffic keeps full TLS verification.
  */
 function buildDevLoopbackAgent() {
     const isDev = !utils.DEPLOY_ENV || utils.DEPLOY_ENV === 'dev';
@@ -28,74 +42,66 @@ function buildDevLoopbackAgent() {
     return undefined; // prod / non-local: default agent, full cert verification
 }
 
-// Built once at module load — reflects DEPLOY_ENV + CORE_API_URL at boot.
 const devLoopbackAgent = buildDevLoopbackAgent();
 
 class McpClient {
     constructor() {
-        // Initialize signer if key is available
-        if (utils.SERVICE_KEY) {
+        // SERVICE_KEY is provisioned by `descix microservice register-delegate`
+        // (dev-overrides.json in dev / Secret Manager in deployed envs).
+        if (utils.SERVICE_KEY?.privateKey) {
             this.signer = new Signer(utils.SERVICE_KEY.privateKey, utils.SERVICE_KEY.slotId);
         }
     }
 
     /**
-     * Call a tool via the Core Broker
-     * @param {string} toolName - Name of the tool to call (e.g., 'query_knowledge_base')
-     * @param {Object} args - Tool arguments
-     * @param {Object} context - User context object (from _descix) to pass identity
-     * @returns {Promise<any>} - Tool result
+     * Call a command via the Core Broker (/apifront), authenticated as this service's delegate.
+     * @param {string} command - Command name (e.g. 'kb_records_put', 'ask_question_to_app')
+     * @param {Object} args    - Command params
+     * @returns {Promise<any>} - Core's `message` payload on success
      */
-    async callTool(toolName, args, context) {
+    async callTool(command, args = {}) {
         if (!utils.CORE_API_URL) {
             throw new Error('CORE_API_URL not configured');
         }
+        if (!this.signer) {
+            throw new Error('SERVICE_KEY not configured — run `descix microservice register-delegate` to provision a delegate before making mesh calls.');
+        }
 
-        // Construct the payload simulating a PWA or internal request
-        const payload = {
-            command: toolName,
-            params: {
-                ...args,
-                // Critical: Pass the original user context back to Core
-                // The Core trusts this service (authenticated via Service Secret or VPC)
-                // In this simplified template, we pass the user ID we received
-                user_id: context?.user?.id || utils.OWNER_USER_ID,
-                // If we have owner credentials, use them as fallback for auth
-                wallet_address: utils.OWNER_WALLET_ADDRESS,
-                signature: utils.OWNER_SIGNATURE
-            }
+        // Build the request body. Auth is the delegate signature in headers — NOT in params.
+        const body = {
+            command,
+            params: { ...args }
+        };
+
+        // Serialize ONCE and sign exactly what we send (byte-for-byte).
+        const bodyString = JSON.stringify(body);
+        const signatureHeaders = this.signer.getHeaders(bodyString); // X-NFT-ID / X-Signature / X-Timestamp
+
+        if (!signatureHeaders['X-Signature']) {
+            throw new Error('Signer produced no signature — SERVICE_KEY.privateKey is missing or invalid.');
+        }
+
+        const headers = {
+            'Content-Type': 'application/json',
+            ...signatureHeaders
         };
 
         try {
-            console.log(`[McpClient] Calling ${toolName} on ${utils.CORE_API_URL}`);
-            
-            // Get headers (Signature or Legacy Secret)
-            const headers = {
-                'Content-Type': 'application/json'
-            };
+            console.log(`[McpClient] Calling ${command} on ${utils.CORE_API_URL} (delegate slot ${utils.SERVICE_KEY.slotId})`);
 
-            if (this.signer) {
-                // Sign the payload string
-                const signatureHeaders = this.signer.getHeaders(JSON.stringify(payload));
-                Object.assign(headers, signatureHeaders);
-            } else if (utils.SERVICE_SECRET) {
-                // Fallback to legacy secret
-                headers['Authorization'] = `Bearer ${utils.SERVICE_SECRET}`;
-            }
-            
-            const response = await axios.post(utils.CORE_API_URL, payload, {
+            const response = await axios.post(utils.CORE_API_URL, bodyString, {
                 headers,
-                // dev-only: trust the localhost self-signed cert. undefined in prod.
                 ...(devLoopbackAgent ? { httpsAgent: devLoopbackAgent } : {})
             });
 
             if (response.data?.status === 'OK') {
                 return response.data.message;
-            } else {
-                throw new Error(response.data?.message || 'Unknown error from Core');
             }
+            throw new Error(response.data?.message || 'Unknown error from Core');
         } catch (error) {
-            console.error(`[McpClient] Error calling ${toolName}:`, error.message);
+            const status = error.response?.status;
+            const coreMsg = error.response?.data?.message;
+            console.error(`[McpClient] Error calling ${command}:`, status ? `HTTP ${status} — ${coreMsg || error.message}` : error.message);
             throw error;
         }
     }
