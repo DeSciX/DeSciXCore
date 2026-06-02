@@ -1723,6 +1723,47 @@ appCommand
   });
 
 appCommand
+  .command('set-service-account')
+  .description('Bind an app Cloud Run service-account email to its app_id (SA<->app_id binding for the data-plane loopback)')
+  .option('-c, --community <id>', 'Community ID (uses context if not provided)')
+  .option('-a, --app <id>', 'App ID (uses context if not provided)')
+  .requiredOption('--sa <email>', 'Cloud Run service-account email (svc@PROJECT.iam.gserviceaccount.com); use "none" to clear')
+  .action(async (options) => {
+    try {
+      const apiClient = new DeSciXApiClient();
+      await requireAuth(apiClient);
+
+      const workspaceConfig = await WorkspaceConfig.load();
+      const ctx = workspaceConfig.resolveContextWithOptions(options);
+      const appId = ctx.appId;
+      if (!appId) {
+        console.error(chalk.red('\n❌ App ID required (provide -a or cd into an app directory).\n'));
+        process.exit(1);
+      }
+
+      const clearing = options.sa === 'none' || options.sa === 'null';
+      const service_account = clearing ? null : options.sa;
+      if (!clearing && !service_account.endsWith('.iam.gserviceaccount.com')) {
+        console.error(chalk.red('\n❌ --sa must be a GCP service-account email (.iam.gserviceaccount.com), or "none" to clear.\n'));
+        process.exit(1);
+      }
+
+      const response = await apiClient.invoke('set_app_service_account', {
+        app_id: appId,
+        service_account
+      });
+      const result = response.message || response;
+
+      console.log(chalk.green('\n✅ App service-account binding updated!\n'));
+      console.log(chalk.cyan(`  App: ${result.community_id || ''}/${appId}`));
+      console.log(chalk.gray(`  cloud_run_sa: ${result.cloud_run_sa || '(cleared)'}\n`));
+    } catch (error) {
+      console.error(chalk.red(error.message));
+      process.exit(1);
+    }
+  });
+
+appCommand
   .command('set-price')
   .description('Set app price in USDCX')
   .requiredOption('-c, --community <id>', 'Community ID')
