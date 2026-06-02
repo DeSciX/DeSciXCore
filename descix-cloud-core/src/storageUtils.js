@@ -13,6 +13,7 @@ import { getCloudConfig } from './config.js';
 class AuthProvider {
     static DISCORD = 'discord';
     static GOOGLE = 'google';
+    static GITHUB = 'github';
     static DESCIX = 'descix';      // Native email-based authentication
     static WALLET = 'wallet';       // Wallet signature authentication
     static POWCH = 'powch';        // Passkey (WebAuthn) authentication
