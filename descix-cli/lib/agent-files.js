@@ -54,7 +54,7 @@ async function loadContext(workspaceRoot) {
     // No workspace.json — use defaults
     return {
       appId: path.basename(workspaceRoot),
-      communityId: 'descix',
+      communityId: 'daita',
       apiUrl: 'https://descix.net',
       appName: path.basename(workspaceRoot),
     };

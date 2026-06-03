@@ -116,7 +116,7 @@ async function generateRulesFile(workspacePath, entitlements, primaryCommunity) 
     // Customize with workspace-specific values
     const customized = template
       .replace(/\{\{SDK_ASSETS_PATH\}\}/g, '.descix/sdk-assets')
-      .replace(/\{\{PRIMARY_COMMUNITY\}\}/g, primaryCommunity || 'descix')
+      .replace(/\{\{PRIMARY_COMMUNITY\}\}/g, primaryCommunity || 'daita')
       .replace(/\{\{ENTITLEMENTS_JSON\}\}/g, JSON.stringify(entitlementsSummary, null, 2))
       .replace(/\{\{SDK_VERSION\}\}/g, SDK_VERSION)
       .replace(/\{\{WORKSPACE_PATH\}\}/g, workspacePath);
@@ -348,9 +348,9 @@ export async function runSetupWizard(options = {}) {
     }
 
     // Derive primary community from entitlements
-    let primaryCommunity = 'descix';
+    let primaryCommunity = 'daita';
     if (entitlements.communities.length > 0) {
-      primaryCommunity = entitlements.communities[0].community_id || entitlements.communities[0].id || 'descix';
+      primaryCommunity = entitlements.communities[0].community_id || entitlements.communities[0].id || 'daita';
     }
 
     // Step 4: MCP Configuration
@@ -443,7 +443,7 @@ export async function runSetupWizard(options = {}) {
       additionalContexts: [],
       defaultContext: {
         communityId: primaryCommunity,
-        appId: 'agent',
+        appId: 'daita',
         kbId: 'General'
       },
       apiUrl: apiUrl,

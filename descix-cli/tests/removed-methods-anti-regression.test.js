@@ -155,3 +155,74 @@ test('scaffold-dir anti-regression: copyScaffold resolves to an existing directo
     'microservice/app.js must exist after copyScaffold("microservice")'
   );
 });
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WS-V1-PURGE Phase 2 — anti-regression guard for purged V1 CLI constructs.
+//
+// Scans lib/ and bin/ (excluding tests/) for any re-introduction of the V1
+// Drive/sync-mode/identifier-leak constructs removed in WS-V1-PURGE Phase 2:
+//   - removed CLI commands:  app register-folder, app upload, app upload-tree,
+//                            the `folder` group, config set-sync-mode, the
+//                            kb create --drive-folder option
+//   - removed server-command invocations from the CLI: register_base_folder,
+//     upload_files_to_kb, upload_kb_files, get_user_base_folder
+//   - V1 identifier leaks:   defaultContext appId 'agent' / communityId 'descix'
+//   - deleted modules:       lib/commands/folder.js, lib/commands/app-wizard.js
+// ─────────────────────────────────────────────────────────────────────────────
+
+const V1_PURGE_PATTERNS = [
+  /\.command\('register-folder'\)/,
+  /\.command\('upload-tree'\)/,
+  /\.command\('set-sync-mode'\)/,
+  /\.command\('folder'\)/,
+  /--drive-folder/,
+  /invoke\(['"]register_base_folder['"]/,
+  /invoke\(['"]upload_files_to_kb['"]/,
+  /invoke\(['"]upload_kb_files['"]/,
+  /invoke\(['"]get_user_base_folder['"]/,
+  /appId:\s*['"]agent['"]/,
+  /communityId:\s*['"]descix['"]/,
+  /commands\/folder\.js/,
+  /commands\/app-wizard\.js/,
+];
+
+async function scanForPatterns(files, patterns) {
+  const hits = [];
+  for (const file of files) {
+    const content = await fs.readFile(file, 'utf-8');
+    const lines = content.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      for (const pattern of patterns) {
+        if (pattern.test(lines[i])) {
+          hits.push({ file, lineNumber: i + 1, line: lines[i].trim(), pattern: pattern.toString() });
+        }
+      }
+    }
+  }
+  return hits;
+}
+
+test('WS-V1-PURGE Phase 2: no purged V1 CLI constructs in lib/ or bin/', async () => {
+  const libFiles = await collectJsFiles(path.join(CLI_ROOT, 'lib'));
+  const binFiles = await collectJsFiles(path.join(CLI_ROOT, 'bin'));
+  const hits = await scanForPatterns([...libFiles, ...binFiles], V1_PURGE_PATTERNS);
+
+  if (hits.length > 0) {
+    const report = hits.map(h =>
+      `  ${path.relative(CLI_ROOT, h.file)}:${h.lineNumber} — ${h.line} [pattern: ${h.pattern}]`
+    ).join('\n');
+    assert.fail(`Found ${hits.length} purged V1 construct(s) re-introduced:\n${report}`);
+  }
+  assert.equal(hits.length, 0, 'Zero purged-V1-construct references expected in lib/ and bin/');
+});
+
+test('WS-V1-PURGE Phase 2: deleted CLI modules stay deleted', async () => {
+  for (const rel of ['lib/commands/folder.js', 'lib/commands/app-wizard.js']) {
+    await assert.rejects(
+      () => fs.access(path.join(CLI_ROOT, rel)),
+      /ENOENT/,
+      `${rel} must remain deleted (WS-V1-PURGE Phase 2)`
+    );
+  }
+});

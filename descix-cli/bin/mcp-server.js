@@ -155,7 +155,7 @@ const TOOLS = [
   // the Pinecone KB. `app_records_query` is a STRUCTURED, strongly-consistent
   // metadata-filtered scan (non-ANN) returning full records; use
   // `ask_question_to_app` for semantic ANN search over KB content.
-  // Canonical surface: app_records_*. kb_records_* are deprecated back-compat aliases.
+  // Canonical surface: app_records_*.
   // -------------------------------------------------------------------------
   {
     name: 'app_records_put',
@@ -229,69 +229,6 @@ const TOOLS = [
         kb_id: { type: 'string', description: 'Record collection ID' },
         ids: { type: 'array', items: { type: 'string' }, description: 'Record ids to delete' },
         file_ids: { type: 'array', items: { type: 'string' }, description: 'file_id grouping keys to delete (deletes all records with each file_id)' },
-      },
-      required: ['app_id', 'kb_id'],
-    },
-  },
-  // --- DEPRECATED back-compat aliases (still functional; prefer app_records_*) ---
-  {
-    name: 'kb_records_put',
-    description:
-      'DEPRECATED — use app_records_put. Back-compat alias for the app-data-plane record store ' +
-      '(the structured store is the app data plane / Firestore, not the Pinecone KB). Identical contract.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        app_id: { type: 'string', description: 'App ID' },
-        kb_id: { type: 'string', description: 'Record collection ID' },
-        records: { type: 'array', description: 'Records to upsert (see app_records_put)', items: { type: 'object' } },
-      },
-      required: ['app_id', 'kb_id', 'records'],
-    },
-  },
-  {
-    name: 'kb_records_query',
-    description:
-      'DEPRECATED — use app_records_query. Back-compat alias for the app-data-plane structured scan ' +
-      '(Firestore-backed, strongly consistent — not the Pinecone KB). Identical contract.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        app_id: { type: 'string', description: 'App ID' },
-        kb_id: { type: 'string', description: 'Record collection ID' },
-        filter: { type: 'object', description: 'Metadata predicate (see app_records_query)' },
-        fields: { type: 'array', items: { type: 'string' }, description: 'Projection of metadata fields' },
-        limit: { type: 'number', description: 'Max records to return (post-filter)' },
-      },
-      required: ['app_id', 'kb_id'],
-    },
-  },
-  {
-    name: 'kb_records_get',
-    description:
-      'DEPRECATED — use app_records_get. Back-compat alias for app-data-plane point lookups. Identical contract.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        app_id: { type: 'string', description: 'App ID' },
-        kb_id: { type: 'string', description: 'Record collection ID' },
-        ids: { type: 'array', items: { type: 'string' }, description: 'Record ids to fetch' },
-        fields: { type: 'array', items: { type: 'string' }, description: 'Projection of metadata fields' },
-      },
-      required: ['app_id', 'kb_id', 'ids'],
-    },
-  },
-  {
-    name: 'kb_records_delete',
-    description:
-      'DEPRECATED — use app_records_delete. Back-compat alias for app-data-plane deletes. Identical contract.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        app_id: { type: 'string', description: 'App ID' },
-        kb_id: { type: 'string', description: 'Record collection ID' },
-        ids: { type: 'array', items: { type: 'string' }, description: 'Record ids to delete' },
-        file_ids: { type: 'array', items: { type: 'string' }, description: 'file_id grouping keys to delete' },
       },
       required: ['app_id', 'kb_id'],
     },

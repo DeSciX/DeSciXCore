@@ -1272,7 +1272,7 @@ export class Community {
         this.guild_rep_commission_rate = guild_rep_commission_rate;
         this.guild_dip_commission_rate = guild_dip_commission_rate;
         this.mcp_rag_min_tokens = mcp_rag_min_tokens || 0;
-        this.auto_purchase_apps = auto_purchase_apps || ['agent'];
+        this.auto_purchase_apps = auto_purchase_apps || ['daita'];
         this.pool_config = pool_config || null;
         this.google_group_email = google_group_email || null;
         this.discord_guild_id = discord_guild_id || null;
@@ -1307,7 +1307,7 @@ export class Community {
         if (copy.guild_rep_commission_rate === undefined) copy.guild_rep_commission_rate = 0.1;
         if (copy.guild_dip_commission_rate === undefined) copy.guild_dip_commission_rate = 0.1;
         if (copy.mcp_rag_min_tokens === undefined) copy.mcp_rag_min_tokens = 0;
-        if (copy.auto_purchase_apps === undefined) copy.auto_purchase_apps = ['agent'];
+        if (copy.auto_purchase_apps === undefined) copy.auto_purchase_apps = ['daita'];
         if (copy.pool_config === undefined) copy.pool_config = null;
         if (copy.google_group_email === undefined) copy.google_group_email = null;
         if (copy.discord_guild_id === undefined) copy.discord_guild_id = null;
