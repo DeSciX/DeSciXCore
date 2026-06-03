@@ -44,5 +44,11 @@
   ],
   "engines": {
     "node": ">=24.0.0"
+  },
+  "exports": {
+    ".": "./lib/service-api-client.js",
+    "./service-api-client": "./lib/service-api-client.js",
+    "./api-client": "./lib/api-client.js",
+    "./package.json": "./package.json"
   }
 }

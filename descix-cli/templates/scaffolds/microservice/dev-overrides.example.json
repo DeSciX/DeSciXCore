@@ -1,0 +1,5 @@
+{
+  "_comment": "Copy this file to dev-overrides.json (GITIGNORED) and fill in the developer credential. The microservice authenticates to /apifront AS the developer — exactly like the CLI — using these. In prod these come from a SECRET, never from a checked-in file. defaults-config.json must NOT contain the signature (it is a credential).",
+  "DEVELOPER_WALLET_ADDRESS": "0xYOUR_WALLET_ADDRESS",
+  "DEVELOPER_SIGNATURE": "PASTE_YOUR_DURABLE_SIGNATURE_FROM_.descix/wallet.json"
+}

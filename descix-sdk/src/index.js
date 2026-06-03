@@ -21,8 +21,6 @@ export { Signer } from './auth/signer.js';
 // Mesh asset client — service-side fetch-by-reference (media-via-API-surface)
 export { fetchAppAsset } from './mesh/assetClient.js';
 
-// Mesh loopback — service-side caller-authenticated broker invoker (SA-OIDC, no service key)
-export { createMeshLoopback, meshLoopback } from './mesh/meshLoopback.js';
 
 // Import classes for factory function
 import { GitUtils } from './integrations/gitUtils.js';
@@ -30,7 +28,6 @@ import { WizardOrchestrator, WIZARD_STEPS } from './orchestrators/wizardOrchestr
 import { CommunityManager } from './managers/communityManager.js';
 import { AppManager } from './managers/appManager.js';
 import { Signer } from './auth/signer.js';
-import { createMeshLoopback, meshLoopback } from './mesh/meshLoopback.js';
 
 /**
  * Create all SDK components with a shared API client
@@ -66,7 +63,5 @@ export default {
   createAppManager: (client) => new AppManager(client),
   createSDK,
   WIZARD_STEPS,
-  Signer,
-  createMeshLoopback,
-  meshLoopback
+  Signer
 };
