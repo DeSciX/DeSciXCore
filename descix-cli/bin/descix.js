@@ -18,7 +18,6 @@ import * as configCommands from '../lib/commands/config.js';
 import * as buyCommands from '../lib/commands/buy.js';
 import * as airdropCommands from '../lib/commands/airdrop.js';
 import { runInit } from '../lib/commands/init.js';
-import * as folderCommands from '../lib/commands/folder.js';
 import * as updateCommands from '../lib/commands/update.js';
 import { runStatus } from '../lib/commands/status.js';
 import { runDoctor } from '../lib/commands/doctor.js';
@@ -1151,34 +1150,6 @@ appCommand
   });
 
 appCommand
-  .command('register-folder')
-  .description('Register your base Drive folder (must be shared with dip@descix.net)')
-  .option('-u, --url <folderUrl>', 'Drive folder URL or ID')
-  .action(async (options) => {
-    try {
-      const apiClient = new DeSciXApiClient();
-      await requireAuth(apiClient);
-      
-      if (!options.url) {
-        console.error(chalk.red('Error: Folder URL or ID required. Use -u or --url'));
-        process.exit(1);
-      }
-      
-      const response = await apiClient.invoke('register_base_folder', {
-        folder_url: options.url
-      });
-      const result = response.message || response;
-      
-      console.log(chalk.green('\n✅ Folder registered successfully!\n'));
-      console.log(chalk.cyan(`  Folder ID: ${result.folder_id}`));
-      console.log(chalk.gray(`  Folder Name: ${result.folder_name}\n`));
-    } catch (error) {
-      console.error(chalk.red(error.message));
-      process.exit(1);
-    }
-  });
-
-appCommand
   .command('create')
   .description('Create an app in a community. --quick with -c/-a for CLI-driven creation.')
   .option('-c, --community <id>', 'Community ID')
@@ -1352,332 +1323,6 @@ appCommand
       }
     } catch (error) {
       console.error(chalk.red(`\n❌ ${error.message}\n`));
-      process.exit(1);
-    }
-  });
-
-appCommand
-  .command('upload')
-  .description('Upload local files to app knowledge base')
-  .requiredOption('-c, --community <id>', 'Community ID')
-  .requiredOption('-a, --app <id>', 'App ID')
-  .requiredOption('-p, --path <localPath>', 'Local folder path')
-  .option('-k, --kb <id>', 'Knowledge Base ID', 'General')
-  .action(async (options) => {
-    try {
-      const apiClient = new DeSciXApiClient();
-      await requireAuth(apiClient);
-      
-      const fs = await import('fs/promises');
-      const path = await import('path');
-      
-      // Read files from local path
-      const localPath = options.path;
-      const stats = await fs.stat(localPath);
-      if (!stats.isDirectory()) {
-        throw new Error(`Path is not a directory: ${localPath}`);
-      }
-      
-      console.log(chalk.gray(`Reading files from ${localPath}...`));
-      
-      // Recursively read files
-      const files = [];
-      async function readDir(dirPath, basePath = '') {
-        const entries = await fs.readdir(dirPath, { withFileTypes: true });
-        for (const entry of entries) {
-          const fullPath = path.join(dirPath, entry.name);
-          const relPath = path.join(basePath, entry.name);
-          
-          if (entry.isDirectory()) {
-            await readDir(fullPath, relPath);
-          } else if (entry.isFile()) {
-            const content = await fs.readFile(fullPath, 'utf-8');
-            files.push({
-              name: entry.name,
-              path: relPath,
-              content: Buffer.from(content).toString('base64')  // Base64 encode
-            });
-          }
-        }
-      }
-      
-      await readDir(localPath);
-      
-      if (files.length === 0) {
-        throw new Error('No files found in the specified directory');
-      }
-      
-      console.log(chalk.gray(`Found ${files.length} files. Uploading...`));
-      
-      const response = await apiClient.invoke('upload_files_to_kb', {
-        community_id: options.community,
-        app_id: options.app,
-        kb_id: options.kb,
-        files: files
-      });
-      const result = response.message || response;
-      
-      console.log(chalk.green('\n✅ Files uploaded successfully!\n'));
-      console.log(chalk.cyan(`  Uploaded: ${result.uploaded || 0} files`));
-      console.log(chalk.gray(`  Total Vectors: ${result.totalVectors || 0}\n`));
-      
-      if (result.errors && result.errors.length > 0) {
-        console.log(chalk.yellow('  Errors:'));
-        result.errors.forEach(err => {
-          console.log(chalk.red(`    - ${err.file}: ${err.error}`));
-        });
-      }
-    } catch (error) {
-      console.error(chalk.red(error.message));
-      process.exit(1);
-    }
-  });
-
-appCommand
-  .command('upload-tree')
-  .description('Upload folder tree with subfolders as KBs')
-  .requiredOption('-c, --community <id>', 'Community ID')
-  .requiredOption('-a, --app <id>', 'App ID')
-  .requiredOption('-p, --path <localPath>', 'Local folder path')
-  .option('--confirm', 'Confirm each subfolder as KB')
-  .option('--dry-run', 'Show what would be uploaded without uploading')
-  .action(async (options) => {
-    try {
-      const apiClient = new DeSciXApiClient();
-      await requireAuth(apiClient);
-      
-      const fs = await import('fs/promises');
-      const path = await import('path');
-      const readline = await import('readline');
-      
-      const localPath = options.path;
-      const stats = await fs.stat(localPath);
-      if (!stats.isDirectory()) {
-        throw new Error(`Path is not a directory: ${localPath}`);
-      }
-      
-      console.log(chalk.gray(`Scanning ${localPath}...\n`));
-      
-      // Find top-level subdirectories
-      const entries = await fs.readdir(localPath, { withFileTypes: true });
-      const subdirs = entries.filter(e => e.isDirectory() && !e.name.startsWith('.'));
-      const rootFiles = entries.filter(e => e.isFile() && !e.name.startsWith('.'));
-      
-      if (subdirs.length === 0) {
-        throw new Error('No subdirectories found. Use "app upload" for single KB upload.');
-      }
-      
-      console.log(chalk.cyan(`Found ${subdirs.length} subdirectories:\n`));
-      
-      // Count files in each subdirectory
-      const subdirInfo = [];
-      for (const dir of subdirs) {
-        const dirPath = path.join(localPath, dir.name);
-        const files = await readDirectoryFiles(dirPath);
-        subdirInfo.push({
-          name: dir.name,
-          path: dirPath,
-          fileCount: files.length
-        });
-        console.log(chalk.gray(`  [${subdirInfo.length}] ${dir.name}/ (${files.length} files)`));
-      }
-      
-      if (rootFiles.length > 0) {
-        console.log(chalk.yellow(`\n  Note: ${rootFiles.length} root-level files will go to "General" KB\n`));
-      }
-      
-      if (options.dryRun) {
-        console.log(chalk.cyan('\n✅ Dry run complete. Use without --dry-run to upload.\n'));
-        return;
-      }
-      
-      // Confirm each subdirectory if --confirm flag
-      const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout
-      });
-      
-      const askYesNo = (question, defaultYes = true) => {
-        return new Promise((resolve) => {
-          const suffix = defaultYes ? '(Y/n)' : '(y/N)';
-          rl.question(`${question} ${suffix}: `, (answer) => {
-            const trimmed = answer.trim().toLowerCase();
-            resolve(trimmed === '' ? defaultYes : (trimmed === 'y' || trimmed === 'yes'));
-          });
-        });
-      };
-      
-      const kbsToUpload = [];
-      for (const info of subdirInfo) {
-        if (options.confirm) {
-          const proceed = await askYesNo(`Create KB "${info.name}" and upload ${info.fileCount} files?`, true);
-          if (!proceed) {
-            console.log(chalk.gray(`  Skipping ${info.name}\n`));
-            continue;
-          }
-        }
-        kbsToUpload.push(info);
-      }
-      
-      rl.close();
-      
-      if (kbsToUpload.length === 0) {
-        console.log(chalk.yellow('\n⚠️  No KBs selected for upload.\n'));
-        return;
-      }
-      
-      // Upload each subdirectory as a KB
-      for (const info of kbsToUpload) {
-        console.log(chalk.cyan(`\n📦 Uploading to KB "${info.name}"...`));
-        
-        // Create KB if it doesn't exist
-        try {
-          await apiClient.invoke('create_skeleton_kb', {
-            community_id: options.community,
-            app_id: options.app,
-            kb_name: info.name
-          });
-          console.log(chalk.gray(`  ✓ KB "${info.name}" created`));
-        } catch (err) {
-          // KB might already exist, continue
-          if (!err.message.includes('already exists')) {
-            console.log(chalk.yellow(`  ⚠️  Could not create KB: ${err.message}`));
-          }
-        }
-        
-        // Read files from subdirectory
-        const files = await readDirectoryFiles(info.path);
-        
-        if (files.length === 0) {
-          console.log(chalk.yellow(`  ⚠️  No files found in ${info.name}/`));
-          continue;
-        }
-        
-        // Upload in batches
-        const BATCH_SIZE = 10;
-        let uploaded = 0;
-        let errors = [];
-        
-        for (let i = 0; i < files.length; i += BATCH_SIZE) {
-          const batch = files.slice(i, i + BATCH_SIZE);
-          const batchNum = Math.floor(i / BATCH_SIZE) + 1;
-          const totalBatches = Math.ceil(files.length / BATCH_SIZE);
-          
-          try {
-            process.stdout.write(chalk.gray(`    Batch ${batchNum}/${totalBatches}...`));
-            const response = await apiClient.invoke('upload_files_to_kb', {
-              community_id: options.community,
-              app_id: options.app,
-              kb_id: info.name,
-              files: batch
-            });
-            const result = response.message || response;
-            uploaded += result.uploaded || batch.length;
-            if (result.errors) {
-              errors.push(...result.errors);
-            }
-            console.log(chalk.green(' ✓'));
-          } catch (err) {
-            console.log(chalk.red(` ✗ ${err.message}`));
-            errors.push({ batch: batchNum, error: err.message });
-          }
-        }
-        
-        console.log(chalk.green(`  ✅ Uploaded ${uploaded} files to KB "${info.name}"`));
-        if (errors.length > 0) {
-          console.log(chalk.yellow(`    ⚠️  ${errors.length} errors during upload`));
-        }
-      }
-      
-      // Handle root files if any
-      if (rootFiles.length > 0) {
-        console.log(chalk.cyan(`\n📦 Uploading ${rootFiles.length} root files to "General" KB...`));
-        const rootFilesData = [];
-        for (const file of rootFiles) {
-          const filePath = path.join(localPath, file.name);
-          const content = await fs.readFile(filePath);
-          rootFilesData.push({
-            name: file.name,
-            path: file.name,
-            content: content.toString('base64')
-          });
-        }
-        
-        try {
-          const response = await apiClient.invoke('upload_files_to_kb', {
-            community_id: options.community,
-            app_id: options.app,
-            kb_id: 'General',
-            files: rootFilesData
-          });
-          const result = response.message || response;
-          console.log(chalk.green(`  ✅ Uploaded ${result.uploaded || 0} root files`));
-        } catch (err) {
-          console.log(chalk.yellow(`  ⚠️  Could not upload root files: ${err.message}`));
-        }
-      }
-      
-      console.log(chalk.green('\n✅ Upload tree complete!\n'));
-      
-      // Helper function to read directory files
-      async function readDirectoryFiles(dirPath, basePath = '') {
-        const files = [];
-        const entries = await fs.readdir(dirPath, { withFileTypes: true });
-        
-        for (const entry of entries) {
-          const fullPath = path.join(dirPath, entry.name);
-          const relPath = path.join(basePath, entry.name);
-          
-          if (entry.isDirectory()) {
-            const subFiles = await readDirectoryFiles(fullPath, relPath);
-            files.push(...subFiles);
-          } else if (entry.isFile()) {
-            // Skip hidden files
-            if (entry.name.startsWith('.')) {
-              continue;
-            }
-            const content = await fs.readFile(fullPath);
-            files.push({
-              name: entry.name,
-              path: relPath,
-              content: content.toString('base64')
-            });
-          }
-        }
-        
-        return files;
-      }
-    } catch (error) {
-      console.error(chalk.red(error.message));
-      process.exit(1);
-    }
-  });
-
-appCommand
-  .command('sync')
-  .description('Sync knowledge base (vectorize files in Drive folder)')
-  .requiredOption('-c, --community <id>', 'Community ID')
-  .requiredOption('-a, --app <id>', 'App ID')
-  .option('-k, --kb <id>', 'Knowledge Base ID', 'General')
-  .action(async (options) => {
-    try {
-      const apiClient = new DeSciXApiClient();
-      await requireAuth(apiClient);
-      
-      const response = await apiClient.invoke('sync_knowledge_base', {
-        community_id: options.community,
-        app_id: options.app,
-        kb_id: options.kb
-      });
-      const result = response.message || response;
-      
-      console.log(chalk.green('\n✅ Sync initiated!\n'));
-      console.log(chalk.cyan(`  KB: ${options.community}/${options.app}/${options.kb}`));
-      if (result.note) {
-        console.log(chalk.gray(`  Note: ${result.note}\n`));
-      }
-    } catch (error) {
-      console.error(chalk.red(error.message));
       process.exit(1);
     }
   });
@@ -2474,7 +2119,6 @@ kbCommand
   .requiredOption('-c, --community <id>', 'Community ID')
   .requiredOption('-a, --app <id>', 'App ID')
   .requiredOption('-k, --kb <id>', 'Knowledge Base ID')
-  .option('--drive-folder <id>', 'Google Drive folder ID (optional, will create if not provided)')
   .action(async (options) => {
     try {
       const apiClient = new DeSciXApiClient();
@@ -2483,17 +2127,13 @@ kbCommand
       const response = await apiClient.invoke('create_skeleton_kb', {
         community_id: options.community,
         app_id: options.app,
-        kb_name: options.kb,
-        drive_folder_id: options.driveFolder || null
+        kb_name: options.kb
       });
       const result = response.message || response;
       
       console.log(chalk.green('\n✅ Knowledge Base created successfully!\n'));
       console.log(chalk.cyan(`  KB ID: ${options.kb}`));
       console.log(chalk.gray(`  App: ${options.community}/${options.app}`));
-      if (result.drive_folder_id) {
-        console.log(chalk.gray(`  Drive Folder: ${result.drive_folder_id}\n`));
-      }
     } catch (error) {
       console.error(chalk.red(error.message));
       process.exit(1);
@@ -4728,21 +4368,6 @@ configCommand
   });
 
 configCommand
-  .command('set-sync-mode')
-  .description('Set KB sync mode for an app (git or drive)')
-  .argument('<mode>', 'Sync mode: "git" (local-first) or "drive" (PWA-first)')
-  .option('-c, --community <id>', 'Community ID')
-  .option('-a, --app <id>', 'App ID')
-  .action(async (mode, options) => {
-    try {
-      await configCommands.setSyncMode(mode, options);
-    } catch (error) {
-      console.error(chalk.red(`\n❌ ${error.message}\n`));
-      process.exit(1);
-    }
-  });
-
-configCommand
   .command('set-env')
   .description('Set target environment persistently (updates workspace.json, auto-reconnects)')
   .argument('<env>', 'Environment: dev, demo, prod, or custom name')
@@ -4751,113 +4376,6 @@ configCommand
     try {
       await configCommands.setEnv(env, options);
     } catch (error) {
-      process.exit(1);
-    }
-  });
-
-// ============ Documentation Commands ============
-
-const docsCommand = program
-  .command('docs')
-  .description('Documentation operations');
-
-docsCommand
-  .command('sync')
-  .description('Sync README/ folder to platform-docs KB for RAG search')
-  .option('--path <path>', 'Path to README folder (default: ./README)', './README')
-  .action(async (options) => {
-    try {
-      const apiClient = new DeSciXApiClient();
-      await requireAuth(apiClient);
-      
-      const fs = await import('fs/promises');
-      const path = await import('path');
-      
-      const readmePath = path.resolve(options.path || './README');
-      
-      console.log(chalk.cyan(`\n📚 Syncing documentation to platform-docs KB\n`));
-      console.log(chalk.gray(`Reading from: ${readmePath}\n`));
-      
-      // Check if README folder exists
-      try {
-        const stats = await fs.stat(readmePath);
-        if (!stats.isDirectory()) {
-          throw new Error(`Path is not a directory: ${readmePath}`);
-        }
-      } catch (error) {
-        if (error.code === 'ENOENT') {
-          throw new Error(`README folder not found: ${readmePath}`);
-        }
-        throw error;
-      }
-      
-      // Recursively read all .md files
-      const files = [];
-      async function readDir(dirPath, basePath = '') {
-        const entries = await fs.readdir(dirPath, { withFileTypes: true });
-        for (const entry of entries) {
-          const fullPath = path.join(dirPath, entry.name);
-          const relPath = path.join(basePath, entry.name);
-          
-          if (entry.isDirectory()) {
-            // Skip node_modules and .git
-            if (entry.name === 'node_modules' || entry.name === '.git' || entry.name.startsWith('.')) {
-              continue;
-            }
-            await readDir(fullPath, relPath);
-          } else if (entry.isFile() && entry.name.endsWith('.md')) {
-            const content = await fs.readFile(fullPath, 'utf-8');
-            files.push({
-              name: entry.name,
-              path: relPath,
-              content: Buffer.from(content).toString('base64')  // Base64 encode
-            });
-          }
-        }
-      }
-      
-      await readDir(readmePath);
-      
-      if (files.length === 0) {
-        throw new Error('No .md files found in README folder');
-      }
-      
-      console.log(chalk.gray(`Found ${files.length} markdown files. Uploading...\n`));
-      
-      // Upload files to platform-docs KB
-      const response = await apiClient.invoke('upload_files_to_kb', {
-        community_id: 'descix',
-        app_id: 'platform-docs',
-        kb_id: 'General',
-        files: files
-      });
-      const result = response.message || response;
-      
-      console.log(chalk.green(`\n✅ Uploaded ${result.uploaded || 0} files\n`));
-      
-      // Sync to RAG
-      console.log(chalk.gray('Syncing to RAG vectors...\n'));
-      const syncResponse = await apiClient.invoke('sync_knowledge_base', {
-        community_id: 'descix',
-        app_id: 'platform-docs',
-        kb_id: 'General'
-      });
-      const syncResult = syncResponse.message || syncResponse;
-      
-      console.log(chalk.green('✅ Documentation synced to RAG!\n'));
-      console.log(chalk.cyan(`  Total Vectors: ${syncResult.vectorCount || result.totalVectors || 0}\n`));
-      
-      if (result.errors && result.errors.length > 0) {
-        console.log(chalk.yellow('  Errors:'));
-        result.errors.forEach(err => {
-          console.log(chalk.red(`    - ${err.file}: ${err.error}`));
-        });
-      }
-      
-      console.log(chalk.gray('\nQuery documentation with: descix rag query -c descix -a platform-docs -k General -q "your question"\n'));
-      
-    } catch (error) {
-      console.error(chalk.red(error.message));
       process.exit(1);
     }
   });
@@ -5319,68 +4837,6 @@ program
       
     } catch (error) {
       console.error(chalk.red(`\n❌ ${error.message}\n`));
-      process.exit(1);
-    }
-  });
-
-// ============ Folder Commands ============
-
-const folderCommand = program
-  .command('folder')
-  .description('Drive folder management');
-
-folderCommand
-  .command('set')
-  .description('Set folder ID for an entity')
-  .option('--user <folderId>', 'Set user base folder')
-  .option('--community <communityId>', 'Set community folder (requires folderId positional)')
-  .option('--app <communityApp>', 'Set app folder: "community app" (requires folderId positional)')
-  .option('--kb <communityAppKb>', 'Set KB folder: "community app kb" (requires folderId positional)')
-  .argument('[folderId]', 'Folder ID (for community/app/kb)')
-  .action(async (folderId, options) => {
-    try {
-      await folderCommands.setFolder({ ...options, folderId });
-    } catch (error) {
-      process.exit(1);
-    }
-  });
-
-folderCommand
-  .command('get')
-  .description('Get folder info for an entity')
-  .option('--user', 'Get user base folder')
-  .option('--community <communityId>', 'Get community folder')
-  .option('--app <communityApp>', 'Get app folder: "community app"')
-  .option('--kb <communityAppKb>', 'Get KB folder: "community app kb"')
-  .action(async (options) => {
-    try {
-      await folderCommands.getFolder(options);
-    } catch (error) {
-      process.exit(1);
-    }
-  });
-
-folderCommand
-  .command('allocate')
-  .description('Allocate a new folder for an entity')
-  .option('--app <communityApp>', 'Allocate app folder: "community app"')
-  .option('--kb <communityAppKb>', 'Allocate KB folder: "community app kb"')
-  .option('-n, --name <name>', 'Custom folder name')
-  .action(async (options) => {
-    try {
-      await folderCommands.allocateFolder(options);
-    } catch (error) {
-      process.exit(1);
-    }
-  });
-
-folderCommand
-  .command('validate <folderId>')
-  .description('Validate folder access')
-  .action(async (folderId, options) => {
-    try {
-      await folderCommands.validateFolder(folderId, options);
-    } catch (error) {
       process.exit(1);
     }
   });

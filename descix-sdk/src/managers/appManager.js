@@ -175,15 +175,6 @@ export class AppManager {
   }
 
   /**
-   * Get user's registered base folder
-   * @returns {Promise<Object>} Folder info
-   */
-  async getBaseFolder() {
-    const response = await this.apiClient.invoke('get_user_base_folder', {});
-    return response.message || response;
-  }
-
-  /**
    * Create a knowledge base folder
    * @param {string} communityId - Community ID
    * @param {string} appId - App ID
@@ -195,25 +186,6 @@ export class AppManager {
       community_id: communityId,
       app_id: appId,
       kb_name: kbName
-    });
-
-    return response.message || response;
-  }
-
-  /**
-   * Upload files to a knowledge base
-   * @param {string} communityId - Community ID
-   * @param {string} appId - App ID
-   * @param {string} kbId - Knowledge base ID
-   * @param {Array} files - Array of file objects {name, path, content (base64)}
-   * @returns {Promise<Object>} Upload result
-   */
-  async uploadFilesToKB(communityId, appId, kbId, files) {
-    const response = await this.apiClient.invoke('upload_files_to_kb', {
-      community_id: communityId,
-      app_id: appId,
-      kb_id: kbId,
-      files: files
     });
 
     return response.message || response;

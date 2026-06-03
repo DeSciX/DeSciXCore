@@ -28,12 +28,12 @@ async function loadWorkspaceConfig(workspaceRoot = process.cwd()) {
   } catch (error) {
     // Return default config if file doesn't exist
     return {
-      primaryCommunity: 'descix',
+      primaryCommunity: 'daita',
       directoryMappings: {},
       additionalContexts: [],
       defaultContext: {
-        communityId: 'descix',
-        appId: 'agent',
+        communityId: 'daita',
+        appId: 'daita',
         kbId: 'General'
       }
     };
@@ -105,7 +105,7 @@ export async function init() {
     });
     
     // Use default community for now (can be enhanced with prompts)
-    const primaryCommunity = 'descix';
+    const primaryCommunity = 'daita';
     
     // Generate .descix/workspace.json
     const workspaceRoot = process.cwd();

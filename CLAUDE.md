@@ -107,8 +107,8 @@ Two platform/SDK/CLI deliverables under CEO-D-2026-06-02-EVP-NO-APPDEV-CLI-PLUS-
 - **`workspaceConfig.env`** — raw `env` object from workspace.json. Use for reading `env.platform.microservice.port` / `env.products[i].microservice.port` when injecting port into scaffold files. Do not mutate directly — use `setSitePort()` for site port mutations, `setStaticSite()` for `site.static` (static-site) mutations, and `setMicroservicePort()` for microservice port mutations.
 
 ### Pending (other)
-- `descix-cli/bin/mcp-server.js`: imports non-existent `vendor/mcp/tools.js` — determine canonical MCP entry point, remove `DeSciXMCPServer` legacy
-- `descix-cli/tests/mcp-flow.test.js`: imports `vendor/mcp/mcp-server.js` (missing) — remove or rewrite
+- ~~`descix-cli/bin/mcp-server.js`: imports non-existent `vendor/mcp/tools.js`~~ — CLOSED (stale, WS-V1-PURGE Phase 2): `mcp-server.js` imports `@modelcontextprotocol/sdk` directly; no `DeSciXMCPServer`/`vendor/mcp/tools.js` exists.
+- ~~`descix-cli/tests/mcp-flow.test.js`~~ — CLOSED (stale, WS-V1-PURGE Phase 2): no file imports `vendor/mcp/mcp-server.js`; the test is gone.
 - **Port-allocation policy gap (`WS-CLI-MESH-ROUTING-GAP`) — RESOLVED:** `microservice init` requires a `microservice.port` in workspace.json. The canonical way to set one is now `descix app set-port -a <id> -p <port>` (backed by `WorkspaceConfig.setMicroservicePort`, parallel to `setSitePort`). Explicit-only — there is no auto-allocation (a possible future enhancement once port constants are canonical). Hand-editing workspace.json is no longer needed.
 
 ---
