@@ -18,11 +18,14 @@
       "PUB_SUB_DISCORD_BOT_REPLY",
       "PUB_SUB_DISCORD_EVENTS",
       "DISCORD_VERIFIED_ROLE_NAME",
-      "CDN_URL_MAP_NAME"
-    ]
+      "CDN_URL_MAP_NAME",
+      "DEVELOPER_WALLET_ADDRESS",
+      "DEVELOPER_SIGNATURE"
+    ],
+    "_developer_credential_comment": "DEVELOPER_WALLET_ADDRESS (public) + DEVELOPER_SIGNATURE (SECRET) added so an SDK-based app microservice (CEO-D-2026-06-02-APP-MICROSERVICE-IS-CLI-CLIENT-WALLET-SIG) can read the developer credential from process.env. In prod the SIGNATURE env var is mounted from a DEDICATED per-app Secret Manager secret via Cloud Run --set-secrets (keeps it OUT of the shared descix_config_{env}). Benign for other services: _loadBootstrapKeys only assigns when the env var is present."
   },
   "required_keys": {
-    "description": "Keys that MUST resolve to a non-null value after bootstrap completes for EVERY cloud-core consumer. CloudConfig.initialize() throws CloudConfigFatalError if any of these are null/undefined. These are the UNIVERSAL base: FIRESTORE_DATABASE_ID (named-DB selector used by cloud-core's own CacheFirestore + ServiceManifest — a null silently writes to the wrong/default database) and GOOGLE_PROJECT_ID (auto-resolved at runtime from GCP ADC in initialize(); every cloud-core service runs on GCP). Platform-node-specific keys (RAG/AI/chain/content storage) were MOVED OUT per CEO-D-2026-06-01-APP-DEV-MODEL D1 — a lightweight SDK-based service that uses neither Pinecone/Gemini/AI/chain/GCS must not be coerced into declaring them. Services that DO need those keys declare them per-service via createCloudConfig({ additionalRequiredKeys: [...] }) (e.g. DeSciX_Cloud/daita). The hard-fail is preserved — only its scope moved (feedback_no_hardcoded_fallbacks STILL HOLDS). Add a key here ONLY if a null value would cause silent runtime degradation for ANY conceivable cloud-core consumer.",
+    "description": "Keys that MUST resolve to a non-null value after bootstrap completes for EVERY cloud-core consumer. CloudConfig.initialize() throws CloudConfigFatalError if any of these are null/undefined. These are the UNIVERSAL base: FIRESTORE_DATABASE_ID (named-DB selector used by cloud-core's own CacheFirestore + ServiceManifest \u2014 a null silently writes to the wrong/default database) and GOOGLE_PROJECT_ID (auto-resolved at runtime from GCP ADC in initialize(); every cloud-core service runs on GCP). Platform-node-specific keys (RAG/AI/chain/content storage) were MOVED OUT per CEO-D-2026-06-01-APP-DEV-MODEL D1 \u2014 a lightweight SDK-based service that uses neither Pinecone/Gemini/AI/chain/GCS must not be coerced into declaring them. Services that DO need those keys declare them per-service via createCloudConfig({ additionalRequiredKeys: [...] }) (e.g. DeSciX_Cloud/daita). The hard-fail is preserved \u2014 only its scope moved (feedback_no_hardcoded_fallbacks STILL HOLDS). Add a key here ONLY if a null value would cause silent runtime degradation for ANY conceivable cloud-core consumer.",
     "keys": [
       "FIRESTORE_DATABASE_ID",
       "GOOGLE_PROJECT_ID"
@@ -98,9 +101,9 @@
     ]
   },
   "defaults": {
-    "description": "Keys with safe default values. Use SPARINGLY — prefer null to expose config errors. Only add here if the value is stable across all environments and has no security implications.",
+    "description": "Keys with safe default values. Use SPARINGLY \u2014 prefer null to expose config errors. Only add here if the value is stable across all environments and has no security implications.",
     "values": {
-      "UPVOTE_EMOJI": "👍",
+      "UPVOTE_EMOJI": "\ud83d\udc4d",
       "DEFAULT_KNOWLEDGEBASE_NAME": "General",
       "VECTORIZE_MODE": "sync",
       "PINECONE_INTEGRATED_EMBED_MODEL": "llama-text-embed-v2",
