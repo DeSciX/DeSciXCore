@@ -146,30 +146,27 @@ descix kb build -c descix -a myapp
 
 ---
 
-### descix microservice register-delegate
+### Calling /apifront from your microservice (data plane)
 
-**Description:** Provision the service's delegate key (`SERVICE_KEY`) so it can authenticate mesh/loopback calls
-**Use when:** Your microservice calls Core Tools or other services via the `/apifront` broker — REQUIRED before any loopback call, or you will get HTTP 401
-**What it does:**
-1. Generates an EC (secp256k1) key pair
-2. Registers the public key with Core against one of your service slots (Runner NFT / subscription)
-3. Writes `SERVICE_KEY` into `dev-overrides.json` — the scaffold `mcpClient` signs every mesh call with it
+**The microservice IS the CLI's api-client running in the cloud** (CEO-D-2026-06-02-APP-MICROSERVICE-IS-CLI-CLIENT-WALLET-SIG). To call Core commands (`app_records_*`, `get_app_asset`, `get_asset_upload_token`, RAG, ...) the scaffold's `mcpClient` authenticates to `/apifront` **exactly like the CLI**: it holds the **developer's own durable credential** (`wallet_address` + `signature`) and calls `reconnect_by_wallet` to mint a session — then makes calls **as the developer**. There is NO `register-delegate`, NO `SERVICE_KEY`, NO service account, NO OIDC.
 
-**Options:**
-- `-c, --community <id>`: Community ID (auto-detects from context/manifest.json)
-- `-a, --app <id>`: App ID (auto-detects from context/manifest.json)
-- `-s, --slot <id>`: Service slot ID (uses first available if not provided)
+**Provide the developer credential (gitignored / secret — never checked in):**
+1. Copy `dev-overrides.example.json` → `dev-overrides.json` (this file is `.gitignore`d).
+2. Fill in `DEVELOPER_WALLET_ADDRESS` + `DEVELOPER_SIGNATURE` — your own values from `.descix/wallet.json` (the durable `signature`, not the expiring session token).
+3. In prod these come from a **secret**, never a checked-in file. They must NOT live in `defaults-config.json` (the signature is a credential).
 
-**Canonical mesh microservice onboarding sequence:**
+The scaffold reads them via `utils.DEVELOPER_WALLET_ADDRESS` / `utils.DEVELOPER_SIGNATURE` and HARD-FAILS (no fallback) if absent.
+
+**Canonical microservice onboarding sequence:**
 ```bash
 descix app create   -c <community> -a <app>
 descix app init      -a <community>-<app>
 descix app set-port  -a <community>-<app> -p <port>
 descix microservice register
-descix microservice register-delegate   # <-- the mesh-auth step; without it loopback calls return 401
+# then: cp dev-overrides.example.json dev-overrides.json  and fill in the developer credential
 ```
 
-**Note:** The pre-stored `OWNER_SIGNATURE` in the scaffold is NOT a valid mesh credential — it returns 401 for live loopback calls. `register-delegate` is the canonical fix.
+> `descix microservice register-delegate` still exists for genuine **service-slot** mesh calls (one service calling another's tools as a delegate). It is NOT used for the app **data plane** — that authenticates as the developer per the model above.
 
 ---
 
@@ -412,8 +409,9 @@ For individual app folders, create `.descix/context.json`:
 3. Check `.cursor/mcp.json` exists with `descix` server
 
 ### "401 Unauthorized on a loopback / mesh call"
-Your service has no provisioned delegate key. The scaffold's `OWNER_SIGNATURE` fallback is not a valid mesh credential.
-Run `descix microservice register-delegate` (writes `SERVICE_KEY` to `dev-overrides.json`). Then restart the service.
+For the app data plane, your service authenticates AS the developer (wallet_address + signature). A 401 means the
+developer credential is missing or wrong: check `DEVELOPER_WALLET_ADDRESS` + `DEVELOPER_SIGNATURE` in the gitignored
+`dev-overrides.json` (dev) / the secret (prod). Then restart the service.
 Discover it via `descix tell-me-how "my service gets 401 on a loopback call"`.
 
 ### "Session expired"

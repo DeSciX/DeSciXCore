@@ -1,34 +1,34 @@
 /**
  * Mesh asset client — SERVICE-SIDE fetch-by-reference for app media/assets.
  *
- * The platform half of media-via-API-surface (WS-V1-PURGE Phase 1, item 2). An app
- * microservice running on Cloud Run does NOT share a filesystem with the CLI that
- * uploaded the media, so it cannot read a local path. Instead:
+ * The platform half of media-via-API-surface. An app microservice running on Cloud Run
+ * does NOT share a filesystem with the CLI that uploaded the media, so it cannot read a
+ * local path. Instead:
  *
  *   1. The app developer uploads media via the API surface:
  *        descix app media-upload -a <appId> -f cover.jpg -f episode.mp3
  *      which returns ASSET REFERENCES (gs:// URIs under {env}/{appId}/assets/...).
- *   2. The app handler receives a ref and fetches the bytes over the Core broker:
- *        const meshLoopback = createMeshLoopback({ coreApiUrl, getDescixUser });
- *        const { buffer } = await fetchAppAsset(meshLoopback, { appId, ref });
+ *   2. The app handler receives a ref and fetches the bytes over the Core broker
+ *        (/apifront) via the packaged CLI api-client:
+ *        const invoke = makeServiceApiClientInvoke(...);   // @descix/cli service client
+ *        const { buffer } = await fetchAppAsset(invoke, { appId, ref });
  *
- * AUTH MODEL — SA-OIDC-establishes-caller (CEO-D-2026-06-02-DATAPLANE-LOOPBACK-OPTION-A-SA-APP-BINDING):
+ * AUTH MODEL — the microservice IS the CLI's api-client running in the cloud
+ * (CEO-D-2026-06-02-APP-MICROSERVICE-IS-CLI-CLIENT-WALLET-SIG):
  * `invoke` is any `(command, params) => Promise<message>` that routes to the Core broker
- * (/apifront) as the INJECTED CALLER — i.e. a `meshLoopback` from `createMeshLoopback`
- * (`@descix/sdk` → `./mesh/meshLoopback.js`). The app service mints an OIDC ID-token from
- * its OWN Cloud Run service account and threads the acting user via `_descix.user.id`. There
- * is NO delegate signature, NO X-NFT-ID, NO SERVICE_KEY. Core verifies the SA matches the
- * app_id's registered SA (the SA<->app_id binding) and enforces the user's COMMUNITY_MANAGE_APPS
- * entitlement before serving the asset.
+ * (/apifront) AUTHENTICATED AS THE DEVELOPER — i.e. the packaged CLI api-client holding the
+ * developer's own durable credential (wallet_address + signature), which calls
+ * reconnect_by_wallet to mint a session access_token and then POSTs the command exactly like
+ * the CLI. There is NO SA-OIDC, NO delegate signature, NO X-NFT-ID, NO SERVICE_KEY.
+ * Core runs `get_app_asset` under the developer's normal COMMUNITY_MANAGE_APPS entitlement.
  *
  * The Core `get_app_asset` command enforces that `ref` resolves under THIS app's own assets
  * prefix (community is derived server-side from Products/{appId}); an out-of-prefix or
- * cross-app ref is rejected — defense-in-depth on top of the SA<->app_id binding.
+ * cross-app ref is rejected — defense-in-depth at the command layer.
  *
  * @param {(command: string, params: object) => Promise<any>} invoke
- *        Caller-authed broker invoker — a `meshLoopback(command, params)` from
- *        `createMeshLoopback`. (Historically a delegate-signed `mcpClient.callTool`; the
- *        delegate path is REMOVED for the app data plane.)
+ *        Developer-authed broker invoker — the packaged CLI api-client's invoke
+ *        (a `(command, params) => Promise<message>`).
  * @param {object} opts
  * @param {string} opts.appId - The app that owns the asset.
  * @param {string} opts.ref   - A gs:// URI (from media-upload) OR a relative path under assets/.
@@ -36,7 +36,7 @@
  */
 export async function fetchAppAsset(invoke, { appId, ref } = {}) {
   if (typeof invoke !== 'function') {
-    throw new Error('fetchAppAsset: invoke must be a function (command, params) => Promise<message> (a meshLoopback)');
+    throw new Error('fetchAppAsset: invoke must be a function (command, params) => Promise<message> (the packaged api-client invoke)');
   }
   if (!appId) throw new Error('fetchAppAsset: appId is required');
   if (!ref) throw new Error('fetchAppAsset: ref is required (gs:// URI or relative assets/ path)');
