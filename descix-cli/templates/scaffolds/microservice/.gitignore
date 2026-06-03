@@ -1,0 +1,4 @@
+# Developer credential + local overrides — NEVER commit (org rule: no checked-in credentials).
+dev-overrides.json
+.env
+node_modules/

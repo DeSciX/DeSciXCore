@@ -17,6 +17,10 @@ export class DeSciXApiClient {
     this.workspaceRoot = options.workspaceRoot || null; // Set by initialize()
     this._workspaceConfig = null; // Cached WorkspaceConfig
     this._initialized = false;
+    // serviceMode: a headless service-context client (an app microservice reusing this
+    // api-client to call /apifront AS the developer). It NEVER falls back to interactive
+    // device login on a 401 — a Cloud Run service has no TTY — it hard-fails instead.
+    this.serviceMode = options.serviceMode === true;
   }
 
   /**
@@ -316,6 +320,14 @@ export class DeSciXApiClient {
         // If we got a new token, retry the original request
         if (this.credentials?.accessToken) {
           return this.invoke(command, params, { ...options, _retried: true });
+        } else if (this.serviceMode) {
+          // Headless service context: no interactive device login is possible. The developer's
+          // wallet_address + signature failed to mint/refresh a session — fail loud (no fallback).
+          throw new Error(
+            `[ServiceApiClient] reconnect_by_wallet failed for command '${command}': the developer ` +
+            `credential (wallet_address + signature) did not yield a session. Check the credential in ` +
+            `dev-overrides.json (dev) / the secret (prod). No interactive login fallback in a microservice.`
+          );
         } else if (command !== 'device_request_login' && command !== 'device_check_status') {
           // If refresh failed (e.g. signature invalid or user not found), 
           // we should trigger device login if this is a CLI environment
