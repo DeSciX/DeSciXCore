@@ -6,29 +6,7 @@ import {
   makeCommandRequestJSON,
   AppData,
   ResponseStatus,
-  ProductTypes,
 } from '../AppData.jsx';
-
-export const verifyCommunityStructure = async (folderId) => {
-  try {
-    const data = await makeCommandRequestJSON('verify_community_drive_folder_structure', { communityFolderId: folderId });
-    return data.message;
-  } catch (error) {
-    console.error('Error verifying community structure:', error);
-    return { success: false, messages: [error.message] };
-  }
-};
-
-export const verifyAppStructure = async (folderId, appName, kbName, communityId) => {
-  try {
-    const params = { appFolderId: folderId, newKBName: kbName, app_name: appName, community_id: communityId };
-    const data = await makeCommandRequestJSON('verify_app_drive_folder_structure', params);
-    return data.message;
-  } catch (error) {
-    console.error('Error verifying app structure:', error);
-    return { success: false, messages: [error.message] };
-  }
-};
 
 /**
  * Fetch store bundle + purchases in a single call (authenticated users).
@@ -283,27 +261,6 @@ export const checkFolderUsage = async (params) => {
   }
 };
 
-export const uploadFilesToKB = async (params) => {
-  try {
-    const data = await makeCommandRequestJSON('upload_files_to_kb', params);
-    if (data.status === ResponseStatus.OK && data.message) return data.message;
-    throw new Error(data.message || 'Failed to upload files.');
-  } catch (error) {
-    console.error('Error uploading files:', error);
-    throw error;
-  }
-};
-
-export const syncKnowledgeBase = async (params) => {
-  try {
-    const data = await makeCommandRequestJSON('sync_knowledge_base', params);
-    return data;
-  } catch (error) {
-    console.error('Error syncing knowledge base:', error);
-    throw error;
-  }
-};
-
 export const getDriveGcsSyncStatus = async (params) => {
   try {
     const data = await makeCommandRequestJSON('get_drive_gcs_sync_status', params);
@@ -344,17 +301,6 @@ export const syncGcsToPinecone = async (params) => {
     throw new Error(data.message || 'Failed to sync GCS to Pinecone.');
   } catch (error) {
     console.error('Error syncing GCS to Pinecone:', error);
-    throw error;
-  }
-};
-
-export const convertKbFiles = async (params) => {
-  try {
-    const data = await makeCommandRequestJSON('convert_kb_files', params);
-    if (data.status === ResponseStatus.OK && data.message) return data.message;
-    throw new Error(data.message || 'Failed to convert KB files.');
-  } catch (error) {
-    console.error('Error converting KB files:', error);
     throw error;
   }
 };
