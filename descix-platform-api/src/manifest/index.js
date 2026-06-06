@@ -149,6 +149,8 @@ function escapeRegExp(str) {
  * @param {Object} config.handlers      — { command_name: 'handlerFile.js', ... } from registry.js
  * @param {string} config.handlerDir    — absolute path to commandHandlers/ directory
  * @param {Set<string>} [config.guestCommands] — set of guest-allowed command names
+ * @param {Object} [config.metaOverlay] — { command: { description, inputSchema, mcp, mutating } }
+ *        per-command meta (from handler commandMeta exports). Authoritative over JSDoc.
  * @returns {Promise<Object>} — standard manifest object
  */
 export async function buildManifestFromHandlers(config) {
@@ -157,7 +159,13 @@ export async function buildManifestFromHandlers(config) {
         healthEndpoint = '/health',
         debugPort, community_id, app_id,
         handlers, handlerDir,
-        guestCommands = new Set()
+        guestCommands = new Set(),
+        // WS-MCP-SSOT-TIER2: per-command meta from each handler's commandMeta export
+        // (aggregated by the consuming service). When a command has meta, its
+        // description + inputSchema are AUTHORITATIVE over the JSDoc-parsed values, and
+        // mcp/mutating are surfaced into the manifest entry. Commands without meta fall
+        // back to JSDoc (incremental migration — audit §5.B-3).
+        metaOverlay = {}
     } = config;
 
     // Group commands by handler file to minimize file reads
@@ -216,6 +224,15 @@ export async function buildManifestFromHandlers(config) {
                     };
                 }
                 entry.inputSchema = { type: 'object', properties };
+            }
+
+            // WS-MCP-SSOT-TIER2: meta wins over JSDoc where a command self-describes.
+            const meta = metaOverlay[cmd];
+            if (meta) {
+                if (meta.description) entry.description = meta.description;
+                if (meta.inputSchema) entry.inputSchema = meta.inputSchema;
+                if (typeof meta.mcp === 'boolean') entry.mcp = meta.mcp;
+                if (typeof meta.mutating === 'boolean') entry.mutating = meta.mutating;
             }
 
             commands[cmd] = entry;

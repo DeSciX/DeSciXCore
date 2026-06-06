@@ -11,10 +11,19 @@
     "./email": "./src/email/index.js",
     "./permissions": "./src/permissions/index.js",
     "./entitlements": "./src/entitlements/index.js",
-    "./manifest": "./src/manifest/index.js"
+    "./manifest": "./src/manifest/index.js",
+    "./mcp-tools": "./src/mcp-tools/index.js"
   },
-  "files": ["src"],
-  "keywords": ["descix", "platform", "models", "auth", "permissions"],
+  "files": [
+    "src"
+  ],
+  "keywords": [
+    "descix",
+    "platform",
+    "models",
+    "auth",
+    "permissions"
+  ],
   "license": "UNLICENSED",
   "engines": {
     "node": ">=24.0.0"
