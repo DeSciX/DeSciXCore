@@ -22,12 +22,23 @@ import { DeSciXApiClient } from '../lib/api-client.js';
 import { WalletFileManager } from '../lib/wallet-file.js';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+// WS-MCP-SSOT-TIER2 (audit §5.B-1): the curated HTTP-valid core tools are the SINGLE SOURCE
+// in @descix/platform-api/mcp-tools — shared with the Cloud HTTP MCP path (apiFront.js).
+// This stdio server imports them and CONCATENATES its CLI-LOCAL diagnostics (descix_doctor,
+// platform_health) which are NOT /apifront commands and are intentionally stdio-only.
+// The previously hand-duplicated curated literal in this file is GONE.
+import { toMcpToolList, NATIVE_MCP_TOOLS as SHARED_NATIVE_TOOLS } from '@descix/platform-api/mcp-tools';
 
 // ---------------------------------------------------------------------------
-// Curated app-dev tool definitions (inline — no external tools.js dependency)
+// Tool definitions for the stdio MCP transport.
+//
+// CLI-LOCAL diagnostics (descix_doctor, platform_health) are defined here because they are
+// LOCAL CLI operations, not /apifront commands — they must never be advertised over the HTTP
+// path. Everything else comes from the shared SSOT (@descix/platform-api/mcp-tools), which is
+// the same source the Cloud HTTP MCP path advertises. ONE curated list, two transports.
 // ---------------------------------------------------------------------------
 
-const TOOLS = [
+const CLI_LOCAL_TOOLS = [
   {
     name: 'descix_doctor',
     description:
@@ -42,92 +53,6 @@ const TOOLS = [
           description: 'Also verify app exists on the platform (requires network). Default: true',
         },
       },
-    },
-  },
-  {
-    name: 'ask_question_to_app',
-    description: 'Ask an AI-powered question to an app\'s knowledge base using RAG. Supports conversation threading via previous_interaction_id — pass the interaction_id from the previous response to continue a conversation.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        app_id: { type: 'string', description: 'App ID to query' },
-        knowledgebase_name: { type: 'string', description: 'KB name (default: General)' },
-        user_input: { type: 'string', description: 'The question to ask' },
-        previous_interaction_id: { type: 'string', description: 'Interaction ID from previous response to continue a conversation thread. Omit for first message.' },
-      },
-      required: ['app_id', 'user_input'],
-    },
-  },
-  {
-    name: 'query_knowledge_base',
-    description: 'Search a knowledge base using vector similarity (returns raw chunks)',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        app_id: { type: 'string', description: 'App ID' },
-        kb_id: { type: 'string', description: 'KB name (default: General)' },
-        query: { type: 'string', description: 'Search query' },
-        limit: { type: 'number', description: 'Max results (default: 5)' },
-      },
-      required: ['app_id', 'query'],
-    },
-  },
-  {
-    name: 'find_communities',
-    description: 'List available communities on the platform',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        filter: { type: 'string', description: 'Optional filter string' },
-      },
-    },
-  },
-  {
-    name: 'list_apps_for_community',
-    description: 'List apps in a community',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        community_id: { type: 'string', description: 'Community ID' },
-      },
-      required: ['community_id'],
-    },
-  },
-  {
-    name: 'tell_me_how',
-    description:
-      'Discover platform tools and services by asking a natural language question. ' +
-      'Searches the entire service mesh for relevant capabilities. ' +
-      'If results are empty, try scope "discovery" or rephrase your question.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        question: { type: 'string', description: 'What do you want to do?' },
-        scope: {
-          type: 'string',
-          enum: ['project', 'entitlements', 'discovery'],
-          description: 'Search scope. "entitlements" = your purchased tools, "discovery" = all platform capabilities. Default: entitlements.',
-        },
-      },
-      required: ['question'],
-    },
-  },
-  {
-    name: 'resolve_invite',
-    description:
-      'Resolve a DeSciX invite token into app configuration. Call this when .descix/app.json ' +
-      'contains an invite_token field. Returns app context, community info, and the agent_hint ' +
-      'authored by the app creator. The agent_hint tells you about the user\'s skill level and ' +
-      'goals — use it to adapt your approach.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        invite_token: {
-          type: 'string',
-          description: 'The invite token from .descix/app.json',
-        },
-      },
-      required: ['invite_token'],
     },
   },
   {
@@ -146,94 +71,10 @@ const TOOLS = [
       },
     },
   },
-  // -------------------------------------------------------------------------
-  // -------------------------------------------------------------------------
-  // APP DATA PLANE — structured record store
-  // (CEO-D-2026-06-01-KB-AS-DB-API → re-backed CEO-D-2026-06-02-APP-DATA-PLANE)
-  // Treat an app like a database table. Records live in the app data plane
-  // (Firestore document collections at AppData/{app_id}/{kb_id}/{file_id}) — NOT
-  // the Pinecone KB. `app_records_query` is a STRUCTURED, strongly-consistent
-  // metadata-filtered scan (non-ANN) returning full records; use
-  // `ask_question_to_app` for semantic ANN search over KB content.
-  // Canonical surface: app_records_*.
-  // -------------------------------------------------------------------------
-  {
-    name: 'app_records_put',
-    description:
-      'Use your app like a database: store/replace structured records with custom metadata in the ' +
-      'app data plane (Firestore-backed, strongly consistent — NOT the Pinecone KB). Each record is ' +
-      '{ file_id, text?, chunk_idx?, ...any custom metadata }. You do NOT build the record id — ' +
-      'supply a human-meaningful file_id (the grouping key) plus an optional chunk_idx (default 0) ' +
-      'and the composite id is built for you. (A pre-built full "id" is still accepted for back-compat.) ' +
-      'Custom fields (string/number/boolean/string[]) are stored as filterable metadata you can later ' +
-      'query structurally with app_records_query.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        app_id: { type: 'string', description: 'App ID (your app)' },
-        kb_id: { type: 'string', description: 'Record collection ID (acts like a database table)' },
-        records: {
-          type: 'array',
-          description: 'Records to upsert: [{ file_id (required), text?, chunk_idx? (default 0), ...customMetadata }]. The id is derived from file_id+chunk_idx; pass a full "id" only for back-compat.',
-          items: { type: 'object' },
-        },
-      },
-      required: ['app_id', 'kb_id', 'records'],
-    },
-  },
-  {
-    name: 'app_records_query',
-    description:
-      'Query your app like a database: a STRUCTURED, metadata-filtered scan (NOT ANN/semantic) over the ' +
-      'app data plane (Firestore-backed) that returns ALL records matching a predicate — e.g. "all records ' +
-      'where type=episode AND show=X". Supports $eq/$in/$ne and a field projection. STRONGLY CONSISTENT: a ' +
-      'query run immediately after app_records_put deterministically sees the just-written record(s) (no ' +
-      'read-after-write lag). Use this for exact structured lookups; use ask_question_to_app for fuzzy ' +
-      'semantic search over KB content.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        app_id: { type: 'string', description: 'App ID' },
-        kb_id: { type: 'string', description: 'Record collection ID' },
-        filter: { type: 'object', description: 'Metadata predicate, e.g. { "type": "episode", "show": { "$eq": "X" } }' },
-        fields: { type: 'array', items: { type: 'string' }, description: 'Projection of metadata fields to return (omit or ["*"] for all)' },
-        limit: { type: 'number', description: 'Max records to return (post-filter)' },
-      },
-      required: ['app_id', 'kb_id'],
-    },
-  },
-  {
-    name: 'app_records_get',
-    description:
-      'Fetch specific records from your app data plane by id (point lookup), with an arbitrary metadata ' +
-      'projection. Firestore-backed, strongly consistent. Returns full custom metadata for each requested record.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        app_id: { type: 'string', description: 'App ID' },
-        kb_id: { type: 'string', description: 'Record collection ID' },
-        ids: { type: 'array', items: { type: 'string' }, description: 'Record ids to fetch' },
-        fields: { type: 'array', items: { type: 'string' }, description: 'Projection of metadata fields (omit or ["*"] for all)' },
-      },
-      required: ['app_id', 'kb_id', 'ids'],
-    },
-  },
-  {
-    name: 'app_records_delete',
-    description:
-      'Delete records from your app data plane by id (or by file_id grouping key). Firestore-backed.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        app_id: { type: 'string', description: 'App ID' },
-        kb_id: { type: 'string', description: 'Record collection ID' },
-        ids: { type: 'array', items: { type: 'string' }, description: 'Record ids to delete' },
-        file_ids: { type: 'array', items: { type: 'string' }, description: 'file_id grouping keys to delete (deletes all records with each file_id)' },
-      },
-      required: ['app_id', 'kb_id'],
-    },
-  },
 ];
+
+// Final stdio tool list: CLI-local diagnostics + the shared curated core tools (protocol shape).
+const TOOLS = [...CLI_LOCAL_TOOLS, ...toMcpToolList(SHARED_NATIVE_TOOLS)];
 
 // ---------------------------------------------------------------------------
 // Server bootstrap
