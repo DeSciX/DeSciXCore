@@ -4300,16 +4300,26 @@ program
       const apiClient = new DeSciXApiClient();
       await requireAuth(apiClient);
       
+      // APP entitlements: use the product_type:'APP' fast-path. The no-filter call
+      // returns the STORE BUNDLE (which has no top-level `apps` key — apps are nested
+      // under each community), so `result.apps` was always undefined → "Apps (0)" even
+      // when the user holds entitlements. The fast-path returns the user's actual
+      // purchased App objects (userManagement.js fetch_my_purchases APP branch).
+      const appResp = await apiClient.invoke('fetch_my_purchases', { product_type: 'APP' });
+      const appResult = appResp.message || appResp;
+      const apps = appResult.apps || [];
+
+      // COMMUNITY entitlements: the standard call exposes the user's owned community
+      // IDs via `my_community_ids` (the top-level `communities` field is the store
+      // catalog, not the user's overlay).
       const response = await apiClient.invoke('fetch_my_purchases', {});
       const result = response.message || response;
-      
-      const communities = result.communities || [];
-      const apps = result.apps || [];
-      
+      const communityIds = result.my_community_ids || [];
+
       console.log(chalk.green('\n✅ Your Purchases:\n'));
-      console.log(chalk.cyan(`Communities (${communities.length}):`));
-      communities.forEach((c, idx) => {
-        console.log(chalk.yellow(`  ${idx + 1}. ${c.community_name} (${c.community_id})`));
+      console.log(chalk.cyan(`Communities (${communityIds.length}):`));
+      communityIds.forEach((cid, idx) => {
+        console.log(chalk.yellow(`  ${idx + 1}. ${cid}`));
       });
       console.log();
       console.log(chalk.cyan(`Apps (${apps.length}):`));
