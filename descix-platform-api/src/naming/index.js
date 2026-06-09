@@ -1,0 +1,103 @@
+/**
+ * @descix/platform-api/naming — Canonical token <-> community <-> app id derivation.
+ *
+ * Authority: CEO-D-2026-06-08-CANONICAL-TOKEN-COMMUNITY-APP-MODEL (MustKnow §1).
+ *
+ *   1. token <-> chain contract        1:1 (one symbol = one contract)
+ *   2. community <-> token (per env)   community_id == lowercased(token_symbol)
+ *   3. community IS its default app    app_id == community_id == lowercased(token_symbol)
+ *   4. sub-apps                        {community_app_id}-{short_name}; short_name has NO '-'
+ *   5. identifiers env-invariant; materialization (Firestore records) is per-env
+ *   6. an app whose community is not materialized in that env is an INVALID ORPHAN
+ *
+ * LEAF MODULE — DEPENDENCY-FREE BY DESIGN. Imports nothing so both the HTTP-only CLI
+ * and the cloud command handlers can share the SAME derivation logic. Do not add imports.
+ *
+ * `-` is the RESERVED separator. App IDs stay OPAQUE to routing — routing reads
+ * community_id from Products metadata, it never parses an app_id. These helpers exist
+ * to COMPOSE/VALIDATE ids at create time, not to decompose them at request time.
+ */
+
+// Token symbols are 1-7 uppercase alphanumerics (matches check_token_symbol_available).
+export const TOKEN_SYMBOL_RE = /^[A-Z0-9]{1,7}$/;
+
+// A sub-app short name: lowercase letters/digits/underscore. NO hyphen (reserved separator),
+// no spaces, no other punctuation. Must start with a letter or digit.
+export const APP_SHORT_NAME_RE = /^[a-z0-9][a-z0-9_]*$/;
+
+/**
+ * Canonical community_id / default app_id from a token symbol.
+ * community_id == app_id == lowercased(token_symbol).
+ *
+ * @param {string} token_symbol
+ * @returns {string} normalized id (lowercased, alphanumerics only)
+ * @throws if the symbol is not 1-7 alphanumerics
+ */
+export function communityIdFromTokenSymbol(token_symbol) {
+    if (!token_symbol || typeof token_symbol !== 'string') {
+        throw new Error('token_symbol is required');
+    }
+    const symbolUpper = token_symbol.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (!TOKEN_SYMBOL_RE.test(symbolUpper)) {
+        throw new Error('token_symbol must be 1-7 alphanumeric characters');
+    }
+    return symbolUpper.toLowerCase();
+}
+
+/**
+ * Validate a sub-app short name. The short name is the part AFTER the community prefix.
+ * It must not contain '-' (the reserved separator), spaces, or other punctuation.
+ *
+ * @param {string} short_name
+ * @throws with an explicit, actionable message on any violation
+ */
+export function assertValidAppShortName(short_name) {
+    if (!short_name || typeof short_name !== 'string') {
+        throw new Error('app short name is required');
+    }
+    if (short_name.includes('-')) {
+        throw new Error(
+            `Invalid app short name '${short_name}': '-' is the reserved community/app separator. ` +
+            `Pick a SHORT name with no hyphens (e.g. 'frqtl'); the unique app_id is composed as {community}-{short}.`
+        );
+    }
+    if (!APP_SHORT_NAME_RE.test(short_name)) {
+        throw new Error(
+            `Invalid app short name '${short_name}': use lowercase letters, digits, and underscore only ` +
+            `(must start with a letter or digit, no spaces or punctuation). Keep it SHORT.`
+        );
+    }
+    return short_name;
+}
+
+/**
+ * Compose the canonical unique app_id for a sub-app: {community_app_id}-{short_name}.
+ * The community_app_id is the community's DEFAULT app id (== community_id == token_symbol).
+ *
+ * If short_name already equals community_id (the default-app case) the bare community_id
+ * is returned unchanged — the default app is NOT prefixed, it IS the community.
+ *
+ * @param {string} community_id  the community's default app id (== community_id)
+ * @param {string} short_name    sub-app short name (validated; no '-')
+ * @returns {string} the unique app_id
+ */
+export function composeAppId(community_id, short_name) {
+    if (!community_id || typeof community_id !== 'string') {
+        throw new Error('community_id is required to compose an app_id');
+    }
+    const community = community_id.toLowerCase();
+    const short = String(short_name).toLowerCase();
+    // Default-app case: the community itself.
+    if (short === community) {
+        return community;
+    }
+    // Tolerate a caller that already passed the fully-prefixed id.
+    if (short === `${community}-`.toLowerCase() || short.startsWith(`${community}-`)) {
+        // already composed — validate the tail short-name has no further '-'
+        const tail = short.slice(community.length + 1);
+        assertValidAppShortName(tail);
+        return `${community}-${tail}`;
+    }
+    assertValidAppShortName(short);
+    return `${community}-${short}`;
+}

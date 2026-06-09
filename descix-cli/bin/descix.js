@@ -1153,7 +1153,8 @@ appCommand
   .command('create')
   .description('Create an app in a community. --quick with -c/-a for CLI-driven creation.')
   .option('-c, --community <id>', 'Community ID')
-  .option('-a, --app <name>', 'App name')
+  .option('-a, --app <name>', 'App display name')
+  .option('-s, --short <short_name>', 'SHORT id segment (no hyphens). The unique app_id is composed as {community}-{short}. Keep it short, e.g. "frqtl" -> egpt-frqtl. Defaults to --app if omitted.')
   .option('--quick', 'Create app via CLI (registers in Products + Firestore, grants entitlement; Drive-free); requires -c and -a')
   .option('--overwrite', 'Overwrite existing (with --quick)')
   .action(async (options) => {
@@ -1167,9 +1168,14 @@ appCommand
         // entitlement (developer-permission checked server-side). No Drive base folder
         // is required: KB sync is the Git manifest path (`descix kb corpus sync`),
         // never Drive. create_skeleton is OFF — the Drive skeleton is a removed V1 step.
+        // CANONICAL (CEO-D-2026-06-08): the server composes the unique app_id as
+        // {community}-{short_name}, fails loud on a missing community / duplicate id /
+        // a short name containing '-'. We forward short_name + overwrite; we do NOT
+        // compose the id client-side (the server is authoritative).
         const response = await apiClient.invoke('create_app_for_community', {
           community_id: options.community,
           app_name: options.app,
+          short_name: options.short || undefined,
           create_skeleton: false,
           overwrite: options.overwrite
         });
@@ -1184,7 +1190,10 @@ appCommand
       }
       console.log(chalk.cyan('\n📦 App creation\n'));
       console.log(chalk.white('Create apps in the PWA (Device Setup / App Manager) or via CLI:\n'));
-      console.log(chalk.white('  descix app create --quick -c <community> -a <app-name>\n'));
+      console.log(chalk.white('  descix app create --quick -c <community> -a <app-name> [-s <short>]\n'));
+      console.log(chalk.gray('The unique app_id is composed as {community}-{short} (short defaults to'));
+      console.log(chalk.gray('the app name). Pick a SHORT name with NO hyphens, e.g. -c egpt -s frqtl'));
+      console.log(chalk.gray('=> egpt-frqtl. The community must already exist or creation fails loud.\n'));
       console.log(chalk.gray('This registers the app in the Products registry, creates the Firestore'));
       console.log(chalk.gray('App doc, and grants entitlement. KB sync is `descix kb corpus sync`'));
       console.log(chalk.gray('(Git manifest) — no Drive folder is required.\n'));
