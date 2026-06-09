@@ -173,6 +173,28 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
             required: ['app_id', 'kb_id'],
         },
     },
+    {
+        name: 'create_app_for_community',
+        description:
+            "Create a SUB-APP inside an existing community (registers Products + Firestore App doc + grants you the entitlement). " +
+            "The unique app_id is COMPOSED SERVER-SIDE as {community_id}-{short_name} where community_id is the community's default app id (== its lowercased token symbol), e.g. community 'egpt' + short_name 'frqtl' => app_id 'egpt-frqtl'. " +
+            "Pick a SHORT, lowercase short_name with NO hyphens ('-' is the reserved separator) — if omitted, app_name is used as the short name. " +
+            "Fails loud if: the community does not exist in this environment (you must create the community first — an app without a materialized community is an invalid orphan), an app with the composed id already exists (pass overwrite:true to update it), or the short name contains '-' or other invalid characters. " +
+            "Do NOT use this to create a community's DEFAULT app (app_id == community_id) — that is created by community-create. app_id stays opaque to routing; this only composes it at create time.",
+        mutating: true,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                community_id: { type: 'string', description: "Existing community id (== its default app id == lowercased token symbol). Must already be materialized in this env." },
+                app_name: { type: 'string', description: 'Human-readable display name for the app.' },
+                short_name: { type: 'string', description: "SHORT id segment used to compose the unique app_id {community_id}-{short_name}. Lowercase letters/digits/underscore, NO hyphens. Optional — defaults to app_name. Keep it short, e.g. 'frqtl'." },
+                app_description: { type: 'string', description: 'Optional description.' },
+                icon_url: { type: 'string', description: 'Optional icon URL.' },
+                overwrite: { type: 'boolean', description: 'Set true to update an app whose composed id already exists (otherwise duplicate fails loud). Default false.' },
+            },
+            required: ['community_id', 'app_name'],
+        },
+    },
 ]);
 
 /**

@@ -71,3 +71,12 @@ export {
     manifestMiddleware,
     computeManifestHash
 } from './manifest/index.js';
+
+// Canonical id derivation (token <-> community <-> app)
+export {
+    communityIdFromTokenSymbol,
+    assertValidAppShortName,
+    composeAppId,
+    TOKEN_SYMBOL_RE,
+    APP_SHORT_NAME_RE
+} from './naming/index.js';

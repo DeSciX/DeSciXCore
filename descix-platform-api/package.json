@@ -12,7 +12,8 @@
     "./permissions": "./src/permissions/index.js",
     "./entitlements": "./src/entitlements/index.js",
     "./manifest": "./src/manifest/index.js",
-    "./mcp-tools": "./src/mcp-tools/index.js"
+    "./mcp-tools": "./src/mcp-tools/index.js",
+    "./naming": "./src/naming/index.js"
   },
   "files": [
     "src"
