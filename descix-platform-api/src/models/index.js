@@ -451,9 +451,7 @@ export class User {
         roles = new Map(),
         total_rep = 0, total_ref_generic = 0, total_dip = 0, claimed_promotions = [],
         accumulated_ref_commission = 0, accumulated_rep_commission = 0, accumulated_dip_commission = 0,
-        custodial_usd_balance = 0,
         provider_links = null,
-        is_staked = false,
         base_folder_id = null,
         nfts = new Map(),
         ad_campaigns = new Map(),
@@ -479,8 +477,6 @@ export class User {
         this.accumulated_ref_commission = accumulated_ref_commission;
         this.accumulated_rep_commission = accumulated_rep_commission;
         this.accumulated_dip_commission = accumulated_dip_commission;
-        this.custodial_usd_balance = custodial_usd_balance || 0;
-        this.is_staked = is_staked || false;
         this.base_folder_id = base_folder_id || null;
 
         if (provider_links instanceof Map) {
@@ -517,8 +513,6 @@ export class User {
         if (copy.accumulated_ref_commission === undefined) copy.accumulated_ref_commission = 0;
         if (copy.accumulated_rep_commission === undefined) copy.accumulated_rep_commission = 0;
         if (copy.accumulated_dip_commission === undefined) copy.accumulated_dip_commission = 0;
-        if (copy.custodial_usd_balance === undefined) copy.custodial_usd_balance = 0;
-        if (copy.is_staked === undefined) copy.is_staked = false;
         if (copy.base_folder_id === undefined) copy.base_folder_id = null;
         if (!Array.isArray(copy.api_signatures)) copy.api_signatures = [];
         if (copy.point_multiplier === undefined) copy.point_multiplier = 1.0;
@@ -568,9 +562,7 @@ export class User {
             user_doc.accumulated_ref_commission || 0,
             user_doc.accumulated_rep_commission || 0,
             user_doc.accumulated_dip_commission || 0,
-            user_doc.custodial_usd_balance || 0,
             providerLinksMap,
-            user_doc.is_staked || false,
             user_doc.base_folder_id || null,
             nftsMap,
             adCampaignsMap,
@@ -617,9 +609,7 @@ export class User {
             claimed_promotions: [],
             accumulated_ref_commission: 0,
             accumulated_rep_commission: 0,
-            accumulated_dip_commission: 0,
-            custodial_usd_balance: 0,
-            is_staked: false
+            accumulated_dip_commission: 0
         };
 
         if (!user) {
@@ -650,8 +640,6 @@ export class User {
             if (user.accumulated_ref_commission === undefined) updates.accumulated_ref_commission = 0;
             if (user.accumulated_rep_commission === undefined) updates.accumulated_rep_commission = 0;
             if (user.accumulated_dip_commission === undefined) updates.accumulated_dip_commission = 0;
-            if (user.custodial_usd_balance === undefined) updates.custodial_usd_balance = 0;
-            if (user.is_staked === undefined) updates.is_staked = false;
 
             return await db.update_doc_fields(FirestoreCollections.USERS(), user_id, updates);
         }
@@ -872,11 +860,6 @@ export class User {
     async removeRole(role_id) {
         const updatePath = `roles.${role_id}`;
         return await this.db.update_doc_fields(FirestoreCollections.USERS(), this.id, { [updatePath]: FieldValue.delete() });
-    }
-
-    async updateStakedStatus(status) {
-        this.is_staked = status;
-        return await this.db.update_doc_field(FirestoreCollections.USERS(), this.id, 'is_staked', status);
     }
 
     async checkSubscription(context = {}) {

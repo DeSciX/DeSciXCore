@@ -34,7 +34,9 @@ function makeFakeApiClient(scripted = {}) {
             }
             if (next === undefined) {
                 // default lightweight OK response used for check_staked_status
-                return { status: 'OK', message: { is_staked: true, user: { email: 'admin@descix.net' } } };
+                // (session-validity probe — mirrors the gutted handler shape:
+                //  is_staked is a backward-compat constant false, reason marks the session valid)
+                return { status: 'OK', message: { is_staked: false, reason: 'session_valid', user: { email: 'admin@descix.net' } } };
             }
             return next;
         }

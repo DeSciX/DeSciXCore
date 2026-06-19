@@ -342,10 +342,10 @@ export async function whoami() {
     }
     
     if (userInfo) {
+      // Account Details: feature access is entitlement-based (community membership / subscriptions),
+      // NOT a custodial balance or a STAKED state — both removed per CEO-D-2026-06-14-DROP-CUSTODIAL-ELIMINATE-STAKED.
       console.log(chalk.cyan('\n📊 Account Details:\n'));
-      console.log(chalk.white(`   Balance:    ${userInfo.custodial_usd_balance || userInfo.balance || 0} USDCX`));
-      console.log(chalk.white(`   Staked:     ${userInfo.is_staked ? chalk.green('Yes') : chalk.yellow('No')}`));
-      
+
       try {
         const purchasesResponse = await apiClient.invoke('fetch_my_purchases', { product_type: 'APP' }, { allowGuest: false });
         const purchases = purchasesResponse.message || {};
