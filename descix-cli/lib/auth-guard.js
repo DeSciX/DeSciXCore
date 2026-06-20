@@ -24,9 +24,9 @@ export async function requireAuth(apiClient) {
     process.exit(1);
   }
   
-  // Validate session is still active by calling check_staked_status via HTTP
+  // Validate session is still active by calling validate_session via HTTP
   try {
-    const response = await apiClient.invoke('check_staked_status', {}, { allowGuest: false });
+    const response = await apiClient.invoke('validate_session', {}, { allowGuest: false });
     if (response.status === 'OK' && response.message) {
       return response.message;
     }
@@ -58,7 +58,7 @@ export async function isAuthenticated(apiClient) {
       return false;
     }
     // Try a lightweight check via HTTP
-    const response = await apiClient.invoke('check_staked_status', {}, { allowGuest: false });
+    const response = await apiClient.invoke('validate_session', {}, { allowGuest: false });
     return response.status === 'OK';
   } catch (error) {
     return false;

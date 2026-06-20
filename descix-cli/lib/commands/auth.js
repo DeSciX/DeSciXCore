@@ -307,7 +307,7 @@ export async function whoami() {
   try {
     await requireAuth(apiClient);
     
-    const response = await apiClient.invoke('check_staked_status', {}, { allowGuest: false });
+    const response = await apiClient.invoke('validate_session', {}, { allowGuest: false });
     const userInfo = response.message;
     
     const walletPath = await WalletFileManager.findWalletFile(process.cwd());
