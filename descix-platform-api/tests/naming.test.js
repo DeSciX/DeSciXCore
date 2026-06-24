@@ -14,6 +14,9 @@ import {
 
 test('communityIdFromTokenSymbol: id derived from SYMBOL not name (descix/daita root cause)', () => {
     // The split bug: community NAME "DeSciX" + token "DAITA" must yield id 'daita', NOT 'descix'.
+    // Regression guard for WS-DESCIX-DAITA-CANON: the bootstrap "already exists" fallback at
+    // admin/bootstrap.js:1238 previously derived community_id from the NAME (-> 'descix'); it now
+    // derives from the token symbol (tokenSymbol.toLowerCase()), matching this contract.
     assert.equal(communityIdFromTokenSymbol('DAITA'), 'daita');
     // Symbol-only derivation: a free-text display name can never re-enter the id.
     assert.equal(communityIdFromTokenSymbol('EGPT'), 'egpt');

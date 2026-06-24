@@ -37,7 +37,7 @@ async function loadContext(workspaceRoot) {
     // Derive from v2.1 format or legacy
     const platform = config.env?.platform || {};
     const appId = platform.appId || config.defaultContext?.appId || 'my-app';
-    const communityId = platform.communityId || config.defaultContext?.communityId || config.primaryCommunity || 'descix';
+    const communityId = platform.communityId || config.defaultContext?.communityId || config.primaryCommunity;
 
     // Derive API URL
     let apiUrl = config.apiUrl || null;

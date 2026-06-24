@@ -148,7 +148,7 @@ async function autoRegisterSdkService(apiClient) {
     // Vectorize for tell_me_how discovery
     await apiClient.invoke('vectorize_service_readme', {
       service_name: 'sdk',
-      community_id: 'descix',
+      community_id: 'daita',
       app_id: 'docs',
       readme_content: readmeContent
     });
