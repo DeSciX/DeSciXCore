@@ -101,7 +101,7 @@ async function showStatus(context: vscode.ExtensionContext) {
     const wallet = JSON.parse(raw);
     vscode.window.showInformationMessage(
       `DeSciX: Connected as ${wallet.userId || wallet.walletAddress?.substring(0, 10)} ` +
-      `(${wallet.communityId || 'descix'})`
+      `(${wallet.communityId})`
     );
   } catch {
     vscode.window.showInformationMessage('DeSciX: Connected');

@@ -124,7 +124,7 @@ class FirestoreCollections {
     static SIGNATURE_INDEX() { return new BaseStoragePath("SignatureIndex", "dict").getPath(); }
     static ROLES(scope, scope_id) {
         if (scope === 'PLATFORM') {
-            return new BaseStoragePath("Community/descix/Roles", "dict").getPath();
+            return new BaseStoragePath("Community/daita/Roles", "dict").getPath();
         } else if (scope === 'COMMUNITY') {
             return new BaseStoragePath("Community/{community_id}/Roles", "dict").getPath({ community_id: scope_id });
         } else if (scope === 'APP') {

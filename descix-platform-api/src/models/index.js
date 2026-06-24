@@ -109,7 +109,7 @@ export async function getUserEntitlements(user) {
         // Add public/free apps that everyone has access to
         try {
             const publicApps = await db.get_docs(
-                'Community/descix/Apps',
+                'Community/daita/Apps',
                 null,
                 [['is_public', '==', true]]
             );
@@ -124,8 +124,8 @@ export async function getUserEntitlements(user) {
             console.warn('[getUserEntitlements] Failed to get public apps:', err.message);
         }
 
-        // Always include 'descix' community (platform core)
-        communityIds.add('descix');
+        // Always include 'daita' community (platform core)
+        communityIds.add('daita');
 
         return {
             communities: Array.from(communityIds),
@@ -133,7 +133,7 @@ export async function getUserEntitlements(user) {
         };
     } catch (error) {
         console.error('[getUserEntitlements] Error:', error);
-        return { communities: ['descix'], apps: [] };
+        return { communities: ['daita'], apps: [] };
     }
 }
 

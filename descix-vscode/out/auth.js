@@ -120,7 +120,7 @@ async function showStatus(context) {
         const raw = await fs.readFile(walletPath, 'utf-8');
         const wallet = JSON.parse(raw);
         vscode.window.showInformationMessage(`DeSciX: Connected as ${wallet.userId || wallet.walletAddress?.substring(0, 10)} ` +
-            `(${wallet.communityId || 'descix'})`);
+            `(${wallet.communityId})`);
     }
     catch {
         vscode.window.showInformationMessage('DeSciX: Connected');

@@ -72,7 +72,7 @@ async function pollDeviceLogin(apiClient, deviceCode, onStatus = null) {
           session_token: response.message.session_token,
           wallet_address: response.message.wallet_address,
           signature: response.message.signature,
-          community_id: response.message.community_id || 'descix',
+          community_id: response.message.community_id,
           token_symbol: response.message.token_symbol || 'DAITA'
         };
       }
@@ -450,7 +450,7 @@ export async function adminLogin(options = {}) {
       sessionToken: info.session_token,
       userId: info.user_id,
       email: info.email,
-      communityId: info.community_id || 'descix',
+      communityId: info.community_id,
       tokenSymbol: info.token_symbol || 'DAITA',
       expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
     };
