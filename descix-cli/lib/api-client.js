@@ -107,6 +107,98 @@ export class DeSciXApiClient {
   }
 
   /**
+   * WS-MCP-SURFACE-SPLIT §9 — IAM gating for the internal-only DEV apiFront function.
+   *
+   * The persistent admin-capable DEV endpoint (`apiFront-http-dev`) is deployed
+   * `--no-allow-unauthenticated`, so Google Cloud Run IAM rejects any caller without a
+   * valid Google-signed identity token (HTTP 403 before the request ever reaches the app).
+   * The public LB origins (`*.descix.net`) and local dev (`localhost`/`127.0.0.1`) are NOT
+   * IAM-gated — they front allow-unauthenticated functions or a self-signed local server.
+   *
+   * This predicate returns true ONLY for the raw Cloud Run / Cloud Functions origins
+   * (`*.run.app`, `*.cloudfunctions.net`). When true, callers must add a Google identity
+   * bearer token to clear the IAM layer. The CLI's own session credential still travels in
+   * the request BODY for the app-level auth middleware — IAM and app-auth are two layers.
+   *
+   * @returns {boolean}
+   */
+  _isIamGatedOrigin() {
+    if (!this.baseUrl) return false;
+    let host;
+    try {
+      host = new URL(this.baseUrl).hostname;
+    } catch {
+      return false;
+    }
+    return host.endsWith('.run.app') || host.endsWith('.cloudfunctions.net');
+  }
+
+  /**
+   * Mint a Google identity token (`aud` = the function origin) to clear Cloud Run IAM.
+   *
+   * Resolution order (durable across both deployment and developer contexts):
+   *   1. google-auth-library `getIdTokenClient(audience)` — works when ADC is a SERVICE
+   *      ACCOUNT (CI / Cloud Run / a configured SA key). This is the canonical, audience-
+   *      scoped path. A user ADC cannot mint an audience-scoped ID token, so its headers
+   *      come back WITHOUT an Authorization bearer — we detect that and fall through.
+   *   2. `gcloud auth print-identity-token` — works for a developer's USER ADC (the local
+   *      always-on case). The token is accepted by Cloud Run IAM when the principal holds
+   *      `roles/run.invoker` (project owner/editor inherit it).
+   *
+   * Returns the `Authorization: Bearer <id_token>` value, or null if no identity is mintable
+   * (caller then proceeds without it and surfaces the resulting 403 — no silent fallback).
+   *
+   * @param {string} audience - the function origin (scheme+host), the IAM token audience
+   * @returns {Promise<string|null>}
+   */
+  async _mintIamBearer(audience) {
+    // Path 1: service-account ADC via google-auth-library (audience-scoped).
+    try {
+      const { GoogleAuth } = await import('google-auth-library');
+      const auth = new GoogleAuth();
+      const client = await auth.getIdTokenClient(audience);
+      const headers = await client.getRequestHeaders();
+      const bearer = headers.Authorization || headers.authorization;
+      if (bearer) return bearer;
+      // No bearer => user ADC; fall through to gcloud.
+    } catch (e) {
+      console.error(`[ApiClient] google-auth-library ID token unavailable (${e.message}); trying gcloud.`);
+    }
+
+    // Path 2: developer user ADC via gcloud CLI.
+    try {
+      const { execFile } = await import('node:child_process');
+      const { promisify } = await import('node:util');
+      const run = promisify(execFile);
+      const { stdout } = await run('gcloud', ['auth', 'print-identity-token'], { timeout: 30000 });
+      const token = (stdout || '').trim();
+      if (token) return `Bearer ${token}`;
+    } catch (e) {
+      console.error(`[ApiClient] gcloud identity token unavailable: ${e.message}`);
+    }
+
+    return null;
+  }
+
+  /**
+   * Apply IAM auth to an axios config when the baseUrl is an internal IAM-gated origin.
+   * No-op for localhost and public LB origins. Mutates and returns the config.
+   * @param {Object} axiosConfig
+   * @returns {Promise<Object>}
+   */
+  async _applyIamAuthIfNeeded(axiosConfig) {
+    if (!this._isIamGatedOrigin()) return axiosConfig;
+    const audience = new URL(this.baseUrl).origin;
+    const bearer = await this._mintIamBearer(audience);
+    if (bearer) {
+      axiosConfig.headers = { ...(axiosConfig.headers || {}), Authorization: bearer };
+    } else {
+      console.error('[ApiClient] WARNING: IAM-gated origin but no identity token could be minted; expect HTTP 403.');
+    }
+    return axiosConfig;
+  }
+
+  /**
    * Build request body for API call
    * @param {string} command - Command name
    * @param {Object} params - Command parameters
@@ -216,7 +308,10 @@ export class DeSciXApiClient {
         rejectUnauthorized: false
       });
     }
-    
+
+    // Clear Cloud Run IAM for the internal-only DEV apiFront function (no-op otherwise).
+    await this._applyIamAuthIfNeeded(axiosConfig);
+
     try {
       const response = await axios.post(url, requestBody, axiosConfig);
       console.log(`[ApiClient] Response status: ${response.status}`);
@@ -312,7 +407,10 @@ export class DeSciXApiClient {
           rejectUnauthorized: false
         });
       }
-      
+
+      // Clear Cloud Run IAM for the internal-only DEV apiFront function (no-op otherwise).
+      await this._applyIamAuthIfNeeded(axiosConfig);
+
       const response = await axios.post(url, requestBody, axiosConfig);
 
       const data = response.data;
