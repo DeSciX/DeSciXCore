@@ -643,23 +643,46 @@ export async function runCorpusSync(apiClient, options) {
               success = true;
               syncSpinner.text = `  Upserting chunks... ${i + batch.length}/${allChunks.length}`;
             } catch (err) {
-              if (err.message && (err.message.includes('429') || err.message.includes('RESOURCE_EXHAUSTED'))) {
+              const msg = err.message || '';
+              const isRateLimit = msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED');
+              // A per-batch upsert TIMEOUT (server raced out the wedged Pinecone call →
+              // UPSERT_TIMEOUT) or a transient network/gateway stall (ETIMEDOUT / 504 /
+              // 502 / 503 / ECONNRESET) is RESUMABLE — the upsert is id-keyed and
+              // idempotent, so retrying the same batch overwrites any partially-landed
+              // records. We must NOT skip it (that silently drops chunks). Retry with
+              // backoff like a rate-limit. This is what makes a re-run resume cleanly
+              // and a single rebuild never wedge for hours.
+              const isResumableStall =
+                msg.includes('UPSERT_TIMEOUT') ||
+                msg.includes('ETIMEDOUT') ||
+                msg.includes('timed out') ||
+                msg.includes('504') || msg.includes('502') || msg.includes('503') ||
+                msg.includes('ECONNRESET') || msg.includes('socket hang up');
+
+              if (isRateLimit || isResumableStall) {
                 retries++;
                 const backoff = BATCH_DELAY_MS * Math.pow(2, retries);
-                syncSpinner.text = `  Rate limited. Waiting ${backoff / 1000}s before retry ${retries}/${MAX_RETRIES}...`;
+                const reason = isRateLimit ? 'Rate limited' : 'Transient stall/timeout';
+                syncSpinner.text = `  ${reason}. Waiting ${backoff / 1000}s before retry ${retries}/${MAX_RETRIES} (batch ${i}-${i + batch.length})...`;
                 await new Promise(r => setTimeout(r, backoff));
               } else {
-                // Non-rate-limit error: log failed chunks, continue with remaining batches
+                // Genuine non-transient error (e.g. validation): log failed chunks,
+                // continue with remaining batches.
                 const failedIds = batch.map(c => c.id);
                 syncFailures.push({ error: err.message, chunks: failedIds });
                 syncSpinner.text = `  Batch failed (${failedIds.length} chunks): ${err.message.substring(0, 80)}. Continuing...`;
-                success = true; // Don't retry non-rate-limit errors, move to next batch
+                success = true; // Don't retry non-transient errors, move to next batch
               }
             }
           }
 
           if (!success) {
-            syncSpinner.warn(`  Rate limit exceeded after ${MAX_RETRIES} retries. Synced ${upserted} chunks so far.`);
+            syncSpinner.warn(
+              `  Batch ${i}-${i + batch.length} did not complete after ${MAX_RETRIES} retries. ` +
+              `Synced ${upserted} chunks so far. This run is BOUNDED (it did not hang) — ` +
+              `re-run 'descix kb corpus sync -a ${appId} -k ${kbName}' to RESUME: id-keyed upserts ` +
+              `are idempotent so already-synced batches are cheap and the remainder continues.`
+            );
             break;
           }
 
@@ -712,6 +735,31 @@ export async function runCorpusSync(apiClient, options) {
         chunks_deleted: deleted,
         synced_blob_shas: allSyncedBlobShas
       });
+
+      // 3g. AUTO-RECONCILE the cached rag_vector_count to the TRUE live Pinecone
+      // count after a COMPLETED, clean sync (no batch failures). This keeps the
+      // doctor's fast cached read truthful after every clean run, so drift only
+      // ever appears mid-flight (on interruption). Skipped if any batch failed
+      // (the run is partial — reconciling would bake in the partial state and the
+      // re-run will reconcile once complete). Non-fatal: a reconcile hiccup must
+      // not fail an otherwise-successful sync.
+      if (syncFailures.length === 0) {
+        try {
+          const recRes = await apiClient.invoke('get_kb_rag_status', {
+            app_id: appId, kb_id: kbName, reconcile: true
+          }, { allowGuest: false });
+          const rec = recRes.message || recRes;
+          if (rec && typeof rec.reconcileAfter === 'number') {
+            const d = rec.reconcileAfter - rec.reconcileBefore;
+            console.log(chalk.gray(
+              `  ⟳ Reconciled live count: cached ${rec.reconcileBefore} → live ${rec.reconcileAfter}` +
+              (d === 0 ? ' (already truthful)' : ` (${d >= 0 ? '+' : ''}${d})`)
+            ));
+          }
+        } catch (recErr) {
+          console.log(chalk.yellow(`  ⚠ Auto-reconcile skipped (non-fatal): ${recErr.message}`));
+        }
+      }
 
       totalFilesProcessed += newOrChangedFiles.length;
       totalChunksCreated += upserted;
