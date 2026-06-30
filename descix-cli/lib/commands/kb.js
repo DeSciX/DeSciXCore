@@ -723,13 +723,23 @@ export async function runKbDoctor(apiClient, options) {
   const scope = communityId ? `${communityId}/${appId}/${kbName}` : `${appId}/${kbName}`;
   console.log(chalk.cyan(`\n🩺 kb doctor — ${scope}\n`));
 
-  // (a) Pinecone live vector count
+  // --live   : compute vectorCount from the TRUE live Pinecone scope (id-prefix
+  //            enumeration), bypassing the cached rag_vector_count counter that
+  //            LIES after an interrupted op.
+  // --reconcile: compute the live count AND write it back to rag_vector_count so the
+  //            fast cached read is truthful again. Implies --live truth.
+  const live = !!options.live || !!options.reconcile;
+  const reconcile = !!options.reconcile;
+
+  // (a) Pinecone vector count (cached by default; live/reconciled on request)
   let vectorCount = null;
   let ragStatus = null;
   try {
     const res = await apiClient.invoke('get_kb_rag_status', {
       app_id: appId,
-      kb_id: kbName
+      kb_id: kbName,
+      live,
+      reconcile
     }, { allowGuest: false });
     ragStatus = res.message || res;
     vectorCount = ragStatus?.vectorCount;
@@ -739,6 +749,25 @@ export async function runKbDoctor(apiClient, options) {
   } catch (err) {
     console.log(chalk.red(`  ✗ get_kb_rag_status failed: ${err.message}`));
     throw err;
+  }
+
+  if (reconcile) {
+    console.log(chalk.cyan(
+      `  ⟳ Reconciled cached count: ${ragStatus.reconcileBefore} → ${ragStatus.reconcileAfter} ` +
+      `(${ragStatus.reconcileAfter - ragStatus.reconcileBefore >= 0 ? '+' : ''}${ragStatus.reconcileAfter - ragStatus.reconcileBefore})\n`
+    ));
+  }
+  if (live) {
+    const src = ragStatus.source === 'live' ? chalk.green('LIVE (Pinecone)') : chalk.yellow(ragStatus.source);
+    console.log(`  Count source         : ${src}`);
+    if (typeof ragStatus.cachedVectorCount === 'number') {
+      const cacheDrift = ragStatus.drift;
+      console.log(
+        `  Cached counter       : ${chalk.white(ragStatus.cachedVectorCount)} ` +
+        `(live − cache = ${cacheDrift >= 0 ? '+' : ''}${cacheDrift})` +
+        (cacheDrift === 0 ? chalk.green('  ✓ truthful') : chalk.yellow('  ⚠ cache drifted; run --reconcile'))
+      );
+    }
   }
 
   // (b) Local sync-state total_chunks

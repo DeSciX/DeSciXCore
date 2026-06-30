@@ -2508,6 +2508,8 @@ kbCommand
   .requiredOption('-a, --app <id>', 'App ID')
   .requiredOption('-k, --kb <name>', 'KB name')
   .option('-t, --threshold <ratio>', 'Drift threshold as a fraction (default: 0.05)', parseFloat)
+  .option('--live', 'Compute vectorCount from the TRUE live Pinecone scope (bypass the cached counter, which lies after an interrupted op)')
+  .option('--reconcile', 'Compute the live count AND write it back to rag_vector_count so the cached read is truthful again (implies --live)')
   .action(async (options) => {
     try {
       const apiClient = new DeSciXApiClient();
