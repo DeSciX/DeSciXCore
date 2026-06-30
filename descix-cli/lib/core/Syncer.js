@@ -235,17 +235,25 @@ export async function deleteStaleChunksByFileId(apiClient, communityId, appId, k
  * pollution before a `--rebuild` re-upsert.
  *
  * Server-side it routes to kb_delete_chunks(purge_scope: true), which delegates
- * to the canonical KnowledgeBase.deleteRAG() — deleting via the multi-tenancy
- * metadata filter AND resetting the KB doc's rag fields (rag_vector_count→0) so
- * `kb doctor` reports clean drift after the subsequent re-sync. Touches Pinecone
- * vectors + the KB doc's rag fields ONLY — no Firestore/GCS/Products cascade.
+ * to the canonical KnowledgeBase.deleteRAG(). As of WS-KB-CORPUS-SCOPEPURGE-SCALE
+ * that purge is ROBUST AT SCALE: it enumerates the KB's vectors by their canonical
+ * id-prefix `${app_id}:${kb_id}:` (deterministic listPaginated) and deletes them in
+ * bounded batches of 1000, so an arbitrarily large scope (~20k+ vectors) is cleared
+ * without exceeding the Pinecone client's max-retries ceiling (the prior single
+ * giant metadata deleteMany failed at that size). It still clears ALL orphans
+ * (they share the prefix) AND resets the KB doc's rag fields (rag_vector_count→0)
+ * so `kb doctor` reports clean drift after the subsequent re-sync. The rag-field
+ * reset happens ONLY after the live purge completes. Touches Pinecone vectors +
+ * the KB doc's rag fields ONLY — no Firestore/GCS/Products cascade. On a partial
+ * batch failure it FAILS LOUD (recoverable by re-running — idempotent).
  *
  * @param {Object} apiClient - DeSciXApiClient instance
  * @param {string} communityId - Community ID (required server-side; full scope)
  * @param {string} appId - App ID
  * @param {string} kbId - Knowledge base ID
  * @returns {Promise<{ deleted: number, purged_scope: boolean }>}
- *          `deleted` is -1 when Pinecone's filter-based delete reports no count.
+ *          `deleted` is the actual count of vectors purged (the batched path always
+ *          reports it); -1 only if a future primitive cannot report a count.
  */
 export async function purgeKbScope(apiClient, communityId, appId, kbId) {
   const result = await apiClient.invoke('kb_delete_chunks', {
