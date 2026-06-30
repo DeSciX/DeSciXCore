@@ -226,6 +226,42 @@ export async function deleteStaleChunksByFileId(apiClient, communityId, appId, k
 }
 
 /**
+ * Purge EVERY vector in a KB's {community_id, app_id, knowledgebase_name} scope.
+ *
+ * This is the FULL metadata-scoped purge — it clears all vectors regardless of
+ * their file_id scheme, including legacy/orphan vectors that carry no `corpus:`
+ * file_id and are therefore INVISIBLE to listRemoteFileIds (the corpus-scheme
+ * enumeration). It is the only primitive that fully clears accumulated orphan
+ * pollution before a `--rebuild` re-upsert.
+ *
+ * Server-side it routes to kb_delete_chunks(purge_scope: true), which delegates
+ * to the canonical KnowledgeBase.deleteRAG() — deleting via the multi-tenancy
+ * metadata filter AND resetting the KB doc's rag fields (rag_vector_count→0) so
+ * `kb doctor` reports clean drift after the subsequent re-sync. Touches Pinecone
+ * vectors + the KB doc's rag fields ONLY — no Firestore/GCS/Products cascade.
+ *
+ * @param {Object} apiClient - DeSciXApiClient instance
+ * @param {string} communityId - Community ID (required server-side; full scope)
+ * @param {string} appId - App ID
+ * @param {string} kbId - Knowledge base ID
+ * @returns {Promise<{ deleted: number, purged_scope: boolean }>}
+ *          `deleted` is -1 when Pinecone's filter-based delete reports no count.
+ */
+export async function purgeKbScope(apiClient, communityId, appId, kbId) {
+  const result = await apiClient.invoke('kb_delete_chunks', {
+    community_id: communityId,
+    app_id: appId,
+    kb_id: kbId,
+    purge_scope: true
+  });
+  const data = result?.message || result;
+  return {
+    deleted: typeof data?.deleted_count === 'number' ? data.deleted_count : -1,
+    purged_scope: data?.purged_scope === true
+  };
+}
+
+/**
  * Enumerate all file_id values currently present in a KB's Pinecone namespace.
  *
  * Used by `descix kb corpus sync --rebuild` to compute drift:
@@ -412,6 +448,7 @@ export default {
   upsertChunks,
   deleteStaleChunks,
   deleteStaleChunksByFileId,
+  purgeKbScope,
   listRemoteFileIds,
   getSyncStatus
 };
