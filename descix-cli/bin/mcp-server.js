@@ -323,10 +323,30 @@ try {
     { capabilities: { tools: {} } },
   );
 
-  // tools/list — return curated tool definitions
+  // tools/list — PERMISSION-FILTERED surface (WS-MCP-SURFACE-SPLIT §10.2).
+  //
+  // The describe IS the permission gate. Rather than advertise a static curated list, the
+  // stdio server asks the BACKEND's /mcp tools/list (authenticated with this operator's
+  // credentials) so the advertised surface is filtered by the SAME server-side
+  // checkCommandPermission gate as the HTTP transport — ONE filter, no parallel taxonomy.
+  // `--admin` is simply the local operator's wallet carrying admin entitlements (cred-gated,
+  // §9.1): a platform-admin wallet sees admin tools; a public wallet sees public-only.
+  //
+  // CLI-LOCAL diagnostics (descix_doctor, platform_health) are ALWAYS concatenated — they are
+  // local CLI operations, never /apifront commands, so the backend never advertises them.
+  //
+  // Fallback: if the backend is unreachable, advertise the static curated SSOT core
+  // (CLI_LOCAL_TOOLS + NATIVE_MCP_TOOLS) so the operator is never left with an empty toolbox.
   server.setRequestHandler(ListToolsRequestSchema, async () => {
-    console.error(`[MCP] tools/list — returning ${TOOLS.length} tools`);
-    return { tools: TOOLS };
+    try {
+      const backendTools = await apiClient.mcpListTools();
+      const tools = [...CLI_LOCAL_TOOLS, ...backendTools];
+      console.error(`[MCP] tools/list — ${backendTools.length} permission-filtered backend tools + ${CLI_LOCAL_TOOLS.length} CLI-local = ${tools.length}`);
+      return { tools };
+    } catch (err) {
+      console.error(`[MCP] tools/list — backend unreachable (${err.message}); falling back to static curated core (${TOOLS.length} tools)`);
+      return { tools: TOOLS };
+    }
   });
 
   // tools/call — dispatch to backend via HTTP (except doctor which is local)
