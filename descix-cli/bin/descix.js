@@ -365,7 +365,10 @@ const syncCommand = program
 // Context-aware sync: assets
 syncCommand
   .command('assets')
-  .description('Sync app assets (icon, description, system_instructions) - context-aware')
+  // [DUPLICATE:WS-MCP-STEP3] Legacy Drive-mode asset sync — DUPLICATE of the canonical
+  // `app sync-assets` (plan §5.5 / §4e). Slated for REMOVAL in Step 3 with the legacy
+  // three-stage Drive sync cruft. This round only MARKS.
+  .description('[DUPLICATE → use `descix app sync-assets`] Sync app assets (icon, description, system_instructions) - context-aware. Legacy Drive-mode; slated for removal in WS-MCP Step 3.')
   .option('--push', 'Push local assets to Drive (default)')
   .option('--pull', 'Pull assets from Drive to local')
   .option('--status', 'Show sync status without syncing')
@@ -1050,7 +1053,11 @@ appCommand
 
 appCommand
   .command('init')
-  .description('Initialize local workspace and Firestore KB for an app (idempotent)')
+  // [DUPLICATE:WS-MCP-STEP3] One of THREE app-creation paths (plan §5.1: `app create --quick`,
+  // `app init`, native `create_app_for_community`). Step 3 reduces `app init` to
+  // workspace-register only (the canonical create is `create_app_for_community`). This round
+  // only MARKS.
+  .description('[DUPLICATE → workspace-register leg of app-create; canonical create: `create_app_for_community`] Initialize local workspace and Firestore KB for an app (idempotent). Consolidated in WS-MCP Step 3.')
   .requiredOption('-a, --app <app_id>', 'App ID (e.g. daita)')
   .option('--kb <name>', 'Knowledge base name', 'General')
   .option('-p, --path <dir>', 'Local app directory (default: auto-detected or cwd)')
@@ -1151,7 +1158,12 @@ appCommand
 
 appCommand
   .command('create')
-  .description('Create an app in a community. --quick with -c/-a for CLI-driven creation.')
+  // [DUPLICATE:WS-MCP-STEP3] App-creation has THREE overlapping paths (plan §5.1):
+  // `app create --quick`, `app init` (workspace-register), and the native MCP tool
+  // `create_app_for_community`. Per §5.1 these resolve to ONE canonical create
+  // (`create_app_for_community`), with `app init` reduced to workspace-register only.
+  // Step 3 resolves; this round only MARKS.
+  .description('[DUPLICATE → canonical: `create_app_for_community`; see also `app init`] Create an app in a community. --quick with -c/-a for CLI-driven creation. (App-create has 3 paths — consolidated in WS-MCP Step 3.)')
   .option('-c, --community <id>', 'Community ID')
   .option('-a, --app <name>', 'App display name')
   .option('-s, --short <short_name>', 'SHORT id segment (no hyphens). The unique app_id is composed as {community}-{short}. Keep it short, e.g. "frqtl" -> egpt-frqtl. Defaults to --app if omitted.')
@@ -1471,7 +1483,12 @@ appCommand
 
 appCommand
   .command('deploy')
-  .description('Deploy a microservice for an app you own (registers manifest.json)')
+  // [DUPLICATE:WS-MCP-STEP3] `app deploy` is a DUPLICATE surface for `register_service`,
+  // overlapping `microservice register` (manifest-only write) and `microservice deploy`
+  // (real Cloud Run deploy). Per plan §5.2 the canonical path is `microservice register` /
+  // `microservice deploy`; `app deploy` is to be DELETED and repointed in Step 3
+  // (duplicate-surface resolution). This round only MARKS it — no hide/delete/repoint.
+  .description('[DUPLICATE → use `descix microservice register`/`microservice deploy`] Deploy a microservice for an app you own (registers manifest.json). Slated for removal in WS-MCP Step 3.')
   .option('-m, --manifest <path>', 'Path to manifest.json (default: ./manifest.json)')
   .action(async (options) => {
     try {
@@ -1698,7 +1715,10 @@ appCommand
 
 appCommand
   .command('sync-assets')
-  .description('Sync local assets (system_instructions.md, app_description.md, icon.png) to platform')
+  // [DUPLICATE:WS-MCP-STEP3] `app sync-assets` and `sync assets` overlap (plan §5.5).
+  // Canonical survivor is `app sync-assets`; `sync assets` (legacy Drive-mode) is removed in
+  // Step 3. This round only MARKS.
+  .description('[DUPLICATE → canonical over legacy `sync assets`] Sync local assets (system_instructions.md, app_description.md, icon.png) to platform.')
   .requiredOption('-a, --app <app_id>', 'App ID')
   .option('-k, --kb <name>', 'Target KB for system_instructions', 'General')
   .option('-p, --path <dir>', 'App directory (default: auto-detected)')
@@ -2435,9 +2455,11 @@ const appRecordsCommand = appCommand
 attachRecordsSubcommands(appRecordsCommand, 'app_records', false);
 
 // Deprecated back-compat alias: `descix kb records ...`
+// [DUPLICATE:WS-MCP-STEP3] `kb records` is the deprecated alias for the canonical
+// `app records` (plan §5.6). Slated for deletion in Step 3 (no compat alias kept). MARK only.
 const kbRecordsCommand = kbCommand
   .command('records')
-  .description('[DEPRECATED → use `descix app records`] Back-compat alias for the app-data-plane record store. Still works; delegates to app_records_*.');
+  .description('[DUPLICATE → use `descix app records`] Deprecated back-compat alias for the app-data-plane record store. Still works; delegates to app_records_*. Slated for removal in WS-MCP Step 3.');
 attachRecordsSubcommands(kbRecordsCommand, 'kb_records', true);
 
 
@@ -3301,9 +3323,14 @@ microserviceCommand
   });
 
 // microservice deploy - Cloud Run deploy (broker-first; no per-app LB for non-core apps)
+// WS-MCP-SURFACE-SPLIT §4b: this is the REAL Admin/local deploy (Admin SDK) — it stays fully
+// functional for operator/CI use (EVP/COS deploy runbooks invoke it). It is intentionally NOT
+// advertised over MCP (not mcp:true), so the PUBLIC surface sees no deploy tool. The public
+// "microservice deploy" is "coming soon" (a no-op) — satisfied here by absence from the MCP
+// listing, NOT by neutering this admin path. Do not stub this out.
 microserviceCommand
   .command('deploy')
-  .description('Deploy microservice to Cloud Run (uses deploy-service-env.sh; powch re-provisions platform NEG only)')
+  .description('[ADMIN/LOCAL] Deploy microservice to Cloud Run (uses deploy-service-env.sh; powch re-provisions platform NEG only). Public MCP deploy is coming soon; this real deploy is Admin/local-only.')
   .option('-c, --community <id>', 'Community ID (auto-detects from context)')
   .option('-a, --app <id>', 'App ID (auto-detects from context)')
   .option('--env <env>', 'Target environment: dev|demo|prod')

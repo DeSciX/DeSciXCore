@@ -237,6 +237,35 @@ export class DeSciXApiClient {
   }
 
   /**
+   * WS-MCP-SURFACE-SPLIT §10.2 — fetch the PERMISSION-FILTERED MCP tool catalog for THIS caller.
+   *
+   * Calls the backend `list_mcp_tools` command over the standard /apifront session/wallet path
+   * (the proven CLI auth: device-flow session token, with automatic reconnect-by-wallet refresh).
+   * The backend returns the catalog already filtered by the SAME server-side checkCommandPermission
+   * gate the HTTP /mcp tools/list uses — ONE describe-as-permission-gate, no parallel taxonomy in
+   * the CLI. `--admin` is just the operator's wallet carrying admin entitlements (cred-gated, §9.1).
+   *
+   * NOTE we deliberately do NOT hit /mcp here: that endpoint's bearer path is OAuth-only and its
+   * signature path needs a REGISTERED api-signature — neither is the CLI's session token. The
+   * command path reuses invoke()'s working session auth.
+   *
+   * @returns {Promise<Array<{name, description, inputSchema}>>}
+   */
+  async mcpListTools(options = {}) {
+    // The stdio MCP transport owns stdout for JSON-RPC; invoke()'s [ApiClient] console.log noise
+    // would corrupt it. Route stdout chatter to stderr for the duration of this call only.
+    const origLog = console.log;
+    console.log = (...a) => console.error(...a);
+    try {
+      const resp = await this.invoke('list_mcp_tools', {}, options);
+      const msg = resp?.message || resp;
+      return msg?.tools || [];
+    } finally {
+      console.log = origLog;
+    }
+  }
+
+  /**
    * Invoke a command via HTTP with automatic session management
    * @param {string} command - Command name
    * @param {Object} params - Command parameters
