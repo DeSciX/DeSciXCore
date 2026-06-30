@@ -27,7 +27,7 @@ import { WorkspaceConfig } from '../workspace-config.js';
 import { loadManifests } from '../core/ManifestLoader.js';
 import { walkCorpus } from '../core/CorpusWalker.js';
 import { chunkFile, categorizeFile } from '../core/Chunker.js';
-import { upsertChunks, deleteStaleChunks, deleteStaleChunksByFileId, listRemoteFileIds } from '../core/Syncer.js';
+import { upsertChunks, deleteStaleChunks, deleteStaleChunksByFileId, listRemoteFileIds, purgeKbScope } from '../core/Syncer.js';
 
 /**
  * Resolve community_id for corpus sync — same precedence as site upload / update kb:
@@ -441,84 +441,80 @@ export async function runCorpusSync(apiClient, options) {
         continue;
       }
 
-      // 3b-rebuild: When --rebuild is set, enumerate ALL file_ids currently in Pinecone
-      // for this namespace and purge anything that is not in the current walk. This
-      // recovers from accumulated drift (e.g., the unk-vp_descix/Corpus 20k stale-chunk
-      // case from the WS-CLI-V2.1-PURGE-era delta-without-purge bug).
+      // 3b-rebuild: When --rebuild is set, do a FULL metadata-scoped purge of the
+      // ENTIRE {community_id, app_id, knowledgebase_name} scope, then re-upsert the
+      // full local walk below. This is the WS-KB-CORPUS-SCOPEPURGE fix: the prior
+      // implementation enumerated `corpus:<blob_sha>` file_ids and purged only the
+      // ones absent from the current walk — but the BULK of orphan pollution came
+      // from the legacy `kb sync` path (chunk_ids, no `corpus:` file_id) which is
+      // INVISIBLE to that enumeration, so rebuild left those orphans live. The only
+      // primitive that clears them is a delete by Pinecone metadata filter
+      // {community_id, app_id, knowledgebase_name} — server-side that is
+      // kb_delete_chunks(purge_scope:true) → KnowledgeBase.deleteRAG(), which also
+      // resets the KB doc's rag_vector_count (the field `kb doctor` reads).
       //
-      // Deliverable A: --dry-run, interactive confirmation (--yes to skip).
-      // Read-only enumeration is allowed in dry-run; writes/deletes are NOT.
+      // We still enumerate file_ids first, but ONLY to report the live state for the
+      // dry-run preview / confirmation message. The actual purge is full-scope.
+      //
+      // Deliverable A preserved: --dry-run writes nothing, interactive confirmation
+      // guard intact, --yes skips it.
       let rebuildPurged = 0;
-      let rebuildStaleFileIds = [];
+      let rebuildScopePurged = false;
       let rebuildRemoteUniqueCount = 0;
       let rebuildRemoteTotalChunks = 0;
       if (options.rebuild) {
-        const rebuildSpinner = ora('  [rebuild] Enumerating Pinecone file_ids...').start();
+        const rebuildSpinner = ora('  [rebuild] Enumerating Pinecone namespace...').start();
         try {
+          // Report-only enumeration (corpus-scheme file_ids are a LOWER BOUND on the
+          // true vector count — legacy orphans may not appear here, which is exactly
+          // why we full-scope-purge rather than purge this list).
           const remote = await listRemoteFileIds(apiClient, appId, kbName);
           rebuildRemoteUniqueCount = remote.unique_count;
           rebuildRemoteTotalChunks = remote.total_chunks;
-          rebuildSpinner.text = `  [rebuild] Pinecone has ${remote.unique_count} unique file_id(s) / ${remote.total_chunks} chunks`;
+          rebuildSpinner.succeed(
+            `  [rebuild] Pinecone reports ${remote.unique_count} corpus-scheme file_id(s) / ` +
+            `${remote.total_chunks} enumerable chunk(s) (legacy orphans may exceed this)`
+          );
 
-          // Compute valid file_ids from current local walk
-          const validFileIds = new Set(files.map(f => `corpus:${f.blob_sha}`));
-          const staleFileIds = remote.file_ids.filter(fid => !validFileIds.has(fid));
-          rebuildStaleFileIds = staleFileIds;
-
-          if (staleFileIds.length === 0) {
-            rebuildSpinner.succeed(`  [rebuild] No drift detected (${remote.unique_count} file_ids all current)`);
-          } else if (options.dryRun) {
-            // DRY-RUN: enumerate what WOULD be purged. No writes.
-            rebuildSpinner.succeed(`  [rebuild][dry-run] ${staleFileIds.length} stale file_id(s) WOULD be purged (no action taken)`);
-            console.log(chalk.yellow(`  [dry-run] Stale file_ids (first 10 shown of ${staleFileIds.length}):`));
-            for (const fid of staleFileIds.slice(0, 10)) {
-              console.log(chalk.gray(`    ${fid}`));
-            }
-            if (staleFileIds.length > 10) {
-              console.log(chalk.gray(`    ... and ${staleFileIds.length - 10} more`));
-            }
+          if (options.dryRun) {
+            // DRY-RUN: describe the full-scope purge. No writes.
+            console.log(chalk.yellow(
+              `  [rebuild][dry-run] WOULD purge the ENTIRE scope ` +
+              `${communityId}/${appId}/${kbName} (all vectors, any scheme), then re-upsert ` +
+              `the full local walk. No action taken.`
+            ));
           } else {
             // Interactive confirmation guard. --yes skips for scripting/CI.
-            //
-            // We cannot count chunks-per-file_id without a separate read, so we
-            // surface the chunk delta in aggregate (remote.total_chunks is a
-            // ceiling; the per-file purge is what actually runs). Honesty over
-            // false precision.
-            const confirmLines = [
-              `\n  About to purge up to ${rebuildRemoteTotalChunks} chunk(s) across ${staleFileIds.length} file_id(s) from app=${appId} kb=${kbName}.`,
-              `  First ${Math.min(10, staleFileIds.length)} file_ids that will be purged:`
-            ];
-            console.log(chalk.yellow(confirmLines.join('\n')));
-            for (const fid of staleFileIds.slice(0, 10)) {
-              console.log(chalk.gray(`    ${fid}`));
-            }
-            if (staleFileIds.length > 10) {
-              console.log(chalk.gray(`    ... and ${staleFileIds.length - 10} more`));
-            }
+            console.log(chalk.yellow(
+              `\n  About to FULL-SCOPE PURGE every vector in ${communityId}/${appId}/${kbName} ` +
+              `(≥${rebuildRemoteTotalChunks} enumerable chunk(s); legacy orphans included), ` +
+              `then re-upsert the full local walk (${files.length} file(s)).`
+            ));
 
+            let proceed = true;
             if (!options.yes) {
-              rebuildSpinner.stop();
-              const ok = await confirmYesNo('  Proceed with purge?');
+              const ok = await confirmYesNo('  Proceed with full-scope purge + rebuild?');
               if (!ok) {
                 console.log(chalk.cyan('  [rebuild] Aborted by operator. No Pinecone changes made.'));
                 // Skip THIS manifest's rebuild + delta phases. Don't break the
                 // outer loop — operator might want to keep going for other KBs.
                 continue;
               }
-              rebuildSpinner.start(`  [rebuild] Purging ${staleFileIds.length} stale file_id(s)...`);
-            } else {
-              rebuildSpinner.text = `  [rebuild] (--yes) Purging ${staleFileIds.length} stale file_id(s)...`;
             }
 
-            // Chunked delete to avoid huge payloads on heavily-drifted namespaces
-            const REBUILD_BATCH = 50;
-            for (let i = 0; i < staleFileIds.length; i += REBUILD_BATCH) {
-              const batch = staleFileIds.slice(i, i + REBUILD_BATCH);
-              const result = await deleteStaleChunksByFileId(apiClient, communityId, appId, kbName, batch);
-              rebuildPurged += result.deleted;
-              rebuildSpinner.text = `  [rebuild] Purged ${i + batch.length}/${staleFileIds.length} stale file_id(s)...`;
+            if (proceed) {
+              const purgeSpinner = ora(`  [rebuild] Purging full scope ${communityId}/${appId}/${kbName}...`).start();
+              const purgeResult = await purgeKbScope(apiClient, communityId, appId, kbName);
+              rebuildScopePurged = purgeResult.purged_scope;
+              // deleteRAG via filter-based deleteMany returns -1 (count not knowable
+              // from the SDK). Surface honestly rather than fabricating a number.
+              rebuildPurged = purgeResult.deleted >= 0 ? purgeResult.deleted : 0;
+              purgeSpinner.succeed(
+                purgeResult.deleted >= 0
+                  ? `  [rebuild] Purged ${purgeResult.deleted} vector(s) (full scope) and reset KB doc rag fields`
+                  : `  [rebuild] Purged full scope (filter-based delete; SDK reports no count) and reset KB doc rag fields`
+              );
             }
-            rebuildSpinner.succeed(`  [rebuild] Purged ${rebuildPurged} chunk(s) across ${staleFileIds.length} stale file_id(s)`);
           }
         } catch (err) {
           rebuildSpinner.fail(`  [rebuild] Failed: ${err.message}`);
@@ -608,13 +604,15 @@ export async function runCorpusSync(apiClient, options) {
         console.log(chalk.white(`    Would upsert: ${allChunks.length} chunks from ${newOrChangedFiles.length} file(s)`));
         console.log(chalk.white(`    Would delete (stale-file): ${fileIdsToDelete.length} blob SHA(s)`));
         if (options.rebuild) {
-          console.log(chalk.white(`    Would purge (rebuild): ${rebuildStaleFileIds.length} file_id(s) (up to ${rebuildRemoteTotalChunks} chunks)`));
+          console.log(chalk.white(`    Would purge (rebuild): FULL scope ${communityId}/${appId}/${kbName} (≥${rebuildRemoteTotalChunks} enumerable chunks; legacy orphans included)`));
         }
         // Track for the summary exit-code computation at the end of the loop.
         totalFilesProcessed += newOrChangedFiles.length;
         totalChunksCreated += allChunks.length;
         totalFilesSkipped += unchangedCount;
-        totalFilesDeleted += fileIdsToDelete.length + rebuildStaleFileIds.length;
+        // Full-scope rebuild would purge ≥ the enumerable chunk count. Use it as the
+        // would-delete tally so dry-run reports drift whenever a purge would run.
+        totalFilesDeleted += fileIdsToDelete.length + (options.rebuild ? rebuildRemoteTotalChunks : 0);
         // Do NOT call upsertChunks, deleteStaleChunksByFileId, deleteStaleChunks,
         // or saveSyncState in dry-run. Continue to next manifest.
         continue;

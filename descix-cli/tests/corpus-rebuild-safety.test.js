@@ -262,6 +262,44 @@ test('A4 — --rebuild WITHOUT --dry-run and WITHOUT --yes would prompt (no auto
     'with --yes and no --dry-run, rebuild MUST actually delete stale chunks');
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// A6 — WS-KB-CORPUS-SCOPEPURGE: --rebuild does a FULL metadata-scoped purge, not
+// a file-id-diff purge. This is the load-bearing behavior change. If anyone
+// reverts to "purge only the corpus:<sha> file_ids absent from the walk", legacy
+// orphans (which carry a non-corpus file_id) survive — exactly the bug we fixed.
+// We lock the contract: the single kb_delete_chunks call carries purge_scope:true
+// and NO file_ids/chunk_ids subset.
+// ─────────────────────────────────────────────────────────────────────────────
+test('A6 — --rebuild --yes purges the FULL scope (purge_scope:true), not a file_id subset', async (t) => {
+  const { appId } = await makeFixture(t);
+  // The remote has MORE chunks than the walk would account for — the classic
+  // orphan-pollution shape. A file-id-diff purge would only touch the absent
+  // file_ids; a full-scope purge clears everything regardless of scheme.
+  const spy = new SpyApiClient({
+    registeredKbs: ['Corpus'],
+    remoteFileIds: ['corpus:dead0000beef', 'legacy:orphan-no-corpus-prefix']
+  });
+
+  await runCorpusSync(spy, { app: appId, rebuild: true, yes: true });
+
+  const deletes = spy.callsTo('kb_delete_chunks');
+  // Exactly one purge call for the single manifest's KB.
+  assert.equal(deletes.length, 1,
+    `expected exactly one full-scope purge call; got ${deletes.length}`);
+
+  const payload = deletes[0].payload;
+  // CONTRACT: it must be a full-scope purge, NOT a file_id/chunk_id subset.
+  assert.equal(payload.purge_scope, true,
+    'rebuild must call kb_delete_chunks with purge_scope:true (full metadata-scoped purge)');
+  assert.ok(!payload.file_ids || payload.file_ids.length === 0,
+    'full-scope purge must NOT pass a file_ids subset (that is the bug — orphans without corpus: file_id survive)');
+  assert.ok(!payload.chunk_ids || payload.chunk_ids.length === 0,
+    'full-scope purge must NOT pass a chunk_ids subset');
+  // It must carry the full multi-tenancy scope.
+  assert.ok(payload.app_id && payload.kb_id,
+    'purge call must carry app_id + kb_id to scope the delete');
+});
+
 test('A5 — anti-regression: hasAnyWriteCall sanity check (the assertion above is sound)', () => {
   // Meta-test: prove the spy classifies kb_sync_chunks and kb_delete_chunks as
   // writes. If someone "fixes" the spy to ignore writes, every other test in
