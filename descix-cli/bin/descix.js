@@ -1482,79 +1482,6 @@ appCommand
   });
 
 appCommand
-  .command('deploy')
-  // [DUPLICATE:WS-MCP-STEP3] `app deploy` is a DUPLICATE surface for `register_service`,
-  // overlapping `microservice register` (manifest-only write) and `microservice deploy`
-  // (real Cloud Run deploy). Per plan §5.2 the canonical path is `microservice register` /
-  // `microservice deploy`; `app deploy` is to be DELETED and repointed in Step 3
-  // (duplicate-surface resolution). This round only MARKS it — no hide/delete/repoint.
-  .description('[DUPLICATE → use `descix microservice register`/`microservice deploy`] Deploy a microservice for an app you own (registers manifest.json). Slated for removal in WS-MCP Step 3.')
-  .option('-m, --manifest <path>', 'Path to manifest.json (default: ./manifest.json)')
-  .action(async (options) => {
-    try {
-      const apiClient = new DeSciXApiClient();
-      await requireAuth(apiClient);
-      
-      // Read manifest.json from current directory or specified path
-      const manifestPath = path.resolve(options.manifest || './manifest.json');
-      
-      console.log(chalk.cyan(`\n📦 Deploying microservice from ${manifestPath}\n`));
-      
-      let manifest;
-      try {
-        const manifestContent = await fs.readFile(manifestPath, 'utf-8');
-        manifest = JSON.parse(manifestContent);
-      } catch (error) {
-        if (error.code === 'ENOENT') {
-          console.error(chalk.red(`❌ manifest.json not found at ${manifestPath}`));
-          console.error(chalk.gray('\nCreate a manifest.json with your service configuration.'));
-          console.error(chalk.gray('See DeSciX_Core/descix-cli/templates/scaffolds/microservice/manifest.json for a template.\n'));
-          process.exit(1);
-        }
-        throw new Error(`Failed to parse manifest.json: ${error.message}`);
-      }
-      
-      // Validate required fields
-      if (!manifest.service?.name) {
-        throw new Error('manifest.service.name is required');
-      }
-      if (!manifest.service?.app_id) {
-        throw new Error('manifest.service.app_id is required (the app you own)');
-      }
-      if (!manifest.service?.community_id) {
-        throw new Error('manifest.service.community_id is required');
-      }
-      if (!manifest.service?.domain) {
-        throw new Error('manifest.service.domain is required');
-      }
-      
-      console.log(chalk.gray(`  Service: ${manifest.service.name}`));
-      console.log(chalk.gray(`  App: ${manifest.service.community_id}/${manifest.service.app_id}`));
-      console.log(chalk.gray(`  Domain: ${manifest.service.domain}`));
-      console.log(chalk.gray(`  Commands: ${Object.keys(manifest.commands || {}).length}\n`));
-      
-      // Call register_service
-      const response = await apiClient.invoke('register_service', { manifest });
-      const result = response.message || response;
-      
-      console.log(chalk.green('✅ Microservice deployed successfully!\n'));
-      console.log(chalk.cyan(`  Service: ${manifest.service.name}`));
-      console.log(chalk.gray(`  Commands registered: ${Object.keys(manifest.commands || {}).length}`));
-      
-      if (response.app_updated) {
-        console.log(chalk.gray(`  App api_base_url: ${response.api_base_url}`));
-      }
-      
-      console.log(chalk.gray('\n  The service manifest cache will refresh within 5 minutes.'));
-      console.log(chalk.gray('  For immediate effect, an admin can run: descix microservice reload\n'));
-      
-    } catch (error) {
-      console.error(chalk.red(`\n❌ Deployment failed: ${error.message}\n`));
-      process.exit(1);
-    }
-  });
-
-appCommand
   .command('set-repo')
   .description('Link a GitHub repository to your app')
   .requiredOption('-a, --app <id>', 'App ID')
@@ -2255,67 +2182,6 @@ kbCommand
     }
   });
 
-kbCommand
-  .command('build')
-  .description('Full KB pipeline: [push staging] → pull → chunk → sync')
-  .option('-c, --community <id>', 'Community ID')
-  .option('-a, --app <id>', 'App ID')
-  .option('-k, --kb <id>', 'Knowledge Base ID (default: General)')
-  .option('--folder <id_or_url>', 'Override Drive folder (raw ID or full Drive URL) — one-time import without modifying workspace.json')
-  .option('-s, --chunk-size <size>', 'Chunk size in characters (default: 2000)')
-  .option('-o, --overlap <size>', 'Overlap between chunks (default: 500)')
-  .option('-v, --verbose', 'Show verbose output')
-  .option('-i, --interactive', 'Enable interactive prompts for conflicts')
-  .option('--skip-staging', 'Skip staging push step')
-  .option('--merge-mode <mode>', 'Pull merge mode: merge|overwrite|force-overwrite (default: merge)')
-  .option('--dry-run', 'Show what would happen without making changes')
-  .action(async (options) => {
-    try {
-      const apiClient = new DeSciXApiClient();
-      await requireAuth(apiClient);
-      
-      await kbCommands.runKbBuild(apiClient, options);
-    } catch (error) {
-      console.error(chalk.red(`\n❌ ${error.message}\n`));
-      process.exit(1);
-    }
-  });
-
-kbCommand
-  .command('status')
-  .description('Show KB sync status (local vs Pinecone)')
-  .option('-c, --community <id>', 'Community ID')
-  .option('-a, --app <id>', 'App ID')
-  .option('-k, --kb <id>', 'Knowledge Base ID (default: General)')
-  .action(async (options) => {
-    try {
-      const apiClient = new DeSciXApiClient();
-      await requireAuth(apiClient);
-      
-      await kbCommands.runKbStatus(apiClient, options);
-    } catch (error) {
-      console.error(chalk.red(`\n❌ ${error.message}\n`));
-      process.exit(1);
-    }
-  });
-
-kbCommand
-  .command('compare')
-  .description('Show file-level deltas between local and Drive')
-  .option('-c, --community <id>', 'Community ID')
-  .option('-a, --app <id>', 'App ID')
-  .option('-k, --kb <id>', 'Knowledge Base ID (default: General)')
-  .option('--staging', 'Only show staging → Drive delta')
-  .option('--local', 'Only show local KB ↔ Drive delta')
-  .action(async (options) => {
-    try {
-      await kbCommands.runKbCompare(null, options);
-    } catch (error) {
-      console.error(chalk.red(`\n❌ ${error.message}\n`));
-      process.exit(1);
-    }
-  });
-
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2327,22 +2193,14 @@ kbCommand
 // use `descix chat`.
 //
 // Canonical surface: `descix app records ...` (commands app_records_*).
-// `descix kb records ...` is retained as a DEPRECATED back-compat alias.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Attach the four records subcommands (put/query/get/delete) to a parent command.
  * @param {import('commander').Command} parent - the `records` parent command
- * @param {string} cmdPrefix - backend command prefix ('app_records' | 'kb_records')
- * @param {boolean} deprecated - if true, print a one-line deprecation notice
+ * @param {string} cmdPrefix - backend command prefix ('app_records')
  */
-function attachRecordsSubcommands(parent, cmdPrefix, deprecated) {
-  const deprecate = () => {
-    if (deprecated) {
-      console.error(chalk.yellow(`  (deprecated: 'descix kb records' → use 'descix app records'; ${cmdPrefix}_* still works as a back-compat alias)`));
-    }
-  };
-
+function attachRecordsSubcommands(parent, cmdPrefix) {
   parent
     .command('put')
     .description('Store/replace records in your app data store with custom metadata (your app as a database table). You supply file_id (+ optional chunk_idx); the id is built for you.')
@@ -2353,7 +2211,6 @@ function attachRecordsSubcommands(parent, cmdPrefix, deprecated) {
       try {
         const apiClient = new DeSciXApiClient();
         await requireAuth(apiClient);
-        deprecate();
         let records;
         try { records = JSON.parse(options.records); } catch (e) { throw new Error(`--records must be valid JSON array: ${e.message}`); }
         if (!Array.isArray(records)) throw new Error('--records must be a JSON array');
@@ -2378,7 +2235,6 @@ function attachRecordsSubcommands(parent, cmdPrefix, deprecated) {
       try {
         const apiClient = new DeSciXApiClient();
         await requireAuth(apiClient);
-        deprecate();
         let filter;
         try { filter = JSON.parse(options.filter); } catch (e) { throw new Error(`--filter must be valid JSON: ${e.message}`); }
         const fields = options.fields ? options.fields.split(',').map(s => s.trim()).filter(Boolean) : undefined;
@@ -2407,7 +2263,6 @@ function attachRecordsSubcommands(parent, cmdPrefix, deprecated) {
       try {
         const apiClient = new DeSciXApiClient();
         await requireAuth(apiClient);
-        deprecate();
         const ids = options.ids.split(',').map(s => s.trim()).filter(Boolean);
         const fields = options.fields ? options.fields.split(',').map(s => s.trim()).filter(Boolean) : undefined;
         const params = { app_id: options.app, kb_id: options.kb, ids };
@@ -2434,7 +2289,6 @@ function attachRecordsSubcommands(parent, cmdPrefix, deprecated) {
       try {
         const apiClient = new DeSciXApiClient();
         await requireAuth(apiClient);
-        deprecate();
         const ids = options.ids ? options.ids.split(',').map(s => s.trim()).filter(Boolean) : [];
         const file_ids = options.fileIds ? options.fileIds.split(',').map(s => s.trim()).filter(Boolean) : [];
         if (ids.length === 0 && file_ids.length === 0) throw new Error('Provide --ids and/or --file-ids');
@@ -2452,16 +2306,7 @@ function attachRecordsSubcommands(parent, cmdPrefix, deprecated) {
 const appRecordsCommand = appCommand
   .command('records')
   .description('Use your app as a queryable database (put/query/get/delete structured records with custom metadata). Backed by the app data plane (Firestore), not the Pinecone KB.');
-attachRecordsSubcommands(appRecordsCommand, 'app_records', false);
-
-// Deprecated back-compat alias: `descix kb records ...`
-// [DUPLICATE:WS-MCP-STEP3] `kb records` is the deprecated alias for the canonical
-// `app records` (plan §5.6). Slated for deletion in Step 3 (no compat alias kept). MARK only.
-const kbRecordsCommand = kbCommand
-  .command('records')
-  .description('[DUPLICATE → use `descix app records`] Deprecated back-compat alias for the app-data-plane record store. Still works; delegates to app_records_*. Slated for removal in WS-MCP Step 3.');
-attachRecordsSubcommands(kbRecordsCommand, 'kb_records', true);
-
+attachRecordsSubcommands(appRecordsCommand, 'app_records');
 
 
 // Corpus sub-commands (git-aware RAG sync via manifests)
