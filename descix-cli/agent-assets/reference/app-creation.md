@@ -360,7 +360,7 @@ The CLI does not create apps directly. Users should:
 # After app is created via PWA:
 descix setup --dev            # Hydrate workspace (first time)
 descix kb build               # Pull, chunk, sync KB
-descix sync site              # Deploy static site
+descix site upload -a app   # Deploy static site
 ```
 
 ---

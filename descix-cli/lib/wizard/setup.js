@@ -490,8 +490,8 @@ export async function runSetupWizard(options = {}) {
     console.log(chalk.white('If MCP fails, use CLI directly:'));
     console.log(chalk.gray('  descix purchases              # View your entitlements'));
     console.log(chalk.gray('  descix tell-me-how "question" # Discover tools'));
-    console.log(chalk.gray('  descix sync assets -c X -a Y  # Sync app assets'));
-    console.log(chalk.gray('  descix sync kb -c X -a Y      # Sync knowledge base\n'));
+    console.log(chalk.gray('  descix app sync-assets -a Y   # Sync app assets'));
+    console.log(chalk.gray('  descix kb corpus sync -a Y    # Sync knowledge base\n'));
 
   } catch (error) {
     spinner.fail('Setup failed');
