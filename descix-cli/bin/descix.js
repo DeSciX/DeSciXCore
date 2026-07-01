@@ -362,63 +362,20 @@ const syncCommand = program
   .command('sync')
   .description('Content sync operations (context-aware)');
 
-// Context-aware sync: assets
-syncCommand
-  .command('assets')
-  // [DUPLICATE:WS-MCP-STEP3] Legacy Drive-mode asset sync — DUPLICATE of the canonical
-  // `app sync-assets` (plan §5.5 / §4e). Slated for REMOVAL in Step 3 with the legacy
-  // three-stage Drive sync cruft. This round only MARKS.
-  .description('[DUPLICATE → use `descix app sync-assets`] Sync app assets (icon, description, system_instructions) - context-aware. Legacy Drive-mode; slated for removal in WS-MCP Step 3.')
-  .option('--push', 'Push local assets to Drive (default)')
-  .option('--pull', 'Pull assets from Drive to local')
-  .option('--status', 'Show sync status without syncing')
-  .option('-c, --community <id>', 'Community ID (uses context if not provided)')
-  .option('-a, --app <id>', 'App ID (uses context if not provided)')
-  .action(async (options) => {
-    try {
-      const apiClient = new DeSciXApiClient();
-      await requireAuth(apiClient);
-      
-      // Load workspace context
-      const workspaceConfig = await WorkspaceConfig.load();
-      const ctx = workspaceConfig.resolveContextWithOptions(options);
-      
-      const communityId = ctx.communityId;
-      const appId = ctx.appId;
-      
-      if (!communityId || !appId) {
-        console.error(chalk.red('\n❌ Community and App ID required.'));
-        console.log(chalk.gray('  Either provide -c and -a flags, or cd into an app directory\n'));
-        process.exit(1);
-      }
-      
-      if (options.status) {
-        console.log(chalk.cyan(`\n📊 Asset Sync Status: ${communityId}/${appId}\n`));
-        // TODO: Implement status check
-        console.log(chalk.gray('  Status check not yet implemented for assets.\n'));
-        return;
-      }
-      
-      if (options.pull) {
-        console.log(chalk.cyan(`\n📥 Pulling assets from Drive: ${communityId}/${appId}\n`));
-        // TODO: Implement pull
-        console.log(chalk.gray('  Pull not yet implemented. Use descix update app for push.\n'));
-        return;
-      }
-      
-      // Default: push
-      await updateCommands.updateApp(options);
-      
-    } catch (error) {
-      console.error(chalk.red(`\n❌ ${error.message}\n`));
-      process.exit(1);
-    }
-  });
+// [WS-MCP-SURFACE-SPLIT Step 3 §5.5] `sync assets` (legacy Drive-mode) DELETED —
+// canonical is `descix app sync-assets`. The shared updateCommands.updateApp() body is
+// intentionally RETAINED here: the `update [type]` dispatcher (`update app`/`all`/auto)
+// still consumes it and is a separate Tier-3 decision.
 
 // Context-aware sync: kb
 syncCommand
   .command('kb')
-  .description('Sync knowledge base files - context-aware')
+  // [DUPLICATE:WS-MCP-STEP3] `sync kb` wraps updateKB() (runKbChunk + runKbSync via
+  // context resolution) — a DUPLICATE of `kb corpus sync` (canonical, git-manifest).
+  // Tier 3: BLOCKED from deletion because `.descix/sync-kb-sources.sh` (org KB-ingestion
+  // automation) still invokes `kb chunk`/`kb sync`. MARK only — do NOT delete until that
+  // script migrates to a corpus manifest (plan §5.4b / consolidated-triage TIER 3).
+  .description('[DUPLICATE → use `descix kb corpus sync`] Sync knowledge base files - context-aware. Slated for removal in WS-MCP Step 3 Tier 3 (blocked on sync-kb-sources.sh migration).')
   .argument('[stage]', 'Specific stage: stage1, stage2, stage3, all (default: all)')
   .option('--push', 'Push local to Drive (Stage 1)')
   .option('--pull', 'Pull from Drive to local (Stage 1)')
@@ -492,61 +449,11 @@ syncCommand
     }
   });
 
-// Context-aware sync: site
-syncCommand
-  .command('site')
-  .description('Sync CodeSite to GCS - context-aware')
-  .option('--push', 'Deploy to GCS (default)')
-  .option('--preview', 'Deploy to preview URL')
-  .option('--status', 'Show deployment status')
-  .option('--port <number>', 'Register local dev server port')
-  .option('-c, --community <id>', 'Community ID (uses context if not provided)')
-  .option('-a, --app <id>', 'App ID (uses context if not provided)')
-  .action(async (options) => {
-    try {
-      const apiClient = new DeSciXApiClient();
-      await requireAuth(apiClient);
-      
-      // Load workspace context
-      const workspaceConfig = await WorkspaceConfig.load();
-      const ctx = workspaceConfig.resolveContextWithOptions(options);
-      
-      const communityId = ctx.communityId;
-      const appId = ctx.appId;
-      
-      if (!communityId || !appId) {
-        console.error(chalk.red('\n❌ Community and App ID required.'));
-        console.log(chalk.gray('  Either provide -c and -a flags, or cd into an app directory\n'));
-        process.exit(1);
-      }
-      
-      if (options.status) {
-        console.log(chalk.cyan(`\n📊 Site Status: ${communityId}/${appId}\n`));
-        const response = await apiClient.invoke('get_site_manifest', {
-          community_id: communityId, app_id: appId
-        });
-        const result = response.message || response;
-        if (result.manifest) {
-          console.log(chalk.gray(`  Files: ${Object.keys(result.manifest.files || {}).length}`));
-          console.log(chalk.gray(`  URL: ${result.site_url}\n`));
-        } else {
-          console.log(chalk.gray('  No site deployed.\n'));
-        }
-        return;
-      }
-      
-      // Default: push
-      await updateCommands.updateSite({ 
-        ...options,
-        preview: options.preview,
-        port: options.port ? parseInt(options.port) : undefined
-      });
-      
-    } catch (error) {
-      console.error(chalk.red(`\n❌ ${error.message}\n`));
-      process.exit(1);
-    }
-  });
+// [WS-MCP-SURFACE-SPLIT Step 3 §5.5] `sync site` DELETED — canonical is `descix site upload`
+// (manifest-aware; injects build-time GTM/base-path env vars `sync site` lacked). The shared
+// updateCommands.updateSite() body is intentionally RETAINED: the `update [type]` dispatcher
+// (`update site`/`all`/auto) still consumes it and is a separate Tier-3 decision. The SHARED
+// backend commands (get_site_deploy_token/confirm_site_deploy/get_site_manifest) are untouched.
 
 // ============ Community/App Commands ============
 
@@ -1053,15 +960,14 @@ appCommand
 
 appCommand
   .command('init')
-  // [DUPLICATE:WS-MCP-STEP3] One of THREE app-creation paths (plan §5.1: `app create --quick`,
-  // `app init`, native `create_app_for_community`). Step 3 reduces `app init` to
-  // workspace-register only (the canonical create is `create_app_for_community`). This round
-  // only MARKS.
-  .description('[DUPLICATE → workspace-register leg of app-create; canonical create: `create_app_for_community`] Initialize local workspace and Firestore KB for an app (idempotent). Consolidated in WS-MCP Step 3.')
+  // [WS-MCP-SURFACE-SPLIT Step 3 §5.1] `app init` is the WORKSPACE-REGISTER + KB-init leg of
+  // app-create only. App CREATION is the single canonical path `create_app_for_community`
+  // (CLI: `descix app create --quick -c <community> -a <app>`). The former `-c/--community`
+  // conditional-create branch was removed here so there is exactly one create path.
+  .description('Initialize local workspace and Firestore KB for an existing app (idempotent, workspace-register + KB-init). To create an app first: `descix app create --quick -c <community> -a <app>`.')
   .requiredOption('-a, --app <app_id>', 'App ID (e.g. daita)')
   .option('--kb <name>', 'Knowledge base name', 'General')
   .option('-p, --path <dir>', 'Local app directory (default: auto-detected or cwd)')
-  .option('-c, --community <community_id>', 'Community to create app in (if not yet in Products registry)')
   .action(async (options) => {
     try {
       const apiClient = new DeSciXApiClient();
@@ -1069,27 +975,16 @@ appCommand
       const appId = options.app;
       const kbId = options.kb || 'General';
 
-      // Resolve community_id from Products registry
+      // Resolve community_id from Products registry (app must already exist)
       let communityId;
       try {
         const productCtx = await apiClient.invoke('get_product_context', { app_id: appId });
         communityId = (productCtx.message || productCtx).community_id;
       } catch (e) {
-        // Product not found — fall through to creation below
+        // Product not found — app init does NOT create apps; direct to the canonical create path
       }
-      // Product missing or returned null community_id — create if --community was provided
       if (!communityId) {
-        if (options.community) {
-          console.log(chalk.gray(`  App '${appId}' not in Products registry. Creating in community '${options.community}'...`));
-          await apiClient.invoke('create_app_for_community', {
-            community_id: options.community,
-            app_name: appId,
-          });
-          communityId = options.community;
-          console.log(chalk.green(`  ✓ Created App + Products + Purchase for ${appId}`));
-        } else {
-          throw new Error(`App '${appId}' not found in Products registry. Use --community to create it.`);
-        }
+        throw new Error(`App '${appId}' not found in Products. Create it first: descix app create --quick -c <community> -a ${appId}`);
       }
 
       // 1. Workspace.json — register app if not already mapped
@@ -1158,12 +1053,11 @@ appCommand
 
 appCommand
   .command('create')
-  // [DUPLICATE:WS-MCP-STEP3] App-creation has THREE overlapping paths (plan §5.1):
-  // `app create --quick`, `app init` (workspace-register), and the native MCP tool
-  // `create_app_for_community`. Per §5.1 these resolve to ONE canonical create
-  // (`create_app_for_community`), with `app init` reduced to workspace-register only.
-  // Step 3 resolves; this round only MARKS.
-  .description('[DUPLICATE → canonical: `create_app_for_community`; see also `app init`] Create an app in a community. --quick with -c/-a for CLI-driven creation. (App-create has 3 paths — consolidated in WS-MCP Step 3.)')
+  // WS-MCP-SURFACE-SPLIT Step 3 §5.1: app creation now has ONE canonical path.
+  // `app create --quick` is the CLI wrapper over the backend `create_app_for_community`
+  // tool; `app init`'s former create branch was removed (init is workspace-register + KB-init
+  // only). Use `app create --quick` to create, then `app init` to scaffold + register locally.
+  .description('Create an app in a community (CLI wrapper over create_app_for_community). --quick with -c/-a required for CLI-driven creation; then run `descix app init -a <app_id>`.')
   .option('-c, --community <id>', 'Community ID')
   .option('-a, --app <name>', 'App display name')
   .option('-s, --short <short_name>', 'SHORT id segment (no hyphens). The unique app_id is composed as {community}-{short}. Keep it short, e.g. "frqtl" -> egpt-frqtl. Defaults to --app if omitted.')
@@ -1642,10 +1536,9 @@ appCommand
 
 appCommand
   .command('sync-assets')
-  // [DUPLICATE:WS-MCP-STEP3] `app sync-assets` and `sync assets` overlap (plan §5.5).
-  // Canonical survivor is `app sync-assets`; `sync assets` (legacy Drive-mode) is removed in
-  // Step 3. This round only MARKS.
-  .description('[DUPLICATE → canonical over legacy `sync assets`] Sync local assets (system_instructions.md, app_description.md, icon.png) to platform.')
+  // Canonical asset-sync surface. The legacy Drive-mode `sync assets` DUPLICATE was removed in
+  // WS-MCP-SURFACE-SPLIT Step 3 §5.5; this is now the sole path.
+  .description('Sync local assets (system_instructions.md, app_description.md, icon.png) to platform.')
   .requiredOption('-a, --app <app_id>', 'App ID')
   .option('-k, --kb <name>', 'Target KB for system_instructions', 'General')
   .option('-p, --path <dir>', 'App directory (default: auto-detected)')
@@ -2146,7 +2039,11 @@ kbCommand
 
 kbCommand
   .command('chunk')
-  .description('Generate chunks from local markdown files')
+  // [DUPLICATE:WS-MCP-STEP3] Low-level Git-mode chunk step (local md -> chunks). Superseded
+  // for app KB sync by `kb corpus sync` (git-manifest). Tier 3: BLOCKED — `.descix/sync-kb-sources.sh`
+  // (org KB-ingestion automation) invokes `kb chunk`/`kb sync` directly. MARK only; delete only
+  // after that script migrates to a corpus manifest (plan §5.4b / consolidated-triage TIER 3).
+  .description('[DUPLICATE → use `descix kb corpus sync`] Generate chunks from local markdown files. Low-level Git-mode step; slated for removal in WS-MCP Step 3 Tier 3 (blocked on sync-kb-sources.sh migration).')
   .option('-c, --community <id>', 'Community ID')
   .option('-a, --app <id>', 'App ID')
   .option('-k, --kb <id>', 'Knowledge Base ID (default: General)')
@@ -2165,7 +2062,12 @@ kbCommand
 
 kbCommand
   .command('sync')
-  .description('Sync local chunks to Pinecone via service layer')
+  // [DUPLICATE:WS-MCP-STEP3] Low-level Git-mode sync step (local chunks -> Pinecone). Superseded
+  // for app KB sync by `kb corpus sync` (git-manifest). Tier 3: BLOCKED — `.descix/sync-kb-sources.sh`
+  // (org KB-ingestion automation) invokes `kb chunk`/`kb sync` directly. MARK only; delete only
+  // after that script migrates to a corpus manifest (plan §5.4b / consolidated-triage TIER 3).
+  // NOTE: distinct from `sync kb` (top-level `sync` group) which wraps chunk+sync via context.
+  .description('[DUPLICATE → use `descix kb corpus sync`] Sync local chunks to Pinecone via service layer. Low-level Git-mode step; slated for removal in WS-MCP Step 3 Tier 3 (blocked on sync-kb-sources.sh migration).')
   .option('-c, --community <id>', 'Community ID')
   .option('-a, --app <id>', 'App ID')
   .option('-k, --kb <id>', 'Knowledge Base ID (default: General)')
@@ -4738,7 +4640,15 @@ program
 
 const updateCommand = program
   .command('update')
-  .description('Context-driven resource sync (auto-detects from workspace)')
+  // [DUPLICATE:WS-MCP-STEP3] The `update [type]` dispatcher (app/kb/site/all/auto) is a
+  // DUPLICATE family: `update app` -> updateApp() (== `sync assets`), `update site` ->
+  // updateSite() (== `sync site`, == `site upload`), `update kb` -> updateKB() (runKbChunk+
+  // runKbSync, == `sync kb`, superseded by `kb corpus sync`). Tier 3: this whole family + the
+  // shared updateApp()/updateSite() bodies are the remaining home of the legacy Drive updateApp
+  // and duplicate updateSite AFTER Step-3 Tier 2 removed the `sync assets`/`sync site` blocks.
+  // `update kb` deletion is additionally blocked by `.descix/sync-kb-sources.sh`. MARK only —
+  // deletion needs the Tier-3 `update`-family design decision (consolidated-triage §5.4b).
+  .description('[DUPLICATE → app: `app sync-assets`; site: `site upload`; kb: `kb corpus sync`] Context-driven resource sync (auto-detects from workspace). Slated for removal in WS-MCP Step 3 Tier 3.')
   .argument('[type]', 'Update type: app, kb, site, all (auto-detects if not specified)')
   .option('-c, --community <id>', 'Community ID (optional; app_id sufficient for Unified Registry)')
   .option('-a, --app <id>', 'App ID (globally unique; required if not in app directory)')
