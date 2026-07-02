@@ -516,8 +516,11 @@ const ChatWidget = (props = {}) => {
         cancel_url: window.location.href,
       });
       const msg = res.message || res;
-      const url = msg.url || msg.checkout_url || msg.session_url;
-      if (!url) throw new Error('No checkout URL returned');
+      // Canonical response contract: create_stripe_checkout_session returns
+      // { sessionId, checkoutUrl, paymentId } (purchase.js) — the same field the
+      // CLI's `descix credits buy` consumes.
+      const url = msg.checkoutUrl;
+      if (!url) throw new Error(`No checkout URL returned (response keys: ${Object.keys(msg).join(',')})`);
       window.open(url, '_blank', 'noopener');
       setSnackbar({ open: true, message: `Stripe checkout opened for $${amountUsd} of AI credits — your balance updates after payment.` });
     } catch (e) {
