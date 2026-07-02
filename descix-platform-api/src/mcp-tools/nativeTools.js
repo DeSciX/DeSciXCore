@@ -174,6 +174,19 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
         },
     },
     {
+        // WS-HEADLESS-MVP-A2 (CEO-D-2026-07-01 D2): platform-wide USD AI-credits balance.
+        // Read-only; the METERED RAG/agent surface (WS-A3) debits this balance per call.
+        // NEVER exposes pricing internals — USD balance figures only.
+        name: 'get_credit_balance',
+        description: 'Get your platform-wide AI-credits balance in USD. Metered AI calls (RAG chat / agents) debit this balance; buy credits with the descix CLI (`descix credits buy`) or the platform store.',
+        mutating: false,
+        oauthReadonly: true,
+        inputSchema: {
+            type: 'object',
+            properties: {},
+        },
+    },
+    {
         name: 'create_app_for_community',
         description:
             "Create a SUB-APP inside an existing community (registers Products + Firestore App doc + grants you the entitlement). " +
