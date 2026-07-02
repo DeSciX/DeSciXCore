@@ -4,20 +4,25 @@
  *
  * The local sibling (ws-mcp-surface-split-smoke.mjs) proves the surface over the local
  * :4000 backend. THIS smoke proves the same permission-filtered surface end-to-end over the
- * DEPLOYED, IAM-gated DEV Cloud Function `apiFront-http-dev` (--no-allow-unauthenticated),
- * exercising the IAM auth seam (_applyIamAuthIfNeeded / _mintIamBearer) in api-client.js:
+ * DEPLOYED DEV Cloud Function `apiFront-http-dev`.
  *
- *   - baseUrl is forced to the deployed Cloud Run URL (an IAM-gated `.run.app` origin)
- *   - the client must mint a Google identity bearer to clear Cloud Run IAM (HTTP 403 layer)
- *   - the CLI session credential in the BODY then clears the app-level auth middleware
+ * WS-HEADLESS-MVP-A1 Option 4A (mcp-oauth-longlived-tokens design §2.4, ratified
+ * 2026-07-01): the gcloud-IAM transport layer is RETIRED. `apiFront-http-dev` deploys
+ * --allow-unauthenticated; the api-client no longer mints Google identity tokens
+ * (_applyIamAuthIfNeeded/_mintIamBearer are deleted). Auth is app-layer only:
+ *
+ *   - baseUrl is forced to the deployed Cloud Run URL
+ *   - the CLI session credential in the BODY clears the app-level auth middleware
+ *     (wallet-sig/API_KEY silent re-mint via reconnect_by_wallet — no gcloud, no ~1h SSO)
  *   - mcpListTools() returns the SAME server-side permission-filtered catalog as :4000
  *
  * This is the "always-on CLOUD MCP" transport: point DESCIX_API_URL (or the cloud client's
  * baseUrl) at the deployed function and the stdio MCP serves the cloud surface.
  *
  * Run:  node DeSciX_Core/descix-cli/tests/ws-mcp-surface-split-cloud-smoke.mjs
- * Requires: gcloud ADC with run.invoker on apiFront-http-dev (project owner/editor inherits),
- *           and .descix/wallet.json (NEVER testuser.json).
+ * Requires: .descix/wallet.json (NEVER testuser.json), and apiFront-http-dev redeployed
+ *           with the 4A posture (deploy-backend-env.sh dev). Against a pre-4A (IAM-gated)
+ *           deployment this smoke fails with HTTP 403 BY DESIGN — redeploy first.
  * Override the URL with DESCIX_CLOUD_FN_URL=... if the function URL changes.
  */
 
