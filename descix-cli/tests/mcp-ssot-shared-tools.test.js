@@ -44,6 +44,10 @@ const EXPECTED_SSOT_TOOLS = [
     'app_records_get',
     'app_records_delete',
     'create_app_for_community',
+    // WS-HEADLESS-MVP-A2 (CEO-D-2026-07-01 D2): platform-wide USD AI-credits balance READ.
+    // Non-mutating + oauthReadonly (a balance read changes nothing; the commands that
+    // change balances — grant_credits/refund_credits/debits — are NOT MCP-advertised).
+    'get_credit_balance',
 ];
 
 test('shared SSOT resolves from the CLI WITHOUT pulling GCP infra (leaf module)', () => {
