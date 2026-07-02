@@ -35,7 +35,11 @@
 export const NATIVE_MCP_TOOLS = Object.freeze([
     {
         name: 'query_knowledge_base',
-        description: 'Search a knowledge base using vector similarity (returns raw chunks)',
+        description: 'Search a knowledge base using vector similarity (returns raw chunks). ' +
+            'METERED: each call debits a small flat amount of USD AI credits from your platform balance. ' +
+            'Check your balance with get_credit_balance; buy credits with `descix credits buy --usd <amount>` ' +
+            'or the create_stripe_checkout_session command (purchase_type: ai_credits). ' +
+            'A zero balance returns a CREDITS_REQUIRED error carrying a machine-readable purchase action.',
         mutating: false,
         oauthReadonly: true,
         inputSchema: {
@@ -51,7 +55,11 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
     },
     {
         name: 'ask_question_to_app',
-        description: "Ask an AI-powered question to an app's knowledge base using RAG. Supports conversation threading via previous_interaction_id — pass the interaction_id from the previous response to continue a conversation.",
+        description: "Ask an AI-powered question to an app's knowledge base using RAG. Supports conversation threading via previous_interaction_id — pass the interaction_id from the previous response to continue a conversation. " +
+            'METERED: each call debits USD AI credits from your platform balance based on actual token usage. ' +
+            'Check your balance with get_credit_balance; buy credits with `descix credits buy --usd <amount>` ' +
+            'or the create_stripe_checkout_session command (purchase_type: ai_credits). ' +
+            'A zero balance returns a CREDITS_REQUIRED error carrying a machine-readable purchase action.',
         mutating: false,
         oauthReadonly: true,
         inputSchema: {
@@ -178,7 +186,7 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
         // Read-only; the METERED RAG/agent surface (WS-A3) debits this balance per call.
         // NEVER exposes pricing internals — USD balance figures only.
         name: 'get_credit_balance',
-        description: 'Get your platform-wide AI-credits balance in USD. Metered AI calls (RAG chat / agents) debit this balance; buy credits with the descix CLI (`descix credits buy`) or the platform store.',
+        description: 'Get your platform-wide AI-credits balance in USD. Metered AI calls (RAG chat / agents, e.g. ask_question_to_app and query_knowledge_base) debit this balance; buy credits with the descix CLI (`descix credits buy`) or the platform store. Programmatic purchase: create_stripe_checkout_session with purchase_type "ai_credits" and amount_usd returns a Stripe checkout URL.',
         mutating: false,
         oauthReadonly: true,
         inputSchema: {

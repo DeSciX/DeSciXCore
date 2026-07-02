@@ -378,13 +378,19 @@ const saveThreadsToStorage = (communityId, appId, data) => {
 // ============ MAIN COMPONENT ============
 
 const ChatWidget = (props = {}) => {
-  const { 
-    ipdocFileId, 
-    onExecuteAction, 
+  const {
+    ipdocFileId,
+    onExecuteAction,
     mode = 'standalone',  // standalone, embedded
     preloadedThread,
     documentId,           // IPDoc file ID for document mode
-    layoutMode: initialLayoutMode = 'chat'  // chat, document, split
+    layoutMode: initialLayoutMode = 'chat',  // chat, document, split
+    // WS-HEADLESS-MVP-A4: embeddability override. The isAppOwned input gate is a
+    // store-UX affordance driven by AppData.myApps, which only the platform store flow
+    // populates — an EMBEDDING host app (e.g. frqtl.com) manages entitlement itself and
+    // passes entitled={true}. The SERVER remains authoritative (verify_subscription +
+    // credits gate on every ask_question_to_app); this only unlocks the input UI.
+    entitled,             // undefined => legacy AppData.myApps check
   } = props;
   
   const useStreaming = true;
@@ -421,12 +427,72 @@ const ChatWidget = (props = {}) => {
   
   const responseContainerRef = useRef(null);
 
-  const isAppOwned = selectedApp && AppData.myApps?.some(
-    app => app.app_id === selectedApp.app_id && app.community_id === selectedApp.community_id
-  );
+  const isAppOwned = entitled !== undefined
+    ? (!!entitled && !!selectedApp)
+    : selectedApp && AppData.myApps?.some(
+        app => app.app_id === selectedApp.app_id && app.community_id === selectedApp.community_id
+      );
 
   const communityId = selectedApp?.community_id || selectedCommunity?.community_id;
   const appId = selectedApp?.app_id;
+
+  // ── WS-HEADLESS-MVP-A4: AI-credits awareness ─────────────────────────────────
+  // Chat is METERED (USD AI credits, one balance per user — CEO-D-2026-07-01 D2).
+  // The widget shows the balance, refreshes it after every metered call (debit
+  // feedback), and renders the CREDITS_REQUIRED purchasable action (buy CTA) when the
+  // server rejects at zero balance. The server is authoritative — this UI is advisory.
+  const [creditsBalance, setCreditsBalance] = useState(null);   // { usd_balance } | null
+  const [lastDebit, setLastDebit] = useState(null);             // USD delta of last call
+  const [creditsRequired, setCreditsRequired] = useState(null); // structured err.data or {}
+  const [buyingCredits, setBuyingCredits] = useState(false);
+
+  const isAuthenticated = !!(AppData.sessionInfo?.id || AppData.sessionInfo?.user_id);
+
+  const refreshCredits = useCallback(async ({ recordDebit = false } = {}) => {
+    if (!isAuthenticated) { setCreditsBalance(null); return null; }
+    try {
+      const res = await makeCommandRequestJSON('get_credit_balance', {});
+      const bal = res.message || res;
+      setCreditsBalance(prev => {
+        if (recordDebit && prev && typeof prev.usd_balance === 'number' && typeof bal.usd_balance === 'number') {
+          const delta = Math.round((prev.usd_balance - bal.usd_balance) * 1e6) / 1e6;
+          setLastDebit(delta > 0 ? delta : null);
+        }
+        return bal;
+      });
+      if ((bal.usd_balance ?? 0) > 0) setCreditsRequired(null);
+      return bal;
+    } catch (e) {
+      // Balance display is advisory — never block chat UI on it (server still gates).
+      console.warn('[ChatWidget] get_credit_balance failed:', e.message);
+      return null;
+    }
+  }, [isAuthenticated]);
+
+  useEffect(() => { refreshCredits(); }, [refreshCredits, appId]);
+
+  const handleBuyCredits = async (amountUsd) => {
+    setBuyingCredits(true);
+    try {
+      const res = await makeCommandRequestJSON('create_stripe_checkout_session', {
+        amount_usd: amountUsd,
+        purchase_type: 'ai_credits',
+        success_url: window.location.href,
+        cancel_url: window.location.href,
+      });
+      const msg = res.message || res;
+      const url = msg.url || msg.checkout_url || msg.session_url;
+      if (!url) throw new Error('No checkout URL returned');
+      window.open(url, '_blank', 'noopener');
+      setSnackbar({ open: true, message: `Stripe checkout opened for $${amountUsd} of AI credits — your balance updates after payment.` });
+    } catch (e) {
+      console.error('[ChatWidget] buy credits failed:', e);
+      setSnackbar({ open: true, message: `Could not start checkout: ${e.message}` });
+    } finally {
+      setBuyingCredits(false);
+    }
+  };
+  // ─────────────────────────────────────────────────────────────────────────────
 
   // Load threads from localStorage on mount or app change
   useEffect(() => {
@@ -979,8 +1045,35 @@ const ChatWidget = (props = {}) => {
           };
         });
       }
+      // WS-HEADLESS-MVP-A4: debit feedback — the metered call just debited actual usage;
+      // refresh the balance and record the delta for the credits bar.
+      refreshCredits({ recordDebit: true });
     } catch (error) {
       console.error('Chat Error:', error);
+      // WS-HEADLESS-MVP-A4: never swallow a chat failure silently (pre-A4 this catch
+      // only logged). Render the error into the thread, and if it is the structured
+      // CREDITS_REQUIRED purchasable-action error, surface the buy CTA.
+      const isCreditsRequired = error?.code === 'CREDITS_REQUIRED' || /CREDITS_REQUIRED/.test(error?.message || '');
+      if (isCreditsRequired) {
+        setCreditsRequired(error?.data || {});
+        refreshCredits();
+      }
+      setActiveThread(prev => {
+        if (!prev) return prev;
+        const msgs = [...prev.messages];
+        const lastIdx = msgs.length - 1;
+        if (lastIdx >= 0 && !msgs[lastIdx].answer) {
+          msgs[lastIdx] = {
+            ...msgs[lastIdx],
+            answer: isCreditsRequired
+              ? '**Out of AI credits.** This chat is metered — buy credits below to continue.'
+              : `**Error:** ${error.message}`,
+            error: true,
+            checked: true,
+          };
+        }
+        return { ...prev, messages: msgs };
+      });
     } finally {
       setNetworkLoading(NetworkLoadingType.GET_AI_RESPONSE, false);
     }
@@ -1205,6 +1298,53 @@ const ChatWidget = (props = {}) => {
           {selectedDocIds.map(id => (
             <Chip key={id} label={id} size="small" onDelete={() => handleToggleSource(id)} sx={{ height: '20px', fontSize: '0.65rem' }} />
           ))}
+        </Box>
+      )}
+
+      {/* WS-HEADLESS-MVP-A4: AI-credits bar — balance, debit feedback, buy CTA */}
+      {creditsRequired !== null && (
+        <Alert
+          severity="warning"
+          data-testid="credits-required-alert"
+          sx={{ mx: 2, mt: 1, alignItems: 'center' }}
+          action={
+            <Box sx={{ display: 'flex', gap: 0.5 }}>
+              {[5, 10, 20].map(amt => (
+                <Button
+                  key={amt}
+                  size="small"
+                  variant={amt === 10 ? 'contained' : 'outlined'}
+                  color="warning"
+                  disabled={buyingCredits}
+                  onClick={() => handleBuyCredits(amt)}
+                  data-testid={`buy-credits-${amt}`}
+                >
+                  ${amt}
+                </Button>
+              ))}
+            </Box>
+          }
+        >
+          You&apos;re out of AI credits{creditsBalance ? ` (balance $${(creditsBalance.usd_balance ?? 0).toFixed(2)})` : ''}.
+          Buy credits to continue chatting.
+        </Alert>
+      )}
+      {isAuthenticated && creditsBalance && creditsRequired === null && (
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 1, px: 2, pt: 1 }}>
+          {lastDebit !== null && (
+            <Typography variant="caption" color="text.secondary" data-testid="credits-last-debit">
+              −${lastDebit.toFixed(6).replace(/0+$/, '').replace(/\.$/, '')}
+            </Typography>
+          )}
+          <Tooltip title="AI chat is metered against your platform-wide USD credits balance. Click to refresh.">
+            <Chip
+              size="small"
+              variant="outlined"
+              data-testid="credits-balance-chip"
+              label={`AI credits: $${(creditsBalance.usd_balance ?? 0).toFixed(4)}`}
+              onClick={() => refreshCredits()}
+            />
+          </Tooltip>
         </Box>
       )}
 

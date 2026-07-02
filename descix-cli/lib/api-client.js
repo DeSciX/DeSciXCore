@@ -317,6 +317,10 @@ export class DeSciXApiClient {
         const error = new Error(data.message || 'API request failed');
         error.status = data.status;
         error.response = data;
+        // WS-HEADLESS-MVP-A3: surface structured error fields (e.g. CREDITS_REQUIRED
+        // code + purchasable-action data) to CLI/MCP consumers.
+        if (data.code) error.code = data.code;
+        if (data.data) error.data = data.data;
         throw error;
       }
 
@@ -415,6 +419,10 @@ export class DeSciXApiClient {
         const error = new Error(data.message || 'API request failed');
         error.status = data.status;
         error.response = data;
+        // WS-HEADLESS-MVP-A3: surface structured error fields (e.g. CREDITS_REQUIRED
+        // code + purchasable-action data) to CLI/MCP consumers.
+        if (data.code) error.code = data.code;
+        if (data.data) error.data = data.data;
         throw error;
       }
 
@@ -474,6 +482,10 @@ export class DeSciXApiClient {
         const apiError = new Error(errorData.message || `HTTP ${error.response.status}`);
         apiError.status = error.response.status;
         apiError.response = errorData;
+        // WS-HEADLESS-MVP-A3: ferry structured error fields (code + purchasable-action
+        // data, e.g. CREDITS_REQUIRED/402) through the axios error path.
+        if (errorData.code) apiError.code = errorData.code;
+        if (errorData.data) apiError.data = errorData.data;
         throw apiError;
       } else if (error.code === 'ECONNREFUSED') {
         throw new Error(`Cannot connect to ${this.baseUrl}. Is the backend server running?`);

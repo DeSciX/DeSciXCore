@@ -202,8 +202,9 @@ Every app has three parts:
 | Tool | Purpose |
 |------|---------|
 | `descix_doctor` | Startup diagnostic — call first |
-| `ask_question_to_app` | RAG chat with any app's knowledge base |
-| `query_knowledge_base` | Raw vector search (returns chunks) |
+| `ask_question_to_app` | RAG chat with any app's knowledge base (METERED — debits USD AI credits per actual token usage) |
+| `query_knowledge_base` | Raw vector search, returns chunks (METERED — small flat USD debit per call) |
+| `get_credit_balance` | Check your USD AI-credits balance; buy with `descix credits buy --usd <n>` |
 | `find_communities` | List communities on the platform |
 | `list_apps_for_community` | List apps in a community |
 | `tell_me_how` | Discover any platform capability by asking |

@@ -719,6 +719,23 @@ async function makeCommandRequestInternal(command, params, isGuestAllowed, sendC
 
   // --- Streaming Response Handling ---
   if (params.streaming) {
+    // WS-HEADLESS-MVP-A3: a non-2xx on a streaming request is NOT a stream — it is a
+    // JSON error envelope (e.g. 402 CREDITS_REQUIRED thrown by the pre-generation
+    // credits gate). Pre-A3 this body was fed to the stream parser and yielded a chunk
+    // with no `reply`, silently swallowing the failure. Fail loud with the structured
+    // fields (code + data.purchase) so widgets can render the purchasable action.
+    if (!res.ok) {
+      const errText = await res.text();
+      let errData;
+      try { errData = JSON.parse(errText); } catch (_) {
+        errData = { status: 'ERROR', message: errText || `Server error (${res.status})` };
+      }
+      const err = new Error(typeof errData.message === 'string' ? errData.message : `Server error (${res.status})`);
+      err.status = res.status;
+      if (errData.code) err.code = errData.code;
+      if (errData.data) err.data = errData.data;
+      throw err;
+    }
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
@@ -832,14 +849,20 @@ export const makeCommandRequestJSON = async (command, params = {}, allowGuest = 
     const rawFinalMessage = finalData?.message;
     const finalErrorMessage = typeof rawFinalMessage === 'string' ? rawFinalMessage : 'Unknown API error';
     console.error(`Error in API call '${command}':`, finalErrorMessage);
-    
+
     // SIMPLIFIED: Trust the server.
     // We already handled session expiry above. If we are here, it's a different error
     // (e.g. "User not authenticated" for an entitlement gate, or a 500 error).
     // We should NOT clear the session here. The server knows best.
     // If the server wanted to expire the session, it would have returned 401.
-    
-    throw new Error(finalErrorMessage);
+
+    // WS-HEADLESS-MVP-A3: ferry structured error fields (code + data, e.g. the
+    // CREDITS_REQUIRED purchasable action) so components can render actions, not prose.
+    const err = new Error(finalErrorMessage);
+    err.status = status;
+    if (finalData?.code) err.code = finalData.code;
+    if (finalData?.data) err.data = finalData.data;
+    throw err;
   }
 };
 

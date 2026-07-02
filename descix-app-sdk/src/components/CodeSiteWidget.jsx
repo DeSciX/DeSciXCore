@@ -33,20 +33,30 @@ const PLATFORM_APP_MESSAGES = {
 };
 
 /**
- * CodeSiteWidget
+ * CodeSiteWidget — the Chat + CodeSite SPLIT-VIEW container (WS-HEADLESS-MVP-A4).
  *
- * Displays an app's CodeSite in an iframe with an optional Chat split-view.
- * Leverages direct interframe scripting since all frames are same-site.
+ * Two panel modes:
+ *  - iframe mode (default): pass `url` — the app's CodeSite renders in a sandboxed
+ *    same-origin iframe; AI-emitted action blocks dispatch into the iframe window
+ *    (direct interframe scripting — all frames are same-site; NO postMessage bridge).
+ *  - children mode (A4): pass React `children` — a host app (e.g. frqtl.com's IDE
+ *    component) fills the panel pane directly. Actions then dispatch against the HOST
+ *    window's conventions (window.DeSciX_Actions[fn] etc.), which the host app
+ *    registers. Same action vocabulary, same user-clicks-Run gate.
+ *
+ * The chat pane is the credits-aware embedded ChatWidget (balance, debit feedback,
+ * buy-credits CTA — chat is metered per CEO-D-2026-07-01 D2).
  *
  * Platform apps (daita, powch) are guarded from iframe rendering to prevent
  * recursion (daita) and duplicate instances (powch). See PLATFORM_APP_IDS.
  */
-const CodeSiteWidget = ({ url, enableChat = true, chatPosition = 'right', chatWidth = 0.25 }) => {
+const CodeSiteWidget = ({ url, children, enableChat = true, chatPosition = 'right', chatWidth = 0.25, height = '90vh', chatEntitled }) => {
   const iframeRef = useRef(null);
   const { selectedCommunity, selectedApp } = useAppContext();
   const [chatOpen, setChatOpen] = useState(enableChat);
 
   const iframeSrc = useMemo(() => gcsMediaPath(url), [url]);
+  const usesChildrenPanel = !!children;
 
   // Prevent rendering platform apps in iframe (recursion for daita, duplication for powch)
   const isPlatformApp = PLATFORM_APP_IDS.includes(selectedApp?.app_id) && !window.__STANDALONE_APP_ID__;
@@ -80,7 +90,9 @@ const CodeSiteWidget = ({ url, enableChat = true, chatPosition = 'right', chatWi
    */
   const handleExecuteAction = (functionName, args) => {
     if (isPlatformApp) return;
-    const childWindow = iframeRef.current?.contentWindow;
+    // children mode (A4): the host app rendered its own panel — dispatch against the
+    // HOST window's registered conventions instead of an iframe contentWindow.
+    const childWindow = usesChildrenPanel ? window : iframeRef.current?.contentWindow;
     if (!childWindow) {
       console.warn('[CodeSiteWidget] Cannot execute action: iframe not loaded');
       return;
@@ -119,7 +131,7 @@ const CodeSiteWidget = ({ url, enableChat = true, chatPosition = 'right', chatWi
     }
   };
 
-  if (!iframeSrc) return null;
+  if (!iframeSrc && !usesChildrenPanel) return null;
 
   if (isPlatformApp) {
     const msg = PLATFORM_APP_MESSAGES[selectedApp?.app_id] || PLATFORM_APP_MESSAGES.daita;
@@ -143,28 +155,35 @@ const CodeSiteWidget = ({ url, enableChat = true, chatPosition = 'right', chatWi
   // Sandbox permissions: allow-same-origin is CRITICAL for direct interframe scripting
   const sandboxPermissions = 'allow-scripts allow-forms allow-popups allow-same-origin';
 
-  // Calculate layout widths
-  const codesiteWidth = chatOpen ? (chatPosition === 'right' ? 1 - chatWidth : chatWidth) : 1;
-  const chatPanelWidth = chatOpen ? (chatPosition === 'right' ? chatWidth : 1 - chatWidth) : 0;
+  // Layout: chatWidth is ALWAYS the chat pane's fraction; chatPosition picks the side
+  // (row-reverse puts the chat pane first visually for 'left' — WS-HEADLESS-MVP-A4 fix:
+  // previously 'left' swapped the WIDTHS but the chat still rendered on the right).
+  const codesiteWidth = chatOpen ? 1 - chatWidth : 1;
+  const chatPanelWidth = chatOpen ? chatWidth : 0;
 
   return (
-    <Box sx={{ display: 'flex', height: '90vh', position: 'relative' }}>
-      {/* CodeSite Area */}
-      <Box 
-        sx={{ 
-          width: `${codesiteWidth * 100}%`, 
+    <Box sx={{ display: 'flex', flexDirection: chatPosition === 'left' ? 'row-reverse' : 'row', height, position: 'relative' }}>
+      {/* CodeSite / panel area */}
+      <Box
+        sx={{
+          width: `${codesiteWidth * 100}%`,
           height: '100%',
           transition: 'width 0.3s ease',
-          position: 'relative'
+          position: 'relative',
+          overflow: usesChildrenPanel ? 'auto' : 'hidden'
         }}
       >
-        <iframe
-          ref={iframeRef}
-          src={iframeSrc}
-          title="Code Site"
-          style={{ width: '100%', height: '100%', border: 'none' }}
-          sandbox={sandboxPermissions}
-        />
+        {usesChildrenPanel ? (
+          children
+        ) : (
+          <iframe
+            ref={iframeRef}
+            src={iframeSrc}
+            title="Code Site"
+            style={{ width: '100%', height: '100%', border: 'none' }}
+            sandbox={sandboxPermissions}
+          />
+        )}
         
         {/* Chat Toggle Button (floating) */}
         {enableChat && (
@@ -202,9 +221,10 @@ const CodeSiteWidget = ({ url, enableChat = true, chatPosition = 'right', chatWi
             overflow: 'hidden'
           }}
         >
-          <ChatWidget 
+          <ChatWidget
             onExecuteAction={handleExecuteAction}
             mode="embedded"
+            entitled={chatEntitled}
           />
         </Paper>
       )}

@@ -382,8 +382,16 @@ try {
       };
     } catch (error) {
       console.error(`[MCP] Tool error: ${error.message}`);
+      // WS-HEADLESS-MVP-A3: when the backend attached structured error fields (code +
+      // data — e.g. CREDITS_REQUIRED with its machine-readable purchasable action), ferry
+      // them as JSON after the prose so an MCP client can render the action (balance
+      // check via `get_credit_balance`, buy via `descix credits buy` / the
+      // create_stripe_checkout_session command) instead of parsing the message string.
+      const structured = (error.code || error.data)
+        ? `\n${JSON.stringify({ code: error.code, data: error.data }, null, 2)}`
+        : '';
       return {
-        content: [{ type: 'text', text: `Error: ${error.message}` }],
+        content: [{ type: 'text', text: `Error: ${error.message}${structured}` }],
         isError: true,
       };
     }

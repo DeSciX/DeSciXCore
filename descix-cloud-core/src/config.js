@@ -132,7 +132,10 @@ function networkResponse(netStatus, authStatus, message) {
     const finalAuthStatus = validAuthStatuses.includes(authStatus) ? authStatus : LoginStatus.CONNECTED;
     if (typeof message === 'object' && message !== null && message.status) {
         if (message.status === NetworkStatus.ERROR) {
-            return { status: NetworkStatus.ERROR, auth_status: finalAuthStatus, message: message.message, code: message.code };
+            // WS-HEADLESS-MVP-A3: ferry structured error fields (code + data) end-to-end —
+            // e.g. the CREDITS_REQUIRED purchasable-action payload. undefined fields are
+            // dropped by JSON serialization, so legacy string-only errors are unchanged.
+            return { status: NetworkStatus.ERROR, auth_status: finalAuthStatus, message: message.message, code: message.code, data: message.data };
         }
         if (message.status === NetworkStatus.OK) {
             return { status: NetworkStatus.OK, auth_status: finalAuthStatus, message: message.message || message };
