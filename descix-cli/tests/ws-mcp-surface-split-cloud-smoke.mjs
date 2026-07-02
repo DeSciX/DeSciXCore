@@ -48,7 +48,7 @@ function fail(msg) { console.error(`\n❌ FAIL: ${msg}`); process.exit(1); }
 function ok(msg) { console.log(`✅ ${msg}`); }
 
 (async () => {
-  console.log('=== WS-MCP-SURFACE-SPLIT CLOUD-transport smoke (IAM-gated apiFront-http-dev) ===');
+  console.log('=== WS-MCP-SURFACE-SPLIT CLOUD-transport smoke (apiFront-http-dev, 4A app-layer auth) ===');
   console.log(`Target: ${CLOUD_FN_URL}\n`);
 
   // ---- ADMIN caller over the CLOUD transport (baseUrl pinned to the deployed function) ----
@@ -63,9 +63,12 @@ function ok(msg) { console.log(`✅ ${msg}`); }
     signature: w.signature || null,
   });
 
-  // Prove the seam actually engaged for this origin.
-  if (!adminClient._isIamGatedOrigin()) fail(`baseUrl ${CLOUD_FN_URL} not recognized as IAM-gated origin — seam would not engage`);
-  ok('baseUrl recognized as IAM-gated origin — IAM bearer will be applied');
+  // WS-HEADLESS-MVP-A1 Option 4A: the gcloud IAM seam is DELETED — prove it stays deleted
+  // (anti-regression) and that NO Google identity token is involved in this smoke.
+  for (const removed of ['_isIamGatedOrigin', '_mintIamBearer', '_applyIamAuthIfNeeded']) {
+    if (typeof adminClient[removed] === 'function') fail(`${removed} re-appeared in api-client — the 4A collapse deleted it`);
+  }
+  ok('gcloud IAM seam absent from api-client (4A) — auth is app-layer only (body session/wallet-sig)');
 
   const adminTools = await adminClient.mcpListTools();
   const adminNames = names(adminTools);
@@ -118,6 +121,6 @@ function ok(msg) { console.log(`✅ ${msg}`); }
     ? `separation proven via guest app-auth gate (admin=${adminNames.size} tools, guest=0)`
     : `admin surface (${adminNames.size}) ⊋ guest surface (${guestNames.size}) — describe-gate discriminates by permission`);
 
-  console.log('\n=== CLOUD SMOKE PASS: deployed IAM-gated apiFront-http-dev serves the permission-filtered tools/list end-to-end (§9 + §10.2) ===');
+  console.log('\n=== CLOUD SMOKE PASS: deployed apiFront-http-dev (4A, app-layer auth) serves the permission-filtered tools/list end-to-end (§10.2) ===');
   process.exit(0);
 })().catch(e => { console.error('\n❌ CLOUD SMOKE ERROR:', e.stack || e.message); process.exit(1); });
