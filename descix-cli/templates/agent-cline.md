@@ -96,8 +96,9 @@ platform routing tests.
 ## MCP Tools
 
 - `descix_doctor` — Startup diagnostic (call first)
-- `ask_question_to_app` — RAG chat with app_id `{{appId}}`
-- `query_knowledge_base` — Vector search (raw chunks)
+- `ask_question_to_app` — RAG chat with app_id `{{appId}}` (METERED — debits USD AI credits per actual token usage)
+- `query_knowledge_base` — Vector search, raw chunks (METERED — small flat USD debit per call)
+- `get_credit_balance` — Check your USD AI-credits balance; buy with `descix credits buy --usd <n>`
 - `find_communities` — List communities
 - `list_apps_for_community` — List apps in a community
 - `tell_me_how` — Discover any platform capability (use scope "discovery" if "entitlements" is empty)

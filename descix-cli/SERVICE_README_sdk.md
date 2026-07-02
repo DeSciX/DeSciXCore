@@ -247,6 +247,33 @@ descix purchases
 
 ---
 
+### descix credits — AI credits (metered usage)
+
+**Description:** Manage your platform-wide USD AI-credits balance. All AI/RAG consumption
+is METERED (WS-HEADLESS-MVP A2/A3): `ask_question_to_app` (chat) debits actual token
+usage in USD; `query_knowledge_base` (raw vector search) debits a small flat rate per
+call. One balance per user, platform-wide.
+**Use when:** A metered call fails with `CREDITS_REQUIRED`, or you want to check usage.
+
+**Commands:**
+```bash
+descix credits balance          # current USD balance + lifetime totals
+descix credits history          # ledger rows (debits carry app/community attribution)
+descix credits buy --usd 10     # prints a Stripe checkout URL — complete it in a browser
+```
+
+**Zero balance behavior:** metered calls are rejected with a structured
+`CREDITS_REQUIRED` error (HTTP 402 over `/apifront`; `isError` tool result over MCP)
+that carries a machine-readable purchase action: `data.purchase.cli`
+(`descix credits buy --usd <amount>`), `data.purchase.command`
+(`create_stripe_checkout_session` with `purchase_type: 'ai_credits'`), and
+`data.purchase.balance_tool` (`get_credit_balance`). There is no free fallback.
+
+**MCP tools:** `get_credit_balance` (check balance from any MCP client) — see also the
+metering notes on the `ask_question_to_app` and `query_knowledge_base` tool descriptions.
+
+---
+
 ## MCP Tools (for Cursor AI)
 
 After running `descix setup` and restarting Cursor, these MCP tools are available to the AI agent:
