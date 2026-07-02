@@ -1,33 +1,40 @@
 /**
- * WS-HEADLESS-MVP-A4 — dev harness: embeddable credits-aware AI-Chat + CodeSite
- * split view against LIVE DEV (:4000 via the vite proxy).
+ * WS-HEADLESS-MVP-A4 — the MVP dogfood demo: a CANONICAL @descix/app-sdk app
+ * (AppShell citizen) hosting the credits-aware AI-Chat + CodeSite split view
+ * against LIVE DEV (:4000 via the vite proxy — topology-faithful: mirrors the LB's
+ * statics + /apifront on one host; see frqtl-server-seam-contract.md §7.5).
  *
- * This page is the frqtl.com hosting pattern in miniature:
- *   - AppShell (peer-app model) provides context + Powch integration
- *   - CodeSiteWidget in CHILDREN mode: the host app fills the panel pane with its own
- *     "IDE" component and registers window.DeSciX_Actions handlers the AI can target
- *     via ```json:call:<fn>``` action blocks (user clicks Run — no auto-execution)
- *   - the chat pane is the metered ChatWidget: real ask_question_to_app calls, real
- *     USD AI-credit debits, balance chip + debit feedback + buy-credits CTA at $0
- *   - chatEntitled unlocks the input UI (the host manages entitlement); the SERVER
- *     stays authoritative (verify_subscription + credits gate on every call)
+ * CANONICAL COMPONENTS ONLY (engineering-culture mandate — extend, never re-invent):
+ *   - AppShell            → providers + SdkInitializer (deeplinks /claim/:code,
+ *                           referral params custom_id/referrer_id/guild_id, community-
+ *                           token path parsing — ALL inherited automatically)
+ *   - DemoChrome          → the PWA TopNavBar pattern, minimal: wallet button
+ *                           (bridge.openUi()), user menu with the canonical logout
+ *                           (setSessionInfo(null) + setLoginStatus(GUEST))
+ *   - CodeSiteWidget      → THE canonical split layout, DEFAULT orientation
+ *                           (CodeSite pane LEFT, chat pane RIGHT). children mode fills
+ *                           the CodeSite pane with the host "IDE" (frqtl.com pattern)
+ *   - ChatWidget          → credits-aware (balance chip, debit feedback, buy-credits
+ *                           CTA, built-in "Sign in with Powch" via the shell bridge)
+ *   - PowchSideBarWidget  → the domain-isolated Powch identity silo (standalone prop:
+ *                           own-origin host; NOT auto-rendered by AppShell)
  *
- * Auth (REAL Powch login — standalone-app pattern per DeSciX/CLAUDE.md):
- *   - the ChatWidget renders "Sign in with Powch" when unauthenticated;
- *   - the harness supplies onRequestLogin backed by a PowchClient (its own Powch
- *     iframe against the LOCAL dev Powch site :5175 — passkey ceremony, site pass,
- *     registerDeSciX) and hands the auth payload to window.DeSciX.loginWithSessionToken;
- *   - the Playwright spec drives the REAL WebAuthn ceremony with the CDP virtual
- *     authenticator + PRF mock. Nothing here bypasses a backend check.
- *
- * Run:  cd DeSciX_Core/descix-app-sdk/demo && npx vite   → https://localhost:5199/splitview.html (HTTPS — WebAuthn secure context)
+ * Run:  cd DeSciX_Core/descix-app-sdk/demo && npx vite
+ *       → https://localhost:5199/splitview.html   (HTTPS — WebAuthn secure context)
  */
 import React, { useEffect, useState } from 'react';
 import ReactDOM from 'react-dom/client';
-import { AppShell, CodeSiteWidget, AppData } from '@descix/app-sdk';
-import { PowchClient } from '@descix/app-sdk/powch-client';
+import {
+  AppShell, CodeSiteWidget, PowchSideBarWidget, AppData, LoginStatus,
+  useAppContext, usePowchBridge,
+} from '@descix/app-sdk';
+import {
+  AppBar, Toolbar, Typography, IconButton, Menu, MenuItem, Chip, Tooltip,
+} from '@mui/material';
+import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
+import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 
-const HARNESS_APP = {
+const DEMO_APP = {
   app_id: 'descix-docs',
   community_id: 'daita',
   app_name: 'DeSciX Docs',
@@ -35,58 +42,66 @@ const HARNESS_APP = {
 
 // Select the app BEFORE React mounts: AppContext reads AppData.selectedApp at provider
 // render (the setter is non-reactive by design — the PWA re-renders via view routing,
-// which a standalone embed does not).
-AppData.selectedApp = HARNESS_APP;
-AppData.selectedCommunity = { community_id: HARNESS_APP.community_id, community_name: 'DeSciX' };
+// which a single-page app does not).
+AppData.selectedApp = DEMO_APP;
+AppData.selectedCommunity = { community_id: DEMO_APP.community_id, community_name: 'DeSciX' };
 
-// ── Powch login (STANDALONE-app pattern) ─────────────────────────────────────────
-// A standalone host (the frqtl.com pattern) owns a PowchClient: it creates its own
-// Powch sidebar iframe against the LOCAL dev Powch site (__POWCH_APP_URL__ from the
-// workspace product map → https://localhost:5175/ in dev). The ChatWidget's
-// "Sign in with Powch" button invokes this via onRequestLogin; on success the auth
-// payload (HOST_SAFE_KEYS incl. sessionInfo) goes to the shell's canonical
-// window.DeSciX.loginWithSessionToken → REACTIVE AppContext session → the widget
-// re-renders authenticated and loads the credit balance.
-const POWCH_URL = typeof __POWCH_APP_URL__ !== 'undefined' && __POWCH_APP_URL__
-  ? __POWCH_APP_URL__ : 'https://localhost:5175/';
-// Constructed EAGERLY at module scope (like the canonical sample
-// DeSciX_Powch/samples/standalone-react/app.js): at this point window.DeSciX.powch does
-// not exist yet, so PowchClient runs in TRUE STANDALONE mode and owns its own
-// domain-isolated sidebar iframe (#powch-sdk-bridge). Constructing it lazily after the
-// shell is READY would silently switch it to embedded/shell-bridge mode.
-const _powch = new PowchClient({ bridgeUrl: POWCH_URL });
-function getPowch() { return _powch; }
+const CHROME_HEIGHT = 56;
 
 /**
- * Send POWCH_AUTH with boot-race protection: if the Powch app inside the sidebar
- * iframe is still booting, a postMessage request is dropped silently (the PWA never
- * hits this because its sidebar loads at app startup, long before a sign-in click).
- * Re-send until the auth FLOW responds. Duplicate sends are safe — the Powch app
- * just (re)opens the auth flow.
+ * Minimal canonical chrome — the platform PWA's TopNavBar pattern reduced to its
+ * essentials: brand, Powch wallet button (bridge.openUi()), and — when authenticated —
+ * a user menu whose Logout is the CANONICAL logout (clear the reactive session +
+ * return the login state machine to GUEST; the Powch vault is deliberately untouched —
+ * it is managed inside the domain-isolated iframe).
  */
-async function authWithBootRetry(powch, options, { attempts = 5, attemptMs = 10000 } = {}) {
-  for (let i = 0; i < attempts; i++) {
-    const result = await Promise.race([
-      powch.auth(options),
-      new Promise((res) => setTimeout(() => res('__POWCH_BOOT_TIMEOUT__'), attemptMs)),
-    ]);
-    if (result !== '__POWCH_BOOT_TIMEOUT__') return result;
-    console.warn(`[harness] Powch auth attempt ${i + 1} unanswered (app booting?) — retrying`);
-  }
-  throw new Error('Powch auth: no response from the Powch app after retries');
-}
+function DemoChrome() {
+  const { sessionInfo, setSessionInfo, setLoginStatus } = useAppContext();
+  const bridge = usePowchBridge();
+  const [menuAnchor, setMenuAnchor] = useState(null);
+  const isAuthenticated = !!(sessionInfo?.id || sessionInfo?.user_id);
 
-async function harnessPowchLogin() {
-  const powch = getPowch();
-  powch.open(); // show the Powch sidebar so the user sees the passkey/login UI
-  const payload = await authWithBootRetry(powch, { registerDeSciX: true, require: ['email'] });
-  if (!payload) throw new Error('Powch auth returned no payload');
-  if (!window.DeSciX?.loginWithSessionToken) {
-    throw new Error('Shell not READY — window.DeSciX.loginWithSessionToken unavailable');
-  }
-  window.DeSciX.loginWithSessionToken(payload);
-  powch.close();
-  return payload;
+  const handleLogout = () => {
+    // TopNavBar.jsx handleLogout pattern (the PWA reference implementation).
+    setSessionInfo(null);
+    setLoginStatus(LoginStatus.GUEST);
+    setMenuAnchor(null);
+  };
+
+  return (
+    <AppBar position="static" sx={{ height: CHROME_HEIGHT, justifyContent: 'center' }}>
+      <Toolbar variant="dense">
+        <Typography variant="h6" sx={{ flexGrow: 1 }} data-testid="chrome-title">
+          SplitView Demo <Typography component="span" variant="caption" sx={{ opacity: 0.7 }}>— app-sdk MVP dogfood ({DEMO_APP.app_id})</Typography>
+        </Typography>
+        {isAuthenticated && (
+          <Chip
+            size="small"
+            color="success"
+            variant="outlined"
+            data-testid="chrome-user-chip"
+            label={sessionInfo?.email || sessionInfo?.id || sessionInfo?.user_id}
+            sx={{ mr: 1, maxWidth: 260 }}
+          />
+        )}
+        <Tooltip title="Open Powch wallet">
+          <IconButton color="inherit" onClick={() => bridge?.openUi()} aria-label="Open Powch wallet" data-testid="chrome-wallet-button">
+            <AccountBalanceWalletIcon />
+          </IconButton>
+        </Tooltip>
+        {isAuthenticated && (
+          <>
+            <IconButton color="inherit" onClick={(e) => setMenuAnchor(e.currentTarget)} aria-label="User menu" data-testid="chrome-user-menu">
+              <AccountCircleIcon />
+            </IconButton>
+            <Menu anchorEl={menuAnchor} open={!!menuAnchor} onClose={() => setMenuAnchor(null)}>
+              <MenuItem onClick={handleLogout} data-testid="chrome-logout">Logout</MenuItem>
+            </Menu>
+          </>
+        )}
+      </Toolbar>
+    </AppBar>
+  );
 }
 
 /** The host app's "IDE" pane — stands in for frqtl.com's IDE/Studio/GYM component. */
@@ -125,12 +140,19 @@ function FakeIdePanel() {
   );
 }
 
-function HarnessApp() {
+function DemoApp() {
   return (
-    <div data-testid="harness-root" style={{ height: '100vh' }}>
-      <CodeSiteWidget chatPosition="left" chatWidth={0.45} height="100vh" chatEntitled onRequestLogin={harnessPowchLogin}>
+    <div data-testid="harness-root" style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
+      <DemoChrome />
+      {/* CANONICAL split layout: CodeSite pane LEFT, chat pane RIGHT (CodeSiteWidget
+          defaults). chatEntitled unlocks the input UI only — the SERVER enforces the
+          real entitlement (verify_subscription) + the credits gate on every ask. */}
+      <CodeSiteWidget chatWidth={0.4} height={`calc(100vh - ${CHROME_HEIGHT}px)`} chatEntitled>
         <FakeIdePanel />
       </CodeSiteWidget>
+      {/* The domain-isolated Powch identity silo (NOT auto-rendered by AppShell;
+          `standalone` because this app runs on its own origin, not inside the PWA). */}
+      <PowchSideBarWidget standalone />
     </div>
   );
 }
@@ -138,7 +160,7 @@ function HarnessApp() {
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <AppShell appId="descix-docs" config={{}}>
-      <HarnessApp />
+      <DemoApp />
     </AppShell>
   </React.StrictMode>
 );
