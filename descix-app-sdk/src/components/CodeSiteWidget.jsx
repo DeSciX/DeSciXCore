@@ -50,7 +50,7 @@ const PLATFORM_APP_MESSAGES = {
  * Platform apps (daita, powch) are guarded from iframe rendering to prevent
  * recursion (daita) and duplicate instances (powch). See PLATFORM_APP_IDS.
  */
-const CodeSiteWidget = ({ url, children, enableChat = true, chatPosition = 'right', chatWidth = 0.25, height = '90vh', chatEntitled }) => {
+const CodeSiteWidget = ({ url, children, enableChat = true, chatPosition = 'right', chatWidth = 0.25, height = '90vh', chatEntitled, onRequestLogin }) => {
   const iframeRef = useRef(null);
   const { selectedCommunity, selectedApp } = useAppContext();
   const [chatOpen, setChatOpen] = useState(enableChat);
@@ -225,6 +225,7 @@ const CodeSiteWidget = ({ url, children, enableChat = true, chatPosition = 'righ
             onExecuteAction={handleExecuteAction}
             mode="embedded"
             entitled={chatEntitled}
+            onRequestLogin={onRequestLogin}
           />
         </Paper>
       )}

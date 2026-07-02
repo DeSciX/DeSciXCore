@@ -10,21 +10,31 @@ import { usePowchBridge } from '../providers/PowchBridgeProvider';
  * - Renders the iframe for the Powch App.
  * - Uses PWA-owned PowchBridgeProvider for visibility and iframe registration.
  * - Subscribes to ui_open/ui_close for reliable visibility updates.
+ *
+ * WS-HEADLESS-MVP-A4 `standalone` prop: a STANDALONE-ORIGIN AppShell app (own
+ * top-level window — e.g. frqtl.com or the splitview harness; NOT embedded inside the
+ * platform PWA) has no host shell to provide the Powch iframe, so the shell bridge's
+ * login() dead-ends with "Powch PWA not ready". Passing standalone={true} mounts +
+ * registers the sidebar despite isAppMode (which exists to prevent DUPLICATE sidebars
+ * when the app runs inside the PWA, whose own sidebar already serves the bridge).
+ * This honors the platform invariant "Powch integration is automatic for any app
+ * using AppShell" for standalone-origin hosting.
  */
-const PowchSideBarWidget = () => {
+const PowchSideBarWidget = ({ standalone = false }) => {
   const { isAppMode } = useAppContext();
   const iframeRef = useRef(null);
   const bridge = usePowchBridge();
   const powchAppUrl = bridge?.config?.bridgeUrl || 'https://powch.descix.net/';
   const [isVisible, setIsVisible] = useState(bridge?.isIframeVisible ?? false);
+  const suppressed = isAppMode && !standalone;
 
   useEffect(() => {
-    if (isAppMode || !iframeRef.current) return;
+    if (suppressed || !iframeRef.current) return;
     console.log('[PowchSideBar] Registering iframe with global bridge');
     window.dispatchEvent(new CustomEvent('POWCH_REGISTER_IFRAME', {
       detail: { iframe: iframeRef.current },
     }));
-  }, [isAppMode]);
+  }, [suppressed]);
 
   useEffect(() => {
     if (!bridge) return;
@@ -42,8 +52,10 @@ const PowchSideBarWidget = () => {
     };
   }, [bridge]);
 
-  // If we are already in an app mode (standalone), we don't need the sidebar
-  if (isAppMode) return null;
+  // Embedded inside the platform PWA: the PWA's own sidebar serves the bridge —
+  // rendering another here would duplicate the identity silo. Standalone-origin
+  // hosts opt in via the `standalone` prop.
+  if (suppressed) return null;
 
   return (
     <Box

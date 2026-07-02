@@ -32,6 +32,7 @@ import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { useNetworkLoading } from '../util/NetworkAPI';
 import { NetworkLoadingType, makeCommandRequestJSON, AppData, ProductTypes } from '../util/AppData';
 import { Api } from '../util/api';
+import { usePowchBridge } from '../providers/PowchBridgeProvider';
 
 const messages = ["searching knowledgebase", "running analytics"];
 
@@ -391,10 +392,16 @@ const ChatWidget = (props = {}) => {
     // passes entitled={true}. The SERVER remains authoritative (verify_subscription +
     // credits gate on every ask_question_to_app); this only unlocks the input UI.
     entitled,             // undefined => legacy AppData.myApps check
+    // WS-HEADLESS-MVP-A4: host-supplied login trigger for STANDALONE embeds (e.g. a
+    // PowchClient-based host like the splitview harness / frqtl.com). When absent, the
+    // widget falls back to the in-shell Powch bridge (usePowchBridge().login — the
+    // PWA/SignInButton pattern, which requires a registered Powch iframe).
+    onRequestLogin,
   } = props;
-  
+
   const useStreaming = true;
-  const { selectedCommunity, selectedApp, loginStatus, setCurrentView } = useAppContext();
+  const { selectedCommunity, selectedApp, loginStatus, setCurrentView, sessionInfo } = useAppContext();
+  const powchBridge = usePowchBridge();
   const [loadingState, setNetworkLoading] = useNetworkLoading(NetworkLoadingType.GET_AI_RESPONSE);
 
   // Thread management state
@@ -445,8 +452,36 @@ const ChatWidget = (props = {}) => {
   const [lastDebit, setLastDebit] = useState(null);             // USD delta of last call
   const [creditsRequired, setCreditsRequired] = useState(null); // structured err.data or {}
   const [buyingCredits, setBuyingCredits] = useState(false);
+  const [signingIn, setSigningIn] = useState(false);
 
-  const isAuthenticated = !!(AppData.sessionInfo?.id || AppData.sessionInfo?.user_id);
+  // REACTIVE session from context (AppData.sessionInfo alone is a non-reactive cache —
+  // reading it here would freeze the widget in its pre-login state after Powch login).
+  const isAuthenticated = !!(sessionInfo?.id || sessionInfo?.user_id);
+
+  // WS-HEADLESS-MVP-A4: the widget is "auth'd via Powch bridge" — when unauthenticated
+  // it OFFERS the login instead of dead-ending on "User not authenticated".
+  const handleSignIn = async () => {
+    setSigningIn(true);
+    try {
+      if (onRequestLogin) {
+        // Standalone host owns the Powch client (PowchClient pattern).
+        await onRequestLogin();
+      } else if (powchBridge) {
+        // In-shell path (PWA/SignInButton pattern): bridge login + session sync.
+        const result = await powchBridge.login({ purpose: 'chat', registerDeSciX: true });
+        if (result && window.DeSciX?.loginWithSessionToken) {
+          window.DeSciX.loginWithSessionToken(result);
+        }
+      } else {
+        throw new Error('No Powch login path available (no bridge, no onRequestLogin)');
+      }
+    } catch (e) {
+      console.error('[ChatWidget] Powch sign-in failed:', e);
+      setSnackbar({ open: true, message: `Sign-in failed: ${e.message}` });
+    } finally {
+      setSigningIn(false);
+    }
+  };
 
   const refreshCredits = useCallback(async ({ recordDebit = false } = {}) => {
     if (!isAuthenticated) { setCreditsBalance(null); return null; }
@@ -1301,6 +1336,28 @@ const ChatWidget = (props = {}) => {
         </Box>
       )}
 
+      {/* WS-HEADLESS-MVP-A4: Powch sign-in affordance — chat is auth'd via Powch */}
+      {!isAuthenticated && (
+        <Alert
+          severity="info"
+          data-testid="chat-signin-alert"
+          sx={{ mx: 2, mt: 1, alignItems: 'center' }}
+          action={
+            <Button
+              size="small"
+              variant="contained"
+              disabled={signingIn}
+              onClick={handleSignIn}
+              data-testid="chat-signin-button"
+            >
+              {signingIn ? 'Signing in…' : 'Sign in with Powch'}
+            </Button>
+          }
+        >
+          Sign in to chat — AI chat runs on your DeSciX account (metered AI credits).
+        </Alert>
+      )}
+
       {/* WS-HEADLESS-MVP-A4: AI-credits bar — balance, debit feedback, buy CTA */}
       {creditsRequired !== null && (
         <Alert
@@ -1331,6 +1388,15 @@ const ChatWidget = (props = {}) => {
       )}
       {isAuthenticated && creditsBalance && creditsRequired === null && (
         <Box sx={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 1, px: 2, pt: 1 }}>
+          <Tooltip title="Signed in via Powch">
+            <Chip
+              size="small"
+              variant="outlined"
+              color="success"
+              data-testid="chat-user-chip"
+              label={sessionInfo?.email || sessionInfo?.id || sessionInfo?.user_id}
+            />
+          </Tooltip>
           {lastDebit !== null && (
             <Typography variant="caption" color="text.secondary" data-testid="credits-last-debit">
               −${lastDebit.toFixed(6).replace(/0+$/, '').replace(/\.$/, '')}
@@ -1356,16 +1422,16 @@ const ChatWidget = (props = {}) => {
           <Box sx={{ position: 'relative' }}>
             <TextField
               fullWidth
-              label={isAppOwned ? 'Ask a question' : 'Purchase required'}
+              label={!isAuthenticated ? 'Sign in to chat' : (isAppOwned ? 'Ask a question' : 'Purchase required')}
               variant="outlined"
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               onKeyDown={handleKeyDown}
               multiline
               minRows={4}
-              disabled={!isAppOwned}
+              disabled={!isAppOwned || !isAuthenticated}
             />
-            <IconButton type="submit" color="primary" disabled={!isAppOwned || !message.trim()} sx={{ position: 'absolute', top: '8px', right: '8px' }}>
+            <IconButton type="submit" color="primary" disabled={!isAppOwned || !isAuthenticated || !message.trim()} sx={{ position: 'absolute', top: '8px', right: '8px' }}>
               <SendIcon />
             </IconButton>
           </Box>

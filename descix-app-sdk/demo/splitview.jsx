@@ -12,15 +12,20 @@
  *   - chatEntitled unlocks the input UI (the host manages entitlement); the SERVER
  *     stays authoritative (verify_subscription + credits gate on every call)
  *
- * Auth: the harness expects a REAL platform session seeded into localStorage
- * ('sessionInfo') before load — the Playwright spec mints one via reconnect_by_wallet
- * (the same wallet-sig rail the CLI uses). Nothing here bypasses a backend check.
+ * Auth (REAL Powch login — standalone-app pattern per DeSciX/CLAUDE.md):
+ *   - the ChatWidget renders "Sign in with Powch" when unauthenticated;
+ *   - the harness supplies onRequestLogin backed by a PowchClient (its own Powch
+ *     iframe against the LOCAL dev Powch site :5175 — passkey ceremony, site pass,
+ *     registerDeSciX) and hands the auth payload to window.DeSciX.loginWithSessionToken;
+ *   - the Playwright spec drives the REAL WebAuthn ceremony with the CDP virtual
+ *     authenticator + PRF mock. Nothing here bypasses a backend check.
  *
- * Run:  cd DeSciX_Core/descix-app-sdk/demo && npx vite   → http://localhost:5599/splitview.html
+ * Run:  cd DeSciX_Core/descix-app-sdk/demo && npx vite   → https://localhost:5199/splitview.html (HTTPS — WebAuthn secure context)
  */
 import React, { useEffect, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import { AppShell, CodeSiteWidget, AppData } from '@descix/app-sdk';
+import { PowchClient } from '@descix/app-sdk/powch-client';
 
 const HARNESS_APP = {
   app_id: 'descix-docs',
@@ -33,6 +38,56 @@ const HARNESS_APP = {
 // which a standalone embed does not).
 AppData.selectedApp = HARNESS_APP;
 AppData.selectedCommunity = { community_id: HARNESS_APP.community_id, community_name: 'DeSciX' };
+
+// ── Powch login (STANDALONE-app pattern) ─────────────────────────────────────────
+// A standalone host (the frqtl.com pattern) owns a PowchClient: it creates its own
+// Powch sidebar iframe against the LOCAL dev Powch site (__POWCH_APP_URL__ from the
+// workspace product map → https://localhost:5175/ in dev). The ChatWidget's
+// "Sign in with Powch" button invokes this via onRequestLogin; on success the auth
+// payload (HOST_SAFE_KEYS incl. sessionInfo) goes to the shell's canonical
+// window.DeSciX.loginWithSessionToken → REACTIVE AppContext session → the widget
+// re-renders authenticated and loads the credit balance.
+const POWCH_URL = typeof __POWCH_APP_URL__ !== 'undefined' && __POWCH_APP_URL__
+  ? __POWCH_APP_URL__ : 'https://localhost:5175/';
+// Constructed EAGERLY at module scope (like the canonical sample
+// DeSciX_Powch/samples/standalone-react/app.js): at this point window.DeSciX.powch does
+// not exist yet, so PowchClient runs in TRUE STANDALONE mode and owns its own
+// domain-isolated sidebar iframe (#powch-sdk-bridge). Constructing it lazily after the
+// shell is READY would silently switch it to embedded/shell-bridge mode.
+const _powch = new PowchClient({ bridgeUrl: POWCH_URL });
+function getPowch() { return _powch; }
+
+/**
+ * Send POWCH_AUTH with boot-race protection: if the Powch app inside the sidebar
+ * iframe is still booting, a postMessage request is dropped silently (the PWA never
+ * hits this because its sidebar loads at app startup, long before a sign-in click).
+ * Re-send until the auth FLOW responds. Duplicate sends are safe — the Powch app
+ * just (re)opens the auth flow.
+ */
+async function authWithBootRetry(powch, options, { attempts = 5, attemptMs = 10000 } = {}) {
+  for (let i = 0; i < attempts; i++) {
+    const result = await Promise.race([
+      powch.auth(options),
+      new Promise((res) => setTimeout(() => res('__POWCH_BOOT_TIMEOUT__'), attemptMs)),
+    ]);
+    if (result !== '__POWCH_BOOT_TIMEOUT__') return result;
+    console.warn(`[harness] Powch auth attempt ${i + 1} unanswered (app booting?) — retrying`);
+  }
+  throw new Error('Powch auth: no response from the Powch app after retries');
+}
+
+async function harnessPowchLogin() {
+  const powch = getPowch();
+  powch.open(); // show the Powch sidebar so the user sees the passkey/login UI
+  const payload = await authWithBootRetry(powch, { registerDeSciX: true, require: ['email'] });
+  if (!payload) throw new Error('Powch auth returned no payload');
+  if (!window.DeSciX?.loginWithSessionToken) {
+    throw new Error('Shell not READY — window.DeSciX.loginWithSessionToken unavailable');
+  }
+  window.DeSciX.loginWithSessionToken(payload);
+  powch.close();
+  return payload;
+}
 
 /** The host app's "IDE" pane — stands in for frqtl.com's IDE/Studio/GYM component. */
 function FakeIdePanel() {
@@ -73,7 +128,7 @@ function FakeIdePanel() {
 function HarnessApp() {
   return (
     <div data-testid="harness-root" style={{ height: '100vh' }}>
-      <CodeSiteWidget chatPosition="left" chatWidth={0.45} height="100vh" chatEntitled>
+      <CodeSiteWidget chatPosition="left" chatWidth={0.45} height="100vh" chatEntitled onRequestLogin={harnessPowchLogin}>
         <FakeIdePanel />
       </CodeSiteWidget>
     </div>
