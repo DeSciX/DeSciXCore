@@ -4,7 +4,7 @@ import {
   Alert, Button, Dialog, DialogTitle, DialogContent, DialogActions,
   List, ListItem, ListItemText, Checkbox, ListItemIcon, Chip,
   Drawer, Divider, ListItemButton, ListItemSecondaryAction, Tooltip,
-  Snackbar, Grid
+  Snackbar, Grid, Menu, MenuItem
 } from '@mui/material';
 import { marked } from 'marked';
 import 'github-markdown-css/github-markdown-dark.css';
@@ -460,6 +460,10 @@ const ChatWidget = (props = {}) => {
   const [lastDebit, setLastDebit] = useState(null);             // USD delta of last call
   const [creditsRequired, setCreditsRequired] = useState(null); // structured err.data or {}
   const [buyingCredits, setBuyingCredits] = useState(false);
+  // Round 5 (CEO retest 2026-07-02): PROACTIVE purchase affordance — clicking the
+  // balance chip opens the buy-credits flow (same handleBuyCredits path as the
+  // CREDITS_REQUIRED CTA), instead of the CTA appearing only on the zero-balance error.
+  const [buyMenuAnchor, setBuyMenuAnchor] = useState(null);
   const [signingIn, setSigningIn] = useState(false);
 
   // REACTIVE session from context (AppData.sessionInfo alone is a non-reactive cache —
@@ -513,6 +517,17 @@ const ChatWidget = (props = {}) => {
   }, [isAuthenticated]);
 
   useEffect(() => { refreshCredits(); }, [refreshCredits, appId]);
+
+  // Round 5: while the CREDITS_REQUIRED alert is showing, poll the balance so a
+  // purchase completed in another tab (Stripe checkout return) or a grant clears the
+  // alert automatically — refreshCredits() already dismisses it once balance > 0.
+  // Without this the alert deadlocks: nothing re-reads the balance until the user
+  // manually asks again.
+  useEffect(() => {
+    if (creditsRequired === null || !isAuthenticated) return undefined;
+    const t = setInterval(() => { refreshCredits(); }, 5000);
+    return () => clearInterval(t);
+  }, [creditsRequired, isAuthenticated, refreshCredits]);
 
   const handleBuyCredits = async (amountUsd) => {
     setBuyingCredits(true);
@@ -1413,15 +1428,42 @@ const ChatWidget = (props = {}) => {
               −${lastDebit.toFixed(6).replace(/0+$/, '').replace(/\.$/, '')}
             </Typography>
           )}
-          <Tooltip title="AI chat is metered against your platform-wide USD credits balance. Click to refresh.">
+          <Tooltip title="AI chat is metered against your platform-wide USD credits balance. Click to buy credits or refresh.">
             <Chip
               size="small"
               variant="outlined"
               data-testid="credits-balance-chip"
               label={`AI credits: $${(creditsBalance.usd_balance ?? 0).toFixed(4)}`}
-              onClick={() => refreshCredits()}
+              onClick={(e) => { setBuyMenuAnchor(e.currentTarget); refreshCredits(); }}
             />
           </Tooltip>
+          {/* Round 5: proactive buy-credits flow from the chip (CEO retest 2026-07-02).
+              Same purchase path as the zero-balance CTA — handleBuyCredits ->
+              create_stripe_checkout_session (purchase_type: ai_credits) -> window.open. */}
+          <Menu
+            anchorEl={buyMenuAnchor}
+            open={!!buyMenuAnchor}
+            onClose={() => setBuyMenuAnchor(null)}
+            data-testid="credits-buy-menu"
+          >
+            {[5, 10, 20].map(amt => (
+              <MenuItem
+                key={amt}
+                disabled={buyingCredits}
+                data-testid={`chip-buy-credits-${amt}`}
+                onClick={() => { setBuyMenuAnchor(null); handleBuyCredits(amt); }}
+              >
+                Buy ${amt} AI credits
+              </MenuItem>
+            ))}
+            <Divider />
+            <MenuItem
+              data-testid="chip-refresh-balance"
+              onClick={() => { setBuyMenuAnchor(null); refreshCredits(); }}
+            >
+              Refresh balance
+            </MenuItem>
+          </Menu>
         </Box>
       )}
 
