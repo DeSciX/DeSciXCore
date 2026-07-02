@@ -55,7 +55,7 @@ export async function showHistory(options = {}) {
             : (e.ts?.seconds ? new Date(e.ts.seconds * 1000).toISOString() : String(e.ts || ''));
         let detail = '';
         if (e.type === 'debit') {
-            detail = `${e.app_id || '?'} ${e.model_used || ''} in:${e.tokens_in ?? '?'} out:${e.tokens_out ?? '?'}${e.exempt ? ' [exempt]' : ''}`;
+            detail = `${e.app_id || '?'} ${e.model_used || ''} in:${e.tokens_in ?? '?'} out:${e.tokens_out ?? '?'}`;
         } else if (e.type === 'purchase') {
             detail = `${e.source || ''} ${e.payment_ref || ''}`;
         } else if (e.type === 'grant' || e.type === 'refund') {
