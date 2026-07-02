@@ -400,7 +400,15 @@ const ChatWidget = (props = {}) => {
   } = props;
 
   const useStreaming = true;
-  const { selectedCommunity, selectedApp, loginStatus, setCurrentView, sessionInfo } = useAppContext();
+  const { loginStatus, setCurrentView, sessionInfo } = useAppContext();
+  // Inter-view state: selectedApp/selectedCommunity are read DIRECTLY from AppData —
+  // the shell's viewRouter assigns them immediately before triggering the view
+  // transition (PlatformViewContext.jsx '--- Update selected context ---'), and the
+  // AppContext provider does NOT re-render on that transition (its mirror is
+  // provider-render-stale). This is the load-bearing convention the PWA's original
+  // copy of this component used; do NOT switch these to useAppContext().
+  const selectedCommunity = AppData.selectedCommunity;
+  const selectedApp = AppData.selectedApp;
   const powchBridge = usePowchBridge();
   const [loadingState, setNetworkLoading] = useNetworkLoading(NetworkLoadingType.GET_AI_RESPONSE);
 
