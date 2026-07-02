@@ -105,49 +105,6 @@ export const createPoolDeployment = async (params) => {
   }
 };
 
-export const enableSelling = async (tokenSymbol, sellFeeBps = null) => {
-  try {
-    const data = await makeCommandRequestJSON('enable_selling', { token_symbol: tokenSymbol, sell_fee_bps: sellFeeBps });
-    if (data.status !== ResponseStatus.OK) throw new Error(data.message || 'Failed to enable selling');
-    return data.message;
-  } catch (error) {
-    console.error('Error enabling selling:', error);
-    throw error;
-  }
-};
-
-export const disableSelling = async (tokenSymbol) => {
-  try {
-    const data = await makeCommandRequestJSON('disable_selling', { token_symbol: tokenSymbol });
-    if (data.status !== ResponseStatus.OK) throw new Error(data.message || 'Failed to disable selling');
-    return data.message;
-  } catch (error) {
-    console.error('Error disabling selling:', error);
-    throw error;
-  }
-};
-
-export const pauseTrading = async (tokenSymbol) => {
-  try {
-    const data = await makeCommandRequestJSON('pause_trading', { token_symbol: tokenSymbol });
-    if (data.status !== ResponseStatus.OK) throw new Error(data.message || 'Failed to pause trading');
-    return data.message;
-  } catch (error) {
-    console.error('Error pausing trading:', error);
-    throw error;
-  }
-};
-
-export const resumeTrading = async (tokenSymbol, enableSellingFlag = false) => {
-  try {
-    const data = await makeCommandRequestJSON('resume_trading', { token_symbol: tokenSymbol, enable_selling: enableSellingFlag });
-    if (data.status !== ResponseStatus.OK) throw new Error(data.message || 'Failed to resume trading');
-    return data.message;
-  } catch (error) {
-    console.error('Error resuming trading:', error);
-    throw error;
-  }
-};
 
 export const preparePoolDeployment = async (params) => {
   try {
