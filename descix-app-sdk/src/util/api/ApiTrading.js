@@ -99,16 +99,6 @@ export const getPoolMarketOverview = async (tokenSymbols) => {
   }
 };
 
-export const getChainBatchParams = async (tokenSymbol) => {
-  try {
-    const data = await makeCommandRequestJSON('get_chain_batch_params', { token_symbol: tokenSymbol });
-    return data.status === ResponseStatus.OK ? data.message : null;
-  } catch (error) {
-    console.error('Error fetching batch params:', error);
-    return null;
-  }
-};
-
 export const getPriceHistory = async (tokenSymbol, hours = 24) => {
   try {
     const data = await makeCommandRequestJSON('get_price_history', { token_symbol: tokenSymbol, hours }, true);

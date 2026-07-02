@@ -116,27 +116,6 @@ export const getAllCryptoPrices = async () => {
   }
 };
 
-export const createPaymentQuote = async (params) => {
-  try {
-    const data = await makeCommandRequestJSON('create_payment_quote', params);
-    if (data.status === ResponseStatus.OK) return data.message;
-    throw new Error(data.message || 'Failed to create quote');
-  } catch (error) {
-    console.error('Error creating payment quote:', error);
-    throw error;
-  }
-};
-
-export const getPaymentQuote = async (quoteId) => {
-  try {
-    const data = await makeCommandRequestJSON('get_payment_quote', { quote_id: quoteId });
-    return data.status === ResponseStatus.OK ? data.message : null;
-  } catch (error) {
-    console.error('Error getting payment quote:', error);
-    throw error;
-  }
-};
-
 export const verifyCryptoPayment = async (params) => {
   try {
     const data = await makeCommandRequestJSON('verify_crypto_payment', params);
