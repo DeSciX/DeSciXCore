@@ -107,95 +107,83 @@ export class DeSciXApiClient {
   }
 
   /**
-   * WS-MCP-SURFACE-SPLIT §9 — IAM gating for the internal-only DEV apiFront function.
+   * WS-HEADLESS-MVP-A1 (mcp-oauth-longlived-tokens design §2.4, Option 4A) — attach the
+   * cached OAuth access token as the standard `Authorization: Bearer` header when the
+   * credential cache holds a FRESH one.
    *
-   * The persistent admin-capable DEV endpoint (`apiFront-http-dev`) is deployed
-   * `--no-allow-unauthenticated`, so Google Cloud Run IAM rejects any caller without a
-   * valid Google-signed identity token (HTTP 403 before the request ever reaches the app).
-   * The public LB origins (`*.descix.net`) and local dev (`localhost`/`127.0.0.1`) are NOT
-   * IAM-gated — they front allow-unauthenticated functions or a self-signed local server.
+   * This REPLACES the retired gcloud-IAM transport seam (_isIamGatedOrigin/_mintIamBearer/
+   * _applyIamAuthIfNeeded): `apiFront-http-dev` now deploys --allow-unauthenticated and the
+   * OAuth bearer — verified by the app layer (verifyMcpAccessToken on /mcp; scope/exposure
+   * gate + checkCommandPermission) — is the wall. No Google identity token, no gcloud, no
+   * ~1h SSO reauth. The CLI's session credential still travels in the request BODY for the
+   * /apifront auth middleware (the wallet-sig/API_KEY headless path, CEO-D-2026-06-02).
    *
-   * This predicate returns true ONLY for the raw Cloud Run / Cloud Functions origins
-   * (`*.run.app`, `*.cloudfunctions.net`). When true, callers must add a Google identity
-   * bearer token to clear the IAM layer. The CLI's own session credential still travels in
-   * the request BODY for the app-level auth middleware — IAM and app-auth are two layers.
+   * ensureSession() keeps the token fresh (silent refresh); this method only ATTACHES it.
+   * No-op when no OAuth credential is cached — never a fabricated fallback.
    *
-   * @returns {boolean}
-   */
-  _isIamGatedOrigin() {
-    if (!this.baseUrl) return false;
-    let host;
-    try {
-      host = new URL(this.baseUrl).hostname;
-    } catch {
-      return false;
-    }
-    return host.endsWith('.run.app') || host.endsWith('.cloudfunctions.net');
-  }
-
-  /**
-   * Mint a Google identity token (`aud` = the function origin) to clear Cloud Run IAM.
-   *
-   * Resolution order (durable across both deployment and developer contexts):
-   *   1. google-auth-library `getIdTokenClient(audience)` — works when ADC is a SERVICE
-   *      ACCOUNT (CI / Cloud Run / a configured SA key). This is the canonical, audience-
-   *      scoped path. A user ADC cannot mint an audience-scoped ID token, so its headers
-   *      come back WITHOUT an Authorization bearer — we detect that and fall through.
-   *   2. `gcloud auth print-identity-token` — works for a developer's USER ADC (the local
-   *      always-on case). The token is accepted by Cloud Run IAM when the principal holds
-   *      `roles/run.invoker` (project owner/editor inherit it).
-   *
-   * Returns the `Authorization: Bearer <id_token>` value, or null if no identity is mintable
-   * (caller then proceeds without it and surfaces the resulting 403 — no silent fallback).
-   *
-   * @param {string} audience - the function origin (scheme+host), the IAM token audience
-   * @returns {Promise<string|null>}
-   */
-  async _mintIamBearer(audience) {
-    // Path 1: service-account ADC via google-auth-library (audience-scoped).
-    try {
-      const { GoogleAuth } = await import('google-auth-library');
-      const auth = new GoogleAuth();
-      const client = await auth.getIdTokenClient(audience);
-      const headers = await client.getRequestHeaders();
-      const bearer = headers.Authorization || headers.authorization;
-      if (bearer) return bearer;
-      // No bearer => user ADC; fall through to gcloud.
-    } catch (e) {
-      console.error(`[ApiClient] google-auth-library ID token unavailable (${e.message}); trying gcloud.`);
-    }
-
-    // Path 2: developer user ADC via gcloud CLI.
-    try {
-      const { execFile } = await import('node:child_process');
-      const { promisify } = await import('node:util');
-      const run = promisify(execFile);
-      const { stdout } = await run('gcloud', ['auth', 'print-identity-token'], { timeout: 30000 });
-      const token = (stdout || '').trim();
-      if (token) return `Bearer ${token}`;
-    } catch (e) {
-      console.error(`[ApiClient] gcloud identity token unavailable: ${e.message}`);
-    }
-
-    return null;
-  }
-
-  /**
-   * Apply IAM auth to an axios config when the baseUrl is an internal IAM-gated origin.
-   * No-op for localhost and public LB origins. Mutates and returns the config.
    * @param {Object} axiosConfig
-   * @returns {Promise<Object>}
+   * @returns {Object}
    */
-  async _applyIamAuthIfNeeded(axiosConfig) {
-    if (!this._isIamGatedOrigin()) return axiosConfig;
-    const audience = new URL(this.baseUrl).origin;
-    const bearer = await this._mintIamBearer(audience);
-    if (bearer) {
-      axiosConfig.headers = { ...(axiosConfig.headers || {}), Authorization: bearer };
-    } else {
-      console.error('[ApiClient] WARNING: IAM-gated origin but no identity token could be minted; expect HTTP 403.');
-    }
+  _applyOAuthBearerIfAvailable(axiosConfig) {
+    const oauthBlock = this.credentials?.oauth;
+    if (!oauthBlock?.access_token) return axiosConfig;
+    axiosConfig.headers = { ...(axiosConfig.headers || {}), Authorization: `Bearer ${oauthBlock.access_token}` };
     return axiosConfig;
+  }
+
+  /**
+   * WS-HEADLESS-MVP-A1 (design §2.2/§4.1) — OAuth silent refresh, the gcloud-ADC analogue.
+   *
+   * When the cached OAuth access token is expired (or within the 60s skew window), POST
+   * grant_type=refresh_token to /oauth/token. The AS ROTATES the refresh token on use, so
+   * BOTH returned tokens are persisted back to wallet.json immediately — losing the rotated
+   * refresh token would trip the AS's reuse-detection and revoke the whole chain.
+   *
+   * Non-interactive for up to 30 days of inactivity (sliding window under rotation). If the
+   * refresh is rejected (revoked/expired chain), we FAIL LOUD once per process and leave the
+   * wallet-sig path — which is untouched by the OAuth branch — to carry the session; the
+   * user re-runs `descix login` to re-establish OAuth.
+   */
+  async _ensureOAuthAccessToken() {
+    const oauthBlock = this.credentials?.oauth;
+    if (!oauthBlock?.refresh_token || this._oauthRefreshFailed) return;
+
+    const { isOAuthAccessTokenFresh, refreshOAuthTokens, buildOAuthCredentialBlock } = await import('./oauth-client.js');
+    if (isOAuthAccessTokenFresh(oauthBlock)) return;
+
+    try {
+      const tokens = await refreshOAuthTokens(this.baseUrl, {
+        refreshToken: oauthBlock.refresh_token,
+        clientId: oauthBlock.client_id,
+      });
+      const updated = buildOAuthCredentialBlock({
+        clientId: oauthBlock.client_id,
+        tokens,
+        tokenEndpointBase: this.baseUrl,
+      });
+      this.credentials.oauth = updated;
+
+      // Persist the ROTATED pair to wallet.json (same write path as the session refresh).
+      try {
+        const { WalletFileManager } = await import('./wallet-file.js');
+        const walletPath = await WalletFileManager.findWalletFile(this.workspaceRoot || process.cwd());
+        if (walletPath) {
+          const walletData = await WalletFileManager.loadWalletFile(walletPath);
+          if (walletData) {
+            walletData.oauth = updated;
+            await WalletFileManager.saveWalletFile(walletPath, walletData);
+          }
+        }
+      } catch (saveErr) {
+        console.error('[ApiClient] Failed to persist rotated OAuth tokens to wallet file:', saveErr.message);
+      }
+    } catch (error) {
+      // Revoked/expired refresh chain (or AS unreachable): loud, once per process. The
+      // wallet-sig session path proceeds independently — no silent credential fabrication.
+      this._oauthRefreshFailed = true;
+      console.error(`[ApiClient] OAuth silent refresh failed: ${error.message}. ` +
+        `Run 'descix login' to re-establish OAuth credentials.`);
+    }
   }
 
   /**
@@ -231,11 +219,19 @@ export class DeSciXApiClient {
    * @returns {Promise<void>}
    */
   async ensureSession() {
+    // WS-HEADLESS-MVP-A1 OAuth branch: keep the cached OAuth access token fresh (silent
+    // refresh against /oauth/token). Runs ONLY when an `oauth` credential block exists in
+    // wallet.json (written by `descix login`) — the wallet-sig session path below is
+    // untouched and remains the headless/API_KEY credential (design §2.6).
+    if (this.credentials?.oauth?.refresh_token) {
+      await this._ensureOAuthAccessToken();
+    }
+
     // If we already have an access token, assume it's valid (will retry if expired)
     if (this.credentials?.accessToken) {
       return;
     }
-    
+
     // If we have wallet credentials but no session, get one via reconnect_by_wallet
     if (this.credentials?.walletAddress && this.credentials?.signature) {
       try {
@@ -309,8 +305,8 @@ export class DeSciXApiClient {
       });
     }
 
-    // Clear Cloud Run IAM for the internal-only DEV apiFront function (no-op otherwise).
-    await this._applyIamAuthIfNeeded(axiosConfig);
+    // WS-A1: OAuth bearer rides the standard Authorization header (no-op without a cache).
+    this._applyOAuthBearerIfAvailable(axiosConfig);
 
     try {
       const response = await axios.post(url, requestBody, axiosConfig);
@@ -408,8 +404,8 @@ export class DeSciXApiClient {
         });
       }
 
-      // Clear Cloud Run IAM for the internal-only DEV apiFront function (no-op otherwise).
-      await this._applyIamAuthIfNeeded(axiosConfig);
+      // WS-A1: OAuth bearer rides the standard Authorization header (no-op without a cache).
+      this._applyOAuthBearerIfAvailable(axiosConfig);
 
       const response = await axios.post(url, requestBody, axiosConfig);
 
@@ -548,7 +544,10 @@ export class DeSciXApiClient {
         walletAddress: walletData.walletAddress || null,
         signature: walletData.signature || null,
         communityId: walletData.communityId || null,
-        tokenSymbol: walletData.tokenSymbol || null
+        tokenSymbol: walletData.tokenSymbol || null,
+        // WS-A1: OAuth credential block (gcloud-ADC analogue) — null when never logged in
+        // via the device→OAuth bridge; the wallet-sig path is then the sole credential.
+        oauth: walletData.oauth || null
       };
 
       return this.credentials;

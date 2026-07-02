@@ -37,7 +37,15 @@ export class WalletFileManager {
     try {
       const data = await fs.readFile(walletPath, 'utf-8');
       const walletData = JSON.parse(data);
-      
+
+      // WS-HEADLESS-MVP-A1 §2.5 (parent plan §10.4) — API_KEY is the vocabulary-aligned
+      // ALIAS of the wallet signature (the durable headless bearer credential). Alias-only
+      // (CEO §7 Q4): `signature` stays canonical on disk; a file authored with only
+      // API_KEY is normalized on read.
+      if (walletData && walletData.API_KEY && !walletData.signature) {
+        walletData.signature = walletData.API_KEY;
+      }
+
       if (this.validateWalletFile(walletData)) {
         return walletData;
       } else {
@@ -66,13 +74,19 @@ export class WalletFileManager {
         throw new Error('Invalid wallet data structure');
       }
 
+      // WS-HEADLESS-MVP-A1 §2.5 — keep the API_KEY alias mirrored to the canonical
+      // signature so the on-disk file self-documents the alias (alias-only rename).
+      if (walletData.signature) {
+        walletData.API_KEY = walletData.signature;
+      }
+
       // Ensure directory exists
       const dir = path.dirname(walletPath);
       await fs.mkdir(dir, { recursive: true });
 
       // Write file with restricted permissions (600)
       await fs.writeFile(walletPath, JSON.stringify(walletData, null, 2), { mode: 0o600 });
-      
+
       return true;
     } catch (error) {
       console.error(`[WalletFile] Error saving wallet file: ${error.message}`);

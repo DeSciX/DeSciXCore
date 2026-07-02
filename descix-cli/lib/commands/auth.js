@@ -43,12 +43,45 @@ async function openBrowser(url) {
 }
 
 /**
- * Request device login via HTTP
+ * Request device login via HTTP.
+ * WS-HEADLESS-MVP-A1: optionally carries the device→OAuth bridge context so the server
+ * issues an OAuth authorization code alongside the session on completion (design §2.1).
  * @param {DeSciXApiClient} apiClient - The API client
+ * @param {Object|null} oauthCtx - { client_id, code_challenge, redirect_uri, scope }
  */
-async function requestDeviceLogin(apiClient) {
-  const response = await apiClient.invoke('device_request_login', {}, { allowGuest: true });
+async function requestDeviceLogin(apiClient, oauthCtx = null) {
+  const params = oauthCtx ? { oauth: oauthCtx } : {};
+  const response = await apiClient.invoke('device_request_login', params, { allowGuest: true });
   return response.message;
+}
+
+/**
+ * WS-HEADLESS-MVP-A1 — prepare the OAuth leg of `descix login`:
+ * PKCE pair + a registered CLI public client (DCR, reusing a cached client_id when the
+ * wallet file already has one). Returns null (with a loud warning) when the server does
+ * not expose the OAuth AS — the wallet-sig login proceeds untouched (design §4.1:
+ * "Behind a flag; wallet-sig path untouched").
+ */
+async function prepareOAuthLeg(apiClient, existingWallet, scope) {
+  const oauthClient = await import('../oauth-client.js');
+  const { verifier, challenge } = oauthClient.generatePkcePair();
+
+  let clientId = existingWallet?.oauth?.client_id || null;
+  if (!clientId) {
+    clientId = await oauthClient.registerOAuthClient(apiClient.baseUrl, {});
+  }
+
+  return {
+    oauthClient,
+    verifier,
+    clientId,
+    ctx: {
+      client_id: clientId,
+      code_challenge: challenge,
+      redirect_uri: oauthClient.OOB_REDIRECT_URI,
+      scope: scope || oauthClient.DEFAULT_OAUTH_SCOPE,
+    },
+  };
 }
 
 /**
@@ -69,11 +102,16 @@ async function pollDeviceLogin(apiClient, deviceCode, onStatus = null) {
       if (status === 'complete') {
         return {
           user_id: response.message.user_id,
+          email: response.message.email || null,
           session_token: response.message.session_token,
           wallet_address: response.message.wallet_address,
           signature: response.message.signature,
           community_id: response.message.community_id,
-          token_symbol: response.message.token_symbol || 'DAITA'
+          token_symbol: response.message.token_symbol || 'DAITA',
+          // WS-A1 device→OAuth bridge: single-use authorization code (present exactly once
+          // when the request carried an oauth ctx) — redeemed at /oauth/token immediately.
+          oauth_code: response.message.oauth_code || null,
+          oauth_scope: response.message.oauth_scope || null
         };
       }
       
@@ -124,8 +162,34 @@ export async function loginDevice(options = {}) {
       workspaceRoot = foundRoot || startDir;
     }
 
-    // Request device login
-    const request = await requestDeviceLogin(apiClient);
+    // WS-HEADLESS-MVP-A1: OAuth leg (default ON, `--no-oauth` disables). Additive: any
+    // failure here warns loudly and the wallet-sig device login proceeds untouched.
+    let oauthLeg = null;
+    if (options.oauth !== false) {
+      try {
+        const existingWallet = await WalletFileManager.loadWalletFile(
+          WalletFileManager.getProjectWalletPath(workspaceRoot));
+        oauthLeg = await prepareOAuthLeg(apiClient, existingWallet, options.scope);
+      } catch (e) {
+        console.log(chalk.yellow(`\n⚠️  OAuth token leg unavailable (${e.message}).`));
+        console.log(chalk.yellow('   Proceeding with wallet-signature login only.\n'));
+      }
+    }
+
+    // Request device login (retry ONCE on a stale cached OAuth client_id)
+    let request;
+    try {
+      request = await requestDeviceLogin(apiClient, oauthLeg?.ctx || null);
+    } catch (e) {
+      if (oauthLeg && /invalid_client/.test(e.message || '')) {
+        // Cached client_id no longer registered server-side — re-register and retry.
+        oauthLeg.clientId = await oauthLeg.oauthClient.registerOAuthClient(apiClient.baseUrl, {});
+        oauthLeg.ctx.client_id = oauthLeg.clientId;
+        request = await requestDeviceLogin(apiClient, oauthLeg.ctx);
+      } else {
+        throw e;
+      }
+    }
 
     spinner.succeed('Device login request created');
 
@@ -170,11 +234,39 @@ export async function loginDevice(options = {}) {
       sessionToken: credentials.session_token,
       expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString()
     };
-    
+
+    // WS-HEADLESS-MVP-A1: redeem the device-bridge authorization code for the long-lived
+    // OAuth pair (design §3) and cache it gcloud-ADC-style in wallet.json. The AS's auth
+    // codes are single-use with a ≤60s TTL — redeem BEFORE anything else.
+    if (oauthLeg && credentials.oauth_code) {
+      try {
+        const tokens = await oauthLeg.oauthClient.redeemAuthorizationCode(apiClient.baseUrl, {
+          code: credentials.oauth_code,
+          clientId: oauthLeg.clientId,
+          codeVerifier: oauthLeg.verifier,
+        });
+        walletData.oauth = oauthLeg.oauthClient.buildOAuthCredentialBlock({
+          clientId: oauthLeg.clientId,
+          tokens,
+          tokenEndpointBase: apiClient.baseUrl,
+        });
+      } catch (e) {
+        console.log(chalk.yellow(`\n⚠️  OAuth code redemption failed: ${e.message}`));
+        console.log(chalk.yellow('   Wallet-signature login is still valid; re-run "descix login" for OAuth tokens.\n'));
+      }
+    } else if (oauthLeg && !credentials.oauth_code) {
+      console.log(chalk.yellow('\n⚠️  Server did not issue an OAuth code (device→OAuth bridge not available).'));
+      console.log(chalk.yellow('   Wallet-signature login is still valid.\n'));
+    }
+
     const walletPath = WalletFileManager.getProjectWalletPath(workspaceRoot);
     await WalletFileManager.saveWalletFile(walletPath, walletData);
-    
+
     spinner.succeed(chalk.green('Login successful!'));
+    if (walletData.oauth) {
+      console.log(chalk.green('   OAuth tokens cached (30-day silent refresh — gcloud-style).'));
+      console.log(chalk.gray(`   Scope: ${walletData.oauth.scope}`));
+    }
     console.log(chalk.cyan(`\n✅ Credentials saved to:`));
     console.log(chalk.gray(`   ${walletPath}\n`));
     
@@ -380,25 +472,45 @@ export async function whoami() {
 }
 
 /**
- * Logout - clear credentials
+ * Logout - revoke server-side OAuth credentials (RFC 7009), then clear the local cache.
+ * WS-HEADLESS-MVP-A1 (design §4.6): revocation kills the whole refresh-token chain so a
+ * copied wallet.json cannot keep refreshing after logout. Revocation failure is reported
+ * but never blocks the local credential wipe.
  */
 export async function logout() {
   const spinner = ora('Logging out...').start();
-  
+
   try {
     const walletPath = await WalletFileManager.findWalletFile(process.cwd());
-    
+
     if (!walletPath) {
       spinner.info(chalk.yellow('Not logged in'));
       console.log(chalk.gray('\n   No credentials to remove.\n'));
       return;
     }
-    
+
+    const walletInfo = await WalletFileManager.loadWalletFile(walletPath);
+    if (walletInfo?.oauth?.refresh_token) {
+      spinner.text = 'Revoking OAuth credentials...';
+      try {
+        const apiClient = new DeSciXApiClient();
+        await apiClient.ensureBaseUrl();
+        const { revokeOAuthToken } = await import('../oauth-client.js');
+        await revokeOAuthToken(apiClient.baseUrl, {
+          token: walletInfo.oauth.refresh_token,
+          clientId: walletInfo.oauth.client_id,
+        });
+        console.log(chalk.gray('\n   OAuth refresh-token chain revoked server-side.'));
+      } catch (e) {
+        console.log(chalk.yellow(`\n   ⚠️  OAuth revocation failed (${e.message}); removing local credentials anyway.`));
+      }
+    }
+
     await fs.unlink(walletPath);
-    
+
     spinner.succeed(chalk.green('Logged out'));
     console.log(chalk.cyan('\n✅ Credentials removed\n'));
-    
+
   } catch (error) {
     spinner.fail(chalk.red('Logout failed'));
     console.error(chalk.red(error.message));

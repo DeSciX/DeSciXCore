@@ -81,6 +81,8 @@ program
   .option('-u, --url <url>', 'API URL override')
   .option('--dev', 'Use development server (https://localhost:4000)')
   .option('--wallet', 'Use direct wallet connection (advanced, not yet implemented)')
+  .option('--no-oauth', 'Skip the OAuth long-lived token leg (wallet-signature login only)')
+  .option('--scope <scope>', 'OAuth scope to request (default: mcp:read mcp:tools mcp:write mcp:admin)')
   .action(async (options) => {
     try {
       // Handle --dev flag
