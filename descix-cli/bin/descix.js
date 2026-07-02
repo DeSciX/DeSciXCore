@@ -16,6 +16,7 @@ import { GlobalConfig } from '../lib/global-config.js';
 import * as authCommands from '../lib/commands/auth.js';
 import * as configCommands from '../lib/commands/config.js';
 import * as buyCommands from '../lib/commands/buy.js';
+import * as creditsCommands from '../lib/commands/credits.js';
 import * as airdropCommands from '../lib/commands/airdrop.js';
 import { runInit } from '../lib/commands/init.js';
 import * as updateCommands from '../lib/commands/update.js';
@@ -330,6 +331,78 @@ buyCommand
   .description('List supported blockchains for payments')
   .action(() => {
     buyCommands.listChains();
+  });
+
+// ============ AI Credits Commands (WS-HEADLESS-MVP-A2, CEO-D-2026-07-01 D2) ============
+// Platform-wide USD AI-credits: metered RAG/agent calls debit this balance.
+// NOT community tokens (those are under `descix buy`).
+
+const creditsCommand = program
+  .command('credits')
+  .description('Platform-wide USD AI credits (metered AI consumption)');
+
+creditsCommand
+  .command('balance')
+  .description('Show your AI-credits balance')
+  .action(async () => {
+    try {
+      await creditsCommands.showBalance();
+    } catch (error) {
+      process.exit(1);
+    }
+  });
+
+creditsCommand
+  .command('history')
+  .description('Show your credit ledger (purchases, debits, grants)')
+  .option('--limit <n>', 'Max entries (default 50)')
+  .action(async (options) => {
+    try {
+      await creditsCommands.showHistory(options);
+    } catch (error) {
+      process.exit(1);
+    }
+  });
+
+creditsCommand
+  .command('buy')
+  .description('Buy AI credits with USD (Stripe checkout)')
+  .requiredOption('--usd <amount>', 'USD amount of credits to buy')
+  .option('--return-base <url>', 'Base URL for the checkout success/cancel landing (default https://descix.net)')
+  .action(async (options) => {
+    try {
+      await creditsCommands.buyCredits({ usd: options.usd, returnBase: options.returnBase });
+    } catch (error) {
+      process.exit(1);
+    }
+  });
+
+creditsCommand
+  .command('grant')
+  .description('ADMIN: grant AI credits to a user')
+  .requiredOption('--user <user_id>', 'Target user id')
+  .requiredOption('--usd <amount>', 'USD amount to grant')
+  .requiredOption('--reason <text>', 'Audit reason')
+  .action(async (options) => {
+    try {
+      await creditsCommands.grantCredits(options);
+    } catch (error) {
+      process.exit(1);
+    }
+  });
+
+creditsCommand
+  .command('refund')
+  .description('ADMIN: remove AI credits from a user (e.g. after a Stripe refund)')
+  .requiredOption('--user <user_id>', 'Target user id')
+  .requiredOption('--usd <amount>', 'USD amount to remove')
+  .requiredOption('--reason <text>', 'Audit reason')
+  .action(async (options) => {
+    try {
+      await creditsCommands.refundCredits(options);
+    } catch (error) {
+      process.exit(1);
+    }
   });
 
 // ============ Airdrop Commands (WS-ADMIN-B1 manual-trigger) ============

@@ -160,6 +160,14 @@ class FirestoreCollections {
     // on_chain_log: mandatory audit row per CEO-D-ONCHAIN-POLICY for every on-chain write
     // emitted by the platform (stub-plan §5.3).
     static ON_CHAIN_LOG() { return new BaseStoragePath("on_chain_log", "dict").getPath(); }
+
+    // WS-HEADLESS-MVP-A2 (CEO-D-2026-07-01 D2/D4): platform-wide USD AI-credits ledger.
+    // Credits/balance is the ONE balance doc per user (integer micro-USD fields);
+    // CreditLedger holds append-only rows — debit rows are the D4 pro-rata attribution
+    // signal, consumed by the buyback worker via collectionGroup('CreditLedger').
+    // See V2_docs/services/ai-credits.md.
+    static USER_CREDITS(user_id) { return new BaseStoragePath("UserCache/{user_id}/Credits", "dict").getPath({ user_id }); }
+    static USER_CREDIT_LEDGER(user_id) { return new BaseStoragePath("UserCache/{user_id}/CreditLedger", "dict").getPath({ user_id }); }
 }
 
 // --- FirestoreDocumentPath ---
@@ -172,6 +180,9 @@ class FirestoreDocumentPath {
     static USER_SESSION(user_id, access_token) { return `${FirestoreCollections.USER_SESSIONS(user_id)}/${access_token}`; }
     static USER_OAUTH_SESSION(user_id, access_token) { return FirestoreDocumentPath.USER_SESSION(user_id, access_token); }
     static USER_PURCHASE(user_id, purchase_id) { return `${FirestoreCollections.USER_PURCHASES(user_id)}/${purchase_id}`; }
+    // WS-HEADLESS-MVP-A2: the one credits balance doc per user (doc id is fixed: 'balance').
+    static USER_CREDIT_BALANCE(user_id) { return `${FirestoreCollections.USER_CREDITS(user_id)}/balance`; }
+    static USER_CREDIT_LEDGER_ENTRY(user_id, entry_id) { return `${FirestoreCollections.USER_CREDIT_LEDGER(user_id)}/${entry_id}`; }
     static USER_COMMUNITY_STAT(user_id, community_id) { return `${FirestoreCollections.USER_COMMUNITY_STATS(user_id)}/${community_id}`; }
     static IPDOC(file_id) { return `${FirestoreCollections.IP_DOCS()}/${file_id}`; }
     static GUILD_SETTING(guild_id) { return `${FirestoreCollections.GUILD_SETTINGS()}/${guild_id}`; }
