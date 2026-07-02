@@ -3,7 +3,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Paper, IconButton, Typography } from '@mui/material';
 import ChatIcon from '@mui/icons-material/Chat';
 import CloseIcon from '@mui/icons-material/Close';
-import { gcsMediaPath } from '../util/AppData';
+import { gcsMediaPath, AppData } from '../util/AppData';
 import { Api } from '../util/api';
 import { useAppContext } from '../AppContext';
 import ChatWidget from './ChatWidget';
@@ -52,7 +52,10 @@ const PLATFORM_APP_MESSAGES = {
  */
 const CodeSiteWidget = ({ url, children, enableChat = true, chatPosition = 'right', chatWidth = 0.25, height = '90vh', chatEntitled, onRequestLogin }) => {
   const iframeRef = useRef(null);
-  const { selectedCommunity, selectedApp } = useAppContext();
+  // Inter-view state read DIRECTLY from AppData (viewRouter assigns before the view
+  // transition; the context mirror is provider-render-stale — see ChatWidget note).
+  const selectedCommunity = AppData.selectedCommunity;
+  const selectedApp = AppData.selectedApp;
   const [chatOpen, setChatOpen] = useState(enableChat);
 
   const iframeSrc = useMemo(() => gcsMediaPath(url), [url]);
