@@ -480,7 +480,14 @@ const ChatWidget = (props = {}) => {
         await onRequestLogin();
       } else if (powchBridge) {
         // In-shell path (PWA/SignInButton pattern): bridge login + session sync.
-        const result = await powchBridge.login({ purpose: 'chat', registerDeSciX: true });
+        // GUARDRAIL-2026-07-03-POWCH-CONSENT-INVERSION — request the documented
+        // DeSciX sign-in trio; Powch is deny-by-default and only shares what the
+        // user consents to in ConsentView (`require` is a request list only).
+        const result = await powchBridge.login({
+          purpose: 'chat',
+          registerDeSciX: true,
+          require: ['verified_email', 'wallet_address', 'wallet_signature'],
+        });
         if (result && window.DeSciX?.loginWithSessionToken) {
           window.DeSciX.loginWithSessionToken(result);
         }
