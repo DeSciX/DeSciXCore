@@ -23,6 +23,19 @@ export {
     stripInvalidAndLower,
 } from './config.js';
 
+export {
+    MESH_CTX_FIELDS,
+    MESH_CTX_HEADERS,
+    DEFAULT_MAX_SKEW_MS,
+    MeshContextError,
+    normalizeMeshContext,
+    serializeMeshContext,
+    signMeshContext,
+    buildOutboundMeshHeaders,
+    verifyMeshContext,
+    createMeshContextVerifier,
+} from './meshContext.js';
+
 export { getFirestoreInstance } from './firestore.js';
 export { publishMessage } from './pubsub.js';
 export { registerServiceManifest } from './serviceManifest.js';
