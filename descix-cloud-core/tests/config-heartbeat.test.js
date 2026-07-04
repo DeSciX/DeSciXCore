@@ -36,7 +36,6 @@ function fullDefaults(overrides = {}) {
         DEFAULT_INTELLIGENCE_LEVEL: "2",
         PINECONE_INDEX_NAME: "descix-dev",
         PINECONE_API_KEY: "test-pc-key",
-        PINECONE_NAMESPACE_MODE: "community_id",
         PLATFORM_DEFAULT_CHAIN: "polygon",
         FIRESTORE_DATABASE_ID: "descix-dev",
         GOOGLE_PROJECT_ID: "test-project",

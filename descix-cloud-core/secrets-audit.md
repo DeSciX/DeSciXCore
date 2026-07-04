@@ -173,7 +173,6 @@ These are non-sensitive, instance-wide defaults. They may vary by deployment but
 | DEFAULT_KNOWLEDGEBASE_NAME | `General` | config-schema defaults |
 | VECTORIZE_MODE | `sync` | RAG behavior |
 | PINECONE_INTEGRATED_EMBED_MODEL | `llama-text-embed-v2` | config-schema defaults |
-| PINECONE_NAMESPACE_MODE | `community_id` | config-schema defaults |
 | DELIMITER | `\n---END---\n` | Parsing |
 | SEND_THRESHOLD | `500` | Messaging |
 | MAX_SEND_SIZE | `2000` | Messaging |

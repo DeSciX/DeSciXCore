@@ -123,7 +123,6 @@ test('(b2) additionalRequiredKeys does NOT throw when the value IS provided by t
         DEFAULT_INTELLIGENCE_LEVEL: "2",
         PINECONE_INDEX_NAME: "descix-prod",
         PINECONE_API_KEY: "test-pc-key",
-        PINECONE_NAMESPACE_MODE: "community_id",
         PLATFORM_DEFAULT_CHAIN: "polygon",
         FIRESTORE_DATABASE_ID: "(default)",
         GOOGLE_PROJECT_ID: "descix",

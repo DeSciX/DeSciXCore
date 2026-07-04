@@ -7,4 +7,6 @@ export {
     toMcpToolList,
     mutatingNativeToolNames,
     recommendedOAuthReadonlyToolNames,
+    DISCOVERY_CORE_TOOL_NAMES,
+    isDiscoveryCoreTool,
 } from './nativeTools.js';
