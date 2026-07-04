@@ -48,6 +48,8 @@ const EXPECTED_SSOT_TOOLS = [
     // Non-mutating + oauthReadonly (a balance read changes nothing; the commands that
     // change balances — grant_credits/refund_credits/debits — are NOT MCP-advertised).
     'get_credit_balance',
+    // WS-MCP-SURFACE-SPLIT-EXEC §6.3 (CEO-D-2026-07-04): DISCOVERY-CORE invoke gateway (mutating).
+    'execute_remote_command',
 ];
 
 test('shared SSOT resolves from the CLI WITHOUT pulling GCP infra (leaf module)', () => {
@@ -70,17 +72,15 @@ test('shared SSOT resolves from the CLI WITHOUT pulling GCP infra (leaf module)'
         assert.equal(typeof t.mutating, 'boolean',
             `tool ${t.name} must self-declare mutating:boolean (drives the OAuth read-only partition)`);
     }
-    // Derived partition must cover the whole surface: every tool is either mutating, or a
-    // read-only tool flagged for the OAuth allow-list — the count is DERIVED, never hardcoded.
+    // WS-MCP-SURFACE-SPLIT-EXEC §6.7 (CEO-D-2026-07-04): oauthReadonly advisory is reconciled to
+    // the ENFORCED allow-list (6 tools), so it no longer covers every non-mutating tool; the guard
+    // is now DISJOINTNESS (never both), plus conscious membership via EXPECTED_SSOT_TOOLS.
     const mutating = new Set(mutatingNativeToolNames());
     const readonlyOAuth = new Set(recommendedOAuthReadonlyToolNames());
     for (const t of NATIVE_MCP_TOOLS) {
-        const inExactlyOnePartition = mutating.has(t.name) !== readonlyOAuth.has(t.name);
-        assert.ok(inExactlyOnePartition,
-            `tool ${t.name} must be in exactly one derived partition (mutating XOR oauth-readonly)`);
+        assert.ok(!(mutating.has(t.name) && readonlyOAuth.has(t.name)),
+            `tool ${t.name} must not be BOTH mutating and oauth-readonly-advisory`);
     }
-    assert.equal(mutating.size + readonlyOAuth.size, NATIVE_MCP_TOOLS.length,
-        'derived partitions (mutating + oauth-readonly) must exactly cover the curated surface');
 });
 
 test('mcp-server.js no longer hand-duplicates the curated tool literals', () => {

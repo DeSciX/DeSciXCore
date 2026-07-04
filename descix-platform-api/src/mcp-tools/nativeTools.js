@@ -112,7 +112,10 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
         name: 'resolve_invite',
         description: 'Resolve a DeSciX invite token into app configuration. Returns app context, community info, and the agent_hint authored by the app creator (skill level + goals).',
         mutating: false,
-        oauthReadonly: true,
+        // WS-MCP-SURFACE-SPLIT-EXEC §6.7 D6: this tool is NOT in the enforced
+        // OAUTH_READONLY_TOOLS allow-list (oauthAsHandlers.js) — the oauthReadonly:true
+        // advisory flag had drifted from the enforced policy and was removed to stop
+        // implying enforcement that does not exist.
         inputSchema: {
             type: 'object',
             properties: { invite_token: { type: 'string', description: 'The invite token from .descix/app.json' } },
@@ -137,7 +140,10 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
         name: 'app_records_query',
         description: 'Query your app like a database: a STRUCTURED, metadata-filtered scan (NOT ANN/semantic) over the app data plane returning ALL records matching a predicate (e.g. type=episode AND show=X). Supports $eq/$in/$ne + field projection. STRONGLY CONSISTENT (read-after-write). Use ask_question_to_app for fuzzy semantic KB search.',
         mutating: false,
-        oauthReadonly: true,
+        // WS-MCP-SURFACE-SPLIT-EXEC §6.7 D6: this tool is NOT in the enforced
+        // OAUTH_READONLY_TOOLS allow-list (oauthAsHandlers.js) — the oauthReadonly:true
+        // advisory flag had drifted from the enforced policy and was removed to stop
+        // implying enforcement that does not exist.
         inputSchema: {
             type: 'object',
             properties: {
@@ -154,7 +160,10 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
         name: 'app_records_get',
         description: 'Fetch specific records from your app data plane by id (point lookup) with an arbitrary metadata projection. Firestore-backed, strongly consistent.',
         mutating: false,
-        oauthReadonly: true,
+        // WS-MCP-SURFACE-SPLIT-EXEC §6.7 D6: this tool is NOT in the enforced
+        // OAUTH_READONLY_TOOLS allow-list (oauthAsHandlers.js) — the oauthReadonly:true
+        // advisory flag had drifted from the enforced policy and was removed to stop
+        // implying enforcement that does not exist.
         inputSchema: {
             type: 'object',
             properties: {
@@ -192,6 +201,33 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
         inputSchema: {
             type: 'object',
             properties: {},
+        },
+    },
+    {
+        // WS-MCP-SURFACE-SPLIT-EXEC (CEO-D-2026-07-04 §6.3, D2): the DISCOVERY-CORE invoke gateway.
+        // tell_me_how surfaces MESH-DISCOVERABLE commands (everything NOT in the handshake core);
+        // this is how a client actually calls one without it being advertised at tools/list. It is a
+        // thin passthrough into the SAME /apifront CommandHandler.invoke path — so EVERY existing
+        // call-time gate (permission, credits, OAuth scope, service-account) applies to the TARGET
+        // command exactly as if called directly. Nothing is bypassed.
+        // mutating:true — a gateway that can reach mutating targets is itself treated as mutating, so
+        // it is NEVER placed in the public-internet read-only OAuth surface. Internal/CLI callers get it.
+        name: 'execute_remote_command',
+        description:
+            'Invoke a platform command discovered via tell_me_how that is NOT advertised in the ' +
+            'handshake tool list (the MESH-DISCOVERABLE surface). Pass the exact command name and its ' +
+            'params; the call runs through all normal permission, credit-metering and scope gates for ' +
+            'that command — you can only do what you are already entitled to do. Use tell_me_how first ' +
+            'to discover the command name and its parameters. Example: execute_remote_command({ command: ' +
+            '"beast_get_dashboard", params: { ... } }).',
+        mutating: true,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                command: { type: 'string', description: 'The exact command name to invoke (as returned by tell_me_how).' },
+                params: { type: 'object', description: "Parameters for the target command (its own inputSchema). Omit for no-arg commands." },
+            },
+            required: ['command'],
         },
     },
     {
@@ -234,4 +270,31 @@ export function mutatingNativeToolNames() {
 /** EVP-recommended read-only tools for the security-owned OAuth allow-list (advisory). */
 export function recommendedOAuthReadonlyToolNames() {
     return NATIVE_MCP_TOOLS.filter(t => t.mutating === false && t.oauthReadonly === true).map(t => t.name);
+}
+
+/**
+ * DISCOVERY-CORE — the CEO-RATIFIED (CEO-D-2026-07-04-MCP-SURFACE-SPLIT-EXECUTION §3) set of tools
+ * advertised at the MCP handshake (tools/list) for STANDARD callers. Everything else that is
+ * registered + callable is MESH-DISCOVERABLE: reachable via tell_me_how + execute_remote_command but
+ * NOT advertised at handshake, so a standard session pays ~1k tokens of catalog instead of ~8.7k.
+ * The "8" of §3 is 8 CRITERIA ROWS; the mesh-health row names TWO tools (list_services +
+ * service_health_check), so this is 9 tool NAMES. Membership is ratified — do NOT add/remove without
+ * a CEO ruling. (execute_remote_command, list_services, service_health_check are advertised via
+ * commandMeta mcp:true in DeSciX_Cloud; the other 6 live in NATIVE_MCP_TOOLS above.)
+ */
+export const DISCOVERY_CORE_TOOL_NAMES = Object.freeze([
+    'tell_me_how',
+    'execute_remote_command',
+    'ask_question_to_app',
+    'query_knowledge_base',
+    'find_communities',
+    'fetch_my_purchases',
+    'get_credit_balance',
+    'list_services',
+    'service_health_check',
+]);
+
+/** True if `name` is in the ratified DISCOVERY-CORE handshake set. */
+export function isDiscoveryCoreTool(name) {
+    return DISCOVERY_CORE_TOOL_NAMES.includes(name);
 }

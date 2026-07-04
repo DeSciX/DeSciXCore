@@ -106,7 +106,6 @@
       "DEFAULT_KNOWLEDGEBASE_NAME": "General",
       "VECTORIZE_MODE": "sync",
       "PINECONE_INTEGRATED_EMBED_MODEL": "llama-text-embed-v2",
-      "PINECONE_NAMESPACE_MODE": "community_id",
       "PLATFORM_DEFAULT_CHAIN": "polygon",
       "DEFAULT_AI_MODEL": "gemini-2.0-flash",
       "CHAIN_DB_ID": "descix-chain",

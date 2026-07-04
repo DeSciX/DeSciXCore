@@ -63,12 +63,11 @@ function baseDefaults(overrides = {}) {
     };
 }
 
-// The 9 platform-node keys that were MOVED OUT of the base into per-service
+// The 8 platform-node keys that were MOVED OUT of the base into per-service
 // additionalRequiredKeys (DeSciX_Cloud/daita). NONE of these may be base-required.
 const MOVED_PLATFORM_NODE_KEYS = [
     'PINECONE_INDEX_NAME',
     'PINECONE_API_KEY',
-    'PINECONE_NAMESPACE_MODE',
     'GEMINI_API_KEY',
     'INTELLIGENCE_LEVELS',
     'DEFAULT_AI_MODEL',
@@ -158,7 +157,6 @@ test('DeSciX_Cloud per-service keys pass when present alongside base keys', asyn
     const dir = await mkConfigDir(t, baseDefaults({
         PINECONE_INDEX_NAME: 'descix-dev',
         PINECONE_API_KEY: 'k',
-        PINECONE_NAMESPACE_MODE: 'community_id',
         GEMINI_API_KEY: 'g',
         INTELLIGENCE_LEVELS: { '2': { model: 'gemini-3.1-flash-lite' } },
         DEFAULT_AI_MODEL: 'gemini-3.1-flash-lite',
@@ -171,7 +169,7 @@ test('DeSciX_Cloud per-service keys pass when present alongside base keys', asyn
     const cfg = createCloudConfig({
         rootPath: dir,
         additionalRequiredKeys: [
-            'PINECONE_INDEX_NAME', 'PINECONE_API_KEY', 'PINECONE_NAMESPACE_MODE',
+            'PINECONE_INDEX_NAME', 'PINECONE_API_KEY',
             'GEMINI_API_KEY', 'INTELLIGENCE_LEVELS', 'DEFAULT_AI_MODEL',
             'DEFAULT_INTELLIGENCE_LEVEL', 'PLATFORM_DEFAULT_CHAIN', 'STORAGE_BUCKET',
         ],
