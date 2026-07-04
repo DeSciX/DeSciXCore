@@ -802,6 +802,83 @@ communityCommand
     }
   });
 
+communityCommand
+  .command('rename')
+  .description('[ADMIN] Rename a community_id across all surfaces (Firestore, Products, Pinecone metadata, ServiceManifests, descix-chain registry). On-chain contract + token symbol are UNTOUCHED. Dry-run first.')
+  .argument('<old_community_id>', 'Current community_id (e.g. unkamon)')
+  .argument('<new_community_id>', 'New canonical community_id (e.g. unk)')
+  .option('--dry-run', 'Preview the full cascade plan without executing')
+  .option('--yes', 'Skip confirmation prompt')
+  .action(async (oldId, newId, options) => {
+    try {
+      const apiClient = new DeSciXApiClient();
+      await requireAuth(apiClient);
+      const dryRun = !!options.dryRun;
+
+      // Always fetch the plan first (dry_run:true) for display.
+      const previewResp = await apiClient.invoke('rename_community', {
+        old_community_id: oldId, new_community_id: newId, dry_run: true
+      });
+      const preview = previewResp.message || previewResp;
+      const plan = preview.plan;
+      if (!plan) {
+        console.error(chalk.red('\n  Error: could not retrieve rename plan.\n'));
+        process.exit(1);
+      }
+
+      console.log(chalk.bold(`\nCommunity rename plan: ${oldId} -> ${newId}\n`));
+      console.log(chalk.gray(`  Community doc:         old_exists=${plan.community_doc.old_exists}, new_exists=${plan.community_doc.new_exists}`));
+      console.log(chalk.gray(`  Name / token:          ${plan.community_doc.community_name} / ${plan.community_doc.token_symbol}`));
+      console.log(chalk.gray(`  Apps subcollection:    ${plan.community_doc.apps_subcollection.join(', ') || '(none)'}`));
+      console.log(chalk.gray(`  Roles subcollection:   ${plan.community_doc.roles_subcollection.join(', ') || '(none)'}`));
+      console.log(chalk.gray(`  Community tree docs:   ${plan.community_doc.total_docs_in_tree}`));
+      console.log(chalk.gray(`  Products to update:    ${plan.products.count} (${plan.products.app_ids.join(', ')})`));
+      console.log(chalk.gray(`  User purchases:        ${plan.user_purchases_to_repoint}`));
+      console.log(chalk.gray(`  ServiceManifests:      ${plan.service_manifests_to_retag.join(', ') || '(none)'}`));
+      console.log(chalk.gray(`  Chain product/contract: ${plan.chain.product_doc_old || '(none)'} / ${plan.chain.contract_address || '(none)'} (symbol ${plan.chain.token_symbol}, communityId ${plan.chain.contract_community_id})`));
+      console.log(chalk.cyan(`  Pinecone re-tag:       scanned=${plan.pinecone.scanned}, matched(community=${oldId})=${plan.pinecone.matched}, legacy-id-prefixed=${plan.pinecone.legacyIdMatched}`));
+      console.log(chalk.gray(`    by app: ${JSON.stringify(plan.pinecone.byApp)}`));
+      console.log(chalk.gray(`    prefix counts: ${JSON.stringify(plan.pinecone.prefixCounts)}`));
+
+      if (dryRun) {
+        console.log(chalk.yellow('\n  DRY RUN — no changes made. Remove --dry-run to execute.\n'));
+        return;
+      }
+
+      if (!options.yes) {
+        const readline = await import('readline');
+        const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+        const answer = await new Promise(resolve => rl.question(
+          chalk.yellow(`\n  Execute rename ${oldId} -> ${newId}? Re-tags ${plan.pinecone.matched} vector(s) and deletes Community/${oldId} after verifying Community/${newId}. [y/N] `),
+          resolve
+        ));
+        rl.close();
+        if (answer.toLowerCase() !== 'y') {
+          console.log(chalk.gray('\n  Aborted.\n'));
+          return;
+        }
+      }
+
+      const resp = await apiClient.invoke('rename_community', {
+        old_community_id: oldId, new_community_id: newId, dry_run: false
+      });
+      const result = resp.message || resp;
+      const ex = result.executed || {};
+      console.log(chalk.green(`\n  ${result.message}\n`));
+      console.log(chalk.gray(`  Community doc copied:  ${ex.community_doc_copied}`));
+      console.log(chalk.gray(`  Old community deleted: ${ex.old_community_deleted}`));
+      console.log(chalk.gray(`  Products updated:      ${ex.products_updated}`));
+      console.log(chalk.gray(`  User purchases:        ${ex.user_purchases_repointed}`));
+      console.log(chalk.gray(`  Pinecone re-tagged:    ${ex.pinecone?.updated} / matched ${ex.pinecone?.matched}`));
+      console.log(chalk.gray(`  ServiceManifests:      ${ex.service_manifests_retagged}`));
+      console.log(chalk.gray(`  Chain re-pointed:      ${ex.chain_repointed} (contract ${ex.chain_contract_address}, symbol unchanged)`));
+      console.log();
+    } catch (error) {
+      console.error(chalk.red(`\n  Error: ${error.message}\n`));
+      process.exit(1);
+    }
+  });
+
 // Deploy a token contract without creating community
 communityCommand
   .command('deploy-token')
