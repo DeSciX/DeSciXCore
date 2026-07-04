@@ -115,7 +115,9 @@
       "AIRDROP_MAX_RETRIES": 5,
       "AIRDROP_SCHEDULER_INTERVAL_SECONDS": 3600,
       "GET_PLATFORM_HOLDINGS_CACHE_TTL_SECONDS": 60,
-      "SERVICE_MANIFEST_TTL_SECONDS": 60
-    }
+      "SERVICE_MANIFEST_TTL_SECONDS": 60,
+      "PLATFORM_RUNTIME_SERVICE_ACCOUNTS": null
+    },
+    "_PLATFORM_RUNTIME_SERVICE_ACCOUNTS_comment": "WS-MCP-SURFACE-SPLIT-EXEC §6.5 (CEO ruling 2026-07-04): documentation-only registry entry — this `defaults` section is NOT read by config.js at runtime (grep-verified: no `.defaults`/`.values` consumer in src/config.js); the actual value resolution is per-env `defaults-config-{env}.json` (non-secret allow-list of platform-runtime GCP service-account emails). Listed here as `null` (not a real fallback) to document the key's existence and its fail-closed posture: absent/null/empty means the SA-acceptance gate rejects everything. This key is intentionally NOT declared with a real value in this section because it is security-relevant (per this section's own docstring: 'Use SPARINGLY... no security implications')."
   }
 }
