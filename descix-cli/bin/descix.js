@@ -3966,13 +3966,72 @@ async function clearSession(communityId, appId) {
     }
 }
 
+/**
+ * WS-R7-PREREQS (CEO-D-2026-07-04-R7-PREREQS-RESCOPE ruling 3) session helpers.
+ *
+ * Session files are keyed {community_id}_{app_id}.json where community_id is the
+ * SERVER-resolved value (returned by app-scoped commands). Before the server response
+ * arrives the community may be unknown client-side — app_id is globally unique on the
+ * platform (product_id === app_id), so `*_{appId}.json` identifies the app's sessions
+ * unambiguously and the newest file is the current thread.
+ */
+
+/**
+ * List existing session files for an app, newest first.
+ * @param {string} appId
+ * @returns {Promise<Array<{communityId: string, path: string, updated: number}>>}
+ */
+async function findSessionsForApp(appId) {
+    const sessionDir = path.join(os.homedir(), '.descix', 'sessions');
+    const suffix = `_${appId}.json`;
+    let entries = [];
+    try {
+        entries = await fs.readdir(sessionDir);
+    } catch {
+        return [];
+    }
+    const results = [];
+    for (const name of entries) {
+        if (!name.endsWith(suffix)) continue;
+        const communityId = name.slice(0, name.length - suffix.length);
+        if (!communityId) continue;
+        const filePath = path.join(sessionDir, name);
+        let updated = 0;
+        try {
+            const data = JSON.parse(await fs.readFile(filePath, 'utf-8'));
+            updated = data.updated || 0;
+        } catch {
+            continue; // unreadable session file — skip, do not guess
+        }
+        results.push({ communityId, path: filePath, updated });
+    }
+    results.sort((a, b) => b.updated - a.updated);
+    return results;
+}
+
+/**
+ * Save the session under the AUTHORITATIVE community key and self-heal: remove any
+ * session files for the same app keyed under a DIFFERENT community (e.g. the legacy
+ * hardcoded 'descix_*' mis-keys this fix removes). One app = one live session file.
+ * @param {string} communityId - server-resolved community_id
+ * @param {string} appId
+ * @param {string} interactionId
+ */
+async function saveSessionAuthoritative(communityId, appId, interactionId) {
+    const stale = (await findSessionsForApp(appId)).filter(s => s.communityId !== communityId);
+    await saveSessionInteractionId(communityId, appId, interactionId);
+    for (const st of stale) {
+        try { await fs.unlink(st.path); } catch { /* already gone */ }
+    }
+}
+
 // ============ Chat Commands ============
 
 program
   .command('chat [question...]')
   .description('Chat with an app agent. Usage: descix chat "Your question" or descix chat -q "Your question"')
-  .option('-c, --community <id>', 'Community ID (defaults to descix)')
-  .option('-a, --app <id>', 'App ID (defaults to agent)')
+  .option('-c, --community <id>', 'Community ID (optional; server resolves it from Products)')
+  .option('-a, --app <id>', 'App ID (required unless run from inside a mapped app directory)')
   .option('-q, --question <text>', 'Question to ask (alternative to positional argument)')
   .option('-k, --kb <id...>', 'Knowledge Base ID(s) — repeat for multi-KB, use * for all')
   .option('--apps <ids>', 'Comma-separated app IDs for cross-app query')
@@ -4043,9 +4102,14 @@ program
         return;
       }
 
-      // Single-app mode
-      let communityId = options.community;
-      let appId = options.app;
+      // Single-app mode.
+      // WS-R7-PREREQS (CEO-D-2026-07-04-R7-PREREQS-RESCOPE ruling 3): the hardcoded
+      // communityId||'descix' / appId||'agent' fallbacks are REMOVED. app_id must be
+      // resolvable (flag or workspace context) — FAIL LOUD otherwise. community_id is
+      // server-authoritative: the response carries the Products-resolved value and the
+      // session file is keyed from it.
+      let communityId = options.community || null;
+      let appId = options.app || null;
 
       if (!communityId || !appId) {
         try {
@@ -4053,31 +4117,51 @@ program
           if (wsConfig) {
             const detected = wsConfig.detectContext();
             if (detected) {
-              communityId = communityId || detected.communityId;
-              appId = appId || detected.appId;
+              communityId = communityId || detected.communityId || null;
+              appId = appId || detected.appId || null;
             }
           }
         } catch {
-          // Fall through to defaults
+          // No workspace context — resolution below decides, no defaults
         }
       }
 
-      communityId = communityId || 'descix';
-      appId = appId || 'agent';
+      if (!appId) {
+        console.error(chalk.red(
+          'Error: no app resolved. Pass -a/--app <app_id> or run from inside an app directory ' +
+          'mapped in .descix/workspace.json. (The legacy hardcoded descix/agent fallback was ' +
+          'removed — it silently mis-keyed sessions.)'
+        ));
+        process.exit(1);
+      }
 
-      // Get session interaction_id unless --new flag
+      // Session continuity: exact key when the community is known client-side; otherwise
+      // the app's newest session file (app_id is globally unique) carries the thread.
       let previousInteractionId = null;
       if (!options.new) {
-        previousInteractionId = await getSessionInteractionId(communityId, appId);
+        if (communityId) {
+          previousInteractionId = await getSessionInteractionId(communityId, appId);
+        } else {
+          const sessions = await findSessionsForApp(appId);
+          if (sessions.length > 0) {
+            previousInteractionId = await getSessionInteractionId(sessions[0].communityId, appId);
+          }
+        }
       } else {
-        await clearSession(communityId, appId);
+        if (communityId) {
+          await clearSession(communityId, appId);
+        } else {
+          for (const st of await findSessionsForApp(appId)) {
+            try { await fs.unlink(st.path); } catch { /* already gone */ }
+          }
+        }
       }
 
       // Resolve KB param — single or multi
       const kbList = options.kb || ['General'];
       const useMultiKb = kbList.length > 1 || kbList.includes('*');
 
-      console.log(chalk.gray(`Asking ${communityId}/${appId}...`));
+      console.log(chalk.gray(`Asking ${communityId ? communityId + '/' : ''}${appId}...`));
 
       const invokeParams = {
         app_id: appId,
@@ -4098,9 +4182,24 @@ program
       const response = await apiClient.invoke('ask_question_to_app', invokeParams);
       const result = response.message || response;
 
-      // Save new interaction_id for next message
+      // Save new interaction_id for next message, keyed by the SERVER-resolved
+      // community (authoritative — Products-hydrated). Client-resolved (-c flag /
+      // workspace context) is only accepted when the server did not return one
+      // (older backend); with NEITHER available this FAILS LOUD after printing the
+      // response — the session must never be keyed under a guessed community.
       if (result.interaction_id) {
-        await saveSessionInteractionId(communityId, appId, result.interaction_id);
+        const authoritativeCommunityId = result.community_id || communityId;
+        if (!authoritativeCommunityId) {
+          console.log(chalk.white(result.response || result.text || ''));
+          console.error(chalk.red(
+            '\nError: cannot key the chat session — the server did not return community_id ' +
+            'and none was resolvable client-side. The response above was NOT session-saved. ' +
+            'Pass -c/--community, or update the backend (ask_question_to_app must return the ' +
+            'Products-resolved community_id per CEO-D-2026-07-04-R7-PREREQS-RESCOPE).'
+          ));
+          process.exit(1);
+        }
+        await saveSessionAuthoritative(authoritativeCommunityId, appId, result.interaction_id);
       }
 
       console.log(chalk.green('\n\u2705 Response:\n'));
@@ -4136,14 +4235,26 @@ program
 program
   .command('new-chat')
   .description('Clear chat session for an app (start fresh conversation)')
-  .option('-c, --community <id>', 'Community ID (defaults to descix)')
-  .option('-a, --app <id>', 'App ID (defaults to agent)')
+  .option('-c, --community <id>', 'Community ID (optional; clears only that community key)')
+  .option('-a, --app <id>', 'App ID (required)')
   .action(async (options) => {
     try {
-      const communityId = options.community || 'descix';
-      const appId = options.app || 'agent';
-      await clearSession(communityId, appId);
-      console.log(chalk.green(`Chat session cleared for ${communityId}/${appId}. Next chat will start fresh.`));
+      // WS-R7-PREREQS: hardcoded descix/agent fallbacks REMOVED — an app id is required.
+      const appId = options.app || null;
+      if (!appId) {
+        console.error(chalk.red('Error: -a/--app <app_id> is required (the legacy hardcoded descix/agent fallback was removed).'));
+        process.exit(1);
+      }
+      if (options.community) {
+        await clearSession(options.community, appId);
+        console.log(chalk.green(`Chat session cleared for ${options.community}/${appId}. Next chat will start fresh.`));
+      } else {
+        const sessions = await findSessionsForApp(appId);
+        for (const st of sessions) {
+          try { await fs.unlink(st.path); } catch { /* already gone */ }
+        }
+        console.log(chalk.green(`Chat session cleared for ${appId} (${sessions.length} session file(s)). Next chat will start fresh.`));
+      }
     } catch (error) {
       console.error(chalk.red(error.message));
       process.exit(1);
