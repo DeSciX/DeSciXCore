@@ -277,8 +277,12 @@ export class PowchBridgeClient {
   }
 
   logout() {
-    // Session managed inside Powch iframe; no postMessage command. No-op to satisfy interface.
-    return Promise.resolve();
+    // WS-HEADLESS-MVP-R7 (defect #4): was a hard no-op — shell logout never reached
+    // Powch. Fits the existing generic request/response plumbing untouched: Powch
+    // whitelists POWCH_LOGOUT and routes it to its internal full-logout handler,
+    // responding via the standard POWCH_RESPONSE requestId echo (contract agreed with
+    // the Powch-side agent under this workstream — no wire-format change on either side).
+    return this._sendRequest('POWCH_LOGOUT', {});
   }
 
   request(options = {}) {
