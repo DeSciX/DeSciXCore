@@ -2621,16 +2621,14 @@ siteCommand
           app_id: appId,
           community_id: communityId
         });
-        const buildEnvVars = {
-          VITE_GTM_ID: buildConfigResult.message.VITE_GTM_ID,
-          VITE_GTM_AUTH: buildConfigResult.message.VITE_GTM_AUTH,
-          VITE_GTM_PREVIEW: buildConfigResult.message.VITE_GTM_PREVIEW,
-          VITE_GTM_ENV_SUFFIX: buildConfigResult.message.VITE_GTM_ENV_SUFFIX,
-          VITE_BASE_PATH: buildConfigResult.message.VITE_BASE_PATH,
-          VITE_API_URL: buildConfigResult.message.VITE_API_URL,
-          VITE_SITE_URL: buildConfigResult.message.VITE_SITE_URL,
-          VITE_POWCH_APP_URL: buildConfigResult.message.VITE_POWCH_APP_URL,
-        };
+        // Canonical-contract ferry (engineering-culture mandate 2026-06-18): the server's
+        // get_site_build_config owns the build-env schema — forward EVERY VITE_* key it
+        // returns instead of hand-mirroring the field list (drift bug class; a hand mirror
+        // silently dropped VITE_POWCH_FIRST_PARTY_ORIGINS, baking deny-by-default [] into
+        // the Powch PWA and killing the first-party email ToS auto-grant).
+        const buildEnvVars = Object.fromEntries(
+          Object.entries(buildConfigResult.message || {}).filter(([k]) => k.startsWith('VITE_'))
+        );
         console.log(chalk.cyan(`  Build env: base=${buildConfigResult.message.VITE_BASE_PATH}, gtm=${buildConfigResult.message.VITE_GTM_ID}\n`));
 
         // Run buildCommand if specified
