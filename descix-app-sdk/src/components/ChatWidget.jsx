@@ -465,6 +465,11 @@ const ChatWidget = (props = {}) => {
   // CREDITS_REQUIRED CTA), instead of the CTA appearing only on the zero-balance error.
   const [buyMenuAnchor, setBuyMenuAnchor] = useState(null);
   const [signingIn, setSigningIn] = useState(false);
+  // WS-HEADLESS-MVP-R7 (defect #3): minimal post-checkout status indicator. Stripe
+  // redirects the SAME tab back to success_url/cancel_url (handleBuyCredits opens it
+  // via window.open — the checkout itself still navigates within that new tab), so on
+  // return there is otherwise no visual feedback at all. 'success' | 'cancelled' | null.
+  const [checkoutStatus, setCheckoutStatus] = useState(null);
 
   // REACTIVE session from context (AppData.sessionInfo alone is a non-reactive cache —
   // reading it here would freeze the widget in its pre-login state after Powch login).
@@ -525,6 +530,25 @@ const ChatWidget = (props = {}) => {
 
   useEffect(() => { refreshCredits(); }, [refreshCredits, appId]);
 
+  // WS-HEADLESS-MVP-R7 (defect #3): on mount, detect a return from Stripe checkout via
+  // the `checkout=success|cancelled` query param handleBuyCredits appends to
+  // success_url/cancel_url, show a small status indicator, refresh the balance (the
+  // authoritative source — this UI is advisory), then strip the param so a later
+  // reload doesn't re-show stale status. Deliberately minimal: no transactions/history
+  // page (that's the separate, later Powch payments migration).
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const status = params.get('checkout');
+    if (status !== 'success' && status !== 'cancelled') return;
+    setCheckoutStatus(status);
+    if (status === 'success') refreshCredits();
+    params.delete('checkout');
+    const query = params.toString();
+    const cleanUrl = `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`;
+    window.history.replaceState(window.history.state, '', cleanUrl);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Round 5: while the CREDITS_REQUIRED alert is showing, poll the balance so a
   // purchase completed in another tab (Stripe checkout return) or a grant clears the
   // alert automatically — refreshCredits() already dismisses it once balance > 0.
@@ -536,14 +560,23 @@ const ChatWidget = (props = {}) => {
     return () => clearInterval(t);
   }, [creditsRequired, isAuthenticated, refreshCredits]);
 
+  // WS-HEADLESS-MVP-R7 (defect #3): append a distinguishing `checkout` query param so
+  // the page returned to after Stripe checkout can tell success from cancel (the
+  // mount-time effect above reads it). Preserves any existing query params.
+  const buildCheckoutReturnUrl = (status) => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('checkout', status);
+    return url.toString();
+  };
+
   const handleBuyCredits = async (amountUsd) => {
     setBuyingCredits(true);
     try {
       const res = await makeCommandRequestJSON('create_stripe_checkout_session', {
         amount_usd: amountUsd,
         purchase_type: 'ai_credits',
-        success_url: window.location.href,
-        cancel_url: window.location.href,
+        success_url: buildCheckoutReturnUrl('success'),
+        cancel_url: buildCheckoutReturnUrl('cancelled'),
       });
       const msg = res.message || res;
       // Canonical response contract: create_stripe_checkout_session returns
@@ -1369,6 +1402,22 @@ const ChatWidget = (props = {}) => {
         </Box>
       )}
 
+      {/* WS-HEADLESS-MVP-R7 (defect #3): minimal post-checkout status indicator — no
+          transactions/history page (out of scope; separate Powch payments migration). */}
+      {checkoutStatus !== null && (
+        <Alert
+          severity={checkoutStatus === 'success' ? 'success' : 'info'}
+          data-testid="checkout-status-alert"
+          data-checkout-status={checkoutStatus}
+          sx={{ mx: 2, mt: 1, alignItems: 'center' }}
+          onClose={() => setCheckoutStatus(null)}
+        >
+          {checkoutStatus === 'success'
+            ? 'Checkout complete — your AI credits balance has been refreshed.'
+            : 'Checkout cancelled — no charge was made.'}
+        </Alert>
+      )}
+
       {/* WS-HEADLESS-MVP-A4: Powch sign-in affordance — chat is auth'd via Powch */}
       {!isAuthenticated && (
         <Alert
@@ -1427,7 +1476,13 @@ const ChatWidget = (props = {}) => {
               variant="outlined"
               color="success"
               data-testid="chat-user-chip"
-              label={sessionInfo?.email || sessionInfo?.id || sessionInfo?.user_id}
+              // WS-HEADLESS-MVP-R7 (defect #1): the session object carries no display-name
+              // field (AppData.jsx / AppContext.jsx — only id/user_id/wallet_address/
+              // access_token/roles/custodial_balance). Prefer the verified email (Powch
+              // surfaces it under the first-party ToS grant, CEO-D-2026-07-05-R7); NEVER
+              // fall back to the raw passkey id/user_id — that's an opaque internal
+              // identifier, not a human-readable label.
+              label={sessionInfo?.email || 'Signed in'}
             />
           </Tooltip>
           {lastDebit !== null && (

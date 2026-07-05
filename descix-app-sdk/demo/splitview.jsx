@@ -80,7 +80,9 @@ function DemoChrome() {
             color="success"
             variant="outlined"
             data-testid="chrome-user-chip"
-            label={sessionInfo?.email || sessionInfo?.id || sessionInfo?.user_id}
+            // WS-HEADLESS-MVP-R7 (defect #1): same fallback fix as ChatWidget's
+            // chat-user-chip — never surface the raw passkey id/user_id.
+            label={sessionInfo?.email || 'Signed in'}
             sx={{ mr: 1, maxWidth: 260 }}
           />
         )}
