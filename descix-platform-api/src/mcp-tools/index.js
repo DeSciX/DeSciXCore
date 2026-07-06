@@ -10,3 +10,8 @@ export {
     DISCOVERY_CORE_TOOL_NAMES,
     isDiscoveryCoreTool,
 } from './nativeTools.js';
+export {
+    ESSENTIAL_TOOL_NAMES,
+    MCP_HANDSHAKE_INSTRUCTIONS,
+    PLATFORM_BOOTSTRAP_SUMMARY,
+} from './handshake.js';

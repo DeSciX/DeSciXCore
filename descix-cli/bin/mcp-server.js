@@ -27,7 +27,7 @@ import * as path from 'path';
 // This stdio server imports them and CONCATENATES its CLI-LOCAL diagnostics (descix_doctor,
 // platform_health) which are NOT /apifront commands and are intentionally stdio-only.
 // The previously hand-duplicated curated literal in this file is GONE.
-import { toMcpToolList, NATIVE_MCP_TOOLS as SHARED_NATIVE_TOOLS } from '@descix/platform-api/mcp-tools';
+import { toMcpToolList, NATIVE_MCP_TOOLS as SHARED_NATIVE_TOOLS, MCP_HANDSHAKE_INSTRUCTIONS } from '@descix/platform-api/mcp-tools';
 
 // ---------------------------------------------------------------------------
 // Tool definitions for the stdio MCP transport.
@@ -320,7 +320,10 @@ try {
   // Create MCP server
   const server = new Server(
     { name: 'DeSciX MCP Server', version: '1.0.0' },
-    { capabilities: { tools: {} } },
+    // WS-MVP-FIRSTCONTACT F1: the external-consumer operating manual rides the MCP
+    // `initialize` result on BOTH transports. SSOT: @descix/platform-api/mcp-tools
+    // handshake.js — do not hand-author a second copy here.
+    { capabilities: { tools: {} }, instructions: MCP_HANDSHAKE_INSTRUCTIONS },
   );
 
   // tools/list — PERMISSION-FILTERED surface (WS-MCP-SURFACE-SPLIT §10.2).
