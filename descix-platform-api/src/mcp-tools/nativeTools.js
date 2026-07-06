@@ -96,16 +96,18 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
     },
     {
         name: 'tell_me_how',
-        description: 'Discover platform tools and services by asking a natural language question. Searches the service mesh for relevant capabilities. If results are empty, try scope "discovery" or rephrase.',
+        description: 'Discover platform tools and services by asking a natural language question. Searches the service mesh for relevant capabilities; results include callable schemas and an invocation envelope. Call with scope "bootstrap" FIRST on a new session: it deterministically returns the platform summary, your caller context, credit balance, and the essential tools. If results are empty, try scope "discovery" or rephrase.',
         mutating: false,
         oauthReadonly: true,
         inputSchema: {
             type: 'object',
             properties: {
-                question: { type: 'string', description: 'What do you want to do?' },
-                scope: { type: 'string', enum: ['project', 'entitlements', 'discovery'], description: '"entitlements" = your purchased tools, "discovery" = all platform capabilities. Default: entitlements.' },
+                question: { type: 'string', description: 'What do you want to do? Required for every scope except "bootstrap".' },
+                // WS-MVP-FIRSTCONTACT F3: 'bootstrap' = deterministic first-contact on-ramp
+                // (no vector search). question becomes optional for that scope only; the
+                // server still hard-requires it for project/entitlements/discovery.
+                scope: { type: 'string', enum: ['bootstrap', 'project', 'entitlements', 'discovery'], description: '"bootstrap" = deterministic first-call on-ramp (platform summary + caller context + credit balance + essential tool schemas), "entitlements" = your purchased tools, "discovery" = all platform capabilities. Default: entitlements.' },
             },
-            required: ['question'],
         },
     },
     {
