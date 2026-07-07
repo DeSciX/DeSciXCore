@@ -2572,6 +2572,27 @@ siteCommand
   .action(async (options) => {
     try {
       const apiClient = new DeSciXApiClient();
+
+      // WS-DEPLOY-HARDENING item 7: `site upload` must never silently target a stale local
+      // backend. detectApiUrl() checks process.env.DESCIX_API_URL first, then falls back to
+      // workspace.json's derived localhost URL for DEV (WorkspaceConfig.getApiUrl()), then
+      // GlobalConfig, then production. `--env` (except dev, by design — "let workspace.json
+      // resolve naturally") and `--api-url` are folded into DESCIX_API_URL by the preAction
+      // hook BEFORE this action runs — so checking DESCIX_API_URL here reflects whether the
+      // resolution took the explicit path or the silent fallback path. Site deploys target a
+      // cloud env, so a local resolution reached via the silent fallback is a hard failure.
+      const resolvedApiUrl = await apiClient.ensureBaseUrl();
+      const isLocalApiUrl = /^https?:\/\/(localhost|127(?:\.\d{1,3}){3})(?::\d+)?/i.test(resolvedApiUrl) ||
+        /:4000(?:\/|$)/.test(resolvedApiUrl);
+      const explicitlyResolvedViaEnv = !!process.env.DESCIX_API_URL;
+      if (isLocalApiUrl && !explicitlyResolvedViaEnv) {
+        console.error(chalk.red(
+          `\n❌ Refusing site upload against a local backend (${resolvedApiUrl}). ` +
+          `Site deploys target a cloud env — pass --env=<dev|demo|prod> or export DESCIX_API_URL=https://<env>.descix.net\n`
+        ));
+        process.exit(1);
+      }
+
       await requireAuth(apiClient);
 
       // Load workspace context
