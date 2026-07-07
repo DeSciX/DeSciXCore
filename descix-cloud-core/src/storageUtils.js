@@ -168,6 +168,12 @@ class FirestoreCollections {
     // See V2_docs/services/ai-credits.md.
     static USER_CREDITS(user_id) { return new BaseStoragePath("UserCache/{user_id}/Credits", "dict").getPath({ user_id }); }
     static USER_CREDIT_LEDGER(user_id) { return new BaseStoragePath("UserCache/{user_id}/CreditLedger", "dict").getPath({ user_id }); }
+    // WS-FREEMIUM-ONRAMP (CEO-D-2026-07-06-FREEMIUM-ONRAMP): per-UTC-day sponsored-grant
+    // burn counters {granted_micro_total, grants_count, updated_at}, doc id 'YYYY-MM-DD'.
+    // In practice only the sponsor-pool principal (creditsService.SPONSOR_POOL_USER_ID)
+    // carries this subcollection — it enforces the POOL daily cap independently of pool
+    // balance. See V2_docs/services/ai-credits.md §5a.
+    static USER_SPONSORED_DAYS(user_id) { return new BaseStoragePath("UserCache/{user_id}/SponsoredDays", "dict").getPath({ user_id }); }
 }
 
 // --- FirestoreDocumentPath ---
