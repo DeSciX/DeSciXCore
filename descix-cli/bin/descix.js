@@ -2717,7 +2717,7 @@ siteCommand
         preview: options.preview || false
       });
 
-      const { signed_urls, existing_manifest, token_id, site_url } = tokenResponse.message;
+      const { signed_urls, upload_headers, existing_manifest, token_id, site_url } = tokenResponse.message;
 
       // 3. Determine delta
       let filesToUpload = fileList;
@@ -2769,12 +2769,22 @@ siteCommand
           try {
             const content = await fs.readFile(file._absolutePath);
 
+            // Canonical contract (WS-DEPLOY-HARDENING item 4): the server binds Cache-Control
+            // into the v4 signed URL signature (generateSiteUploadUrls/siteAssetCacheControl).
+            // Ferry the exact header bag the server minted — never re-derive the policy
+            // client-side. A mismatched header (including a client-side --no-cache override)
+            // makes GCS return 403 signature-mismatch, so once the server ferries a bound
+            // header for this path, --no-cache is a no-op for it (falls back to legacy
+            // Content-Type-only behavior for paths the server didn't ferry a header for).
+            const ferriedHeaders = upload_headers && upload_headers[file.path];
+            const headers = ferriedHeaders || {
+              'Content-Type': file.content_type,
+              ...(options.noCache ? { 'Cache-Control': 'no-cache' } : {})
+            };
+
             const response = await fetch(signedUrl, {
               method: 'PUT',
-              headers: {
-                'Content-Type': file.content_type,
-                ...(options.noCache ? { 'Cache-Control': 'no-cache' } : {})
-              },
+              headers,
               body: content
             });
 
