@@ -258,6 +258,30 @@ export async function completeDeviceLogin(params) {
   }
 }
 
+/**
+ * WS-FREEMIUM-ONRAMP C2/C3 — complete the browser OAuth connect ceremony.
+ * Called by ConnectCeremonyWidget AFTER the Powch passkey+ToS ceremony reaches CONNECTED,
+ * presenting the fresh session (makeCommandRequestJSON auto-attaches it — allowGuest:false).
+ * The server (complete_connect_ceremony) mints the single-use OAuth code bound to the
+ * authenticated user and returns redirect_url; the widget follows it back to claude.ai.
+ */
+export async function completeConnectCeremony(params) {
+  try {
+    const { ceremony_id } = params;
+    if (!ceremony_id) throw new Error('ceremony_id is required');
+    const data = await makeCommandRequestJSON('complete_connect_ceremony', { ceremony_id }, false);
+    if (data && data.status === ResponseStatus.OK) {
+      // redirect_url may be at top-level or nested under message depending on the envelope.
+      const redirect_url = data.redirect_url ?? data.message?.redirect_url ?? null;
+      return { status: ResponseStatus.OK, redirect_url, message: data.message };
+    }
+    return { status: ResponseStatus.ERROR, message: data?.message || 'Failed to complete connect ceremony' };
+  } catch (error) {
+    console.error('Network error completing connect ceremony:', error);
+    return { status: ResponseStatus.ERROR, message: error.message || 'Failed to complete connect ceremony' };
+  }
+}
+
 export async function initiateGoogleOAuth() {
   const config = await getGoogleOAuthConfig();
   if (!config?.oauthUrl) throw new Error('Google OAuth URL not configured on server');
