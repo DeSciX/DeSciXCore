@@ -400,6 +400,7 @@ export const AppContextView = {
   WALLET: 'WALLET',
   DEVELOPER_TOOLS: 'DEVELOPER_TOOLS',
   DEVICE_LOGIN: 'DEVICE_LOGIN', // CLI/MCP device login flow
+  CONNECT_CEREMONY: 'CONNECT_CEREMONY', // WS-FREEMIUM-ONRAMP: browser OAuth connect ceremony (claude.ai) — sibling of DEVICE_LOGIN
   STANDALONE_APP: 'STANDALONE_APP', // Isolated Standalone App mode
   CLAIM_PAGE: 'CLAIM_PAGE',     // NEW: Claim page view
   ERROR: 'ERROR',
