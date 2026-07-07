@@ -486,7 +486,7 @@ export async function updateSite(options = {}) {
       preview: options.preview || false
     });
     
-    const { signed_urls, existing_manifest, token_id, site_url } = tokenResponse.message;
+    const { signed_urls, upload_headers, existing_manifest, token_id, site_url } = tokenResponse.message;
     
     // Determine delta
     let filesToUpload = fileList;
@@ -517,10 +517,15 @@ export async function updateSite(options = {}) {
       if (!signedUrl) continue;
       
       const content = await fs.readFile(path.join(siteDir, file.path));
-      
+
+      // Canonical contract (WS-DEPLOY-HARDENING item 4): the server binds Cache-Control into
+      // the v4 signed URL signature (generateSiteUploadUrls/siteAssetCacheControl). Ferry the
+      // exact header bag the server minted — never re-derive the policy client-side, and never
+      // send a header the signature doesn't expect (GCS returns 403 signature-mismatch).
+      const headers = (upload_headers && upload_headers[file.path]) || { 'Content-Type': file.content_type };
       const response = await fetch(signedUrl, {
         method: 'PUT',
-        headers: { 'Content-Type': file.content_type },
+        headers,
         body: content
       });
       
