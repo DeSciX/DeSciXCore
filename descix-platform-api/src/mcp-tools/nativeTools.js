@@ -212,8 +212,11 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
         // thin passthrough into the SAME /apifront CommandHandler.invoke path — so EVERY existing
         // call-time gate (permission, credits, OAuth scope, service-account) applies to the TARGET
         // command exactly as if called directly. Nothing is bypassed.
-        // mutating:true — a gateway that can reach mutating targets is itself treated as mutating, so
-        // it is NEVER placed in the public-internet read-only OAuth surface. Internal/CLI callers get it.
+        // mutating:true — a gateway that CAN reach mutating targets is itself classified mutating.
+        // WS-FREEMIUM-ONRAMP FO-2 (doc c §2.5): it IS now admitted to the read-only OAuth SURFACE
+        // (a read-scoped session may CALL the gateway — see MESH_INVOKE_GATEWAY_TOOLS below), but the
+        // scope-aware dispatch gate in DeSciX_Cloud CommandHandler.invoke enforces that the re-entrant
+        // TARGET command is read-only. The classification is about the tool; the gate is about the call.
         name: 'execute_remote_command',
         description:
             'Invoke a platform command discovered via tell_me_how that is NOT advertised in the ' +
@@ -299,4 +302,26 @@ export const DISCOVERY_CORE_TOOL_NAMES = Object.freeze([
 /** True if `name` is in the ratified DISCOVERY-CORE handshake set. */
 export function isDiscoveryCoreTool(name) {
     return DISCOVERY_CORE_TOOL_NAMES.includes(name);
+}
+
+/**
+ * MESH-INVOKE GATEWAY tools (WS-FREEMIUM-ONRAMP FO-2, doc c §2.4/§2.5). These are mutating:true
+ * tools that dispatch a DISCOVERED target command by re-entering CommandHandler.invoke (currently
+ * only execute_remote_command). They are the ONE class admitted to the read-only OAuth surface
+ * despite a mutating self-classification, because the scope-aware dispatch gate
+ * (DeSciX_Cloud apiFront.js CommandHandler.invoke) fires again on the re-entrant TARGET — so a
+ * read-scoped session can CALL the gateway but cannot dispatch a mutating target through it.
+ *
+ * SINGLE SOURCE so the two consumers never drift:
+ *   - surface admission: DeSciX_Cloud oauthAsHandlers.js isToolAllowedForOAuth (exempts these from
+ *     the MUTATING_TOOL_NAMES defense-in-depth),
+ *   - dispatch exemption: DeSciX_Cloud apiFront.js invoke gate (does NOT treat the gateway call
+ *     itself as a mutating dispatch; its inner re-entry is gated by construction).
+ * Do NOT add a tool here without the matching re-entrant-invoke + inner-gate guarantee.
+ */
+export const MESH_INVOKE_GATEWAY_TOOLS = Object.freeze(['execute_remote_command']);
+
+/** True if `name` is a mesh-invoke gateway tool (admitted-despite-mutating; dispatch-gated by re-entry). */
+export function isMeshInvokeGatewayTool(name) {
+    return MESH_INVOKE_GATEWAY_TOOLS.includes(name);
 }
