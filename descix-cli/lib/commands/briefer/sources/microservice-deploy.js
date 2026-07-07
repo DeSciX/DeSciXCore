@@ -1,8 +1,11 @@
 /**
  * §4 — Microservice deploy extractor (M2 implementation).
  *
- * Per-app microservice deploy (broker-first model):
- *   1. `gcloud run deploy {app}-{env}` — deploy-service-env.sh
+ * Per-app microservice deploy (broker-first model), CONSOLIDATED onto a
+ * single canonical path for both apps (WS-DEPLOY-HARDENING item 6 —
+ * Powch's divergent `microservice/scripts/deploy.sh` is now a hard-fail
+ * deprecation stub, not a second deploy implementation):
+ *   1. `gcloud run deploy {app}-{env}` — deploy-service-env.sh → lib/cloud-run-deploy.js
  *   2. `descix microservice register` — Firestore manifest (or self-register on boot)
  *
  * No per-app LB/NEG step for non-core apps. Core platform app NEGs at env standup via provision-platform-lb.js.
@@ -54,7 +57,13 @@ export async function extract({ env, cliPaths } = {}) {
     });
   }
 
-  // ── Step 1: gcloud run deploy from Powch + Cloud deploy scripts ──
+  // ── Step 1: gcloud run deploy — Cloud canonical lib is the SOLE source of
+  // this fact. Powch's per-app deploy.sh was RETIRED to a hard-fail
+  // DEPRECATION stub (WS-DEPLOY-HARDENING item 6) — deploy is now
+  // CONSOLIDATED onto deploy-service-env.sh → cloud-run-deploy.js for both
+  // apps. We still read the Powch file, but only to ground-truth its
+  // retirement marker (fail-loud if the stub itself drifts) — not to
+  // extract a second `gcloud run deploy` invocation. ──
   const powch = await readSourceFile({
     cliPaths,
     relPath: POWCH_DEPLOY,
@@ -62,14 +71,21 @@ export async function extract({ env, cliPaths } = {}) {
   });
   const powchRun = findInLines({
     lines: powch.lines,
-    regex: /^gcloud\s+run\s+deploy\s+\$SERVICE_NAME/,
+    regex: /^echo\s+"DEPRECATED:/,
     section: `§${SECTION.number} ${SECTION.heading}`,
-    source: `${POWCH_DEPLOY} (gcloud run deploy invocation)`,
-    expected: 'gcloud run deploy $SERVICE_NAME ...',
-    recovery: `Re-locate the gcloud run deploy in ${POWCH_DEPLOY}.`
+    source: `${POWCH_DEPLOY} (retirement stub marker)`,
+    expected: 'echo "DEPRECATED: ..." — the WS-DEPLOY-HARDENING item 6 retirement stub',
+    recovery: `Re-locate the DEPRECATED marker in ${POWCH_DEPLOY}. If the script has been deleted outright, remove this Powch reference from the §4 extractor entirely (single canonical deploy path already covered by CLOUD_RUN_LIB).`
   });
-  // Slice the deploy block — from the `gcloud run deploy` to the next blank line.
-  const powchDeployEnd = findContinuationEnd(powch.lines, powchRun.lineNumber);
+  const powchDeployEndMatch = findInLines({
+    lines: powch.lines,
+    regex: /^exit\s+1/,
+    section: `§${SECTION.number} ${SECTION.heading}`,
+    source: `${POWCH_DEPLOY} (retirement stub exit)`,
+    expected: 'exit 1 — the stub hard-fails rather than deploying',
+    recovery: `Re-locate the exit 1 in ${POWCH_DEPLOY}.`
+  });
+  const powchDeployEnd = powchDeployEndMatch.lineNumber;
   const powchDeployBlock = sliceRange(powch.lines, powchRun.lineNumber, powchDeployEnd);
 
   // Cloud-side deploy: bash script shells out to shared lib (deployToCloudRun)
@@ -196,9 +212,9 @@ export async function extract({ env, cliPaths } = {}) {
   const lines = [
     `Today (regen target: \`${env}\`), per-app microservice deploy is **2 steps** (broker-first — no NEG for non-core apps):`,
     ``,
-    `**Step 1.** \`gcloud run deploy {app}-{env} ...\` — deploys the Cloud Run service (via \`deploy-service-env.sh\` → \`lib/cloud-run-deploy.js\`; CLI: \`descix microservice deploy\`).`,
-    `- Reference (Powch): \`${POWCH_DEPLOY}:${powchRun.lineNumber}\``,
-    `- Reference (Cloud canonical): \`${CLOUD_RUN_LIB}:${cloudRun.lineNumber}\``,
+    `**Step 1.** \`gcloud run deploy {app}-{env} ...\` — deploys the Cloud Run service (via \`deploy-service-env.sh\` → \`lib/cloud-run-deploy.js\`; CLI: \`descix microservice deploy\`). This is now the SOLE deploy path for **both** apps — Powch's own \`deploy.sh\` was retired to a hard-fail deprecation stub (WS-DEPLOY-HARDENING item 6) that points callers at this canonical path.`,
+    `- Reference (Cloud canonical — sole source of the \`gcloud run deploy\` fact): \`${CLOUD_RUN_LIB}:${cloudRun.lineNumber}\``,
+    `- Reference (Powch retirement stub, not a second deploy path): \`${POWCH_DEPLOY}:${powchRun.lineNumber}\``,
     ``,
     'Verbatim from `' + CLOUD_RUN_LIB + '` (shared deploy lib):',
     ``,
@@ -226,7 +242,7 @@ export async function extract({ env, cliPaths } = {}) {
   const markdown = lines.join('\n');
 
   const citations = [
-    makeCitation({ file: POWCH_DEPLOY, lines: `${powchRun.lineNumber}-${powchDeployEnd}`, anchor: 'gcloud run deploy (Powch)', fileLines: powch.lines }),
+    makeCitation({ file: POWCH_DEPLOY, lines: `${powchRun.lineNumber}-${powchDeployEnd}`, anchor: 'DEPRECATED stub (Powch — consolidated onto Cloud canonical path)', fileLines: powch.lines }),
     makeCitation({ file: CLOUD_RUN_LIB, lines: `${cloudRun.lineNumber}-${cloudDeployEnd}`, anchor: 'gcloud run deploy (Cloud canonical lib)', fileLines: cloudRunLib.lines }),
     makeCitation({ file: CLOUD_DEPLOY, lines: 'deployToCloudRun', anchor: 'deploy-service-env.sh → lib', fileLines: cloud.lines }),
     makeCitation({ file: LB_FILE, lines: String(ensureCoreNegMatch.lineNumber), anchor: 'provision-platform-lb.js ensureCoreNeg', fileLines: lb.lines }),
