@@ -19,7 +19,7 @@ import {
     EVIDENCE_CONTRACT_END,
     renderEvidenceContractMarkdown,
 } from '../src/mcp-tools/evidence-contract.js';
-import { MCP_HANDSHAKE_INSTRUCTIONS } from '../src/mcp-tools/handshake.js';
+import { MCP_HANDSHAKE_INSTRUCTIONS, ESSENTIAL_TOOL_NAMES } from '../src/mcp-tools/handshake.js';
 
 test('FRAME is universal and app-agnostic (no Lean/EGPT specifics leak into the frame)', () => {
     assert.equal(EVIDENCE_CONTRACT_FRAME.version, '2');
@@ -100,9 +100,16 @@ test('render is deterministic (byte-stable) and frames the vendored block with v
     assert.match(EVIDENCE_CONTRACT_MARKDOWN, /cwd `Lean\/EGPT`/);
 });
 
-test('MCP handshake instructions: short, sentence-bounded, honest tool-loading language', () => {
-    assert.ok(MCP_HANDSHAKE_INSTRUCTIONS.length < 1200, `handshake too long: ${MCP_HANDSHAKE_INSTRUCTIONS.length}`);
+test('MCP handshake instructions: short (< client cut), sentence-bounded, honest tool-loading, names all essential tools', () => {
+    // test2 #5: prior copy was 2449 chars and truncated mid-word (~1500). Stay well under.
+    assert.ok(MCP_HANDSHAKE_INSTRUCTIONS.length < 1500, `handshake too long: ${MCP_HANDSHAKE_INSTRUCTIONS.length}`);
     assert.ok(MCP_HANDSHAKE_INSTRUCTIONS.trimEnd().endsWith('.'), 'must end on a sentence boundary');
     assert.ok(!MCP_HANDSHAKE_INSTRUCTIONS.includes('pre-load'), 'dishonest "pre-load these" language must be gone');
     assert.match(MCP_HANDSHAKE_INSTRUCTIONS, /tool-search before first use/);
+    // Mirror the Cloud F1 conformance contract (ws-mvp-firstcontact): 8-25 lines, names all 4 essential tools.
+    const lines = MCP_HANDSHAKE_INSTRUCTIONS.split('\n').length;
+    assert.ok(lines >= 8 && lines <= 25, `handshake ${lines} lines — outside the 8-25 operating-manual envelope`);
+    for (const name of ESSENTIAL_TOOL_NAMES) {
+        assert.ok(MCP_HANDSHAKE_INSTRUCTIONS.includes(name), `handshake must name essential tool ${name}`);
+    }
 });
