@@ -548,7 +548,7 @@ export class User {
         let nftsMap = new Map(Object.entries(user_doc.nfts || {}));
         let adCampaignsMap = new Map(Object.entries(user_doc.ad_campaigns || {}));
 
-        return new User(
+        const user = new User(
             docId,
             user_doc.email || null,
             user_doc.user_info || null,
@@ -569,6 +569,24 @@ export class User {
             user_doc.pending_referral_code || null,
             user_doc.api_signatures || []
         );
+
+        // ws-user-domain-owners: hydrate owner-method-backed fields that are NOT
+        // constructor params. commitTosAndConnect/stampBaseEntitlements/markMigrated/
+        // setPendingReferral write these via db.update_doc_fields (targeted field
+        // writes onto FirestoreCollections.USERS()), so they exist on the Firestore
+        // doc but were previously dropped on every from_firestore() load. Mirrors
+        // Cloud ipStorageUtils.js User.from_firestore (commit 105a152).
+        user.tos_accepted_at = user_doc.tos_accepted_at || null;
+        user.tos_version = user_doc.tos_version || null;
+        user.gate_passed_at = user_doc.gate_passed_at || null;
+        user.gate_source = user_doc.gate_source || null;
+        user.verified_email = user_doc.verified_email || null;
+        user.base_entitlements_stamp = user_doc.base_entitlements_stamp || null;
+        user.migrated_to = user_doc.migrated_to || null;
+        user.migrated_at = user_doc.migrated_at || null;
+        user.pending_referral_guild_id = user_doc.pending_referral_guild_id || null;
+
+        return user;
     }
 
     static async to_firestore(user_id, user_info, auth_provider = 'discord') {
