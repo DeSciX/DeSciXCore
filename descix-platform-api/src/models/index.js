@@ -548,7 +548,7 @@ export class User {
         let nftsMap = new Map(Object.entries(user_doc.nfts || {}));
         let adCampaignsMap = new Map(Object.entries(user_doc.ad_campaigns || {}));
 
-        return new User(
+        const user = new User(
             docId,
             user_doc.email || null,
             user_doc.user_info || null,
@@ -569,6 +569,24 @@ export class User {
             user_doc.pending_referral_code || null,
             user_doc.api_signatures || []
         );
+
+        // ws-user-domain-owners: hydrate owner-method-backed fields that are NOT
+        // constructor params. commitTosAndConnect/stampBaseEntitlements/markMigrated/
+        // setPendingReferral write these via db.update_doc_fields (targeted field
+        // writes onto FirestoreCollections.USERS()), so they exist on the Firestore
+        // doc but were previously dropped on every from_firestore() load. Mirrors
+        // Cloud ipStorageUtils.js User.from_firestore (commit 105a152).
+        user.tos_accepted_at = user_doc.tos_accepted_at || null;
+        user.tos_version = user_doc.tos_version || null;
+        user.gate_passed_at = user_doc.gate_passed_at || null;
+        user.gate_source = user_doc.gate_source || null;
+        user.verified_email = user_doc.verified_email || null;
+        user.base_entitlements_stamp = user_doc.base_entitlements_stamp || null;
+        user.migrated_to = user_doc.migrated_to || null;
+        user.migrated_at = user_doc.migrated_at || null;
+        user.pending_referral_guild_id = user_doc.pending_referral_guild_id || null;
+
+        return user;
     }
 
     static async to_firestore(user_id, user_info, auth_provider = 'discord') {
@@ -960,6 +978,75 @@ export class User {
         const updates = { wallet_address: normalizedAddress, signature: signature };
         return await this.db.update_doc_fields(FirestoreCollections.USERS(), this.id, updates);
     }
+
+    // --- User-Domain Owner Methods (ws-user-domain-owners) ---
+    async commitTosAndConnect({ tos_version, gate_source, verified_email } = {}) {
+        const updates = {
+            tos_accepted_at: Timestamp.now(),
+            tos_version: tos_version || '1.0.0',
+            gate_passed_at: Timestamp.now(),
+            gate_source: gate_source
+        };
+        this.tos_accepted_at = updates.tos_accepted_at;
+        this.tos_version = updates.tos_version;
+        this.gate_passed_at = updates.gate_passed_at;
+        this.gate_source = updates.gate_source;
+        if (verified_email) {
+            const normalized = normalizeEmail(verified_email);
+            updates.verified_email = normalized;
+            updates.email = normalized;
+            this.verified_email = normalized;
+            this.email = normalized;
+        }
+        return await this.db.update_doc_fields(FirestoreCollections.USERS(), this.id, updates);
+    }
+
+    isConnected() {
+        return !!this.tos_accepted_at;
+    }
+
+    async stampBaseEntitlements(stamp) {
+        const updates = { base_entitlements_stamp: stamp };
+        this.base_entitlements_stamp = stamp;
+        return await this.db.update_doc_fields(FirestoreCollections.USERS(), this.id, updates);
+    }
+
+    hasBaseEntitlementStamp(stamp) {
+        return this.base_entitlements_stamp === stamp;
+    }
+
+    async setPendingReferral(code, guild_id = null) {
+        const updates = { pending_referral_code: code };
+        this.pending_referral_code = code;
+        if (guild_id !== null) {
+            updates.pending_referral_guild_id = guild_id;
+            this.pending_referral_guild_id = guild_id;
+        }
+        return await this.db.update_doc_fields(FirestoreCollections.USERS(), this.id, updates);
+    }
+
+    async clearPendingReferral() {
+        // Symmetric with setPendingReferral(code, guild_id): clears BOTH fields it can set.
+        // Mirrors Cloud ipStorageUtils.js User.clearPendingReferral (commit 111318e).
+        const updates = { pending_referral_code: null, pending_referral_guild_id: null };
+        this.pending_referral_code = null;
+        this.pending_referral_guild_id = null;
+        return await this.db.update_doc_fields(FirestoreCollections.USERS(), this.id, updates);
+    }
+
+    async setBaseFolderId(id) {
+        const updates = { base_folder_id: id };
+        this.base_folder_id = id;
+        return await this.db.update_doc_fields(FirestoreCollections.USERS(), this.id, updates);
+    }
+
+    async markMigrated(to) {
+        const updates = { migrated_to: to, migrated_at: Timestamp.now() };
+        this.migrated_to = updates.migrated_to;
+        this.migrated_at = updates.migrated_at;
+        return await this.db.update_doc_fields(FirestoreCollections.USERS(), this.id, updates);
+    }
+    // --- End User-Domain Owner Methods ---
 
     async incrementRep(amount) {
         return await this.db.update_doc_field(FirestoreCollections.USERS(), this.id, 'total_rep', FieldValue.increment(amount));
