@@ -1026,8 +1026,11 @@ export class User {
     }
 
     async clearPendingReferral() {
-        const updates = { pending_referral_code: null };
+        // Symmetric with setPendingReferral(code, guild_id): clears BOTH fields it can set.
+        // Mirrors Cloud ipStorageUtils.js User.clearPendingReferral (commit 111318e).
+        const updates = { pending_referral_code: null, pending_referral_guild_id: null };
         this.pending_referral_code = null;
+        this.pending_referral_guild_id = null;
         return await this.db.update_doc_fields(FirestoreCollections.USERS(), this.id, updates);
     }
 
