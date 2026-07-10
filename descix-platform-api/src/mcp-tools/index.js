@@ -17,15 +17,20 @@ export {
     MCP_HANDSHAKE_INSTRUCTIONS,
     PLATFORM_BOOTSTRAP_SUMMARY,
 } from './handshake.js';
-// ws-evidence-contract (DF-4/DF-5) — canonical Evidence Contract + science-DEX story
-// + conditional repo pointer. One owner; the MCP surface consumes by import.
+// ws-evidence-grounding (CEO-D-2026-07-09) — canonical Evidence Contract: FRAME +
+// per-app SETTLEMENT PROFILES, addressability (getEvidenceContract), the compaction-proof
+// echo, the agent-led install block, and the vendored-copy render/sentinels. One owner;
+// the MCP surface consumes by import.
 export {
     SCIENCE_DEX_STORY,
-    EVIDENCE_CONTRACT,
+    EVIDENCE_CONTRACT_FRAME,
+    SETTLEMENT_PROFILES,
+    getEvidenceContract,
+    EVIDENCE_CONTRACT_ECHO,
+    contributionInstallBlock,
     EVIDENCE_CONTRACT_MARKDOWN,
     EVIDENCE_CONTRACT_VENDORED_BLOCK,
     EVIDENCE_CONTRACT_BEGIN,
     EVIDENCE_CONTRACT_END,
     renderEvidenceContractMarkdown,
-    evidenceRepoPointer,
 } from './evidence-contract.js';
