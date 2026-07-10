@@ -961,6 +961,72 @@ export class User {
         return await this.db.update_doc_fields(FirestoreCollections.USERS(), this.id, updates);
     }
 
+    // --- User-Domain Owner Methods (ws-user-domain-owners) ---
+    async commitTosAndConnect({ tos_version, gate_source, verified_email } = {}) {
+        const updates = {
+            tos_accepted_at: Timestamp.now(),
+            tos_version: tos_version || '1.0.0',
+            gate_passed_at: Timestamp.now(),
+            gate_source: gate_source
+        };
+        this.tos_accepted_at = updates.tos_accepted_at;
+        this.tos_version = updates.tos_version;
+        this.gate_passed_at = updates.gate_passed_at;
+        this.gate_source = updates.gate_source;
+        if (verified_email) {
+            const normalized = normalizeEmail(verified_email);
+            updates.verified_email = normalized;
+            updates.email = normalized;
+            this.verified_email = normalized;
+            this.email = normalized;
+        }
+        return await this.db.update_doc_fields(FirestoreCollections.USERS(), this.id, updates);
+    }
+
+    isConnected() {
+        return !!this.tos_accepted_at;
+    }
+
+    async stampBaseEntitlements(stamp) {
+        const updates = { base_entitlements_stamp: stamp };
+        this.base_entitlements_stamp = stamp;
+        return await this.db.update_doc_fields(FirestoreCollections.USERS(), this.id, updates);
+    }
+
+    hasBaseEntitlementStamp(stamp) {
+        return this.base_entitlements_stamp === stamp;
+    }
+
+    async setPendingReferral(code, guild_id = null) {
+        const updates = { pending_referral_code: code };
+        this.pending_referral_code = code;
+        if (guild_id !== null) {
+            updates.pending_referral_guild_id = guild_id;
+            this.pending_referral_guild_id = guild_id;
+        }
+        return await this.db.update_doc_fields(FirestoreCollections.USERS(), this.id, updates);
+    }
+
+    async clearPendingReferral() {
+        const updates = { pending_referral_code: null };
+        this.pending_referral_code = null;
+        return await this.db.update_doc_fields(FirestoreCollections.USERS(), this.id, updates);
+    }
+
+    async setBaseFolderId(id) {
+        const updates = { base_folder_id: id };
+        this.base_folder_id = id;
+        return await this.db.update_doc_fields(FirestoreCollections.USERS(), this.id, updates);
+    }
+
+    async markMigrated(to) {
+        const updates = { migrated_to: to, migrated_at: Timestamp.now() };
+        this.migrated_to = updates.migrated_to;
+        this.migrated_at = updates.migrated_at;
+        return await this.db.update_doc_fields(FirestoreCollections.USERS(), this.id, updates);
+    }
+    // --- End User-Domain Owner Methods ---
+
     async incrementRep(amount) {
         return await this.db.update_doc_field(FirestoreCollections.USERS(), this.id, 'total_rep', FieldValue.increment(amount));
     }
