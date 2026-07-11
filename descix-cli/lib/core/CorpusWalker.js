@@ -231,7 +231,12 @@ export async function walkCorpus(manifest, workspaceRoot) {
           ref,
           tier,
           doc_type,
-          syncignore
+          syncignore,
+          // KB-curation metadata (rides into the chunk record → Pinecone).
+          doc_class: source.doc_class,
+          license_basis: source.license_basis ?? null,
+          raw_path: source.raw_path ?? null,
+          synced_from_edit: (source.raw_path ?? null) != null
         },
         source_repo: sourceRepo
       });

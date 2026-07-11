@@ -28,6 +28,7 @@ import { loadManifests } from '../core/ManifestLoader.js';
 import { walkCorpus } from '../core/CorpusWalker.js';
 import { chunkFile, categorizeFile } from '../core/Chunker.js';
 import { upsertChunks, deleteStaleChunks, deleteStaleChunksByFileId, listRemoteFileIds, purgeKbScope } from '../core/Syncer.js';
+import { lintManifestForDenyClasses, assertNoViolations } from '../core/CorpusDenyLint.js';
 
 /**
  * Resolve community_id for corpus sync — same precedence as site upload / update kb:
@@ -134,6 +135,11 @@ async function chunkCorpusFile(fileEntry, context) {
       source_repo,
       tier: source_entry.tier,
       doc_type: source_entry.doc_type,
+      // KB-curation metadata — rides into Pinecone so query surfaces can
+      // default-filter to publishable doc_classes and surface provenance.
+      doc_class: source_entry.doc_class,
+      license_basis: source_entry.license_basis,
+      synced_from_edit: source_entry.synced_from_edit,
       // Chunk metadata
       file_name: fileName,
       mime_type: mimeType,
@@ -416,6 +422,33 @@ export async function runCorpusSync(apiClient, options) {
           ? `${refResolution.resolvedRef} (manifest)`
           : `${refResolution.resolvedRef} (default)`;
       console.log(chalk.gray(`  Ref: ${refLabel}`));
+
+      // ── K2: Tier-P deny-class lint (CEO-D-2026-07-11-KB-CURATION-RATIFIED) ──
+      // A publish_tier:"P" manifest is a PUBLISHING ACT. Before ANY walk or
+      // Pinecone read/write, run the canonical deny lint: print every exemption
+      // and warning (the review artifact, model §5.3), then FAIL LOUD on any
+      // violation. Non-Tier-P manifests (publish_tier "I"/absent) skip this
+      // entirely — current behavior unchanged.
+      if (manifest.publish_tier === 'P') {
+        const lintSpinner = ora('  [deny-lint] Linting Tier-P manifest for deny-classes...').start();
+        let denyReport;
+        try {
+          denyReport = await lintManifestForDenyClasses(manifest, workspaceRoot);
+        } catch (lintErr) {
+          lintSpinner.fail(`  [deny-lint] Lint could not run: ${lintErr.message}`);
+          throw lintErr;
+        }
+        lintSpinner.stop();
+        // Print the review artifact — every exemption and warning, always.
+        for (const ex of denyReport.exemptions) console.log(chalk.yellow(`  ${ex.line}`));
+        for (const w of denyReport.warnings) console.log(chalk.yellow(`  ${w.line}`));
+        // Fail loud BEFORE the walk / any Pinecone op if there are violations.
+        assertNoViolations(denyReport);
+        console.log(chalk.green(
+          `  [deny-lint] OK — ${denyReport.exemptions.length} exemption(s), ` +
+          `${denyReport.warnings.length} warning(s), 0 violation(s).`
+        ));
+      }
 
       // 3a. Walk corpus
       const walkSpinner = ora('  Walking source directories...').start();
