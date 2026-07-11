@@ -14,11 +14,20 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
+// Canonical doc_class taxonomy lives in CorpusDenyLint — import it, never re-list.
+import { PUBLISHABLE_DOC_CLASSES, DENY_DOC_CLASSES } from './CorpusDenyLint.js';
+
+// Valid publish tiers (model §1). "I" internal (default), "P" public, "U" user.
+const PUBLISH_TIERS = new Set(['P', 'I', 'U']);
 
 /**
  * Validate a parsed manifest object against the schema.
  * Required: kb_name (string), sources (non-empty array).
  * Each source: path (string) required; ref, tier, doc_type, syncignore optional.
+ * KB-curation (CEO-D-2026-07-11): manifest-level `publish_tier` ("P"|"I"|"U",
+ * default "I") + per-source `doc_class`, `license_basis`, `lint_exempt`,
+ * `exempt_reason`, `raw_path` (all optional). A `publish_tier:"P"` manifest hard-
+ * fails if any source lacks a publishable `doc_class` (no default is allowed).
  * github block: optional, validated but not used for sync_mode: "local".
  *
  * @param {Object} manifest - Parsed JSON manifest
@@ -33,6 +42,13 @@ function validateManifest(manifest, filePath) {
   if (!manifest.kb_name || typeof manifest.kb_name !== 'string') {
     throw new Error(`Invalid manifest at ${filePath}: kb_name (string) is required`);
   }
+
+  if (manifest.publish_tier !== undefined) {
+    if (typeof manifest.publish_tier !== 'string' || !PUBLISH_TIERS.has(manifest.publish_tier)) {
+      throw new Error(`Invalid manifest at ${filePath}: publish_tier must be one of "P", "I", "U"`);
+    }
+  }
+  const isTierP = manifest.publish_tier === 'P';
 
   if (!Array.isArray(manifest.sources) || manifest.sources.length === 0) {
     throw new Error(`Invalid manifest at ${filePath}: sources (non-empty array) is required`);
@@ -55,6 +71,44 @@ function validateManifest(manifest, filePath) {
     }
     if (src.syncignore !== undefined && !Array.isArray(src.syncignore)) {
       throw new Error(`Invalid manifest at ${filePath}: sources[${i}].syncignore must be an array`);
+    }
+    // KB-curation optional per-source fields.
+    if (src.doc_class !== undefined && typeof src.doc_class !== 'string') {
+      throw new Error(`Invalid manifest at ${filePath}: sources[${i}].doc_class must be a string`);
+    }
+    if (src.license_basis !== undefined && typeof src.license_basis !== 'string') {
+      throw new Error(`Invalid manifest at ${filePath}: sources[${i}].license_basis must be a string`);
+    }
+    if (src.lint_exempt !== undefined && !Array.isArray(src.lint_exempt)) {
+      throw new Error(`Invalid manifest at ${filePath}: sources[${i}].lint_exempt must be an array`);
+    }
+    if (src.exempt_reason !== undefined && typeof src.exempt_reason !== 'string') {
+      throw new Error(`Invalid manifest at ${filePath}: sources[${i}].exempt_reason must be a string`);
+    }
+    if (src.raw_path !== undefined && typeof src.raw_path !== 'string') {
+      throw new Error(`Invalid manifest at ${filePath}: sources[${i}].raw_path must be a string`);
+    }
+
+    // Tier-P: every source MUST carry a publishable doc_class (no default allowed).
+    if (isTierP) {
+      if (!src.doc_class) {
+        throw new Error(
+          `Invalid manifest at ${filePath}: sources[${i}] (${src.path}) requires a doc_class ` +
+          `in a Tier-P (publish_tier:"P") manifest — no default is allowed.`
+        );
+      }
+      if (DENY_DOC_CLASSES.has(src.doc_class)) {
+        throw new Error(
+          `Invalid manifest at ${filePath}: sources[${i}] (${src.path}) doc_class "${src.doc_class}" ` +
+          `is a deny-class {${[...DENY_DOC_CLASSES].join(', ')}} — structurally invalid in a Tier-P manifest.`
+        );
+      }
+      if (!PUBLISHABLE_DOC_CLASSES.has(src.doc_class)) {
+        throw new Error(
+          `Invalid manifest at ${filePath}: sources[${i}] (${src.path}) doc_class "${src.doc_class}" ` +
+          `is not a publishable class {${[...PUBLISHABLE_DOC_CLASSES].join(', ')}}.`
+        );
+      }
     }
   }
 
@@ -86,8 +140,18 @@ export async function loadManifest(manifestPath, workspaceRoot) {
     ref: src.ref || 'main',
     tier: src.tier || 3,
     doc_type: src.doc_type || 'generic',
-    syncignore: src.syncignore || []
+    syncignore: src.syncignore || [],
+    // KB-curation carry-through. doc_class is as-is (may be undefined for tier I).
+    doc_class: src.doc_class,
+    license_basis: src.license_basis ?? null,
+    lint_exempt: src.lint_exempt || [],
+    exempt_reason: src.exempt_reason ?? null,
+    raw_path: src.raw_path ?? null
   }));
+
+  // Surface publish_tier on the manifest object (default "I") so corpus.js can
+  // read manifest.publish_tier to decide whether to run the Tier-P deny lint.
+  manifest.publish_tier = manifest.publish_tier || 'I';
 
   manifest._manifestPath = manifestPath;
   return manifest;
