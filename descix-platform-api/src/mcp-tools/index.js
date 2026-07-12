@@ -34,3 +34,11 @@ export {
     EVIDENCE_CONTRACT_END,
     renderEvidenceContractMarkdown,
 } from './evidence-contract.js';
+// ws-first-contact-voice (CEO-D-2026-07-12, packet V6) — D4 "Set up DeSciX" setup-playbook:
+// the structured onboarding return contract + the setup-intent detector consumed as an
+// additive tell_me_how route. Dependency-free leaf; project_instructions is the single-source
+// D3-AI stance text.
+export {
+    DESCIX_SETUP_PLAYBOOK,
+    isSetupIntent,
+} from './setup-playbook.js';
