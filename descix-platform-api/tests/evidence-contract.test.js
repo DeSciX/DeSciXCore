@@ -33,6 +33,27 @@ test('FRAME is universal and app-agnostic (no Lean/EGPT specifics leak into the 
     assert.match(EVIDENCE_CONTRACT_FRAME.claim_citation_discipline, /own evidence domain/i);
 });
 
+test('FRAME.retrieval_first: retrieval-first directive naming concrete read commands, no adversarial pressure (ws-first-contact-voice V1.2/V1.4)', () => {
+    // V1.2: the load-bearing behavioral directive exists and is a non-empty string.
+    assert.equal(typeof EVIDENCE_CONTRACT_FRAME.retrieval_first, 'string');
+    assert.ok(EVIDENCE_CONTRACT_FRAME.retrieval_first.length > 0, 'retrieval_first must be a non-empty string');
+    // It must name CONCRETE read instruments so "retrieve" is a one-call action, not a slogan.
+    assert.match(EVIDENCE_CONTRACT_FRAME.retrieval_first, /query_knowledge_base/);
+    assert.match(EVIDENCE_CONTRACT_FRAME.retrieval_first, /get_kb_rag_file_content/);
+    // It stays app-agnostic (same no-leak rule as the FRAME): no Lean/EGPT tokens.
+    for (const leaked of ['lake build', 'Quot.sound', 'P_eq_NP', 'EGPTMath']) {
+        assert.ok(!EVIDENCE_CONTRACT_FRAME.retrieval_first.includes(leaked), `retrieval_first leaked profile token: ${leaked}`);
+    }
+    // The test-2 adversarial pressure is gone from the FRAME: the "burden reversed onto the
+    // challenger" framing no longer appears anywhere in the app-agnostic frame.
+    const frameText = JSON.stringify(EVIDENCE_CONTRACT_FRAME);
+    assert.ok(!/reversed onto the challenger/i.test(frameText), 'adversarial "reversed onto the challenger" must be gone from the FRAME');
+    // And the egpt burden rule drops the "not acceptable to burn a conversation" pressure.
+    assert.ok(!/not acceptable to/i.test(SETTLEMENT_PROFILES.egpt.burden_of_proof.rule), 'egpt burden rule must drop the "not acceptable to" pressure');
+    // The egpt rule now carries a retrieval-first instruction instead.
+    assert.match(SETTLEMENT_PROFILES.egpt.burden_of_proof.rule, /retrieve and read it first/i);
+});
+
 test('EGPT settlement profile: capstones enumerated inline + axiom closure + repo/cwd/expected_when_green', () => {
     const p = SETTLEMENT_PROFILES.egpt;
     assert.equal(p.app_id, 'egpt');
@@ -98,6 +119,9 @@ test('render is deterministic (byte-stable) and frames the vendored block with v
     // Render surfaces the capstone names + the renamed field semantics.
     assert.match(EVIDENCE_CONTRACT_MARKDOWN, /InformationTheory\.P_eq_NP\b/);
     assert.match(EVIDENCE_CONTRACT_MARKDOWN, /cwd `Lean\/EGPT`/);
+    // ws-first-contact-voice V1: the deterministic render now surfaces the retrieval-first directive.
+    assert.match(EVIDENCE_CONTRACT_MARKDOWN, /Retrieval first/);
+    assert.match(EVIDENCE_CONTRACT_MARKDOWN, /query_knowledge_base/);
 });
 
 test('MCP handshake instructions: short (< client cut), sentence-bounded, honest tool-loading, names all essential tools', () => {
@@ -105,7 +129,11 @@ test('MCP handshake instructions: short (< client cut), sentence-bounded, honest
     assert.ok(MCP_HANDSHAKE_INSTRUCTIONS.length < 1500, `handshake too long: ${MCP_HANDSHAKE_INSTRUCTIONS.length}`);
     assert.ok(MCP_HANDSHAKE_INSTRUCTIONS.trimEnd().endsWith('.'), 'must end on a sentence boundary');
     assert.ok(!MCP_HANDSHAKE_INSTRUCTIONS.includes('pre-load'), 'dishonest "pre-load these" language must be gone');
-    assert.match(MCP_HANDSHAKE_INSTRUCTIONS, /tool-search before first use/);
+    // V4 (ws-first-contact-voice): the lead-in now states the deferred-tool honesty
+    // ("run your tool-search for a tool before its first call") instead of the exact
+    // phrase "tool-search before first use". Assert the load-bearing token — the honest
+    // tool-search directive — still survives (deliberate, still-meaningful check).
+    assert.match(MCP_HANDSHAKE_INSTRUCTIONS, /tool-search/);
     // Mirror the Cloud F1 conformance contract (ws-mvp-firstcontact): 8-25 lines, names all 4 essential tools.
     const lines = MCP_HANDSHAKE_INSTRUCTIONS.split('\n').length;
     assert.ok(lines >= 8 && lines <= 25, `handshake ${lines} lines — outside the 8-25 operating-manual envelope`);
