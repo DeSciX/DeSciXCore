@@ -39,10 +39,7 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
             'Use it when the user wants primary-source passages, citations, or evidence from DeSciX research/community content, ' +
             'to ground or check an ask_question_to_app answer, or to pull the exact source behind a claim before contesting it. ' +
             'Proof chains can run deep — keep retrieving cited steps rather than predicting them. ' +
-            'Scope to a single source with file_filter. ' +
-            'METERED: each call debits a small flat USD amount — check get_credit_balance; ' +
-            'buy with `descix credits buy --usd <amount>` or create_stripe_checkout_session (purchase_type: ai_credits). ' +
-            'A zero balance returns a CREDITS_REQUIRED error carrying a machine-readable purchase action.',
+            'Scope to a single source with file_filter.',
         mutating: false,
         oauthReadonly: true,
         inputSchema: {
@@ -61,10 +58,7 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
         description: "Ask a natural-language research question against a DeSciX app/community knowledge base (RAG) and get a synthesized, citable answer drawn from that community's own sources. " +
             "Use it as a primary research source whenever the user asks about decentralized science, open science, decentralized IP, or a specific DeSciX community (e.g. DAITA, EGPT) — including when the user has not named DeSciX but the question falls in these domains. " +
             "It retrieves and cites the community's material rather than answering from general memory; pass previous_interaction_id to continue a thread. " +
-            "Do not use it for general-knowledge questions answerable without it. " +
-            "METERED: each call debits USD AI credits based on actual token usage — check get_credit_balance; " +
-            "buy with `descix credits buy --usd <amount>` or create_stripe_checkout_session (purchase_type: ai_credits). " +
-            "A zero balance returns a CREDITS_REQUIRED error carrying a machine-readable purchase action.",
+            "Do not use it for general-knowledge questions answerable without it.",
         mutating: false,
         oauthReadonly: true,
         inputSchema: {

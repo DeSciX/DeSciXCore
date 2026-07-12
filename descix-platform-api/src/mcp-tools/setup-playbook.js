@@ -1,26 +1,31 @@
 /**
- * @descix/platform-api/mcp-tools — D4 "Set up DeSciX" setup-playbook (canonical owner module).
+ * @descix/platform-api/mcp-tools — D4 "Set up DeSciX" FIRST-CONTACT SCRIPT (canonical owner).
  *
- * ws-first-contact-voice (CEO-D-2026-07-12-VOICE-AND-SERVING-DISPATCH, packet V6):
- * spec D4 delivered as an ADDITIVE `tell_me_how` intent route, NOT a new handshake tool.
- * Cloud `communityCommands.js` `tell_me_how` calls `isSetupIntent(question)` as an intent
- * route placed BEFORE the scope switch; on a match it returns DESCIX_SETUP_PLAYBOOK — the
- * structured object Claude renders into a walkthrough.
+ * ws-first-contact-voice (CEO-D-2026-07-12-VOICE-AND-SERVING-DISPATCH, packet V6) upgraded by
+ * CEO-D-2026-07-12-METERING-DISPLAY-AND-FIRST-CONTACT-SCRIPT: no longer a static checklist —
+ * DESCIX_SETUP_PLAYBOOK is a DOCTOR-STYLE conversational script the consuming assistant follows:
+ * greet → ask interest → offer suggested prompts (use-case canon,
+ * headless-surface-reassessment-2026-07-12.md §3) → walk Project creation → explain tokenomics.
+ * SETUP IS THE CANONICAL HOME FOR METERING EDUCATION (the tool descriptions carry no cost
+ * banners by CEO ruling — metering is the default assumption, like the Claude API itself).
  *
- * SINGLE SOURCE for the D3 stance: `project_instructions` below IS the canonical Claude.ai
- * (D3-AI) paste-in text — the same block published in
- * docs/design/first-contact-project-instructions-drafts-2026-07-12.md ("Claude.ai — the
- * research assistant (CANONICAL)") and mirrored in the voice-pass packet (V7 D3-AI). The
- * playbook and the paste-in are versioned together so the stance text cannot drift.
+ * Public onboarding instruction (the ad/setup-card two-step):
+ *   "Add the DeSciX connector to Claude (Settings → Connectors → add the platform origin +
+ *    /mcp), then just type: 'Help me set-up DeSciX'."
  *
- * LEAF MODULE — DEPENDENCY-FREE BY DESIGN: this file imports NOTHING (same discipline as
- * nativeTools.js / handshake.js / evidence-contract.js) so both MCP transports consume it
- * by import without dragging infrastructure in. Do not add imports here.
+ * Delivered as an ADDITIVE `tell_me_how` intent route (Cloud communityCommands.js), placed
+ * BEFORE the scope switch. SINGLE SOURCE for the D3 stance: `project_instructions` below IS
+ * the canonical Claude.ai (D3-AI) paste-in — the same block in
+ * docs/design/first-contact-project-instructions-drafts-2026-07-12.md and packet V7.D3-AI.
+ * The script REFERENCES that field; it never duplicates the prose.
+ *
+ * LEAF MODULE — DEPENDENCY-FREE BY DESIGN: imports NOTHING (same discipline as
+ * nativeTools.js / handshake.js / evidence-contract.js). Do not add imports here.
  */
 
 /**
  * The canonical D3-AI Claude.ai Project custom-instructions paste-in (the epistemic stance
- * layer). VERBATIM copy of packet V7.D3-AI / drafts "Claude.ai — the research assistant
+ * layer). VERBATIM copy of packet V7.D3-AI / drafts "Claude.ai — the primary UX hub
  * (CANONICAL)". This is the single source of `project_instructions` — do not paraphrase.
  */
 const D3_AI_PROJECT_INSTRUCTIONS = [
@@ -42,12 +47,65 @@ const D3_AI_PROJECT_INSTRUCTIONS = [
 ].join('\n');
 
 /**
- * DESCIX_SETUP_PLAYBOOK — the structured D4 return contract (packet V6). Claude renders this
- * into a step-by-step walkthrough. Frozen so a consumer cannot mutate the shared object.
+ * The doctor-style conversational script. Each step tells the CONSUMING ASSISTANT what to do
+ * (second person, one step at a time) — render conversationally, never dump as a wall.
+ * Suggested prompts come from the first-contact use-case canon
+ * (headless-surface-reassessment-2026-07-12.md §3).
+ */
+const FIRST_CONTACT_SCRIPT = Object.freeze([
+    Object.freeze({
+        step: 'greet',
+        do: 'Greet the user and give the one-liner: DeSciX is a decentralized-science exchange where research claims are settled by machine-checkable evidence and contributions can earn on-chain rewards. Tell them setup takes a few minutes and you will walk them through it.',
+    }),
+    Object.freeze({
+        step: 'ask_interest',
+        do: 'ASK what they are interested in before showing anything (do not dump a menu). Listen for: building/tracking token value; quantum computing; physics simulation; computing history / neuromorphic computing; arguing proofs or contributing code.',
+    }),
+    Object.freeze({
+        step: 'offer_prompts',
+        do: 'Based on their answer, offer two or three SUGGESTED PROMPTS from the matching track (they can just type one). If their interest spans tracks, mix.',
+        tracks: Object.freeze({
+            value_building: Object.freeze([
+                'Show me my DeSciX communities, credits, and token balances.',
+                'Build me a token-economy dashboard from my DeSciX data — interesting projects, community stats, airdrops, and my referral link.',
+                'What token-earning opportunities do I have right now?',
+            ]),
+            quantum_computing: Object.freeze([
+                'Show me the QFT vs Willsch (Mathematics 2023) replication and verify it headlessly via npm.',
+            ]),
+            light_engine: Object.freeze([
+                'Launch the live double-slit experiment and explain what I am seeing.',
+                'Capture detector-wall data from the double-slit experiment headlessly and chart it.',
+            ]),
+            neuromorphic: Object.freeze([
+                "Show me von Neumann's Computer & the Brain Circuit-SAT / Half-Adder experience.",
+            ]),
+            proofs_and_debate: Object.freeze([
+                'I want to argue the P=NP proof.',
+            ]),
+        }),
+        proofs_referral_note: 'Arguing proofs, developing experiments, and FRQTL IDE contributions live on Cowork/Claude Code — offer set-up pointers there rather than dead-ending the user here.',
+    }),
+    Object.freeze({
+        step: 'create_project',
+        do: 'Walk them through creating the Claude Project STEP-BY-STEP, one step at a time, confirming each: (1) claude.ai/projects → + New Project — name it (e.g. "DeSciX Research"); (2) hand over the project_instructions block (clearly delimited) to paste into the project custom instructions; (3) enable the DeSciX connector for the project (+ → Connectors); (4) move this chat in (chat dropdown → Add to project); (5) verify with ONE retrieval — run the verification probe and show the cited answer. You cannot perform the clicks; you supply every value.',
+    }),
+    Object.freeze({
+        step: 'explain_tokenomics',
+        do: 'Now — and only now — explain the tokenomics model: metering is the default for platform AI services, exactly like the Claude API itself. RAG calls draw on a shared USD AI-credit balance by actual usage; get_credit_balance shows the balance any time, and credits can be bought with the descix CLI or the platform store. Earning: contributions, disputatio participation, and airdrops can earn community tokens. Setup is where this is explained once — the tools themselves do not nag about cost.',
+    }),
+]);
+
+/**
+ * DESCIX_SETUP_PLAYBOOK — the structured D4 return contract (packet V6, first-contact-script
+ * revision). Claude follows `script` conversationally; `project_instructions` is the
+ * single-source D3-AI block the create_project step hands over. Frozen throughout.
  */
 export const DESCIX_SETUP_PLAYBOOK = Object.freeze({
     kind: 'descix_setup_playbook',
-    version: '2026-07-12',
+    version: '2026-07-12.2',
+    onboarding_instruction: 'Add the DeSciX connector to Claude (Settings → Connectors → add the platform origin + /mcp), then just type: "Help me set-up DeSciX".',
+    script: FIRST_CONTACT_SCRIPT,
     project_instructions: D3_AI_PROJECT_INSTRUCTIONS,
     knowledge: Object.freeze([
         Object.freeze({
@@ -60,13 +118,6 @@ export const DESCIX_SETUP_PLAYBOOK = Object.freeze({
             url_or_ref: 'ipdoc_46b780dc-5184-4b18-a5df-3c949cdfcadc (egpt/General)',
             why: 'A primary-source document to retrieve and cite rather than reconstruct.',
         }),
-    ]),
-    ui_steps: Object.freeze([
-        "Create a new Project at claude.ai/projects → '+ New Project'. (I can't do this step for you — I'll supply every value.)",
-        "Name it (e.g., 'DeSciX Research') and paste the provided instructions into the project's custom instructions.",
-        'Enable the DeSciX connector for this project (+ → Connectors).',
-        'Move our current chat in: chat-name dropdown → Add to project.',
-        "Say the word and I'll run a quick test query to confirm it's live.",
     ]),
     connector_enable_reminder: "Enable DeSciX via the '+' → Connectors menu in the project.",
     cannot_do_note: 'Claude cannot create or configure the Project itself — you perform the clicks; I supply every value.',
@@ -82,19 +133,18 @@ export const DESCIX_SETUP_PLAYBOOK = Object.freeze({
 
 /**
  * The D4/spec setup-intent route. Returns true when a natural-language question expresses
- * SETUP/ONBOARDING intent (so `tell_me_how` should return DESCIX_SETUP_PLAYBOOK before the
- * scope switch). Deliberately TIGHT — it must NOT fire on generic discovery questions
- * ("how do I query a knowledge base"); those flow through to the normal discovery scope.
- *
- * Note: DESCIX_SETUP_PLAYBOOK.project_instructions is the single-source D3-AI stance text —
- * this detector is the only gate that surfaces it, so keep the phrase list conservative.
+ * SETUP/ONBOARDING intent (so `tell_me_how` returns DESCIX_SETUP_PLAYBOOK before the scope
+ * switch). Hyphen/underscore variants are normalized so the PUBLIC instruction phrase
+ * "Help me set-up DeSciX" fires. Deliberately TIGHT otherwise — must NOT fire on generic
+ * discovery questions ("how do I query a knowledge base").
  *
  * @param {string} question - the caller's natural-language question.
  * @returns {boolean} true if the question expresses setup/onboarding intent.
  */
 export function isSetupIntent(question) {
     if (typeof question !== 'string') return false;
-    const q = question.toLowerCase();
+    // Normalize so "set-up" / "set_up" match the canonical "set up" phrases.
+    const q = question.toLowerCase().replace(/[-_]/g, ' ');
     const SETUP_PHRASES = [
         'set up descix',
         'setup descix',
