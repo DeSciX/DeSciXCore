@@ -40,6 +40,14 @@ test('FRAME.retrieval_first: retrieval-first directive naming concrete read comm
     // It must name CONCRETE read instruments so "retrieve" is a one-call action, not a slogan.
     assert.match(EVIDENCE_CONTRACT_FRAME.retrieval_first, /query_knowledge_base/);
     assert.match(EVIDENCE_CONTRACT_FRAME.retrieval_first, /get_kb_rag_file_content/);
+    // CEO wording pass 2026-07-12: the recursive-chain principle is load-bearing — assert
+    // on durable phrases so a future rewording that drops the principle fails here.
+    assert.match(EVIDENCE_CONTRACT_FRAME.retrieval_first, /recursive/);
+    assert.match(EVIDENCE_CONTRACT_FRAME.retrieval_first, /followed the chain/);
+    assert.match(EVIDENCE_CONTRACT_FRAME.retrieval_first, /honest/i);
+    // egpt profile threads the chain principle concretely (facts unchanged).
+    assert.match(SETTLEMENT_PROFILES.egpt.burden_of_proof.rule, /followable end-to-end/);
+    assert.match(SETTLEMENT_PROFILES.egpt.burden_of_proof.rule, /not predicting/);
     // It stays app-agnostic (same no-leak rule as the FRAME): no Lean/EGPT tokens.
     for (const leaked of ['lake build', 'Quot.sound', 'P_eq_NP', 'EGPTMath']) {
         assert.ok(!EVIDENCE_CONTRACT_FRAME.retrieval_first.includes(leaked), `retrieval_first leaked profile token: ${leaked}`);

@@ -38,6 +38,7 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
         description: 'Vector-similarity search over a DeSciX knowledge base, returning raw source chunks with dereferenceable citations. ' +
             'Use it when the user wants primary-source passages, citations, or evidence from DeSciX research/community content, ' +
             'to ground or check an ask_question_to_app answer, or to pull the exact source behind a claim before contesting it. ' +
+            'Proof chains can run deep — keep retrieving cited steps rather than predicting them. ' +
             'Scope to a single source with file_filter. ' +
             'METERED: each call debits a small flat USD amount — check get_credit_balance; ' +
             'buy with `descix credits buy --usd <amount>` or create_stripe_checkout_session (purchase_type: ai_credits). ' +
