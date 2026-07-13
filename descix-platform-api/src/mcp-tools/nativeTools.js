@@ -196,7 +196,7 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
         // Read-only; the METERED RAG/agent surface (WS-A3) debits this balance per call.
         // NEVER exposes pricing internals — USD balance figures only.
         name: 'get_credit_balance',
-        description: 'Get your platform-wide AI-credits balance in USD. Metered AI calls (RAG chat / agents, e.g. ask_question_to_app and query_knowledge_base) debit this balance; buy credits with the descix CLI (`descix credits buy`) or the platform store. Programmatic purchase: create_stripe_checkout_session with purchase_type "ai_credits" and amount_usd returns a Stripe checkout URL.',
+        description: 'Get your platform-wide AI-credits balance in USD. Metered AI calls (RAG chat / agents, e.g. ask_question_to_app and query_knowledge_base) debit this balance. At a $0 balance a free daily credit auto-applies to your first metered call each day, so metered tools are usable without buying anything first (the response reports daily_free_credit_usd and daily_free_credit_available_today). Buy more credits with the descix CLI (`descix credits buy`) or the platform store. Programmatic purchase: create_stripe_checkout_session with purchase_type "ai_credits" and amount_usd returns a Stripe checkout URL.',
         mutating: false,
         oauthReadonly: true,
         inputSchema: {
