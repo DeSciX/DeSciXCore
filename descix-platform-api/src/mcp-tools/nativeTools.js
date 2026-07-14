@@ -85,11 +85,12 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
     },
     {
         name: 'find_communities',
-        // R5 (CEO-D-2026-07-13-PUBLIC-COMMUNITIES-AND-SURFACE-LOCKDOWN): this lists ONLY PUBLIC
-        // communities for a normal caller (the public app store). Non-public communities you own
-        // or that are shared with you remain reachable via fetch_my_purchases. The is_public
-        // filter is enforced server-side in the Cloud handler; admin callers see all.
-        description: 'List the PUBLIC communities on the platform (the public app store). Communities you own or that are shared with you are reachable via fetch_my_purchases even when they are not public.',
+        // R5 (CEO-D-2026-07-14 disambiguation): this lists ONLY LISTED communities for a normal
+        // caller (the app store). "Listed" is the ACCESS sense (a separate `tradeable` boolean owns
+        // token-tradeability — the old `is_public` conflated them). Non-listed communities you own
+        // or that are shared with you remain reachable via fetch_my_purchases. The `listed` filter is
+        // enforced server-side in the Cloud handler; admin callers see all.
+        description: 'List the communities listed in the app store. Communities you own or that are shared with you are reachable via fetch_my_purchases even when they are not listed.',
         mutating: false,
         oauthReadonly: true,
         inputSchema: {

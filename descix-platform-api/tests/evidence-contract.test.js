@@ -32,10 +32,12 @@ test('R6: DISCOVERY-CORE is the 7 normal-user MVP tools; mesh-ops tools flipped 
     }
 });
 
-test('R5: find_communities tool description advertises PUBLIC-only listing', () => {
+test('R5: find_communities tool description advertises LISTED-only (no "public") listing', () => {
     const fc = NATIVE_MCP_TOOLS.find((t) => t.name === 'find_communities');
-    assert.match(fc.description, /PUBLIC communities/);
+    assert.match(fc.description, /listed in the app store/i);
     assert.match(fc.description, /fetch_my_purchases/);
+    // CEO-D-2026-07-14: the word "public" is killed from the field/description vocabulary.
+    assert.ok(!/public/i.test(fc.description), 'find_communities description must not use the word "public"');
 });
 
 test('FRAME is universal and app-agnostic (no Lean/EGPT specifics leak into the frame)', () => {
