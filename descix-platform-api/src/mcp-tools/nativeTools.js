@@ -85,7 +85,11 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
     },
     {
         name: 'find_communities',
-        description: 'List available communities on the platform',
+        // R5 (CEO-D-2026-07-13-PUBLIC-COMMUNITIES-AND-SURFACE-LOCKDOWN): this lists ONLY PUBLIC
+        // communities for a normal caller (the public app store). Non-public communities you own
+        // or that are shared with you remain reachable via fetch_my_purchases. The is_public
+        // filter is enforced server-side in the Cloud handler; admin callers see all.
+        description: 'List the PUBLIC communities on the platform (the public app store). Communities you own or that are shared with you are reachable via fetch_my_purchases even when they are not public.',
         mutating: false,
         oauthReadonly: true,
         inputSchema: {
@@ -277,14 +281,21 @@ export function recommendedOAuthReadonlyToolNames() {
 }
 
 /**
- * DISCOVERY-CORE — the CEO-RATIFIED (CEO-D-2026-07-04-MCP-SURFACE-SPLIT-EXECUTION §3) set of tools
- * advertised at the MCP handshake (tools/list) for STANDARD callers. Everything else that is
- * registered + callable is MESH-DISCOVERABLE: reachable via tell_me_how + execute_remote_command but
- * NOT advertised at handshake, so a standard session pays ~1k tokens of catalog instead of ~8.7k.
- * The "8" of §3 is 8 CRITERIA ROWS; the mesh-health row names TWO tools (list_services +
- * service_health_check), so this is 9 tool NAMES. Membership is ratified — do NOT add/remove without
- * a CEO ruling. (execute_remote_command, list_services, service_health_check are advertised via
- * commandMeta mcp:true in DeSciX_Cloud; the other 6 live in NATIVE_MCP_TOOLS above.)
+ * DISCOVERY-CORE — the set of tools advertised at the MCP handshake (tools/list) for STANDARD
+ * callers. Everything else that is registered + callable is MESH-DISCOVERABLE: reachable via
+ * tell_me_how + execute_remote_command but NOT advertised at handshake, so a standard session pays
+ * ~1k tokens of catalog instead of ~8.7k.
+ *
+ * R6 (CEO-D-2026-07-13-PUBLIC-COMMUNITIES-AND-SURFACE-LOCKDOWN): the mesh-ops tools list_services
+ * and service_health_check are NOT part of a normal user's MVP minimal set — they surfaced the
+ * platform's internal service topology at first contact. They are FLAG-FLIPPED off the handshake
+ * set here (a flag-flip only; the tell_me_how discovery internals are untouched — item K of the
+ * MCP-hardening thread owns the discovery-scope enforcement). list_services is additionally
+ * admin-gated in DeSciX_Cloud (COMMAND_PERMISSIONS). That leaves the 7 normal-user tools below.
+ * The prior ratification was CEO-D-2026-07-04-MCP-SURFACE-SPLIT-EXECUTION §3 (9 names); this ruling
+ * supersedes the mesh-health row for the STANDARD surface. Membership is ratified — do NOT
+ * add/remove without a CEO ruling. (execute_remote_command is advertised via commandMeta mcp:true
+ * in DeSciX_Cloud; the other 6 live in NATIVE_MCP_TOOLS above.)
  */
 export const DISCOVERY_CORE_TOOL_NAMES = Object.freeze([
     'tell_me_how',
@@ -294,8 +305,6 @@ export const DISCOVERY_CORE_TOOL_NAMES = Object.freeze([
     'find_communities',
     'fetch_my_purchases',
     'get_credit_balance',
-    'list_services',
-    'service_health_check',
 ]);
 
 /** True if `name` is in the ratified DISCOVERY-CORE handshake set. */

@@ -23,12 +23,44 @@ test('first-contact script: public two-step instruction + doctor-style steps in 
     assert.match(DESCIX_SETUP_PLAYBOOK.onboarding_instruction, /Settings → Connectors/);
     assert.match(DESCIX_SETUP_PLAYBOOK.onboarding_instruction, /Help me set-up DeSciX/);
     assert.match(DESCIX_SETUP_PLAYBOOK.onboarding_instruction, /\/mcp/);
-    // Doctor-style conversational script: greet -> ask -> offer prompts -> create project -> tokenomics.
+    // Doctor-style conversational script (voice round 2): greet -> LEARN DAITA -> ask -> offer
+    // prompts -> create project -> tokenomics -> VERIFY (real settlement run, the final step).
     const steps = DESCIX_SETUP_PLAYBOOK.script.map((s) => s.step);
-    assert.deepEqual(steps, ['greet', 'ask_interest', 'offer_prompts', 'create_project', 'explain_tokenomics']);
+    assert.deepEqual(steps, ['greet', 'learn_daita', 'ask_interest', 'offer_prompts', 'create_project', 'explain_tokenomics', 'verify_settlement']);
     for (const s of DESCIX_SETUP_PLAYBOOK.script) {
         assert.ok(typeof s.do === 'string' && s.do.length > 0, `step ${s.step} missing 'do'`);
     }
+});
+
+test('V2 purpose-first greet + DAITA-first guided first step', () => {
+    const greet = DESCIX_SETUP_PLAYBOOK.script.find((s) => s.step === 'greet');
+    // Greet leads with the economic-model PURPOSE, mechanism second.
+    assert.match(greet.do, /economic model/i);
+    assert.match(greet.do, /share in the value/i);
+    // The explicit guided FIRST step points at the DAITA community's own agent; DAITA = concept
+    // home, EGPT = one example effort.
+    const learn = DESCIX_SETUP_PLAYBOOK.script.find((s) => s.step === 'learn_daita');
+    assert.match(learn.do, /ask_question_to_app/);
+    assert.match(learn.do, /'daita'|app_id: 'daita'/);
+    assert.match(learn.do, /concept\/platform home/i);
+    assert.match(learn.do, /EGPT is one example/i);
+});
+
+test('V4 verify_settlement: setup ends with a REAL runnable verification (published DSE command)', () => {
+    const verify = DESCIX_SETUP_PLAYBOOK.script.find((s) => s.step === 'verify_settlement');
+    // It is the FINAL step.
+    assert.equal(DESCIX_SETUP_PLAYBOOK.script[DESCIX_SETUP_PLAYBOOK.script.length - 1].step, 'verify_settlement');
+    assert.match(verify.do, /npx -y -p @descix\/frqtl-sdk@0\.1\.2 frqtl-dse-settlement --check/);
+    assert.match(verify.do, /CHECK RESULT: PASS/);
+    // Per-surface framing (doctrine surface ladder).
+    assert.match(verify.do, /Claude Code or Cowork/);
+    // The structured settlement_experience carries the exact command/output for machine consumers.
+    const exp = DESCIX_SETUP_PLAYBOOK.settlement_experience;
+    assert.equal(exp.app_id, 'egpt-dse');
+    assert.equal(exp.package, '@descix/frqtl-sdk@0.1.2');
+    assert.equal(exp.command, 'npx -y -p @descix/frqtl-sdk@0.1.2 frqtl-dse-settlement --check');
+    assert.match(exp.expected_output, /chi2 \(combined histogram\) = 0/);
+    assert.ok(exp.per_surface.claude_ai && exp.per_surface.claude_code && exp.per_surface.cowork);
 });
 
 test('offer_prompts tracks: drawn from the use-case canon (surface-ladder §3)', () => {
@@ -60,5 +92,8 @@ test('isSetupIntent: fires on the public instruction phrase + variants; not on d
     assert.equal(isSetupIntent('help me setup descix'), true);
     assert.equal(isSetupIntent('set up DeSciX'), true);
     assert.equal(isSetupIntent('help me get started with DeSciX'), true);
+    // R2 (TEST-3 G3.3): the real phrasing that failed the walkthrough now fires.
+    assert.equal(isSetupIntent('Help me get set-up with DeSciX'), true);
+    assert.equal(isSetupIntent('help me get set up with descix'), true);
     assert.equal(isSetupIntent('how do I query a knowledge base'), false);
 });
