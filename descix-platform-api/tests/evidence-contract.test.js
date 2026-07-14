@@ -8,6 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+    SCIENCE_DEX_STORY,
     EVIDENCE_CONTRACT_FRAME,
     SETTLEMENT_PROFILES,
     getEvidenceContract,
@@ -20,6 +21,22 @@ import {
     renderEvidenceContractMarkdown,
 } from '../src/mcp-tools/evidence-contract.js';
 import { MCP_HANDSHAKE_INSTRUCTIONS, ESSENTIAL_TOOL_NAMES } from '../src/mcp-tools/handshake.js';
+import { DISCOVERY_CORE_TOOL_NAMES, NATIVE_MCP_TOOLS } from '../src/mcp-tools/nativeTools.js';
+
+test('R6: DISCOVERY-CORE is the 7 normal-user MVP tools; mesh-ops tools flipped off the handshake', () => {
+    assert.equal(DISCOVERY_CORE_TOOL_NAMES.length, 7);
+    assert.ok(!DISCOVERY_CORE_TOOL_NAMES.includes('list_services'), 'list_services flipped off handshake');
+    assert.ok(!DISCOVERY_CORE_TOOL_NAMES.includes('service_health_check'), 'service_health_check flipped off handshake');
+    for (const t of ['tell_me_how', 'execute_remote_command', 'ask_question_to_app', 'query_knowledge_base', 'find_communities', 'fetch_my_purchases', 'get_credit_balance']) {
+        assert.ok(DISCOVERY_CORE_TOOL_NAMES.includes(t), `MVP tool ${t} stays in DISCOVERY-CORE`);
+    }
+});
+
+test('R5: find_communities tool description advertises PUBLIC-only listing', () => {
+    const fc = NATIVE_MCP_TOOLS.find((t) => t.name === 'find_communities');
+    assert.match(fc.description, /PUBLIC communities/);
+    assert.match(fc.description, /fetch_my_purchases/);
+});
 
 test('FRAME is universal and app-agnostic (no Lean/EGPT specifics leak into the frame)', () => {
     assert.equal(EVIDENCE_CONTRACT_FRAME.version, '2');
@@ -90,11 +107,58 @@ test('getEvidenceContract addressability: by app_id, unknown, and caller-relevan
 
     assert.equal(getEvidenceContract({ appId: 'no-such-app' }).profile, null);
 
+    // Prefix-match (voice round 2): a caller in community 'egpt' is relevant to 'egpt' AND its
+    // sub-app settlement profiles ({community}-{name}) — so 'egpt-dse' surfaces too. 'daita'/'powch'
+    // have no published profile and no sub-app profile, so they contribute nothing.
     const relevant = getEvidenceContract({ relevantAppIds: ['egpt', 'daita', 'powch'] });
-    assert.deepEqual(Object.keys(relevant.profiles), ['egpt']); // only published profiles returned
+    assert.deepEqual(Object.keys(relevant.profiles).sort(), ['egpt', 'egpt-dse']);
+    // An unrelated community surfaces no profile.
+    assert.deepEqual(Object.keys(getEvidenceContract({ relevantAppIds: ['daita'] }).profiles), []);
 
     const all = getEvidenceContract({});
     assert.ok('egpt' in all.profiles);
+    assert.ok('egpt-dse' in all.profiles);
+});
+
+test('V1 purpose-first: the platform framing leads with the economic-model PURPOSE, mechanism second', () => {
+    // SCIENCE_DEX_STORY is the single source the handshake + bootstrap consume; sentence 1 must
+    // name the purpose (open source gets an economic model / creators share the value), not "a DEX".
+    assert.match(SCIENCE_DEX_STORY[0], /economic model/i);
+    assert.match(SCIENCE_DEX_STORY[0], /share in the value|researchers and creators/i);
+    // The purpose leads: the word "DEX" (the mechanism) must not be the opening frame of sentence 1.
+    assert.ok(!/^DeSciX is a rigorous decentralized-science DEX/.test(SCIENCE_DEX_STORY[0]), 'sentence 1 must not open mechanics-first');
+});
+
+test('R3: FRAME leads with the verifiability INVITATION; no-priors is a consequence of checkability', () => {
+    // Lead with "you can check this yourself, here it takes minutes" rather than a posture demand.
+    assert.match(EVIDENCE_CONTRACT_FRAME.summary, /check them yourself|verifiable BY YOU|check it, usually in minutes/i);
+    // no-priors is now framed as a CONSEQUENCE of checkability ("because everything here is checkable").
+    assert.match(EVIDENCE_CONTRACT_FRAME.no_priors_rule, /because everything here is checkable/i);
+    // The egpt burden rule leads with the concrete invitation (exact command, minutes) and drops
+    // any posture-demand phrasing.
+    const egptRule = SETTLEMENT_PROFILES.egpt.burden_of_proof.rule;
+    assert.match(egptRule, /check this yourself/i);
+    assert.match(egptRule, /takes minutes|~2 min/i);
+    assert.match(egptRule, /not a posture you are asked to adopt/i);
+});
+
+test('PROFILE: egpt-dse settlement profile carries the ratified DSE settlement facts (D-report 2026-07-12)', () => {
+    const p = SETTLEMENT_PROFILES['egpt-dse'];
+    assert.ok(p, 'egpt-dse profile must be registered');
+    assert.equal(p.app_id, 'egpt-dse');
+    assert.equal(p.package, '@descix/frqtl-sdk@0.1.2');
+    assert.equal(p.golden_in_package_path, 'dist/node/conformance/goldens/double-slit.json');
+    // CEO-ratified golden parameter tuple.
+    assert.deepEqual(p.golden_tuple, { seed: 42, wavelength: 64, detectAtSlits: 1, ticks: 400, total: 103, slit1: 63, slit2: 40, combined_bins: 74 });
+    // Exact-bin-match criterion (chi2 === 0), no tolerance band.
+    assert.match(p.criterion, /chi2 === 0/);
+    assert.match(p.settles_on, /Pearson χ² must be exactly 0|exact bin match/i);
+    // The exact ratified command, verified against the published registry.
+    const cmd = p.verification_commands.find(v => v.id === 'dse_settlement');
+    assert.ok(cmd, 'dse_settlement verification command present');
+    assert.equal(cmd.cmd, 'npx -y -p @descix/frqtl-sdk@0.1.2 frqtl-dse-settlement --check');
+    assert.match(cmd.expected_when_green, /chi2 \(combined histogram\) = 0/);
+    assert.match(cmd.expected_when_green, /CHECK RESULT: PASS/);
 });
 
 test('EVIDENCE_CONTRACT_ECHO is a single compaction-proof line naming the re-fetch tool', () => {

@@ -55,7 +55,17 @@ const D3_AI_PROJECT_INSTRUCTIONS = [
 const FIRST_CONTACT_SCRIPT = Object.freeze([
     Object.freeze({
         step: 'greet',
-        do: 'Greet the user and give the one-liner: DeSciX is a decentralized-science exchange where research claims are settled by machine-checkable evidence and contributions can earn on-chain rewards. Tell them setup takes a few minutes and you will walk them through it.',
+        // V2 (voice round 2): PURPOSE-FIRST one-liner — the point of DeSciX is the economic model
+        // for open source, not the DEX mechanism. Mechanism comes second.
+        do: 'Greet the user and give the purpose-first one-liner: DeSciX gives open source an economic model — researchers and creators share in the value their contributions create, instead of giving their work away for free. Mechanically it is a decentralized-science exchange where research claims are settled by machine-checkable evidence and contributions can earn on-chain rewards. Tell them setup takes a few minutes and you will walk them through it.',
+    }),
+    Object.freeze({
+        step: 'learn_daita',
+        // V2 (voice round 2): the EXPLICIT guided first step. DAITA is the concept/platform home;
+        // EGPT is one example effort. Point the assistant at the DAITA community's own RAG agent so
+        // it learns what DeSciX is and how the tokenomics work from the platform's own source,
+        // rather than reconstructing it from memory (retrieval-first, applied to onboarding).
+        do: "The first step is to LEARN what DeSciX is from the platform itself: call ask_question_to_app({ app_id: 'daita', user_input: 'What is DeSciX, and how do its tokenomics work — how do researchers and creators earn from their contributions?' }). DAITA is the concept/platform home (the community branded 'DeSciX'); EGPT is one example effort inside it, not the platform itself. Summarize what DAITA returns for the user and cite it — do not answer this from your own memory.",
     }),
     Object.freeze({
         step: 'ask_interest',
@@ -92,7 +102,16 @@ const FIRST_CONTACT_SCRIPT = Object.freeze([
     }),
     Object.freeze({
         step: 'explain_tokenomics',
-        do: 'Now — and only now — explain the tokenomics model: metering is the default for platform AI services, exactly like the Claude API itself. RAG calls draw on a shared USD AI-credit balance by actual usage; get_credit_balance shows the balance any time, and credits can be bought with the descix CLI or the platform store. Earning: contributions, disputatio participation, and airdrops can earn community tokens. Setup is where this is explained once — the tools themselves do not nag about cost.',
+        do: 'Now explain the tokenomics model: metering is the default for platform AI services, exactly like the Claude API itself. RAG calls draw on a shared USD AI-credit balance by actual usage; get_credit_balance shows the balance any time, and credits can be bought with the descix CLI or the platform store. Earning: contributions, disputatio participation, and airdrops can earn community tokens. Setup is where this is explained once — the tools themselves do not nag about cost.',
+    }),
+    Object.freeze({
+        step: 'verify_settlement',
+        // V4 (voice round 2): the FINAL step is a REAL verifiability experience — setup should end
+        // with the user having SEEN the Evidence Contract settle a claim, not just read about it.
+        // The published DSE settlement command IS live today (ws-frqtl-node-settlement D-report,
+        // 2026-07-12: @descix/frqtl-sdk@0.1.2, verified against the public registry). Per-surface
+        // framing per the voice doctrine surface ladder. Worded truthfully off the D-report.
+        do: "Finish by letting the user SEE the Evidence Contract settle a claim, not just read about it. DeSciX's FRQTL double-slit experiment ships a published settlement command: `npx -y -p @descix/frqtl-sdk@0.1.2 frqtl-dse-settlement --check`. It reproduces the detector histogram bin-for-bin against a golden that ships inside the package and prints `chi2 (combined histogram) = 0 (df=73)` then `CHECK RESULT: PASS (chi2=0, exact bin match)` in about a minute, entirely offline. Per surface: on Claude Code or Cowork, run it directly and show the user the PASS output; on claude.ai, offer it as the thing to run in Claude Code or Cowork (or run it yourself if you have npm-capable tooling). Ask the user before running. This is the egpt-dse settlement profile — the same χ²=0 exact-bin-match criterion the Evidence Contract names.",
     }),
 ]);
 
@@ -103,10 +122,26 @@ const FIRST_CONTACT_SCRIPT = Object.freeze([
  */
 export const DESCIX_SETUP_PLAYBOOK = Object.freeze({
     kind: 'descix_setup_playbook',
-    version: '2026-07-12.2',
+    version: '2026-07-13.1',
     onboarding_instruction: 'Add the DeSciX connector to Claude (Settings → Connectors → add the platform origin + /mcp), then just type: "Help me set-up DeSciX".',
     script: FIRST_CONTACT_SCRIPT,
     project_instructions: D3_AI_PROJECT_INSTRUCTIONS,
+    // V4 (voice round 2): the REAL runnable verification the final script step points at. LIVE
+    // TODAY — @descix/frqtl-sdk@0.1.2 published + verified against the public registry
+    // (ws-frqtl-node-settlement D-report, 2026-07-12). This is the egpt-dse settlement profile's
+    // verification command; setup ends with the user having SEEN a claim settle.
+    settlement_experience: Object.freeze({
+        app_id: 'egpt-dse',
+        package: '@descix/frqtl-sdk@0.1.2',
+        command: 'npx -y -p @descix/frqtl-sdk@0.1.2 frqtl-dse-settlement --check',
+        expected_output: 'chi2 (combined histogram) = 0 (df=73); CHECK RESULT: PASS (chi2=0, exact bin match)',
+        per_surface: Object.freeze({
+            claude_ai: 'Offer it as the thing to run in Claude Code or Cowork; run it directly only if you have npm-capable tooling.',
+            claude_code: 'Run it directly and show the PASS output.',
+            cowork: 'Run it directly and show the PASS output.',
+        }),
+        note: 'Runs offline from the published registry in ~1 min; the golden ships in-package. Ask the user before running.',
+    }),
     knowledge: Object.freeze([
         Object.freeze({
             title: 'DeSciX / EGPT research guide',
@@ -155,6 +190,11 @@ export function isSetupIntent(question) {
         'make a descix project',
         'configure descix',
         'help me get started',
+        // R2 (voice round 2, TEST-3 G3.3): "Help me get set-up with DeSciX" normalizes to
+        // "help me get set up with descix" — none of the above matched it. Add the "get set up"
+        // stem so the phrasing that a real user typed fires the doctor script.
+        'get set up',
+        'get setup',
     ];
     return SETUP_PHRASES.some((phrase) => q.includes(phrase));
 }
