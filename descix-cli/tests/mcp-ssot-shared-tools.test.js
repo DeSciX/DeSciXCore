@@ -101,3 +101,29 @@ test('CLI-local diagnostics remain stdio-only (not in the shared HTTP SSOT)', ()
     assert.ok(!ssotNames.has('descix_doctor'), 'descix_doctor must NOT be in the HTTP SSOT');
     assert.ok(!ssotNames.has('platform_health'), 'platform_health must NOT be in the HTTP SSOT');
 });
+
+// WS-MULTI-KB-EXPOSE (role-system handoff §4.2): the multi-KB retrieval path exists server-side
+// (ragCommands → prepare_chat_context/queryRAG → buildMetadataFilter $in). Re-expose the array
+// scope param on the two RAG tools so MCP callers can actually reach it. Guard the shape so it
+// never silently drifts back to singular-only.
+test('RAG tools expose the multi-KB array scope param alongside the singular', () => {
+    const byName = Object.fromEntries(NATIVE_MCP_TOOLS.map(t => [t.name, t]));
+
+    const ask = byName['ask_question_to_app'];
+    const askProps = ask.inputSchema.properties;
+    assert.ok(askProps.knowledgebase_name, 'ask_question_to_app keeps the singular knowledgebase_name');
+    assert.ok(askProps.knowledgebase_names, 'ask_question_to_app must expose plural knowledgebase_names');
+    assert.equal(askProps.knowledgebase_names.type, 'array');
+    assert.equal(askProps.knowledgebase_names.items?.type, 'string');
+    assert.ok(!(ask.inputSchema.required || []).includes('knowledgebase_names'),
+        'the multi-KB scope is optional (singular / default still work)');
+
+    const qkb = byName['query_knowledge_base'];
+    const qkbProps = qkb.inputSchema.properties;
+    assert.ok(qkbProps.kb_id, 'query_knowledge_base keeps the singular kb_id');
+    assert.ok(qkbProps.kb_ids, 'query_knowledge_base must expose plural kb_ids');
+    assert.equal(qkbProps.kb_ids.type, 'array');
+    assert.equal(qkbProps.kb_ids.items?.type, 'string');
+    assert.ok(!(qkb.inputSchema.required || []).includes('kb_ids'),
+        'the multi-KB scope is optional (singular / default still work)');
+});

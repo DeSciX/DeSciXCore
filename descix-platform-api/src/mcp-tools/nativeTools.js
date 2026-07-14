@@ -47,6 +47,7 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
             properties: {
                 app_id: { type: 'string', description: 'App ID' },
                 kb_id: { type: 'string', description: 'KB name (default: General)' },
+                kb_ids: { type: 'array', items: { type: 'string' }, description: 'Optional: search several of the app\'s knowledge bases at once — the top chunks are pooled from all of them. Takes precedence over kb_id when both are given; a single "*" element searches every KB in the app.' },
                 query: { type: 'string', description: 'Search query' },
                 limit: { type: 'number', description: 'Max results (default: 5)' },
             },
@@ -66,6 +67,7 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
             properties: {
                 app_id: { type: 'string', description: 'App ID to query' },
                 knowledgebase_name: { type: 'string', description: 'KB name (default: General)' },
+                knowledgebase_names: { type: 'array', items: { type: 'string' }, description: 'Optional: draw the answer from several of the app\'s knowledge bases fused together in one call. The FIRST name is the primary KB whose voice and model settings shape the reply. Takes precedence over knowledgebase_name when both are given; a single "*" element means every KB in the app.' },
                 user_input: { type: 'string', description: 'The question to ask' },
                 previous_interaction_id: { type: 'string', description: 'Interaction ID from a previous response to continue a conversation thread. Omit for the first message.' },
             },
