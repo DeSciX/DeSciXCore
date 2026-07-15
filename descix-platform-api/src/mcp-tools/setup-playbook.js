@@ -102,7 +102,13 @@ const FIRST_CONTACT_SCRIPT = Object.freeze([
     }),
     Object.freeze({
         step: 'explain_tokenomics',
-        do: 'Now explain the tokenomics model: metering is the default for platform AI services, exactly like the Claude API itself. RAG calls draw on a shared USD AI-credit balance by actual usage; get_credit_balance shows the balance any time, and credits can be bought with the descix CLI or the platform store. Earning: contributions, disputatio participation, and airdrops can earn community tokens. Setup is where this is explained once — the tools themselves do not nag about cost.',
+        // ws-first-contact-economy (CEO-D-2026-07-15-TWO-FLOORS-POWCH-LISTED-ECONOMY-GO, D8/D10-D11):
+        // name the TWO distinct free floors truthfully — the ONE-TIME setup welcome credit (a ledgered
+        // grant, not earned, not a token) and the SEPARATE recurring free DAILY credit — plus the
+        // starting contribution/airdrop-eligibility position finishing setup confers. Dollar figures are
+        // the current launch values (config-driven server-side: PATRONAGE_SETUP_BONUS_USD /
+        // SPONSORED_CREDITS_USER_DAILY_CAP_USD) — named here as the current amounts, not authoritative.
+        do: 'Now explain the tokenomics model: metering is the default for platform AI services, exactly like the Claude API itself. RAG calls draw on a shared USD AI-credit balance by actual usage; get_credit_balance shows the balance any time (and whether today\'s free daily credit is still available), and credits can be bought with the descix CLI or the platform store. Two distinct things keep first contact free — keep them separate: (1) a ONE-TIME welcome credit (currently $10) is added to your balance when you finish this setup — a grant to explore with, NOT earned and NOT a community token; (2) SEPARATELY, a free daily credit (currently $10/day) auto-applies to your first metered call each day and renews every day. Earning is different again: contributions, disputatio participation, and airdrops can earn community tokens — and finishing setup also gives you a small starting contribution position, so you land already eligible to accrue toward airdrops (claiming a community\'s airdrop still needs that community\'s membership). Setup is where this is explained once — the tools themselves do not nag about cost.',
     }),
     Object.freeze({
         step: 'verify_settlement',
