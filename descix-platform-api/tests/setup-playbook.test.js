@@ -63,6 +63,35 @@ test('V4 verify_settlement: setup ends with a REAL runnable verification (publis
     assert.ok(exp.per_surface.claude_ai && exp.per_surface.claude_code && exp.per_surface.cowork);
 });
 
+test('V5 npm-voice delta: honest dev-path (DSE npx-run + math import), lake-build referral, NO false 157-npm claim', () => {
+    const verify = DESCIX_SETUP_PLAYBOOK.script.find((s) => s.step === 'verify_settlement');
+    // (1) npm-installable OFFER present: the constructive-math library, framed as IMPORTABLE (not npx-run).
+    assert.match(verify.do, /@descix\/egpt-math-sdk/, 'egpt-math-sdk offer present');
+    assert.match(verify.do, /import/i, 'math library framed as importable');
+    assert.match(verify.do, /EGPTMath/, 'names the exported constructive-math types');
+    // (2) lake-build referral intact: repos/Lean proofs → Claude Code / Cowork.
+    assert.match(verify.do, /lake build/i, 'lake build referral intact');
+    assert.match(verify.do, /Claude Code/, 'refers repo work to Claude Code');
+    // (3) NEGATIVE — NO false "157 suite / circuit-sat is npx-runnable" claim.
+    assert.ok(!/\b157\b[\s\S]{0,40}(npx|npm run|runnable)/i.test(verify.do), 'no false 157-npm-runnable claim');
+    assert.ok(!/npx[^`]*egpt-math/i.test(verify.do), 'egpt-math is IMPORTED, never npx-run');
+    // ...and where 157 IS mentioned, it is honestly framed as repo-only / notebook.
+    assert.match(verify.do, /157-test suite/i, '157 suite mentioned (as what a full checkout adds)');
+    assert.match(verify.do, /repo checkout|full repo|notebook links/i, '157/circuit-sat framed repo-only');
+    // The ONLY npx command claimed runnable is the DSE check (frqtl-sdk), kept verbatim.
+    const npxRuns = verify.do.match(/npx\s+-y\s+-p\s+@descix\/[^\s`]+/gi) || [];
+    assert.deepEqual(npxRuns, ['npx -y -p @descix/frqtl-sdk@0.1.2'], 'exactly one npx-runnable package — the DSE check');
+
+    // (4) structured constructive_math_experience sibling field (machine-consumable).
+    const cm = DESCIX_SETUP_PLAYBOOK.constructive_math_experience;
+    assert.equal(cm.package, '@descix/egpt-math-sdk@0.1.1');
+    assert.equal(cm.importable, true);
+    assert.deepEqual(cm.exports, ['EGPTFFT', 'EGPTMath', 'EGPTMatrix', 'EGPTPolynomial', 'EGPTReal']);
+    assert.equal(cm.not_in_dist.packaged_157_test_suite, false, '157 suite NOT in dist');
+    assert.equal(cm.not_in_dist.circuit_sat_bin, false, 'circuit-sat bin NOT in dist');
+    assert.ok(cm.per_surface.claude_ai && cm.per_surface.claude_code && cm.per_surface.cowork);
+});
+
 test('offer_prompts tracks: drawn from the use-case canon (surface-ladder §3)', () => {
     const offer = DESCIX_SETUP_PLAYBOOK.script.find((s) => s.step === 'offer_prompts');
     const tracks = offer.tracks;

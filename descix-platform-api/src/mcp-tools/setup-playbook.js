@@ -112,12 +112,22 @@ const FIRST_CONTACT_SCRIPT = Object.freeze([
     }),
     Object.freeze({
         step: 'verify_settlement',
-        // V4 (voice round 2): the FINAL step is a REAL verifiability experience — setup should end
-        // with the user having SEEN the Evidence Contract settle a claim, not just read about it.
-        // The published DSE settlement command IS live today (ws-frqtl-node-settlement D-report,
-        // 2026-07-12: @descix/frqtl-sdk@0.1.2, verified against the public registry). Per-surface
-        // framing per the voice doctrine surface ladder. Worded truthfully off the D-report.
-        do: "Finish by letting the user SEE the Evidence Contract settle a claim, not just read about it. DeSciX's FRQTL double-slit experiment ships a published settlement command: `npx -y -p @descix/frqtl-sdk@0.1.2 frqtl-dse-settlement --check`. It reproduces the detector histogram bin-for-bin against a golden that ships inside the package and prints `chi2 (combined histogram) = 0 (df=73)` then `CHECK RESULT: PASS (chi2=0, exact bin match)` in about a minute, entirely offline. Per surface: on Claude Code or Cowork, run it directly and show the user the PASS output; on claude.ai, offer it as the thing to run in Claude Code or Cowork (or run it yourself if you have npm-capable tooling). Ask the user before running. This is the egpt-dse settlement profile — the same χ²=0 exact-bin-match criterion the Evidence Contract names.",
+        // V5 (CEO voice delta 2026-07-15, ws-setup-npm-voice — verify-before-close pass on the
+        // first-contact arc): the dev-path voice is honestly scoped to what an npm-capable assistant
+        // can do RIGHT NOW against the PUBLISHED packages (COS re-verified today). claude.ai cannot
+        // clone a repo or run `lake build` (that belongs in Claude Code / Cowork — refer there), but it
+        // CAN prompt the user to click a link and CAN install/import npm packages. TWO things are live:
+        //   (1) the DSE settlement CHECK — `@descix/frqtl-sdk@0.1.2` (cold-cache PASS re-verified today,
+        //       chi2=0), command kept VERBATIM; and
+        //   (2) the constructive-math LIBRARY — `@descix/egpt-math-sdk@0.1.1` is npm-IMPORTABLE now
+        //       (exports EGPTFFT/EGPTMath/EGPTMatrix/EGPTPolynomial/EGPTReal).
+        // TRUTH RULE (do NOT overclaim): there is NO packaged one-command 157-test suite and NO
+        // circuit-SAT bin in the published dist — those are repo-only (full checkout via Claude
+        // Code/Cowork) or live today as launchable notebook links (coming via the FRQTL lane). The 157
+        // suite may be MENTIONED as what a full checkout adds, never as npx-runnable. Offer-first,
+        // ask-before-running, per-surface honesty preserved. HUsr user-type differentiation (airdrop/
+        // tokenomics fork) is a BOARDED follow-up — do NOT branch on user type here.
+        do: "Finish by offering the user a way to SEE a claim settle — offer it, and ask before running anything. Be honest about the boundary first: you can't clone the repo or run the Lean proofs here (a full `lake build` checkout belongs in Claude Code or Cowork — refer the user there for that), but the egpt community's libraries ARE npm-installable, so an npm-capable assistant can do two things right now. (1) The double-slit Evidence Contract settlement check: `npx -y -p @descix/frqtl-sdk@0.1.2 frqtl-dse-settlement --check` — it reproduces the detector histogram bin-for-bin against an in-package golden and prints `chi2 (combined histogram) = 0 (df=73)` then `CHECK RESULT: PASS (chi2=0, exact bin match)` in about a minute, entirely offline (the egpt-dse settlement profile — the same χ²=0 exact-bin-match criterion the Evidence Contract names). (2) The constructive-math library `@descix/egpt-math-sdk` is importable now (it exports EGPTFFT, EGPTMath, EGPTMatrix, EGPTPolynomial, EGPTReal) — you can import it and exercise the integer-only math interactively with the user. Say it plainly: \"want me to run the settlement check, or import the math library and try it?\" Per surface: on Claude Code or Cowork, run both directly and show the output; on claude.ai, offer them and run them yourself only if you have npm-capable tooling, otherwise point the user to Claude Code or Cowork. Note honestly what npm does NOT yet include: there is no one-command packaged 157-test suite and no circuit-SAT binary in the published dist — those come from a full repo checkout (Claude Code/Cowork) or the launchable notebook links, so never present them as npx-runnable.",
     }),
 ]);
 
@@ -128,7 +138,7 @@ const FIRST_CONTACT_SCRIPT = Object.freeze([
  */
 export const DESCIX_SETUP_PLAYBOOK = Object.freeze({
     kind: 'descix_setup_playbook',
-    version: '2026-07-13.1',
+    version: '2026-07-15.1',
     onboarding_instruction: 'Add the DeSciX connector to Claude (Settings → Connectors → add the platform origin + /mcp), then just type: "Help me set-up DeSciX".',
     script: FIRST_CONTACT_SCRIPT,
     project_instructions: D3_AI_PROJECT_INSTRUCTIONS,
@@ -147,6 +157,30 @@ export const DESCIX_SETUP_PLAYBOOK = Object.freeze({
             cowork: 'Run it directly and show the PASS output.',
         }),
         note: 'Runs offline from the published registry in ~1 min; the golden ships in-package. Ask the user before running.',
+    }),
+    // V5 (CEO voice delta 2026-07-15, ws-setup-npm-voice): the SECOND live dev-path experience — the
+    // constructive-math library is npm-IMPORTABLE now (verified against the published registry: exports
+    // EGPTFFT/EGPTMath/EGPTMatrix/EGPTPolynomial/EGPTReal). Distinct from settlement_experience: that one
+    // is npx-RUN (a bin), this one is IMPORTED and exercised. `not_in_dist` is the truth guard — the
+    // 157-test suite and circuit-SAT bin are NOT in the published dist (repo-only / notebook links), so a
+    // consumer must not present them as npx-runnable. Coming via the FRQTL lane (rows being boarded).
+    constructive_math_experience: Object.freeze({
+        app_id: 'egpt',
+        package: '@descix/egpt-math-sdk@0.1.1',
+        importable: true,
+        exports: Object.freeze(['EGPTFFT', 'EGPTMath', 'EGPTMatrix', 'EGPTPolynomial', 'EGPTReal']),
+        what_you_can_do: 'Import the package and exercise the integer-only constructive math interactively with the user (construct and evaluate the exported types). Offer-first; ask before running.',
+        not_in_dist: Object.freeze({
+            packaged_157_test_suite: false,
+            circuit_sat_bin: false,
+            note: 'No one-command 157-test suite and no circuit-SAT binary ship in the published dist yet — those are repo-only (full checkout via Claude Code/Cowork) or live today as launchable notebook links (coming via the FRQTL lane). Never present them as npx-runnable.',
+        }),
+        per_surface: Object.freeze({
+            claude_ai: 'Offer to import and exercise it; run it yourself only if you have npm-capable tooling, otherwise point the user to Claude Code or Cowork.',
+            claude_code: 'Import and exercise it directly with the user.',
+            cowork: 'Import and exercise it directly with the user.',
+        }),
+        note: 'Importable from the published registry now. Ask the user before running.',
     }),
     knowledge: Object.freeze([
         Object.freeze({
