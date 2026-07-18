@@ -48,7 +48,7 @@ test('FIX2/FIX3: create_app_for_community enforces canonical checks', () => {
     // (b) duplicate fail-loud, gated by overwrite
     assert.match(src, /already exists in community/,
         'must fail loud on duplicate app_id');
-    assert.match(src, /if \(app && !overwrite\)/,
+    assert.match(src, /if \(existing && !overwrite\)/,
         'duplicate check must be gated by an explicit overwrite flag');
     // (c)+(d)+FIX3: composed id via composeAppId from short_name/app_name
     assert.match(src, /composeAppId\(community_id, requestedShort\)/,

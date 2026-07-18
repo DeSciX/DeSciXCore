@@ -101,3 +101,57 @@ export function composeAppId(community_id, short_name) {
     assertValidAppShortName(short);
     return `${community}-${short}`;
 }
+
+// A caller-identity (passkey uid / canonical attribution id) tail is an OPAQUE, identity-derived
+// value — NOT a human-picked short name. It legitimately carries the sanitized-credentialId /
+// base64url / email-fallback alphabet (uppercase, '-', '_', '@', '.'), which APP_SHORT_NAME_RE
+// deliberately forbids for hand-picked names. It must stay VERBATIM (never lowercased/rewritten)
+// so distinct case-sensitive credential IDs can never collide onto one namespace — the injectivity
+// is what makes "the name IS the authorization" a real self-scope guarantee, not a convention.
+// The only hard constraints are Firestore-doc-id safety: no '/', no whitespace, not '.'/'..',
+// non-empty, bounded length. Routing NEVER parses an app_id (it reads community_id from Products),
+// so the reserved '-' separator inside the tail does not affect routing.
+const USER_APP_TAIL_MAX = 256; // Firestore doc-id budget is 1500 bytes; `{community}-` + tail stays well under.
+
+/**
+ * Compose the canonical, self-scoping app_id for a MEMBER's own per-community app (doc home):
+ *   {community_id}-{uid}
+ * where `uid` is the caller's canonical attribution id (User.canonicalAttributionId(user) —
+ * the passkey uid = sanitizeCredentialId(credentialId), or the normalized-email fallback).
+ *
+ * Authority: CEO-D-2026-07-18-PER-USER-APP. This is the "naming IS the authorization" primitive:
+ * because the tail is derived purely from the authenticated caller's own identity, a member can
+ * only ever address their OWN app — never another user's namespace. Handlers MUST pass the
+ * server-resolved uid here, never a client-supplied value.
+ *
+ * Distinct from composeAppId: that composes HUMAN-picked sub-app short names (APP_SHORT_NAME_RE,
+ * no '-'); this composes an OPAQUE identity tail kept verbatim. A user-app is UNLISTED and
+ * site-less by design, so it needs no DNS-label / subdomain compliance.
+ *
+ * @param {string} community_id  the community's default app id (== community_id == token symbol)
+ * @param {string} uid           the caller's canonical attribution id (server-resolved, verbatim)
+ * @returns {string} the self-scoped user app_id `{community}-{uid}`
+ * @throws if uid is missing or not a safe Firestore-doc-id fragment
+ */
+export function composeUserAppId(community_id, uid) {
+    if (!community_id || typeof community_id !== 'string') {
+        throw new Error('community_id is required to compose a user app_id');
+    }
+    if (!uid || typeof uid !== 'string') {
+        throw new Error('uid (canonical attribution id) is required to compose a user app_id');
+    }
+    if (uid.includes('/')) {
+        throw new Error(`Invalid uid '${uid}': '/' is not allowed in a Firestore doc id.`);
+    }
+    if (/\s/.test(uid)) {
+        throw new Error(`Invalid uid '${uid}': whitespace is not allowed.`);
+    }
+    if (uid === '.' || uid === '..') {
+        throw new Error(`Invalid uid '${uid}': '.' and '..' are reserved doc ids.`);
+    }
+    if (uid.length > USER_APP_TAIL_MAX) {
+        throw new Error(`Invalid uid: exceeds ${USER_APP_TAIL_MAX} chars (got ${uid.length}).`);
+    }
+    // community prefix is normalized (it IS a token-derived id); the uid tail is preserved verbatim.
+    return `${community_id.toLowerCase()}-${uid}`;
+}
