@@ -11,6 +11,7 @@ import {
     assertValidAppShortName,
     composeAppId,
     composeUserAppId,
+    composeUserDocServeUrl,
 } from '../src/naming/index.js';
 
 test('communityIdFromTokenSymbol: id derived from SYMBOL not name (descix/daita root cause)', () => {
@@ -107,4 +108,26 @@ test('composeUserAppId: rejects Firestore-doc-id-unsafe / empty uids', () => {
     assert.throws(() => composeUserAppId('daita', ''), /uid .* is required/);
     assert.throws(() => composeUserAppId('', 'x'), /community_id is required/);
     assert.throws(() => composeUserAppId('daita', 'a'.repeat(300)), /exceeds/);
+});
+
+// ─── composeUserDocServeUrl (CEO 2026-07-18): deterministic per-user doc serve URL ───
+
+test('composeUserDocServeUrl: {app_id}.{site_domain}/{content_path}', () => {
+    assert.equal(
+        composeUserDocServeUrl({ app_id: 'daita-AbC', site_domain: 'dev.descix.net', content_path: 'files/DRIVEID' }),
+        'https://daita-AbC.dev.descix.net/files/DRIVEID'
+    );
+});
+
+test('composeUserDocServeUrl: strips a leading slash on content_path', () => {
+    assert.equal(
+        composeUserDocServeUrl({ app_id: 'x', site_domain: 'descix.net', content_path: '/assets/ipdocs/y.md' }),
+        'https://x.descix.net/assets/ipdocs/y.md'
+    );
+});
+
+test('composeUserDocServeUrl: requires all three args', () => {
+    assert.throws(() => composeUserDocServeUrl({ site_domain: 'd', content_path: 'p' }), /app_id is required/);
+    assert.throws(() => composeUserDocServeUrl({ app_id: 'a', content_path: 'p' }), /site_domain is required/);
+    assert.throws(() => composeUserDocServeUrl({ app_id: 'a', site_domain: 'd' }), /content_path is required/);
 });
