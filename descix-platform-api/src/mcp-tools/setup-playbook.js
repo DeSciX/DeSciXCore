@@ -79,6 +79,7 @@ const FIRST_CONTACT_SCRIPT = Object.freeze([
                 'Show me my DeSciX communities, credits, and token balances.',
                 'Build me a token-economy dashboard from my DeSciX data — interesting projects, community stats, airdrops, and my referral link.',
                 'What token-earning opportunities do I have right now?',
+                'Contribute my own documents: create my personal doc home and pull in a Drive file I have shared to dip@descix.net.',
             ]),
             quantum_computing: Object.freeze([
                 'Show me the QFT vs Willsch (Mathematics 2023) replication and verify it headlessly via npm.',
@@ -181,6 +182,38 @@ export const DESCIX_SETUP_PLAYBOOK = Object.freeze({
             cowork: 'Import and exercise it directly with the user.',
         }),
         note: 'Importable from the published registry now. Ask the user before running.',
+    }),
+    // ws-drive-contributor-ingest (CEO-D-2026-07-18-PER-USER-APP): the member-open, self-scoped
+    // contribution path — a claude.ai chat-only contributor (files already sitting in a Drive folder,
+    // no code environment) can own a personal doc home and populate it from Drive WITHOUT the gated
+    // add_ipdoc. All three are member-open and self-scoped BY CONSTRUCTION (the target namespace is
+    // derived from the caller's own passkey uid), so they need no permission and can only ever touch
+    // the caller's own docs. Invoke via execute_remote_command({ command, params }). This is the
+    // deterministic discovery surface that closes the tell_me_how name-reachability residual.
+    contributor_ingest: Object.freeze({
+        summary: "Own a personal document home and ingest your own Drive files into it — member-open, no admin rights needed. Your namespace is derived from your identity, so you can only ever write to your own docs.",
+        commands: Object.freeze([
+            Object.freeze({
+                name: 'create_my_app',
+                invoke_via: 'execute_remote_command',
+                params: Object.freeze({ community_id: 'daita' }),
+                does: "Create (idempotent) your own UNLISTED per-community app at app_id {community}-{your_uid} with a personal KB named by your uid. Self-scoped: you cannot create anyone else's app.",
+            }),
+            Object.freeze({
+                name: 'pull_drive_file_to_my_kb',
+                invoke_via: 'execute_remote_command',
+                params: Object.freeze({ community_id: 'daita', drive_file_id: '<id of a Drive file you shared to dip@descix.net>', doc_class: 'primary-source' }),
+                does: "Share a Drive file with dip@descix.net, then pass its file id: it exports the text to GCS and vectorizes it into your personal KB (canonical 4-part chunk scheme), searchable immediately. Idempotent on the Drive file id. Does NOT use the admin-gated add_ipdoc.",
+            }),
+            Object.freeze({
+                name: 'list_my_docs',
+                invoke_via: 'execute_remote_command',
+                params: Object.freeze({}),
+                does: "List all of your ingested docs across every community/app in one call (your 'all my docs everywhere' index).",
+            }),
+        ]),
+        retrieval: "After ingest, query with query_knowledge_base({ app_id: '{community}-{your_uid}', kb_id: '<your_uid>', query, file_filter }) or fuse KBs with kb_ids[]; ask_question_to_app answers from them.",
+        note: 'Sharing to dip@descix.net (Viewer is enough) is how DeSciX reads the file. Ask the user before ingesting.',
     }),
     knowledge: Object.freeze([
         Object.freeze({
