@@ -10,6 +10,7 @@ import {
     communityIdFromTokenSymbol,
     assertValidAppShortName,
     composeAppId,
+    composeUserAppId,
 } from '../src/naming/index.js';
 
 test('communityIdFromTokenSymbol: id derived from SYMBOL not name (descix/daita root cause)', () => {
@@ -79,4 +80,31 @@ test('composeAppId: a short name containing - fails loud', () => {
 
 test('composeAppId: requires community_id', () => {
     assert.throws(() => composeAppId('', 'frqtl'), /community_id is required/);
+});
+
+// ─── composeUserAppId (CEO-D-2026-07-18-PER-USER-APP): self-scoping per-user app id ───
+
+test('composeUserAppId: {community}-{uid}, uid kept VERBATIM (injective self-scope)', () => {
+    // A passkey uid (sanitized credentialId) legitimately carries '-', '_', and case — it must NOT
+    // be lowercased/rewritten, else two case-distinct credential ids could collide onto one app.
+    assert.equal(composeUserAppId('daita', 'AbC-_dEf'), 'daita-AbC-_dEf');
+    assert.equal(composeUserAppId('daita', 'Zm9vYmFy_-QQ'), 'daita-Zm9vYmFy_-QQ');
+});
+
+test('composeUserAppId: email-fallback uid (@/.) is allowed (opaque identity tail)', () => {
+    assert.equal(composeUserAppId('daita', 'sam@descix.net'), 'daita-sam@descix.net');
+});
+
+test('composeUserAppId: community prefix is normalized (token-derived)', () => {
+    assert.equal(composeUserAppId('DAITA', 'Xy'), 'daita-Xy');
+});
+
+test('composeUserAppId: rejects Firestore-doc-id-unsafe / empty uids', () => {
+    assert.throws(() => composeUserAppId('daita', 'a/b'), /not allowed in a Firestore doc id/);
+    assert.throws(() => composeUserAppId('daita', 'a b'), /whitespace/);
+    assert.throws(() => composeUserAppId('daita', '.'), /reserved doc ids/);
+    assert.throws(() => composeUserAppId('daita', '..'), /reserved doc ids/);
+    assert.throws(() => composeUserAppId('daita', ''), /uid .* is required/);
+    assert.throws(() => composeUserAppId('', 'x'), /community_id is required/);
+    assert.throws(() => composeUserAppId('daita', 'a'.repeat(300)), /exceeds/);
 });
