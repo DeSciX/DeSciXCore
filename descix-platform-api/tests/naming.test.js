@@ -112,22 +112,20 @@ test('composeUserAppId: rejects Firestore-doc-id-unsafe / empty uids', () => {
 
 // ─── composeUserDocServeUrl (CEO 2026-07-18): deterministic per-user doc serve URL ───
 
-test('composeUserDocServeUrl: {app_id}.{site_domain}/{content_path}', () => {
+test('composeUserDocServeUrl: community subdomain + /assets/userdocs/{app_id}/{file_id} (CEO-D-2026-07-18 ruling)', () => {
     assert.equal(
-        composeUserDocServeUrl({ app_id: 'daita-AbC', site_domain: 'dev.descix.net', content_path: 'files/DRIVEID' }),
-        'https://daita-AbC.dev.descix.net/files/DRIVEID'
+        composeUserDocServeUrl({ community_id: 'daita', site_domain: 'dev.descix.net', app_id: 'daita-sam@descix.net', file_id: 'DRIVEID' }),
+        'https://daita.dev.descix.net/assets/userdocs/daita-sam@descix.net/DRIVEID'
+    );
+    assert.equal(
+        composeUserDocServeUrl({ community_id: 'daita', site_domain: 'descix.net', app_id: 'daita-Zm9v', file_id: 'abc' }),
+        'https://daita.descix.net/assets/userdocs/daita-Zm9v/abc'
     );
 });
 
-test('composeUserDocServeUrl: strips a leading slash on content_path', () => {
-    assert.equal(
-        composeUserDocServeUrl({ app_id: 'x', site_domain: 'descix.net', content_path: '/assets/ipdocs/y.md' }),
-        'https://x.descix.net/assets/ipdocs/y.md'
-    );
-});
-
-test('composeUserDocServeUrl: requires all three args', () => {
-    assert.throws(() => composeUserDocServeUrl({ site_domain: 'd', content_path: 'p' }), /app_id is required/);
-    assert.throws(() => composeUserDocServeUrl({ app_id: 'a', content_path: 'p' }), /site_domain is required/);
-    assert.throws(() => composeUserDocServeUrl({ app_id: 'a', site_domain: 'd' }), /content_path is required/);
+test('composeUserDocServeUrl: requires all four args', () => {
+    assert.throws(() => composeUserDocServeUrl({ site_domain: 'd', app_id: 'a', file_id: 'f' }), /community_id is required/);
+    assert.throws(() => composeUserDocServeUrl({ community_id: 'c', app_id: 'a', file_id: 'f' }), /site_domain is required/);
+    assert.throws(() => composeUserDocServeUrl({ community_id: 'c', site_domain: 'd', file_id: 'f' }), /app_id is required/);
+    assert.throws(() => composeUserDocServeUrl({ community_id: 'c', site_domain: 'd', app_id: 'a' }), /file_id is required/);
 });

@@ -157,29 +157,26 @@ export function composeUserAppId(community_id, uid) {
 }
 
 /**
- * Compose the canonical, DETERMINISTIC serve URL for a user-owned document, from the app subdomain
- * and the object's storage path — DERIVE, DON'T STORE (CEO ruling 2026-07-18). The URL is a pure
- * function of (app_id, site_domain, content_path), so any read surface (pull, list) can recompute
+ * Compose the canonical, DETERMINISTIC serve URL for an OPTED-IN-PUBLIC user document
+ * (CEO-D-2026-07-18 serve_url ruling). DERIVE, DON'T STORE: a pure function of
+ * (community_id, site_domain, app_id, file_id), so any read surface (pull, list, publish) recomputes
  * it without persisting a serve_url field.
  *
- *   https://{app_id}.{site_domain}/{content_path}
+ *   https://{community_id}.{site_domain}/assets/userdocs/{app_id}/{file_id}
  *
- * where site_domain already encodes the env ({env}.descix.net in dev/demo, descix.net in prod) and
- * content_path is the object key AFTER the `{env}/{app_id}/` prefix (e.g. `files/{drive_doc_id}`).
- * Co-located with composeUserAppId because app_id here is a per-user app id ({community}-{uid}).
+ * Serves via the COMMUNITY subdomain (DNS-able — the per-user-app subdomain was abandoned because a
+ * per-user app_id is not a valid DNS label) and the existing public `/assets/` edge channel. The
+ * public copy lives at `{env}/{community_id}/assets/userdocs/{app_id}/{file_id}` in the public
+ * bucket. site_domain (utils.SITE_DOMAIN, e.g. `dev.descix.net`) is passed in to keep this module
+ * dependency-free. Only opted-in docs are published; private docs have NO public serve_url.
  *
- * NOTE (serving prerequisites — see the ws-drive-contributor-ingest deliverable gap report): this
- * composes the canonical URL SHAPE; whether it resolves depends on DNS-label validity of app_id and
- * on the edge-router serving the content_path's bucket/channel. The caller passes site_domain
- * (utils.SITE_DOMAIN) so this module stays dependency-free.
- *
- * @param {{ app_id: string, site_domain: string, content_path: string }} args
- * @returns {string} the deterministic serve URL
+ * @param {{ community_id: string, site_domain: string, app_id: string, file_id: string }} args
+ * @returns {string} the deterministic public serve URL
  */
-export function composeUserDocServeUrl({ app_id, site_domain, content_path } = {}) {
-    if (!app_id || typeof app_id !== 'string') throw new Error('app_id is required for a user doc serve URL');
+export function composeUserDocServeUrl({ community_id, site_domain, app_id, file_id } = {}) {
+    if (!community_id || typeof community_id !== 'string') throw new Error('community_id is required for a user doc serve URL');
     if (!site_domain || typeof site_domain !== 'string') throw new Error('site_domain is required for a user doc serve URL');
-    if (!content_path || typeof content_path !== 'string') throw new Error('content_path is required for a user doc serve URL');
-    const rel = content_path.replace(/^\/+/, '');
-    return `https://${app_id}.${site_domain}/${rel}`;
+    if (!app_id || typeof app_id !== 'string') throw new Error('app_id is required for a user doc serve URL');
+    if (!file_id || typeof file_id !== 'string') throw new Error('file_id is required for a user doc serve URL');
+    return `https://${community_id}.${site_domain}/assets/userdocs/${app_id}/${file_id}`;
 }
