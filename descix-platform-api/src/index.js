@@ -78,6 +78,7 @@ export {
     assertValidAppShortName,
     composeAppId,
     composeUserAppId,
+    composeUserDocServeUrl,
     TOKEN_SYMBOL_RE,
     APP_SHORT_NAME_RE
 } from './naming/index.js';
