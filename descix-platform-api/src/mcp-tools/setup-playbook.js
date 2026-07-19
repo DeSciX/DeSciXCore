@@ -191,11 +191,11 @@ export const DESCIX_SETUP_PLAYBOOK = Object.freeze({
     // the caller's own docs. Invoke via execute_remote_command({ command, params }). This is the
     // deterministic discovery surface that closes the tell_me_how name-reachability residual.
     contributor_ingest: Object.freeze({
-        // CEO-D-2026-07-18: TEMPORARILY admin-gated (COMMUNITY_MANAGE_APPS/PLATFORM_MANAGE_APPS)
-        // while member-open promotion is parked pending storage-size limits + CEO test. Self-scope
-        // (namespace derived from the caller's own identity) is already enforced in-handler.
-        access: 'admin-only (temporary, CEO-D-2026-07-18) — member-open promotion parked pending storage limits + CEO test',
-        summary: "Own a personal document home and ingest your own Drive files into it. Your namespace is derived from your identity, so you can only ever write to your own docs. NOTE: currently restricted to platform/community admins while member-open access is finalized.",
+        // CEO-D-2026-07-18 member-open promotion: any signed-in user manages their OWN docs. Safe by
+        // construction — self-scope (namespace derived from the caller's own identity, enforced
+        // in-handler) + a 10 MB/file member cap. No admin role required.
+        access: 'member-open — any signed-in user (self-scoped to their own docs; 10 MB/file member cap)',
+        summary: "Own a personal document home and ingest your own Drive files into it — no admin rights needed. Your namespace is derived from your identity, so you can only ever write to your own docs.",
         commands: Object.freeze([
             Object.freeze({
                 name: 'create_my_app',
