@@ -24,6 +24,7 @@ import { runStatus } from '../lib/commands/status.js';
 import { runDoctor } from '../lib/commands/doctor.js';
 import { runHealth } from '../lib/commands/health.js';
 import * as kbCommands from '../lib/commands/kb.js';
+import { kbVectorCell, kbCountSource } from '../lib/commands/kb-list-render.js';
 import * as corpusCommands from '../lib/commands/corpus.js';
 import * as modelConfigCommands from '../lib/commands/model-config.js';
 import * as brieferCommand from '../lib/commands/briefer/index.js';
@@ -2066,13 +2067,25 @@ kbCommand
   .command('list')
   .description('List knowledge bases for an app')
   .requiredOption('-a, --app <app_id>', 'App ID')
+  .option('--cached', 'Show the fast cached vector counter instead of the TRUE live Pinecone count. The cached counter is written ONLY by the CLI/PWA sync path, so it reports 0 for KBs ingested by any other route even when their vectors retrieve. Default is the live count.')
+  .addHelpText('after', `
+By default the Vectors column is the TRUE live Pinecone count (server enumerates each
+KB's vectors by id-prefix). The Source column shows how each count was obtained:
+  live    = counted live from Pinecone (authoritative)
+  cached  = the fast cached counter (--cached; may under-report; verify with a live run)
+  unknown = live count requested but Pinecone enumeration failed — shown as '?', NOT a fake 0
+`)
   .action(async (options) => {
     try {
       const apiClient = new DeSciXApiClient();
       await requireAuth(apiClient);
 
+      // Default to the TRUE live Pinecone count. --cached opts into the fast (possibly
+      // stale) cached counter that only the sync path writes.
+      const live = !options.cached;
       const response = await apiClient.invoke('list_knowledge_bases', {
-        app_id: options.app
+        app_id: options.app,
+        live
       });
       const result = response.message || response;
       const kbs = result.knowledge_bases || [];
@@ -2082,28 +2095,37 @@ kbCommand
         return;
       }
 
+      // Render helpers live in ../lib/commands/kb-list-render.js (unit-tested there).
+      const vectorCell = (kb) => kbVectorCell(kb);
+      const sourceCell = (kb) => kbCountSource(kb, live);
+
       // Table output
       const nameW = Math.max(7, ...kbs.map(k => (k.name || '').length));
       const modelW = Math.max(5, ...kbs.map(k => (k.model || '').length));
+      const vecW = Math.max(7, ...kbs.map(k => vectorCell(k).length));
 
       console.log('\n' + chalk.bold(
         'KB Name'.padEnd(nameW + 2) +
         'Model'.padEnd(modelW + 2) +
         'Instructions'.padEnd(14) +
-        'Vectors'.padEnd(9) +
+        'Vectors'.padEnd(vecW + 2) +
+        'Source'.padEnd(9) +
         'Last Sync'
       ));
-      console.log('-'.repeat(nameW + modelW + 40));
+      console.log('-'.repeat(nameW + modelW + 49));
 
       for (const kb of kbs) {
         const syncDate = kb.rag_last_sync
           ? new Date(kb.rag_last_sync._seconds ? kb.rag_last_sync._seconds * 1000 : kb.rag_last_sync).toISOString().split('T')[0]
           : '-';
+        const src = sourceCell(kb);
+        const srcColor = src === 'live' ? chalk.green : src === 'unknown' ? chalk.yellow : chalk.gray;
         console.log(
           chalk.cyan((kb.name || '').padEnd(nameW + 2)) +
           chalk.gray((kb.model || '').padEnd(modelW + 2)) +
           (kb.system_instructions === 'present' ? chalk.green('present') : chalk.gray('empty')).padEnd(14 + 10) +
-          String(kb.rag_vector_count || 0).padEnd(9) +
+          vectorCell(kb).padEnd(vecW + 2) +
+          srcColor(src.padEnd(9)) +
           syncDate
         );
       }
