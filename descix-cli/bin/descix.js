@@ -2163,6 +2163,41 @@ kbCommand
     }
   });
 
+kbCommand
+  .command('delete')
+  .description('Delete a knowledge base registry doc (refuses a non-empty KB unless --force)')
+  .requiredOption('-a, --app <app_id>', 'App ID')
+  .requiredOption('-k, --kb <kb_name>', 'KB name')
+  .option('--force', 'Purge the KB\'s live vectors and delete it even if non-empty. An empty KB deletes without this flag.')
+  .addHelpText('after', `
+Fail-safe: the server reads the TRUE live Pinecone count. A KB with live vectors (or an
+undetermined count) is REFUSED unless --force. With --force the vectors are purged BEFORE
+the registry doc is removed, so a removed doc never strands orphan vectors.`)
+  .action(async (options) => {
+    try {
+      const apiClient = new DeSciXApiClient();
+      await requireAuth(apiClient);
+
+      const response = await apiClient.invoke('delete_knowledge_base', {
+        app_id: options.app,
+        kb_name: options.kb,
+        force: !!options.force
+      });
+      const result = response.message || response;
+
+      console.log(chalk.green('\n✅ Knowledge base deleted.\n'));
+      console.log(chalk.cyan(`  KB: ${options.kb}`));
+      console.log(chalk.gray(`  App: ${result.community_id || '?'}/${options.app}`));
+      if (result.vectors_purged) {
+        console.log(chalk.gray(`  Vectors purged: ${result.vectors_purged}`));
+      }
+      console.log();
+    } catch (error) {
+      console.error(chalk.red(error.message));
+      process.exit(1);
+    }
+  });
+
 
 // ============ KB: set-/clear-override-model (WS-CONFIG-BOOTSTRAP-FIX item #10) ============
 //
