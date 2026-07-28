@@ -20,6 +20,78 @@ import { PUBLISHABLE_DOC_CLASSES, DENY_DOC_CLASSES } from './CorpusDenyLint.js';
 // Valid publish tiers (model §1). "I" internal (default), "P" public, "U" user.
 const PUBLISH_TIERS = new Set(['P', 'I', 'U']);
 
+// ============ Canonical Manifest Schema (WS-EVP-DESCIX-KB-CLEANUP item 5) ============
+//
+// ONE canonical corpus-manifest schema. Historically two families shared
+// `.descix/manifests/*.json` with drifting per-source field names — the DeSciX-family
+// (`tier`/`doc_type`/`syncignore`/`raw_path`) and the EGPT-research family (which also used
+// `src_path`). Because every field except `path` was optional, the loader SILENTLY accepted both
+// AND silently ignored any unrecognized/misspelled field (the same fail-loud gap as the KB command
+// params — a typo'd `synchignore` produced an empty syncignore with no signal). This is the single
+// source of truth for the recognized field set. Consumers (the walker, the deny-lint, a conformance
+// test) key off these exports so the schema can never drift by hand again.
+//
+// Deprecation window: unrecognized fields and deprecated aliases WARN (they do not throw) so both
+// legacy formats keep syncing. `src_path` is normalized to its canonical name `raw_path` at load.
+// The schema doc lives at V2_docs/architecture/corpus-manifest-schema.md.
+export const CANONICAL_SOURCE_FIELDS = new Set([
+  'path', 'ref', 'tier', 'doc_type', 'syncignore',
+  'doc_class', 'license_basis', 'lint_exempt', 'exempt_reason', 'raw_path',
+]);
+
+// Deprecated per-source field -> canonical replacement. Normalized at load (canonical wins if both
+// are present); a deprecation warning is emitted during the migration window.
+export const DEPRECATED_SOURCE_ALIASES = Object.freeze({ src_path: 'raw_path' });
+
+// Recognized manifest-level (top-level) keys. `_`-prefixed keys are annotation/comment keys and are
+// always allowed (e.g. `_purpose`). Unknown top-level keys warn like unknown source fields.
+export const CANONICAL_MANIFEST_FIELDS = new Set([
+  'kb_name', 'sync_mode', 'publish_tier', 'sources', 'github',
+]);
+
+/**
+ * Collect schema warnings for a manifest WITHOUT throwing — the validator half of the canonical
+ * schema. Flags unknown per-source/top-level fields (typo guard) and deprecated aliases. Exported
+ * so a conformance test drives off the SAME field set the loader enforces (no hand-mirrored list).
+ *
+ * @param {Object} manifest - parsed manifest object
+ * @param {string} filePath - manifest path (for message context)
+ * @returns {string[]} human-readable warning lines (empty when the manifest is fully canonical)
+ */
+export function collectManifestSchemaWarnings(manifest, filePath) {
+  const warnings = [];
+  const base = path.basename(filePath || 'manifest.json');
+  const recognized = [...CANONICAL_SOURCE_FIELDS].join(', ');
+
+  for (const key of Object.keys(manifest || {})) {
+    if (key.startsWith('_')) continue; // annotation/comment key
+    if (CANONICAL_MANIFEST_FIELDS.has(key)) continue;
+    warnings.push(`  ⚠ ${base}: unknown top-level field "${key}" is ignored — check for a typo.`);
+  }
+
+  const sources = Array.isArray(manifest?.sources) ? manifest.sources : [];
+  sources.forEach((src, i) => {
+    for (const key of Object.keys(src || {})) {
+      if (key.startsWith('_')) continue;
+      if (CANONICAL_SOURCE_FIELDS.has(key)) continue;
+      if (key in DEPRECATED_SOURCE_ALIASES) {
+        warnings.push(
+          `  ⚠ ${base} sources[${i}] (${src.path}): field "${key}" is DEPRECATED — rename to ` +
+          `"${DEPRECATED_SOURCE_ALIASES[key]}" (normalized for now; support is removed after the ` +
+          `deprecation window).`
+        );
+      } else {
+        warnings.push(
+          `  ⚠ ${base} sources[${i}] (${src.path}): unknown field "${key}" is ignored — check for a ` +
+          `typo (recognized: ${recognized}).`
+        );
+      }
+    }
+  });
+
+  return warnings;
+}
+
 /**
  * Validate a parsed manifest object against the schema.
  * Required: kb_name (string), sources (non-empty array).
@@ -133,21 +205,37 @@ export async function loadManifest(manifestPath, workspaceRoot) {
 
   validateManifest(manifest, manifestPath);
 
+  // Canonical-schema warnings (WS-EVP-DESCIX-KB-CLEANUP item 5): surface deprecated aliases and
+  // unknown/misspelled fields during the deprecation window — warn, never throw, so both legacy
+  // formats keep syncing.
+  for (const w of collectManifestSchemaWarnings(manifest, manifestPath)) {
+    console.warn(w);
+  }
+
   // Resolve source paths relative to workspace root
-  manifest._resolvedSources = manifest.sources.map(src => ({
-    ...src,
-    absolutePath: path.resolve(workspaceRoot, src.path),
-    ref: src.ref || 'main',
-    tier: src.tier || 3,
-    doc_type: src.doc_type || 'generic',
-    syncignore: src.syncignore || [],
-    // KB-curation carry-through. doc_class is as-is (may be undefined for tier I).
-    doc_class: src.doc_class,
-    license_basis: src.license_basis ?? null,
-    lint_exempt: src.lint_exempt || [],
-    exempt_reason: src.exempt_reason ?? null,
-    raw_path: src.raw_path ?? null
-  }));
+  manifest._resolvedSources = manifest.sources.map(src => {
+    // Normalize deprecated field aliases (src_path -> raw_path). Canonical field wins if both set.
+    const s = { ...src };
+    for (const [alias, canonical] of Object.entries(DEPRECATED_SOURCE_ALIASES)) {
+      if (s[alias] !== undefined && s[canonical] === undefined) {
+        s[canonical] = s[alias];
+      }
+    }
+    return {
+      ...s,
+      absolutePath: path.resolve(workspaceRoot, s.path),
+      ref: s.ref || 'main',
+      tier: s.tier || 3,
+      doc_type: s.doc_type || 'generic',
+      syncignore: s.syncignore || [],
+      // KB-curation carry-through. doc_class is as-is (may be undefined for tier I).
+      doc_class: s.doc_class,
+      license_basis: s.license_basis ?? null,
+      lint_exempt: s.lint_exempt || [],
+      exempt_reason: s.exempt_reason ?? null,
+      raw_path: s.raw_path ?? null
+    };
+  });
 
   // Surface publish_tier on the manifest object (default "I") so corpus.js can
   // read manifest.publish_tier to decide whether to run the Tier-P deny lint.

@@ -188,8 +188,32 @@ export async function walkCorpus(manifest, workspaceRoot) {
   const files = [];
   let commitSha = 'unknown';
 
+  // Nested-source dedup (WS-EVP-DESCIX-KB-CLEANUP item 4): a manifest may list both a directory
+  // source AND a more-specific source nested inside it (e.g. `.../services` at tier 3 AND
+  // `.../services/commandHandlers` at tier 2 to override the tier for that subtree). Without dedup
+  // the walker collects the nested files TWICE — once under each source — producing duplicate
+  // content-addressed chunk IDs and a deterministic upsert-vs-live dedup delta every full sync
+  // (the observed −175 on unk-beast/Corpus). Fix at the walker level so the class is killed for
+  // every manifest: each physical file belongs to EXACTLY ONE source — the DEEPEST (most-specific)
+  // source root that contains it. Walking an ancestor source skips a file owned by a descendant
+  // source, preserving the author's override intent (the nested source's tier/doc_type/syncignore
+  // win for its subtree). Order-independent and deterministic; a single-file source root === the
+  // file path, so an explicit file source always out-specifies any enclosing directory source.
+  const sourceRoots = manifest._resolvedSources.map(s => path.resolve(s.absolutePath));
+  const ownerSourceRoot = (fileAbs) => {
+    const fileResolved = path.resolve(fileAbs);
+    let deepest = null;
+    for (const root of sourceRoots) {
+      if (fileResolved === root || fileResolved.startsWith(root + path.sep)) {
+        if (deepest === null || root.length > deepest.length) deepest = root;
+      }
+    }
+    return deepest;
+  };
+
   for (const source of manifest._resolvedSources) {
     const { absolutePath, ref, tier, doc_type, syncignore } = source;
+    const thisSourceRoot = path.resolve(absolutePath);
 
     // Get commit SHA (same for all sources using the same ref)
     const refCommit = getHeadCommit(ref, workspaceRoot);
@@ -210,6 +234,10 @@ export async function walkCorpus(manifest, workspaceRoot) {
     }
 
     for (const filePath of filePaths) {
+      // Nested-source dedup: skip any file owned by a MORE-SPECIFIC (deeper) source root.
+      if (ownerSourceRoot(filePath) !== thisSourceRoot) {
+        continue;
+      }
       // Compute workspace-relative path for git operations
       const workspaceRelativePath = path.relative(workspaceRoot, filePath);
 
