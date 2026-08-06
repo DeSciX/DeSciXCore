@@ -12,6 +12,14 @@ import chalk from 'chalk';
 import { DeSciXApiClient } from '../lib/api-client.js';
 import { requireAuth } from '../lib/auth-guard.js';
 import { WorkspaceConfig } from '../lib/workspace-config.js';
+// Chat session pointer + the ONE rule for when a dead pointer may be self-healed.
+import {
+  getSessionInteractionId,
+  findSessionsForApp,
+  saveSessionAuthoritative,
+  clearAppSessions,
+  isStaleThreadError,
+} from '../lib/chat-session.js';
 import { GlobalConfig } from '../lib/global-config.js';
 import * as authCommands from '../lib/commands/auth.js';
 import * as configCommands from '../lib/commands/config.js';
@@ -4081,113 +4089,6 @@ repCommand
     }
   });
 
-// ============ Chat Session Management ============
-
-/**
- * Get interaction_id from session file
- * @param {string} communityId 
- * @param {string} appId 
- * @returns {Promise<string|null>}
- */
-async function getSessionInteractionId(communityId, appId) {
-    const sessionPath = path.join(os.homedir(), '.descix', 'sessions', `${communityId}_${appId}.json`);
-    try {
-        const data = JSON.parse(await fs.readFile(sessionPath, 'utf-8'));
-        return data.interaction_id || null;
-    } catch {
-        return null;
-    }
-}
-
-/**
- * Save interaction_id to session file
- * @param {string} communityId 
- * @param {string} appId 
- * @param {string} interactionId 
- */
-async function saveSessionInteractionId(communityId, appId, interactionId) {
-    const sessionDir = path.join(os.homedir(), '.descix', 'sessions');
-    await fs.mkdir(sessionDir, { recursive: true });
-    const sessionPath = path.join(sessionDir, `${communityId}_${appId}.json`);
-    await fs.writeFile(sessionPath, JSON.stringify({ 
-        interaction_id: interactionId, 
-        updated: Date.now() 
-    }, null, 2));
-}
-
-/**
- * Clear session file
- * @param {string} communityId 
- * @param {string} appId 
- */
-async function clearSession(communityId, appId) {
-    const sessionPath = path.join(os.homedir(), '.descix', 'sessions', `${communityId}_${appId}.json`);
-    try {
-        await fs.unlink(sessionPath);
-    } catch {
-        // File doesn't exist, that's fine
-    }
-}
-
-/**
- * WS-R7-PREREQS (CEO-D-2026-07-04-R7-PREREQS-RESCOPE ruling 3) session helpers.
- *
- * Session files are keyed {community_id}_{app_id}.json where community_id is the
- * SERVER-resolved value (returned by app-scoped commands). Before the server response
- * arrives the community may be unknown client-side — app_id is globally unique on the
- * platform (product_id === app_id), so `*_{appId}.json` identifies the app's sessions
- * unambiguously and the newest file is the current thread.
- */
-
-/**
- * List existing session files for an app, newest first.
- * @param {string} appId
- * @returns {Promise<Array<{communityId: string, path: string, updated: number}>>}
- */
-async function findSessionsForApp(appId) {
-    const sessionDir = path.join(os.homedir(), '.descix', 'sessions');
-    const suffix = `_${appId}.json`;
-    let entries = [];
-    try {
-        entries = await fs.readdir(sessionDir);
-    } catch {
-        return [];
-    }
-    const results = [];
-    for (const name of entries) {
-        if (!name.endsWith(suffix)) continue;
-        const communityId = name.slice(0, name.length - suffix.length);
-        if (!communityId) continue;
-        const filePath = path.join(sessionDir, name);
-        let updated = 0;
-        try {
-            const data = JSON.parse(await fs.readFile(filePath, 'utf-8'));
-            updated = data.updated || 0;
-        } catch {
-            continue; // unreadable session file — skip, do not guess
-        }
-        results.push({ communityId, path: filePath, updated });
-    }
-    results.sort((a, b) => b.updated - a.updated);
-    return results;
-}
-
-/**
- * Save the session under the AUTHORITATIVE community key and self-heal: remove any
- * session files for the same app keyed under a DIFFERENT community (e.g. the legacy
- * hardcoded 'descix_*' mis-keys this fix removes). One app = one live session file.
- * @param {string} communityId - server-resolved community_id
- * @param {string} appId
- * @param {string} interactionId
- */
-async function saveSessionAuthoritative(communityId, appId, interactionId) {
-    const stale = (await findSessionsForApp(appId)).filter(s => s.communityId !== communityId);
-    await saveSessionInteractionId(communityId, appId, interactionId);
-    for (const st of stale) {
-        try { await fs.unlink(st.path); } catch { /* already gone */ }
-    }
-}
-
 // ============ Chat Commands ============
 
 program
@@ -4311,13 +4212,7 @@ program
           }
         }
       } else {
-        if (communityId) {
-          await clearSession(communityId, appId);
-        } else {
-          for (const st of await findSessionsForApp(appId)) {
-            try { await fs.unlink(st.path); } catch { /* already gone */ }
-          }
-        }
+        await clearAppSessions(communityId, appId);
       }
 
       // Resolve KB param — single or multi
@@ -4342,7 +4237,39 @@ program
         invokeParams.knowledgebase_name = kbList[0];
       }
 
-      const response = await apiClient.invoke('ask_question_to_app', invokeParams);
+      // Stale-thread self-heal. Exactly ONE retry, and only for the typed 400 — see
+      // isStaleThreadError and the asymmetry note above it. Anything else (including the 403
+      // "this thread is not yours") propagates untouched to the catch below, which prints it
+      // and exits non-zero.
+      let response;
+      let healedFromInteractionId = null;
+      try {
+        response = await apiClient.invoke('ask_question_to_app', invokeParams);
+      } catch (error) {
+        if (!isStaleThreadError(error, previousInteractionId)) throw error;
+
+        healedFromInteractionId = previousInteractionId;
+        await clearAppSessions(communityId, appId);
+
+        // Single retry with no thread — byte-identical to what `--new` would have sent.
+        // NO loop: if this one fails, its error propagates.
+        previousInteractionId = null;
+        invokeParams.previous_interaction_id = null;
+        response = await apiClient.invoke('ask_question_to_app', invokeParams);
+      }
+
+      // Notice goes to STDERR, deliberately. stdout stays exactly the answer (and stays
+      // valid JSON for any `--json`-style consumer), while a human at a terminal always sees
+      // it and a `| jq` pipeline can never swallow it. The user must never be left believing
+      // continuity survived when it did not.
+      if (healedFromInteractionId) {
+        console.error(chalk.yellow(
+          `Note: the previous conversation thread for ${appId} was no longer available ` +
+          `(expired or retired) — it has been discarded and a NEW thread was started. ` +
+          `This answer does not carry any earlier context.`
+        ));
+      }
+
       const result = response.message || response;
 
       // Save new interaction_id for next message, keyed by the SERVER-resolved
@@ -4408,16 +4335,9 @@ program
         console.error(chalk.red('Error: -a/--app <app_id> is required (the legacy hardcoded descix/agent fallback was removed).'));
         process.exit(1);
       }
-      if (options.community) {
-        await clearSession(options.community, appId);
-        console.log(chalk.green(`Chat session cleared for ${options.community}/${appId}. Next chat will start fresh.`));
-      } else {
-        const sessions = await findSessionsForApp(appId);
-        for (const st of sessions) {
-          try { await fs.unlink(st.path); } catch { /* already gone */ }
-        }
-        console.log(chalk.green(`Chat session cleared for ${appId} (${sessions.length} session file(s)). Next chat will start fresh.`));
-      }
+      const cleared = await clearAppSessions(options.community || null, appId);
+      const scope = options.community ? `${options.community}/${appId}` : appId;
+      console.log(chalk.green(`Chat session cleared for ${scope} (${cleared} session file(s)). Next chat will start fresh.`));
     } catch (error) {
       console.error(chalk.red(error.message));
       process.exit(1);
