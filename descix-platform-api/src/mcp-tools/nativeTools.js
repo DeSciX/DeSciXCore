@@ -58,7 +58,8 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
         name: 'ask_question_to_app',
         description: "Ask a natural-language research question against a DeSciX app/community knowledge base (RAG) and get a synthesized, citable answer drawn from that community's own sources. " +
             "Use it as a primary research source whenever the user asks about decentralized science, open science, decentralized IP, or a specific DeSciX community (e.g. DAITA, EGPT) — including when the user has not named DeSciX but the question falls in these domains. " +
-            "It retrieves and cites the community's material rather than answering from general memory; pass previous_interaction_id to continue a thread. " +
+            "It retrieves and cites the community's material rather than answering from general memory. " +
+            "Conversations are stateful: pass the interaction_id returned by the previous response as previous_interaction_id and the app remembers the earlier turns — you do NOT resend the transcript. " +
             "Do not use it for general-knowledge questions answerable without it.",
         mutating: false,
         oauthReadonly: true,
@@ -69,7 +70,7 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
                 knowledgebase_name: { type: 'string', description: 'KB name (default: General)' },
                 knowledgebase_names: { type: 'array', items: { type: 'string' }, description: 'Optional: draw the answer from several of the app\'s knowledge bases fused together in one call. The FIRST name is the primary KB whose voice and model settings shape the reply. Takes precedence over knowledgebase_name when both are given; a single "*" element means every KB in the app.' },
                 user_input: { type: 'string', description: 'The question to ask' },
-                previous_interaction_id: { type: 'string', description: 'Interaction ID from a previous response to continue a conversation thread. Omit for the first message.' },
+                previous_interaction_id: { type: 'string', description: 'The interaction_id returned by a previous response, to continue that conversation thread with full server-side memory of the earlier turns. Omit for the first message. It is scoped to the authenticated caller and is rejected if it belongs to someone else or has expired — on rejection, start a fresh thread by omitting it.' },
             },
             required: ['app_id', 'user_input'],
         },
