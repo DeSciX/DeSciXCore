@@ -2326,6 +2326,7 @@ function attachRecordsSubcommands(parent, cmdPrefix) {
     .requiredOption('-a, --app <app_id>', 'App ID')
     .requiredOption('-k, --kb <kb_id>', 'Record collection ID (acts like a table)')
     .requiredOption('-r, --records <json>', 'JSON array of records: [{ "file_id", "text"?, "chunk_idx"?, ...customMetadata }] — id is built from file_id (+ chunk_idx); pass a full "id" only for back-compat. Example: \'[{"file_id":"e1","text":"...","type":"episode","show":"x"}]\'')
+    .option('--mode <mode>', 'upsert (default) | create — "create" is an atomic all-or-nothing conditional create: it fails if any key already exists and reports who holds it, instead of overwriting', 'upsert')
     .action(async (options) => {
       try {
         const apiClient = new DeSciXApiClient();
@@ -2333,8 +2334,14 @@ function attachRecordsSubcommands(parent, cmdPrefix) {
         let records;
         try { records = JSON.parse(options.records); } catch (e) { throw new Error(`--records must be valid JSON array: ${e.message}`); }
         if (!Array.isArray(records)) throw new Error('--records must be a JSON array');
-        const response = await apiClient.invoke(`${cmdPrefix}_put`, { app_id: options.app, kb_id: options.kb, records });
+        const response = await apiClient.invoke(`${cmdPrefix}_put`, { app_id: options.app, kb_id: options.kb, records, mode: options.mode });
         const result = response.message || response;
+        // A refused conditional create is a DEFINITE answer, not a warning: report it as a
+        // failure with the holder hint and a non-zero exit so scripts branch on it correctly.
+        if (result.claimed === false) {
+          console.error(chalk.red(`\n❌ claim refused — ${result.message || 'key already exists'}\n`));
+          process.exit(1);
+        }
         console.log(chalk.green(`\n✓ ${result.message || 'records put'}\n`));
       } catch (error) {
         console.error(chalk.red(`\n❌ ${error.message}\n`));
