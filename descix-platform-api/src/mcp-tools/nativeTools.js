@@ -133,7 +133,7 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
     },
     {
         name: 'app_records_put',
-        description: 'Use your app like a database: store/replace structured records with custom metadata in the app data plane (Firestore-backed, strongly consistent — NOT the Pinecone KB). Supply a human-meaningful file_id (grouping key) + optional chunk_idx (default 0); the composite id is built for you. Custom string/number/boolean/string[] fields become filterable metadata for app_records_query.',
+        description: 'Use your app like a database: store/replace structured records with custom metadata in the app data plane (Firestore-backed, strongly consistent — NOT the Pinecone KB). Supply a human-meaningful file_id (grouping key) + optional chunk_idx (default 0); the composite id is built for you. Custom string/number/boolean/string[] fields become filterable metadata for app_records_query. Pass mode:"create" for an atomic first-claim-wins conditional create (answers claimed:true / claimed:false + current_holder_hint instead of overwriting). Records under a "lease-" key are holder-verified server-side.',
         mutating: true,
         inputSchema: {
             type: 'object',
@@ -141,6 +141,11 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
                 app_id: { type: 'string', description: 'App ID (your app)' },
                 kb_id: { type: 'string', description: 'Record collection ID (acts like a database table)' },
                 records: { type: 'array', description: 'Records to upsert: [{ file_id (required), text?, chunk_idx? (default 0), ...customMetadata }]. Pass a full "id" only for back-compat.', items: { type: 'object' } },
+                mode: {
+                    type: 'string',
+                    enum: ['upsert', 'create'],
+                    description: '"upsert" (default) merge-writes, last writer wins. "create" is a CONDITIONAL CREATE: atomic and all-or-nothing — every key must be unclaimed, and if any exists nothing is written and the response is { success:false, claimed:false, current_holder_hint, conflicts }. Use it to elect a single holder of a named resource (lease, seat, idempotency key). Capped at 450 records per call.',
+                },
             },
             required: ['app_id', 'kb_id', 'records'],
         },
