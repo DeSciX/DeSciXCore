@@ -105,6 +105,47 @@ test('validateToolParams is a no-op for a tool that is not in the list', () => {
 });
 
 /**
+ * CEO-D-2026-08-14 (FLAG-1 ruling): "the contract is wrong if it doesn't declare the parameters
+ * correctly because the docstrings are supposed to be the self-describing feed into MCP."
+ *
+ * These are the params the ask_question_to_app HANDLER actually reads — the generation knobs
+ * destructured in ragCommands.js and the document-scoping ones read by prepare_chat_context.
+ * Strict validation makes an under-declared schema user-visible (a genuine param gets rejected),
+ * so the schema must keep up with the handler. Pinned here.
+ */
+test('ask_question_to_app declares every param its handler honors', () => {
+    const props = Object.keys(askSchema.properties);
+    for (const p of [
+        // generation knobs (ragCommands.js:394)
+        'intelligence_level', 'model', 'thinking_budget', 'temperature', 'max_output_tokens', 'streaming',
+        // document scoping (communityManagement.js prepare_chat_context:1493)
+        'file_id', 'ipdoc_file_id', 'doc_ids',
+        // core
+        'app_id', 'user_input', 'knowledgebase_name', 'knowledgebase_names', 'previous_interaction_id',
+    ]) {
+        assert.ok(props.includes(p), `ask_question_to_app schema is missing '${p}' — the handler reads it, so a caller passing it would be wrongly rejected`);
+    }
+});
+
+test('every declared param carries a description (the schema IS the MCP-facing doc)', () => {
+    for (const tool of NATIVE_MCP_TOOLS) {
+        for (const [name, spec] of Object.entries(tool.inputSchema.properties || {})) {
+            assert.ok(
+                spec && typeof spec.description === 'string' && spec.description.length > 0,
+                `${tool.name}.${name} has no description`,
+            );
+        }
+    }
+});
+
+test('the CLI tuning knobs that used to be silently dropped now validate', () => {
+    assert.doesNotThrow(() => validateParamsAgainstSchema(askSchema, {
+        app_id: 'unk-beast', user_input: 'q',
+        intelligence_level: 3, model: 'gemini-3.1-flash-lite', thinking_budget: -1, streaming: false,
+    }, { commandName: 'ask_question_to_app' }));
+});
+
+/**
  * CONFORMANCE, driven off the exported list rather than a hand-written mirror: every native
  * tool's advertised schema must be well-formed enough to validate against, and every `required`
  * entry must actually be a declared property. A schema whose required names drift from its
