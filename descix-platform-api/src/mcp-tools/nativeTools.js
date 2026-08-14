@@ -39,7 +39,11 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
             'Use it when the user wants primary-source passages, citations, or evidence from DeSciX research/community content, ' +
             'to ground or check an ask_question_to_app answer, or to pull the exact source behind a claim before contesting it. ' +
             'Proof chains can run deep — keep retrieving cited steps rather than predicting them. ' +
-            'Scope to a single source with file_filter.',
+            'Scope to a single source with file_filter. ' +
+            'RETRIEVAL vs ANSWER: this tool RETRIEVES (raw chunks, no model synthesis, no conversation thread); ' +
+            'ask_question_to_app ANSWERS (synthesized, cited, stateful). Reach for this one when you intend to read and judge the sources yourself. ' +
+            'PARAMETER NAMING: this tool names the knowledge base `kb_id`/`kb_ids`; ask_question_to_app names the SAME concept ' +
+            '`knowledgebase_name`/`knowledgebase_names`. They are not interchangeable — passing the other tool\'s name is now REJECTED, not ignored.',
         mutating: false,
         oauthReadonly: true,
         inputSchema: {
@@ -60,7 +64,12 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
             "Use it as a primary research source whenever the user asks about decentralized science, open science, decentralized IP, or a specific DeSciX community (e.g. DAITA, EGPT) — including when the user has not named DeSciX but the question falls in these domains. " +
             "It retrieves and cites the community's material rather than answering from general memory. " +
             "Conversations are stateful: pass the interaction_id returned by the previous response as previous_interaction_id and the app remembers the earlier turns — you do NOT resend the transcript. " +
-            "Do not use it for general-knowledge questions answerable without it.",
+            "Do not use it for general-knowledge questions answerable without it. " +
+            "ANSWER vs RETRIEVAL: this tool ANSWERS (model-synthesized over the app's own sources, cited, stateful); " +
+            "query_knowledge_base RETRIEVES (raw chunks, no synthesis, stateless). Use that one to check or ground an answer from this one. " +
+            "PARAMETER NAMING: name the knowledge base with `knowledgebase_name` (or `knowledgebase_names` for several). " +
+            "`kb_id` is query_knowledge_base's name for the same concept and is NOT accepted here — it is now REJECTED with a suggestion rather than silently ignored. " +
+            "Omit the KB entirely to use the app's configured default KB.",
         mutating: false,
         oauthReadonly: true,
         inputSchema: {
@@ -71,6 +80,21 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
                 knowledgebase_names: { type: 'array', items: { type: 'string' }, description: 'Optional: draw the answer from several of the app\'s knowledge bases fused together in one call. The FIRST name is the primary KB whose voice and model settings shape the reply. Takes precedence over knowledgebase_name when both are given; a single "*" element means every KB in the app.' },
                 user_input: { type: 'string', description: 'The question to ask' },
                 previous_interaction_id: { type: 'string', description: 'The interaction_id returned by a previous response, to continue that conversation thread with full server-side memory of the earlier turns. Omit for the first message. It is scoped to the authenticated caller and is rejected if it belongs to someone else or has expired — on rejection, start a fresh thread by omitting it.' },
+                // ws-mcp-surface-basics (CEO-D-2026-08-14, FLAG-1 ruling): the schema IS the
+                // self-describing feed into MCP, so an under-declared contract is the bug — not
+                // the caller who passes a param the command genuinely honors. Every property
+                // below is read by the handler (ragCommands.js ask_question_to_app destructures
+                // the generation knobs; communityManagement.js prepare_chat_context reads the
+                // document-scoping ones). Declared so strict validation admits them.
+                intelligence_level: { type: 'number', description: 'Intelligence level 1-5 selecting the model tier. Omit to inherit: KB intelligence_level, then the platform default. Higher levels cost more AI credits.' },
+                model: { type: 'string', description: 'Explicit model name, overriding the whole inheritance chain (level -> KB override -> app default -> platform default). Prefer intelligence_level unless you need one specific model.' },
+                thinking_budget: { type: 'number', description: 'Thinking-token budget: -1 dynamic, 0 off, N a fixed cap. Omit to inherit the KB/platform default.' },
+                temperature: { type: 'number', description: 'Generation temperature override. Omit to inherit the KB/platform default.' },
+                max_output_tokens: { type: 'number', description: 'Cap on generated tokens for this call. Omit to inherit the KB/platform default.' },
+                streaming: { type: 'boolean', description: 'Stream the reply instead of returning it whole. Leave unset/false over MCP tools/call, which returns a single result — this exists for the streaming transports (PWA/Discord).' },
+                file_id: { type: 'string', description: 'Scope the answer to ONE source document by its file_id (as returned in a citation). Use it to ask follow-up questions against a specific paper or record.' },
+                ipdoc_file_id: { type: 'string', description: 'Scope to a specific IPDoc by file_id. Takes precedence over file_id when both are given.' },
+                doc_ids: { type: 'array', items: { type: 'string' }, description: 'Additional document ids whose full contents are added to this call\'s context (beyond what vector retrieval selects).' },
             },
             required: ['app_id', 'user_input'],
         },

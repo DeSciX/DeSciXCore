@@ -4222,9 +4222,19 @@ program
         await clearAppSessions(communityId, appId);
       }
 
-      // Resolve KB param — single or multi
-      const kbList = options.kb || ['General'];
-      const useMultiKb = kbList.length > 1 || kbList.includes('*');
+      // Resolve KB param — single or multi.
+      //
+      // ws-mcp-surface-basics — ONE NORMALIZATION OWNER. `descix chat` and the
+      // ask_question_to_app MCP tool are not two backends: both invoke the SAME
+      // ask_question_to_app command over /apifront/. The only thing that had diverged was the
+      // CLIENT-SIDE default — the CLI substituted a hardcoded 'General' while MCP callers sent
+      // nothing and let the server decide. That hardcoded fallback (anti-pattern #7) is why the
+      // CLI reported "Default KB not found" against apps whose KBs are not named 'General': the
+      // CLI asserted a KB the app never had. When the caller names no KB we now send NO kb param
+      // and the server's resolver (pineconeService.resolveKbNameScope, fed by
+      // utils.DEFAULT_KNOWLEDGEBASE_NAME) is the sole owner of what "default" means.
+      const kbList = options.kb || null;
+      const useMultiKb = !!kbList && (kbList.length > 1 || kbList.includes('*'));
 
       console.log(chalk.gray(`Asking ${communityId ? communityId + '/' : ''}${appId}...`));
 
@@ -4240,7 +4250,7 @@ program
 
       if (useMultiKb) {
         invokeParams.knowledgebase_names = kbList;
-      } else {
+      } else if (kbList) {
         invokeParams.knowledgebase_name = kbList[0];
       }
 
