@@ -27,7 +27,7 @@ import * as path from 'path';
 // This stdio server imports them and CONCATENATES its CLI-LOCAL diagnostics (descix_doctor,
 // platform_health) which are NOT /apifront commands and are intentionally stdio-only.
 // The previously hand-duplicated curated literal in this file is GONE.
-import { toMcpToolList, NATIVE_MCP_TOOLS as SHARED_NATIVE_TOOLS, MCP_HANDSHAKE_INSTRUCTIONS } from '@descix/platform-api/mcp-tools';
+import { toMcpToolList, NATIVE_MCP_TOOLS as SHARED_NATIVE_TOOLS, MCP_HANDSHAKE_INSTRUCTIONS, validateToolParams, toolAcceptsParam } from '@descix/platform-api/mcp-tools';
 
 // ---------------------------------------------------------------------------
 // Tool definitions for the stdio MCP transport.
@@ -75,6 +75,12 @@ const CLI_LOCAL_TOOLS = [
 
 // Final stdio tool list: CLI-local diagnostics + the shared curated core tools (protocol shape).
 const TOOLS = [...CLI_LOCAL_TOOLS, ...toMcpToolList(SHARED_NATIVE_TOOLS)];
+
+// Live tool surface as last returned by tools/list (permission-filtered by the backend).
+// Seeded with the static curated SSOT so the very first tools/call is schema-aware even if
+// no tools/list preceded it. Consumed by tools/call for schema-aware context injection and
+// local param pre-validation (ws-mcp-surface-basics).
+let knownTools = TOOLS;
 
 // ---------------------------------------------------------------------------
 // Server bootstrap
@@ -344,6 +350,9 @@ try {
     try {
       const backendTools = await apiClient.mcpListTools();
       const tools = [...CLI_LOCAL_TOOLS, ...backendTools];
+      // Remember the live, permission-filtered surface: tools/call uses it to decide which
+      // workspace defaults a tool actually ACCEPTS, and to pre-validate params locally.
+      knownTools = tools;
       console.error(`[MCP] tools/list — ${backendTools.length} permission-filtered backend tools + ${CLI_LOCAL_TOOLS.length} CLI-local = ${tools.length}`);
       return { tools };
     } catch (err) {
@@ -366,15 +375,34 @@ try {
         };
       }
 
-      // Merge default context for convenience (caller can override).
-      // Only auto-fill when workspace is configured — prevents silently
-      // targeting wrong app/community.
+      // Merge default context for convenience (caller can override). Only auto-fill when the
+      // workspace is configured — prevents silently targeting the wrong app/community.
+      //
+      // ws-mcp-surface-basics — SCHEMA-AWARE injection. This block used to inject blindly into
+      // EVERY tool, which had two failure modes: it pushed app_id into tools that declare no
+      // app_id (find_communities), and it MANUFACTURED `kb_id: 'General'` — a param
+      // ask_question_to_app does not accept — so the stdio path itself created the
+      // silently-ignored parameter that this workstream exists to kill. A default is now only
+      // filled in when the TARGET TOOL DECLARES that parameter. The hardcoded 'General'
+      // fallback is DELETED (anti-pattern #7): when the workspace names no KB we send none and
+      // let the server apply its own configured default.
       const params = { ...args };
       if (defaultContext) {
-        if (!params.app_id && defaultContext.appId) params.app_id = defaultContext.appId;
-        if (!params.kb_id && (defaultContext.kbId || 'General')) params.kb_id = params.kb_id || defaultContext.kbId || 'General';
-        if (!params.community_id && defaultContext.communityId) params.community_id = defaultContext.communityId;
+        const accepts = (p) => toolAcceptsParam(knownTools, name, p);
+        if (!params.app_id && defaultContext.appId && accepts('app_id')) params.app_id = defaultContext.appId;
+        if (!params.community_id && defaultContext.communityId && accepts('community_id')) params.community_id = defaultContext.communityId;
+        if (!params.kb_id && defaultContext.kbId && accepts('kb_id')) params.kb_id = defaultContext.kbId;
+        // The ask-family names the same concept knowledgebase_name; honor the workspace default
+        // under the name the target tool actually publishes rather than under kb_id.
+        if (!params.knowledgebase_name && defaultContext.kbId && accepts('knowledgebase_name')) {
+          params.knowledgebase_name = defaultContext.kbId;
+        }
       }
+
+      // Fail loud LOCALLY on an unknown/missing param, before spending a round trip. The
+      // backend re-validates at its own boundary — this is a fast mirror of the same SSOT
+      // validator, never a second contract.
+      validateToolParams(knownTools, name, params, { surface: 'CLI stdio MCP tools/call' });
 
       const result = await apiClient.invoke(name, params);
       return {
