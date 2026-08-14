@@ -1121,31 +1121,64 @@ appCommand
 
 appCommand
   .command('init')
-  // [WS-MCP-SURFACE-SPLIT Step 3 §5.1] `app init` is the WORKSPACE-REGISTER + KB-init leg of
-  // app-create only. App CREATION is the single canonical path `create_app_for_community`
-  // (CLI: `descix app create --quick -c <community> -a <app>`). The former `-c/--community`
-  // conditional-create branch was removed here so there is exactly one create path.
-  .description('Initialize local workspace and Firestore KB for an existing app (idempotent, workspace-register + KB-init). To create an app first: `descix app create --quick -c <community> -a <app>`.')
-  .requiredOption('-a, --app <app_id>', 'App ID (e.g. daita)')
+  // ONE PATH TO AN APP (CEO-D-2026-08-14): `app init` is THE app entry point — it creates the
+  // app when it does not exist yet and then registers/scaffolds it locally. The separate
+  // `app create` command is DELETED (no compat fence): two commands for one outcome is how apps
+  // ended up half-made — created on the platform, never initialized — which is precisely the
+  // state the DEV audit found (powch, sml, daita-ssgpod carrying zero knowledge bases).
+  // Creation still routes through the single canonical server command create_app_for_community,
+  // which composes the app_id and fails loud on a missing community / duplicate id / bad short
+  // name. The server also guarantees the default KB, so no app can exist without one.
+  .description('Create (if needed) and initialize an app: platform record + default KB + local workspace registration and scaffold. Idempotent. Pass -c to create a new app; omit it to initialize one that already exists.')
+  .requiredOption('-a, --app <app_id>', 'App ID (e.g. daita). With -c this is the app NAME to create.')
+  .option('-c, --community <id>', 'Community ID — REQUIRED to create an app that does not exist yet. The community must already be materialized in this environment.')
+  .option('-s, --short <short_name>', 'SHORT id segment (no hyphens) used when creating; the app_id is composed server-side as {community}-{short}. Defaults to --app.')
+  .option('--overwrite', 'When creating, overwrite an existing app record intentionally')
   .option('--kb <name>', 'Knowledge base name', 'General')
   .option('-p, --path <dir>', 'Local app directory (default: auto-detected or cwd)')
   .action(async (options) => {
     try {
       const apiClient = new DeSciXApiClient();
       await requireAuth(apiClient);
-      const appId = options.app;
+      let appId = options.app;
       const kbId = options.kb || 'General';
 
-      // Resolve community_id from Products registry (app must already exist)
+      // Resolve community_id from the Products registry to learn whether the app exists yet.
       let communityId;
       try {
         const productCtx = await apiClient.invoke('get_product_context', { app_id: appId });
         communityId = (productCtx.message || productCtx).community_id;
       } catch (e) {
-        // Product not found — app init does NOT create apps; direct to the canonical create path
+        // Not in Products — either we create it below (-c given) or we fail loud.
       }
+
       if (!communityId) {
-        throw new Error(`App '${appId}' not found in Products. Create it first: descix app create --quick -c <community> -a ${appId}`);
+        if (!options.community) {
+          throw new Error(
+            `App '${appId}' does not exist yet. Pass -c <community> to create it: ` +
+            `descix app init -a ${appId} -c <community> [-s <short>]`
+          );
+        }
+        // CREATE leg — the canonical server path. It composes the unique app_id
+        // ({community}-{short}) and is authoritative; we never compose it client-side.
+        const response = await apiClient.invoke('create_app_for_community', {
+          community_id: options.community,
+          app_name: appId,
+          short_name: options.short || undefined,
+          create_skeleton: false,
+          overwrite: options.overwrite,
+        });
+        const created = response.message || response;
+        appId = created.app_id || appId;
+        communityId = created.community_id || options.community;
+        console.log(chalk.green(`\n✅ App created: ${appId}`));
+        console.log(chalk.gray(`  Products:   Products/${appId}`));
+        console.log(chalk.gray(`  Firestore:  Community/${communityId}/Apps/${appId}`));
+      } else if (options.community && options.community !== communityId) {
+        throw new Error(
+          `App '${appId}' already exists in community '${communityId}', not '${options.community}'. ` +
+          `Omit -c to initialize the existing app.`
+        );
       }
 
       // 1. Workspace.json — register app if not already mapped
@@ -1202,6 +1235,8 @@ appCommand
       console.log(chalk.green(`\n✓ ${appId} initialized`));
       console.log(chalk.gray(`  Community: ${communityId}`));
       console.log(chalk.gray(`  KB: ${kbId} — ${kbResult.created ? 'created' : 'already exists'}\n`));
+      console.log(chalk.gray(`  (every app is guaranteed a default KB at creation; an empty one`));
+      console.log(chalk.gray(`   says so rather than answering from general knowledge)\n`));
       console.log(chalk.cyan('Next steps:'));
       console.log(chalk.gray(`  Create a corpus manifest at apps/${appId}/.descix/manifests/${kbId}.json`));
       console.log(chalk.gray(`  then run:`));
@@ -1214,60 +1249,23 @@ appCommand
 
 appCommand
   .command('create')
-  // WS-MCP-SURFACE-SPLIT Step 3 §5.1: app creation now has ONE canonical path.
-  // `app create --quick` is the CLI wrapper over the backend `create_app_for_community`
-  // tool; `app init`'s former create branch was removed (init is workspace-register + KB-init
-  // only). Use `app create --quick` to create, then `app init` to scaffold + register locally.
-  .description('Create an app in a community (CLI wrapper over create_app_for_community). --quick with -c/-a required for CLI-driven creation; then run `descix app init -a <app_id>`.')
-  .option('-c, --community <id>', 'Community ID')
-  .option('-a, --app <name>', 'App display name')
-  .option('-s, --short <short_name>', 'SHORT id segment (no hyphens). The unique app_id is composed as {community}-{short}. Keep it short, e.g. "frqtl" -> egpt-frqtl. Defaults to --app if omitted.')
-  .option('--quick', 'Create app via CLI (registers in Products + Firestore, grants entitlement; Drive-free); requires -c and -a')
-  .option('--overwrite', 'Overwrite existing (with --quick)')
-  .action(async (options) => {
-    try {
-      if (options.quick && options.community && options.app) {
-        const apiClient = new DeSciXApiClient();
-        await requireAuth(apiClient);
-
-        // V2 app creation is Drive-free (WS-V1-PURGE Phase 1, audit #1).
-        // create_app_for_community registers Products + Firestore App doc + grants
-        // entitlement (developer-permission checked server-side). No Drive base folder
-        // is required: KB sync is the Git manifest path (`descix kb corpus sync`),
-        // never Drive. create_skeleton is OFF — the Drive skeleton is a removed V1 step.
-        // CANONICAL (CEO-D-2026-06-08): the server composes the unique app_id as
-        // {community}-{short_name}, fails loud on a missing community / duplicate id /
-        // a short name containing '-'. We forward short_name + overwrite; we do NOT
-        // compose the id client-side (the server is authoritative).
-        const response = await apiClient.invoke('create_app_for_community', {
-          community_id: options.community,
-          app_name: options.app,
-          short_name: options.short || undefined,
-          create_skeleton: false,
-          overwrite: options.overwrite
-        });
-        const result = response.message || response;
-        console.log(chalk.green('\n✅ App created successfully!\n'));
-        console.log(chalk.cyan(`  App ID:     ${result.app_id}`));
-        console.log(chalk.cyan(`  Community:  ${result.community_id}`));
-        console.log(chalk.gray(`  Products:   Products/${result.app_id}`));
-        console.log(chalk.gray(`  Firestore:  Community/${result.community_id}/Apps/${result.app_id}`));
-        console.log(chalk.cyan('\n  Next: descix app init -a ' + result.app_id + '\n'));
-        return;
-      }
-      console.log(chalk.cyan('\n📦 App creation\n'));
-      console.log(chalk.white('Create apps in the PWA (Device Setup / App Manager) or via CLI:\n'));
-      console.log(chalk.white('  descix app create --quick -c <community> -a <app-name> [-s <short>]\n'));
-      console.log(chalk.gray('The unique app_id is composed as {community}-{short} (short defaults to'));
-      console.log(chalk.gray('the app name). Pick a SHORT name with NO hyphens, e.g. -c egpt -s frqtl'));
-      console.log(chalk.gray('=> egpt-frqtl. The community must already exist or creation fails loud.\n'));
-      console.log(chalk.gray('This registers the app in the Products registry, creates the Firestore'));
-      console.log(chalk.gray('App doc, and grants entitlement. KB sync is `descix kb corpus sync`'));
-      console.log(chalk.gray('(Git manifest) — no Drive folder is required.\n'));
-    } catch (error) {
-      console.error(chalk.red(`\n❌ ${error.message}\n`));
-      process.exit(1);
-    }
+  // DELETED SURFACE (CEO-D-2026-08-14, SUPER-DRY: delete the old path, fail loud, no compat
+  // fence). `app create` created the platform record and STOPPED, leaving the caller to
+  // remember `app init` — two commands for one outcome. That is how apps ended up half-made
+  // with no knowledge base at all. `app init` now creates AND initializes in one path.
+  .description('[REMOVED] Use `descix app init -a <name> -c <community>` — it creates and initializes in one step.')
+  // Swallow whatever the old invocation passed so the caller always gets the pointer below
+  // rather than a generic commander arity error that names no replacement.
+  .allowUnknownOption(true)
+  .argument('[ignored...]')
+  .action(() => {
+    console.error(chalk.red('\n❌ `descix app create` has been removed.\n'));
+    console.error(chalk.white('   Use the single canonical path, which creates AND initializes:\n'));
+    console.error(chalk.cyan('     descix app init -a <app-name> -c <community> [-s <short>]\n'));
+    console.error(chalk.gray('   It registers the app (Products + Firestore + entitlement), guarantees'));
+    console.error(chalk.gray('   the default knowledge base, then registers and scaffolds it locally.'));
+    console.error(chalk.gray('   Creating an app without a default KB is no longer possible.\n'));
+    process.exit(1);
   });
 
 // descix app media-upload — upload media/asset files to an app's GCS assets prefix via the
