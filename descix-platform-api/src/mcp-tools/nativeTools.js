@@ -39,7 +39,11 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
             'Use it when the user wants primary-source passages, citations, or evidence from DeSciX research/community content, ' +
             'to ground or check an ask_question_to_app answer, or to pull the exact source behind a claim before contesting it. ' +
             'Proof chains can run deep — keep retrieving cited steps rather than predicting them. ' +
-            'Scope to a single source with file_filter.',
+            'Scope to a single source with file_filter. ' +
+            'RETRIEVAL vs ANSWER: this tool RETRIEVES (raw chunks, no model synthesis, no conversation thread); ' +
+            'ask_question_to_app ANSWERS (synthesized, cited, stateful). Reach for this one when you intend to read and judge the sources yourself. ' +
+            'PARAMETER NAMING: this tool names the knowledge base `kb_id`/`kb_ids`; ask_question_to_app names the SAME concept ' +
+            '`knowledgebase_name`/`knowledgebase_names`. They are not interchangeable — passing the other tool\'s name is now REJECTED, not ignored.',
         mutating: false,
         oauthReadonly: true,
         inputSchema: {
@@ -60,7 +64,12 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
             "Use it as a primary research source whenever the user asks about decentralized science, open science, decentralized IP, or a specific DeSciX community (e.g. DAITA, EGPT) — including when the user has not named DeSciX but the question falls in these domains. " +
             "It retrieves and cites the community's material rather than answering from general memory. " +
             "Conversations are stateful: pass the interaction_id returned by the previous response as previous_interaction_id and the app remembers the earlier turns — you do NOT resend the transcript. " +
-            "Do not use it for general-knowledge questions answerable without it.",
+            "Do not use it for general-knowledge questions answerable without it. " +
+            "ANSWER vs RETRIEVAL: this tool ANSWERS (model-synthesized over the app's own sources, cited, stateful); " +
+            "query_knowledge_base RETRIEVES (raw chunks, no synthesis, stateless). Use that one to check or ground an answer from this one. " +
+            "PARAMETER NAMING: name the knowledge base with `knowledgebase_name` (or `knowledgebase_names` for several). " +
+            "`kb_id` is query_knowledge_base's name for the same concept and is NOT accepted here — it is now REJECTED with a suggestion rather than silently ignored. " +
+            "Omit the KB entirely to use the app's configured default KB.",
         mutating: false,
         oauthReadonly: true,
         inputSchema: {
