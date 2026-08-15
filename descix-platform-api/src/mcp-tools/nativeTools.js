@@ -196,7 +196,7 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
     },
     {
         name: 'app_records_get',
-        description: 'Fetch specific records from your app data plane by id (point lookup) with an arbitrary metadata projection. Firestore-backed, strongly consistent.',
+        description: 'Fetch specific records from your app data plane by id (or by file_id grouping key — id == file_id in this store) with an arbitrary metadata projection. Firestore-backed, strongly consistent. Supply at least one of ids/file_ids.',
         mutating: false,
         // WS-MCP-SURFACE-SPLIT-EXEC §6.7 D6: this tool is NOT in the enforced
         // OAUTH_READONLY_TOOLS allow-list (oauthAsHandlers.js) — the oauthReadonly:true
@@ -208,9 +208,15 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
                 app_id: { type: 'string', description: 'App ID' },
                 kb_id: { type: 'string', description: 'Record collection ID' },
                 ids: { type: 'array', items: { type: 'string' }, description: 'Record ids to fetch' },
+                file_ids: { type: 'array', items: { type: 'string' }, description: 'file_id grouping keys to fetch (id == file_id in this store)' },
                 fields: { type: 'array', items: { type: 'string' }, description: 'Projection of metadata fields (omit or ["*"] for all)' },
             },
-            required: ['app_id', 'kb_id', 'ids'],
+            // `ids` is NOT in required, exactly as on app_records_delete: either ids or file_ids
+            // satisfies this call, which plain JSON-Schema `required` cannot express. The handler
+            // (appDataStore.getRecords) is the authority and refuses "neither supplied" loudly,
+            // naming both params. Requiring `ids` here would reject the file_ids-only call this
+            // schema exists to legalize.
+            required: ['app_id', 'kb_id'],
         },
     },
     {
