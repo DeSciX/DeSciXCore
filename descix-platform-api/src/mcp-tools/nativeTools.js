@@ -157,7 +157,7 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
     },
     {
         name: 'app_records_put',
-        description: 'Use your app like a database: store/replace structured records with custom metadata in the app data plane (Firestore-backed, strongly consistent — NOT the Pinecone KB). Supply a human-meaningful file_id (grouping key) + optional chunk_idx (default 0); the composite id is built for you. Custom string/number/boolean/string[] fields become filterable metadata for app_records_query. Pass mode:"create" for an atomic first-claim-wins conditional create (answers claimed:true / claimed:false + current_holder_hint instead of overwriting). Records under a "lease-" key are holder-verified server-side.',
+        description: 'Use your app like a database: store/replace structured records with custom metadata in the app data plane (Firestore-backed, strongly consistent — NOT the Pinecone KB). Supply a human-meaningful file_id (grouping key) + optional chunk_idx (default 0); the composite id is built for you. Custom string/number/boolean/string[] fields become filterable metadata for app_records_query. Pass mode:"create" for an atomic first-claim-wins conditional create (answers claimed:true / claimed:false + current_holder_hint instead of overwriting). Records under a "lease-" key are holder-verified server-side. TIME: every record is stamped with a server-authoritative received_at — the store\'s own UTC clock at the moment it accepted the write, re-stamped on EVERY write including a merge-upsert of an existing key. It is server-owned: a client-supplied received_at is stripped and replaced, so do not send one. Any created_at you send is ordinary client-asserted metadata with no more authority than text — the store neither validates nor corrects it.',
         mutating: true,
         inputSchema: {
             type: 'object',
@@ -176,7 +176,7 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
     },
     {
         name: 'app_records_query',
-        description: 'Query your app like a database: a STRUCTURED, metadata-filtered scan (NOT ANN/semantic) over the app data plane returning ALL records matching a predicate (e.g. type=episode AND show=X). Supports $eq/$in/$ne + field projection. STRONGLY CONSISTENT (read-after-write). Use ask_question_to_app for fuzzy semantic KB search.',
+        description: 'Query your app like a database: a STRUCTURED, metadata-filtered scan (NOT ANN/semantic) over the app data plane returning ALL records matching a predicate (e.g. type=episode AND show=X). Supports $eq/$in/$ne + field projection. STRONGLY CONSISTENT (read-after-write). Use ask_question_to_app for fuzzy semantic KB search. TIME: returned records carry received_at, stamped by the store\'s own UTC clock when it accepted the write and therefore unforgeable by the record\'s author. Decide STALENESS and ORDERING on received_at. A created_at field, where present, is a claim made by whoever wrote the record — it is never validated, so it may be wrong or even in the future.',
         mutating: false,
         // WS-MCP-SURFACE-SPLIT-EXEC §6.7 D6: this tool is NOT in the enforced
         // OAUTH_READONLY_TOOLS allow-list (oauthAsHandlers.js) — the oauthReadonly:true
@@ -196,7 +196,7 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
     },
     {
         name: 'app_records_get',
-        description: 'Fetch specific records from your app data plane by id (or by file_id grouping key — id == file_id in this store) with an arbitrary metadata projection. Firestore-backed, strongly consistent. Supply at least one of ids/file_ids.',
+        description: 'Fetch specific records from your app data plane by id (or by file_id grouping key — id == file_id in this store) with an arbitrary metadata projection. Firestore-backed, strongly consistent. Supply at least one of ids/file_ids. TIME: returned records carry received_at, stamped by the store\'s own UTC clock when it accepted the write and therefore unforgeable by the record\'s author — read it for staleness and ordering. A created_at field, where present, is the author\'s own unvalidated claim. Note that a projection via `fields` drops received_at unless you ask for it.',
         mutating: false,
         // WS-MCP-SURFACE-SPLIT-EXEC §6.7 D6: this tool is NOT in the enforced
         // OAUTH_READONLY_TOOLS allow-list (oauthAsHandlers.js) — the oauthReadonly:true
