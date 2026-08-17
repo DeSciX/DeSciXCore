@@ -332,6 +332,27 @@ class CloudConfig {
     get HTTP_WORKER() { return this.servicesFilePath('httpWorker.js'); }
     get isDebug() { return this.DEBUG_PROXY || this.DEPLOY_ENV === 'dev'; }
 
+    /**
+     * TRUE when this process runs on a Google-managed serverless runtime — App Engine
+     * (standard/flex), Cloud Run, or Cloud Functions gen2 — i.e. NOT a developer machine
+     * and NOT a locally-run container.
+     *
+     * ONE OWNER for the "am I deployed?" question: every consumer reads this getter
+     * instead of re-deriving it from env markers. The markers below are injected by the
+     * platform itself and cannot be set by our own deploy config, which is exactly what
+     * makes them trustworthy:
+     *   GAE_ENV / GAE_SERVICE — App Engine standard
+     *   K_SERVICE             — Cloud Run + Cloud Functions gen2
+     *
+     * DEPLOY_ENV is NOT a runtime signal. `DEPLOY_ENV === 'dev'` names an ENVIRONMENT
+     * (a deployed cloud env since CEO-D-2026-07-07-DEV-IS-CLOUD), never a location.
+     * Reading process.env HERE, at the config owner, is the sanctioned path; service
+     * code consumes `utils.isManagedCloudRuntime`.
+     */
+    get isManagedCloudRuntime() {
+        return Boolean(process.env.GAE_ENV || process.env.GAE_SERVICE || process.env.K_SERVICE);
+    }
+
     get GOOGLE_APPLICATION_CREDENTIALS() {
         return this.__googleApplicationCredentials;
     }
@@ -756,6 +777,38 @@ class CloudConfig {
         }
     }
 
+    /**
+     * DEBUG_LOCAL means "this process runs on a developer machine". It is the single
+     * signal that selects the local self-signed TLS material (see expressOptions) and,
+     * in every service's app.js, the HTTPS debug listener.
+     *
+     * On a managed cloud runtime the front-end proxy speaks PLAIN HTTP to the container,
+     * so a TLS listener fails every health check in a way that looks like an unrelated
+     * infrastructure fault: App Engine's nginx logs "upstream prematurely closed
+     * connection" on /_ah/start and SIGTERMs the instance (restart loop); Cloud Run
+     * returns 503. This has now bitten twice via DEBUG_LOCAL leaking into a deploy
+     * bundle (BEAST .env, 2026-07-03) or being implied by the environment NAME.
+     *
+     * So: refuse to boot, loudly, naming the exact misconfiguration. No silent
+     * coercion to false — a deployed service that believes it is local is a
+     * misconfiguration an operator must see and fix at its source.
+     */
+    _assertLocalDebugNotOnCloud() {
+        if (!this.DEBUG_LOCAL || !this.isManagedCloudRuntime) return;
+        const markers = ['GAE_ENV', 'GAE_SERVICE', 'K_SERVICE']
+            .filter(k => process.env[k])
+            .map(k => `${k}=${process.env[k]}`)
+            .join(', ');
+        throw new CloudConfigFatalError(
+            `[CloudConfig] FATAL: DEBUG_LOCAL=true on a managed cloud runtime (${markers}). ` +
+            `DEBUG_LOCAL selects a self-signed HTTPS listener + local TLS certs, but the ` +
+            `platform proxy speaks plain HTTP to the container — the service would fail every ` +
+            `health check and crash-loop. Remove DEBUG_LOCAL from this deployment: check the ` +
+            `service's app.yaml / --set-env-vars, the descix_config_${this.DEPLOY_ENV} secret, ` +
+            `and any .env or dev-overrides.json that leaked into the deploy bundle.`
+        );
+    }
+
     async initialize() {
         if (!this.DEPLOY_ENV) {
             throw new CloudConfigFatalError('[CloudConfig] FATAL: DEPLOY_ENV not set. Cannot determine environment before Secret Manager call. Provide DEPLOY_ENV via .env (local dev), deployment env vars (cloud deploy), or ensure .descix/workspace.json is reachable from the service root.');
@@ -813,6 +866,11 @@ class CloudConfig {
             // PUB_SUB_DISCORD_BOT_REPLY is set as a complete topic name per-env
             // via deploy script --set-env-vars (bootstrap key). No suffix appending needed.
         }
+
+        // Runtime coherence: DEBUG_LOCAL must never be set on a deployed runtime.
+        // Runs AFTER Secret Manager + dev-overrides so it sees the FINAL value from
+        // every source (env var, secret, leaked .env / dev-overrides.json).
+        this._assertLocalDebugNotOnCloud();
 
         // WS-CONFIG-BOOTSTRAP-FIX item #2: enforce required_keys at end of bootstrap.
         // Must be the last action — runs AFTER Secret Manager + dev-overrides so any

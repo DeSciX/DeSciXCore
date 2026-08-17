@@ -61,19 +61,23 @@ function findListenerPids(port) {
 
 /**
  * Kills the existing instance of THIS service so its port is free for relaunch.
- * Only runs in debug mode — never executes in production.
+ * DEVELOPER-MACHINE ONLY — on a managed cloud runtime the platform owns process
+ * lifecycle and this must never run.
  *
  * Scoping is by TCP listen port (the service's own identity). This is layout-agnostic
  * and fails safe: if no port can be determined, NOTHING is killed.
  *
  * @param {string} scriptUrl - The script URL from import.meta.url (used only for logging).
- * @param {boolean} isDebug - Whether running in debug mode (utils.isDebug / utils.DEBUG_LOCAL).
+ * @param {boolean} isLocal - Pass `utils.DEBUG_LOCAL` — the explicit "developer machine /
+ *                            local container" signal. NEVER pass `utils.isDebug`: that keys
+ *                            on the environment NAME (`DEPLOY_ENV === 'dev'`), which since
+ *                            CEO-D-2026-07-07-DEV-IS-CLOUD is a DEPLOYED environment.
  * @param {number|string} [port] - The TCP port THIS service binds (e.g. utils.PORT).
  *                                  Strongly recommended; without it the function fails safe.
  */
-export function killExistingProcess(scriptUrl, isDebug, port) {
-    // Only run in debug mode
-    if (!isDebug) {
+export function killExistingProcess(scriptUrl, isLocal, port) {
+    // Only run on a developer machine
+    if (!isLocal) {
         return;
     }
 
