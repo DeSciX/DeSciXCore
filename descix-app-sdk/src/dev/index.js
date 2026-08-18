@@ -18,7 +18,13 @@ export {
   proxyEntry,
   isLocalOrigin,
   assertTargetUrl,
-  CLOUD_DEV_URL,
 } from './resolveGatewayTargets.js';
+export {
+  ENV_ORIGINS,
+  DEFAULT_ENV,
+  DEFAULT_API_URL,
+  PROD_URL,
+  CLOUD_DEV_URL,
+} from './envOrigins.js';
 export { buildWorkspaceProducts, resolveAppGatewayUrl } from './workspaceProducts.js';
 export { workspaceProductsPlugin, WORKSPACE_PRODUCTS_VIRTUAL_ID, WORKSPACE_PRODUCTS_HMR_EVENT } from './workspaceProductsPlugin.js';
