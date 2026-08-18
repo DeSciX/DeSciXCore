@@ -74,11 +74,9 @@ program.hook('preAction', (thisCommand) => {
       console.error(chalk.red(`Unknown environment: ${opts.env}. Use: dev, demo, prod`));
       process.exit(1);
     }
-    const url = ENV_URL_MAP[envName];
-    if (url) {
-      process.env.DESCIX_API_URL = url;
-    }
-    // For 'dev', don't set — let workspace.json resolve naturally
+    // Every named environment resolves to a URL (including dev → cloud DEV).
+    // A local backend is a URL you name, not an environment.
+    process.env.DESCIX_API_URL = ENV_URL_MAP[envName];
   }
 });
 
@@ -2643,14 +2641,14 @@ siteCommand
     try {
       const apiClient = new DeSciXApiClient();
 
-      // WS-DEPLOY-HARDENING item 7: `site upload` must never silently target a stale local
-      // backend. detectApiUrl() checks process.env.DESCIX_API_URL first, then falls back to
-      // workspace.json's derived localhost URL for DEV (WorkspaceConfig.getApiUrl()), then
-      // GlobalConfig, then production. `--env` (except dev, by design — "let workspace.json
-      // resolve naturally") and `--api-url` are folded into DESCIX_API_URL by the preAction
-      // hook BEFORE this action runs — so checking DESCIX_API_URL here reflects whether the
-      // resolution took the explicit path or the silent fallback path. Site deploys target a
-      // cloud env, so a local resolution reached via the silent fallback is a hard failure.
+      // WS-DEPLOY-HARDENING item 7: `site upload` must never target a local backend by
+      // inheritance. detectApiUrl() checks process.env.DESCIX_API_URL first, then
+      // WorkspaceConfig.getApiUrl() (env.apiUrl, else the shipped PROD default), then
+      // GlobalConfig. `--env` and `--api-url` are folded into DESCIX_API_URL by the
+      // preAction hook BEFORE this action runs — so checking DESCIX_API_URL here reflects
+      // whether THIS invocation named its target. A workspace pinned at a local backend
+      // (env.apiUrl = https://localhost:4000) is a standing setting, not a deploy target:
+      // site deploys go to a cloud env, so that combination is a hard failure.
       const resolvedApiUrl = await apiClient.ensureBaseUrl();
       const isLocalApiUrl = /^https?:\/\/(localhost|127(?:\.\d{1,3}){3})(?::\d+)?/i.test(resolvedApiUrl) ||
         /:4000(?:\/|$)/.test(resolvedApiUrl);
@@ -4973,15 +4971,17 @@ const updateCommand = program
 
 program
   .command('serve')
-  .description('Start the unified local gateway (reverse-proxy for PWA, Core, Powch, microservices)')
+  .description('Start the unified local gateway (one HTTPS origin: App Shell at /, your app at /p/<app>, /apifront to the API)')
   .option('-p, --port <port>', 'Gateway port', '5173')
   .option('-w, --workspace <path>', 'Workspace root override')
+  .option('--site-url <url>', 'App Shell target for this run (default: env.siteUrl, a local platform site, else the API origin)')
   .action(async (options) => {
     try {
       const { runServe } = await import('../lib/commands/serve.js');
       await runServe({
         port: parseInt(options.port, 10),
         workspaceRoot: options.workspace || process.cwd(),
+        siteUrl: options.siteUrl,
       });
     } catch (error) {
       console.error(chalk.red('Gateway error:', error.message));
