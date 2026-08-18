@@ -9,6 +9,7 @@
 import path from 'path';
 import axios from 'axios';
 import { WorkspaceConfig } from './workspace-config.js';
+import { DEFAULT_API_URL } from '@descix/app-sdk/dev';
 
 export class DeSciXApiClient {
   constructor(options = {}) {
@@ -61,7 +62,9 @@ export class DeSciXApiClient {
    * @returns {Promise<string>} API base URL
    */
   async detectApiUrl() {
-    const PRODUCTION_URL = 'https://descix.net';
+    // The shipped default lives in ONE place (@descix/app-sdk/dev envOrigins) — this
+    // used to re-declare the production URL as a local literal.
+    const PRODUCTION_URL = DEFAULT_API_URL;
 
     // Check environment variable first (highest priority)
     if (process.env.DESCIX_API_URL) {

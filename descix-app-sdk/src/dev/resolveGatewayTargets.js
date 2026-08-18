@@ -9,20 +9,19 @@
  * Both the gateway (gateway.js) and any app's Vite config (createViteProxyConfig.js)
  * consume this resolver — neither re-derives the chain by hand.
  *
- * Resolution is EXPLICIT-FIRST and never lands on localhost silently: a localhost
- * target appears only when the workspace explicitly configures a local platform
- * checkout. With no local platform at all (an SDK consumer workspace — "mode 2",
- * local app dev against cloud DEV), the API resolves to the stable cloud DEV origin
- * and the shell is served from that same origin.
+ * Resolution is EXPLICIT-FIRST and never lands on localhost silently. The DEFAULT
+ * SDK user wins the defaults: an unconfigured workspace talks to the published
+ * platform (PROD) and serves the shell from that same origin, so `descix serve`
+ * works with no platform checkout and no configuration. Naming another environment
+ * is one command (`descix config set-env dev`); a LOCAL shell or a LOCAL API is an
+ * expert opt-in, reached only by naming it (`--site-url`, `env.siteUrl`,
+ * `env.apiUrl`, or a local platform checkout when the API is already local).
  */
 
 import { URL } from 'url';
 
-/**
- * Stable cloud DEV origin — the default API/shell target for a workspace that
- * configures no local platform. Serves the current PWA, /apifront and /mcp.
- */
-export const CLOUD_DEV_URL = 'https://dev.descix.net';
+export { ENV_ORIGINS, DEFAULT_ENV, DEFAULT_API_URL, PROD_URL, CLOUD_DEV_URL } from './envOrigins.js';
+import { DEFAULT_API_URL, DEFAULT_ENV } from './envOrigins.js';
 
 const LOCAL_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]', '::1', '0.0.0.0']);
 
@@ -86,9 +85,9 @@ function assertSupportedKeys(config) {
  *
  * Precedence:
  *   1. options.apiGatewayUrl        explicit caller override (app Vite configs)
- *   2. env.apiUrl                   explicit workspace setting
- *   3. env.platform.microservice    LOCAL platform checkout — the mode-1 opt-in
- *   4. CLOUD_DEV_URL                default: cloud DEV
+ *   2. env.apiUrl                   explicit workspace setting (what `set-env` writes)
+ *   3. env.platform.microservice    LOCAL platform checkout — the expert opt-in
+ *   4. DEFAULT_API_URL              default: the published platform (PROD)
  *
  * @param {Object} config - parsed .descix/workspace.json
  * @param {Object} [options]
@@ -113,8 +112,8 @@ export function resolveApiTarget(config = {}, options = {}) {
     apiUrl = `${proto}://localhost:${ms.port}`;
     apiSource = 'workspace env.platform.microservice (local platform)';
   } else {
-    apiUrl = CLOUD_DEV_URL;
-    apiSource = 'default (cloud DEV)';
+    apiUrl = DEFAULT_API_URL;
+    apiSource = `default (${DEFAULT_ENV.toUpperCase()})`;
   }
   assertTargetUrl(apiUrl); // fail on a typo here, not deep inside the proxy
 
@@ -124,11 +123,17 @@ export function resolveApiTarget(config = {}, options = {}) {
 /**
  * Resolve the site target — the origin behind the gateway's root route '/'.
  *
- * Precedence:
- *   1. options.siteUrl              explicit caller override
+ * Precedence — the DEFAULT SDK user wins: whenever the API is a real platform
+ * origin, the shell comes from that same origin, so one origin carries shell +
+ * app + /apifront with nothing configured. A platform developer opts IN to a
+ * local shell by naming it; owning a platform checkout is not by itself a request
+ * to serve it.
+ *
+ *   1. options.siteUrl              explicit caller override (--site-url)
  *   2. env.siteUrl                  explicit workspace setting
- *   3. env.platform.site.port       LOCAL shell checkout — the mode-1 opt-in
- *   4. apiUrl, when it is REMOTE    the cloud shell shares the API origin
+ *   3. apiUrl, when it is REMOTE    the cloud shell shares the API origin
+ *   4. env.platform.site.port       LOCAL shell — reachable only once the API is
+ *                                   itself local (the all-local mode-1 stack)
  *   5. throw                        a local API with no local shell has no root
  *
  * @param {Object} config - parsed .descix/workspace.json
@@ -149,24 +154,25 @@ export function resolveSiteTarget(config = {}, options = {}) {
     assertTargetUrl(env.siteUrl);
     return { siteUrl: env.siteUrl, siteSource: 'workspace env.siteUrl' };
   }
-  if (env.platform?.site?.port) {
-    const site = env.platform.site;
-    const proto = site.protocol || 'https';
-    return {
-      siteUrl: `${proto}://localhost:${site.port}`,
-      siteSource: 'workspace env.platform.site (local shell)',
-    };
-  }
 
   const { apiUrl, apiSource } = resolveApiTarget(config, options);
   if (!isLocalOrigin(apiUrl)) {
     return { siteUrl: apiUrl, siteSource: `same origin as API (${apiSource})` };
   }
 
+  if (env.platform?.site?.port) {
+    const site = env.platform.site;
+    const proto = site.protocol || 'https';
+    return {
+      siteUrl: `${proto}://localhost:${site.port}`,
+      siteSource: 'workspace env.platform.site (local shell, local API)',
+    };
+  }
+
   throw new Error(
     '[Gateway] Cannot determine the site (root "/") target. The API resolved to the local ' +
     `origin ${apiUrl} (${apiSource}) and there is no shell to serve at "/".\n` +
-    '  Serve the CLOUD shell:  descix serve --site-url https://dev.descix.net\n' +
+    `  Serve a PLATFORM shell: descix serve --site-url ${DEFAULT_API_URL}\n` +
     '                          (or set env.siteUrl in .descix/workspace.json to make it permanent)\n' +
     '  Serve a LOCAL shell:    set env.platform.site.port to your platform site dev-server port'
   );

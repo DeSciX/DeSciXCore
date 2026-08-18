@@ -19,8 +19,8 @@ import {
   resolveGatewayTargets,
   proxyEntry,
   isLocalOrigin,
-  CLOUD_DEV_URL,
 } from '../src/dev/resolveGatewayTargets.js';
+import { ENV_ORIGINS, DEFAULT_ENV, DEFAULT_API_URL, PROD_URL, CLOUD_DEV_URL } from '../src/dev/envOrigins.js';
 import { buildGatewayProxy } from '../src/dev/gateway.js';
 
 const CONSUMER = { version: '2.1', type: 'workspace', env: { products: [] } };
@@ -38,24 +38,35 @@ const LOCAL_PLATFORM = {
   },
 };
 
-test('CLOUD_DEV_URL is the stable cloud DEV origin', () => {
+test('the shipped SDK default is PROD; dev/demo are named, localhost is not an env', () => {
+  assert.equal(DEFAULT_ENV, 'prod');
+  assert.equal(DEFAULT_API_URL, 'https://descix.net');
+  assert.equal(PROD_URL, 'https://descix.net');
   assert.equal(CLOUD_DEV_URL, 'https://dev.descix.net');
+  assert.deepEqual(Object.keys(ENV_ORIGINS).sort(), ['demo', 'dev', 'prod']);
+  for (const url of Object.values(ENV_ORIGINS)) assert.equal(isLocalOrigin(url), false, url);
 });
 
-test('mode 2 — consumer workspace with no platform defaults API to cloud DEV', () => {
+test('mode 2 — consumer workspace with no platform defaults API to PROD', () => {
   const { apiUrl, apiSource } = resolveApiTarget(CONSUMER);
-  assert.equal(apiUrl, CLOUD_DEV_URL);
-  assert.match(apiSource, /default \(cloud DEV\)/);
+  assert.equal(apiUrl, PROD_URL);
+  assert.match(apiSource, /default \(PROD\)/);
 });
 
-test('mode 2 — root serves the cloud shell from the same origin as the API', () => {
+test('mode 2 — root serves the platform shell from the same origin as the API', () => {
   const { siteUrl, siteSource } = resolveSiteTarget(CONSUMER);
-  assert.equal(siteUrl, CLOUD_DEV_URL);
+  assert.equal(siteUrl, PROD_URL);
   assert.match(siteSource, /same origin as API/);
 });
 
 test('mode 2 — an empty workspace object still resolves (no platform block at all)', () => {
   const t = resolveGatewayTargets({});
+  assert.equal(t.apiUrl, PROD_URL);
+  assert.equal(t.siteUrl, PROD_URL);
+});
+
+test('set-env dev shape (env.apiUrl = cloud DEV) points BOTH targets at dev', () => {
+  const t = resolveGatewayTargets({ env: { environment: 'DEV', apiUrl: CLOUD_DEV_URL, products: [] } });
   assert.equal(t.apiUrl, CLOUD_DEV_URL);
   assert.equal(t.siteUrl, CLOUD_DEV_URL);
 });
@@ -76,7 +87,7 @@ test('explicit env.siteUrl wins for the root route', () => {
   assert.equal(t.siteSource, 'workspace env.siteUrl');
 });
 
-test('mode 1 — a local platform checkout is the EXPLICIT localhost opt-in', () => {
+test('mode 1 — an ALL-LOCAL platform checkout still serves the local shell', () => {
   const t = resolveGatewayTargets(LOCAL_PLATFORM);
   assert.equal(t.apiUrl, 'https://localhost:4000');
   assert.match(t.apiSource, /local platform/);
@@ -84,11 +95,31 @@ test('mode 1 — a local platform checkout is the EXPLICIT localhost opt-in', ()
   assert.match(t.siteSource, /local shell/);
 });
 
+test('a platform checkout does NOT hijack the root once the API is remote', () => {
+  // CEO ruling: the general SDK user wins the default. Owning a platform checkout
+  // is not by itself a request to serve it.
+  const config = { env: { apiUrl: CLOUD_DEV_URL, ...LOCAL_PLATFORM.env } };
+  const t = resolveGatewayTargets(config);
+  assert.equal(t.apiUrl, CLOUD_DEV_URL);
+  assert.equal(t.siteUrl, CLOUD_DEV_URL, 'remote API must outrank env.platform.site.port');
+  assert.match(t.siteSource, /same origin as API/);
+});
+
+test('a platform dev opts IN to the local shell by naming it', () => {
+  const config = { env: { apiUrl: CLOUD_DEV_URL, ...LOCAL_PLATFORM.env } };
+  const viaFlag = resolveSiteTarget(config, { siteUrl: 'https://localhost:5174' });
+  assert.equal(viaFlag.siteUrl, 'https://localhost:5174');
+  const viaWorkspace = resolveSiteTarget({ env: { ...config.env, siteUrl: 'https://localhost:5174' } });
+  assert.equal(viaWorkspace.siteUrl, 'https://localhost:5174');
+  assert.equal(viaWorkspace.siteSource, 'workspace env.siteUrl');
+});
+
 test('local API with NO local shell fails loud instead of proxying root to the API port', () => {
   const config = { env: { platform: { appId: 'daita', microservice: { port: 4000 } } } };
   assert.equal(resolveApiTarget(config).apiUrl, 'https://localhost:4000');
   assert.throws(() => resolveSiteTarget(config), (err) => {
     assert.match(err.message, /Cannot determine the site \(root "\/"\) target/);
+    assert.match(err.message, /--site-url https:\/\/descix\.net/);
     assert.match(err.message, /env\.siteUrl/);
     assert.match(err.message, /env\.platform\.site\.port/);
     return true;
@@ -147,19 +178,32 @@ function withWorkspace(config, fn) {
   }
 }
 
-test('mode-2 route table: root AND /apifront both point at cloud DEV', () => {
+test('mode-2 route table: root AND /apifront both point at the default platform', () => {
   withWorkspace(CONSUMER, (dir) => {
     const targets = resolveGatewayTargets(CONSUMER);
     const proxy = buildGatewayProxy(dir, targets);
 
-    assert.equal(proxy['/'].target, CLOUD_DEV_URL);
+    assert.equal(proxy['/'].target, DEFAULT_API_URL);
     assert.equal(proxy['/'].ws, true);
     assert.equal(proxy['/'].changeOrigin, true);
     assert.equal(proxy['/'].secure, true);
-    assert.equal(proxy['/apifront'].target, CLOUD_DEV_URL);
-    assert.equal(proxy['/mcp'].target, CLOUD_DEV_URL);
-    assert.equal(proxy['/oauth'].target, CLOUD_DEV_URL);
-    assert.equal(proxy['/.well-known/oauth-protected-resource/mcp'].target, CLOUD_DEV_URL);
+    assert.equal(proxy['/apifront'].target, DEFAULT_API_URL);
+    assert.equal(proxy['/mcp'].target, DEFAULT_API_URL);
+    assert.equal(proxy['/oauth'].target, DEFAULT_API_URL);
+    assert.equal(proxy['/.well-known/oauth-protected-resource/mcp'].target, DEFAULT_API_URL);
+  });
+});
+
+test('mode-2 route table after set-env dev: every API prefix and root ride cloud DEV', () => {
+  const config = { version: '2.1', env: { environment: 'DEV', apiUrl: CLOUD_DEV_URL, products: [] } };
+  withWorkspace(config, (dir) => {
+    const proxy = buildGatewayProxy(dir, resolveGatewayTargets(config));
+    for (const route of ['/', '/apifront', '/api', '/mcp', '/oauth',
+                         '/.well-known/oauth-authorization-server/oauth',
+                         '/.well-known/oauth-protected-resource/mcp']) {
+      assert.equal(proxy[route].target, CLOUD_DEV_URL, route);
+      assert.equal(proxy[route].secure, true, route + ' must verify TLS against a cloud origin');
+    }
   });
 });
 
@@ -188,7 +232,7 @@ test('a static product keeps its /p/<app> static route alongside the cloud root'
   };
   withWorkspace(config, (dir) => {
     const proxy = buildGatewayProxy(dir, resolveGatewayTargets(config));
-    assert.equal(proxy['/'].target, CLOUD_DEV_URL);
+    assert.equal(proxy['/'].target, DEFAULT_API_URL);
     assert.equal(
       proxy._staticRoutes['egpt-godsworld'],
       path.resolve(dir, 'godsworld/codesite')

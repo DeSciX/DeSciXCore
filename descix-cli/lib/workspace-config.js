@@ -1,5 +1,6 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { ENV_ORIGINS, DEFAULT_API_URL } from '@descix/app-sdk/dev';
 
 /**
  * WorkspaceConfig - Manages workspace-specific configuration
@@ -488,27 +489,30 @@ export class WorkspaceConfig {
 
   /**
    * Get API URL for the current workspace.
-   * Priority: env.apiUrl > legacy this.apiUrl > derive from platform port (DEV) > production.
-   * Eliminates the need for DESCIX_API_URL in local dev.
+   *
+   * Priority: env.apiUrl > legacy this.apiUrl > the shipped default (PROD).
+   * There is NO environment-name-to-localhost derivation: an environment names a
+   * cloud environment, and localhost is a URL you set explicitly
+   * (`descix config set-env dev --url https://localhost:4000`, or env.apiUrl).
    * @returns {string}
    */
   getApiUrl() {
     if (this.env?.apiUrl) return this.env.apiUrl;
     if (this.apiUrl) return this.apiUrl;
-    const platformPort = this.env?.platform?.microservice?.port;
-    if (platformPort && this.env?.environment === 'DEV') return `https://localhost:${platformPort}`;
-    return 'https://descix.net';
+    return DEFAULT_API_URL;
   }
 
   /**
    * Known environment URL mapping.
    * Shared between `descix config set-env` and the `--env` global flag.
-   * @type {Object.<string, {url: string|null, secretLabel: string}>}
+   * Origins come from the ONE owner (@descix/app-sdk/dev envOrigins); this map
+   * adds only the CLI's own concern, the Secret Manager label.
+   * @type {Object.<string, {url: string, secretLabel: string}>}
    */
   static ENV_MAP = {
-    dev:  { url: null, secretLabel: 'DEBUG' },
-    demo: { url: 'https://demo.descix.net', secretLabel: 'DEMO' },
-    prod: { url: 'https://descix.net', secretLabel: 'LIVE' },
+    dev:  { url: ENV_ORIGINS.dev,  secretLabel: 'DEBUG' },
+    demo: { url: ENV_ORIGINS.demo, secretLabel: 'DEMO' },
+    prod: { url: ENV_ORIGINS.prod, secretLabel: 'LIVE' },
   };
 
   /**
@@ -677,14 +681,14 @@ export class WorkspaceConfig {
   /**
    * Persistently set the target environment in workspace.json.
    *
-   * Updates env.environment and env.apiUrl, then saves.
-   * For DEV, clears apiUrl so getApiUrl() falls back to localhost:{port}.
-   * For known envs, uses the canonical URL from ENV_MAP.
+   * Updates env.environment and env.apiUrl, then saves. EVERY environment writes a
+   * URL — including dev, which writes the cloud DEV origin. Pointing at a local
+   * backend is `--url`: `descix config set-env dev --url https://localhost:4000`.
    * For custom envs, uses --url or defaults to https://{name}.descix.net.
    *
    * @param {string} envName - Environment name (dev, demo, prod, or custom)
-   * @param {string|null} [apiUrl] - Explicit API URL override (for custom envs)
-   * @returns {Promise<{configPath: string, environment: string, apiUrl: string|null, secretLabel: string}>}
+   * @param {string|null} [apiUrl] - Explicit API URL override
+   * @returns {Promise<{configPath: string, environment: string, apiUrl: string, secretLabel: string}>}
    */
   async setEnvironment(envName, apiUrl = null) {
     const normalized = envName.toLowerCase();
@@ -708,12 +712,7 @@ export class WorkspaceConfig {
     if (!this.env) this.env = {};
     this.env.environment = envLabel;
 
-    if (resolvedUrl) {
-      this.env.apiUrl = resolvedUrl;
-    } else {
-      // DEV: remove apiUrl so getApiUrl() derives from platform port
-      delete this.env.apiUrl;
-    }
+    this.env.apiUrl = resolvedUrl;
 
     // Save to disk
     const configPath = await this.save();

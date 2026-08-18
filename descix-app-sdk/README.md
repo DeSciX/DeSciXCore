@@ -75,28 +75,41 @@ platform checkout is required: with nothing configured, the shell and `/apifront
 resolve to cloud DEV.
 
 ```bash
+descix config set-env dev                   # ← today: the platform runs on dev.descix.net
 descix app init -a <app-id> -p ./my-app     # register the app in .descix/workspace.json
 descix app set-site -a <app-id> --static .  # serve ./my-app at /p/<app-id>/
 descix serve -p 5173
 ```
 
 ```
-  API:       https://dev.descix.net   [default (cloud DEV)]
-  Shell:     https://dev.descix.net   [same origin as API (default (cloud DEV))]
+  API:       https://dev.descix.net   [workspace env.apiUrl]
+  Shell:     https://dev.descix.net   [same origin as API (workspace env.apiUrl)]
     /                                  → https://dev.descix.net   (App Shell — sign in here)
     /apifront                          → https://dev.descix.net
     /p/<app-id>                        → ./my-app
 ```
 
+> **Which environment?** The SDK ships pointing at **PROD** (`https://descix.net`). While the
+> platform is still coming up on prod, run `descix config set-env dev` once per workspace —
+> that writes `env.apiUrl` and both the API and the shell follow it. `demo` and `prod` work the
+> same way. There is no "local" environment: a local backend is a URL you name, e.g.
+> `descix config set-env dev --url https://localhost:4000`.
+
 Targets, in precedence order:
 
 | Target | `1.` flag | `2.` workspace.json | `3.` derived | `4.` default |
 |---|---|---|---|---|
-| **API** (`/apifront`, `/api`, `/mcp`, `/oauth`) | `descix --api-url <url> serve`, `--env demo` | `env.apiUrl` | `env.platform.microservice.port` (local platform checkout) | cloud DEV |
-| **Shell** (`/`) | `descix serve --site-url <url>` | `env.siteUrl` | `env.platform.site.port` (local shell), else the API origin when remote | — fails loud |
+| **API** (`/apifront`, `/api`, `/mcp`, `/oauth`) | `descix --api-url <url> serve`, `--env dev` | `env.apiUrl` (what `set-env` writes) | `env.platform.microservice.port` (local platform checkout) | **PROD** |
+| **Shell** (`/`) | `descix serve --site-url <url>` | `env.siteUrl` | the API origin when remote, else `env.platform.site.port` | — fails loud |
 
-A localhost target is always an explicit opt-in. If the API is local and no shell is
-configured, the gateway refuses to start rather than proxying `/` at the API port.
+The default SDK user wins the defaults: whenever the API is a real platform origin, the shell
+comes from that same origin, so one origin carries shell + app + `/apifront` with nothing
+configured. **Platform developers opt IN** to a local shell by naming it
+(`descix serve --site-url https://localhost:5174`, or `env.siteUrl`) — owning a platform
+checkout is not by itself a request to serve it. A localhost target is always something you
+named. If the API is local and no shell is configured, the gateway refuses to start rather
+than proxying `/` at the API port. If the configured platform is unreachable, the proxy
+surfaces the failure as-is (502/timeout) — nothing is masked or retried against a fallback.
 
 ### Trust the dev certificate (one time, required for passkey login)
 
