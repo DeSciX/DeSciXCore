@@ -22,7 +22,7 @@
 import fs from 'fs';
 import path from 'path';
 import { createViteProxyConfig } from './createViteProxyConfig.js';
-import { getViteHttpsConfig } from './getViteHttpsConfig.js';
+import { getViteHttpsConfig, resolveCertPaths, trustCertCommand } from './getViteHttpsConfig.js';
 import { watchWorkspaceConfig } from './watchWorkspaceConfig.js';
 import { buildWorkspaceProducts } from './workspaceProducts.js';
 import { staticSitePlugin } from './staticSitePlugin.js';
@@ -123,11 +123,19 @@ export function buildGatewayProxy(workspaceRoot, targets) {
  * @param {Object} options
  * @param {number} [options.port=5173]
  * @param {string} [options.workspaceRoot] - Workspace root (auto-discovered from CWD if omitted)
+ * @param {string} [options.apiUrl] - Override the API target for this run
+ * @param {string} [options.apiSource] - Human label for where apiUrl came from
+ * @param {string} [options.siteUrl] - Override the App Shell (root) target for this run
+ * @param {string} [options.siteSource] - Human label for where siteUrl came from
  * @param {function} [options.log] - Logger (defaults to console.log)
  */
 export async function runGateway(options = {}) {
   const port = options.port || 5173;
   const log = options.log || console.log;
+  const targetOverrides = {
+    ...(options.apiUrl ? { apiGatewayUrl: options.apiUrl, apiSource: options.apiSource } : {}),
+    ...(options.siteUrl ? { siteUrl: options.siteUrl, siteSource: options.siteSource } : {}),
+  };
 
   // Resolve workspace root
   const workspaceRoot = options.workspaceRoot
@@ -139,7 +147,7 @@ export async function runGateway(options = {}) {
   }
 
   const config = readWorkspaceConfig(workspaceRoot);
-  const targets = resolveGatewayTargets(config);
+  const targets = resolveGatewayTargets(config, targetOverrides);
 
   log(`\n  descix-serve — Unified Local Gateway\n`);
   log(`  Workspace: ${workspaceRoot}`);
@@ -151,7 +159,9 @@ export async function runGateway(options = {}) {
   const proxyRules = buildGatewayProxy(workspaceRoot, targets);
   const staticRoutes = proxyRules._staticRoutes || {};
   delete proxyRules._staticRoutes;
-  const httpsConfig = getViteHttpsConfig(certOptions(config, workspaceRoot));
+  const certOpts = certOptions(config, workspaceRoot);
+  const httpsConfig = getViteHttpsConfig(certOpts);
+  const { certPath } = resolveCertPaths(certOpts);
 
   logProxyTable(proxyRules, log);
   if (Object.keys(staticRoutes).length > 0) {
@@ -181,6 +191,8 @@ export async function runGateway(options = {}) {
 
   await server.listen();
   log(`\n  Gateway listening on https://localhost:${port}\n`);
+  log(`  Dev cert: ${certPath}`);
+  log(`  Passkey login needs this cert trusted once:\n    ${trustCertCommand(certPath)}\n`);
 
   // WS-7: Service discovery — fetch /manifest from all microservices
   discoverServices(config, log).catch(err => {
@@ -188,7 +200,7 @@ export async function runGateway(options = {}) {
   });
 
   const watcher = watchWorkspaceConfig(workspaceRoot, async (newConfig) => {
-    const newTargets = resolveGatewayTargets(newConfig);
+    const newTargets = resolveGatewayTargets(newConfig, targetOverrides);
     const newProxy = buildGatewayProxy(workspaceRoot, newTargets);
     const newStaticRoutes = newProxy._staticRoutes || {};
     delete newProxy._staticRoutes;
