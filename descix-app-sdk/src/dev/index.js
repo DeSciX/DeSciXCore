@@ -3,6 +3,8 @@ export {
   getViteHttpsConfig,
   certificateSanNames,
   assertCertHasLocalhostSan,
+  resolveCertPaths,
+  trustCertCommand,
   DEFAULT_CERT_DIR,
   MINT_CERT_COMMAND,
 } from './getViteHttpsConfig.js';

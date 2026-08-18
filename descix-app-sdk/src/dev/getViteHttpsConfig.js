@@ -63,22 +63,42 @@ export function assertCertHasLocalhostSan(pem, certPath) {
       `(found: ${names.length ? names.join(', ') : 'none'}).\n` +
       'Chrome rejects SAN-less certs and WebAuthn/passkey login cannot run on this origin.\n' +
       `Mint a correct one:\n  ${MINT_CERT_COMMAND}\n` +
-      'Then trust it: security add-trusted-cert -k ~/Library/Keychains/login.keychain-db cert.pem'
+      `Then trust it:\n  ${trustCertCommand(certPath)}`
     );
   }
 }
 
 /**
+ * The cert/key files a given set of options resolves to.
  * @param {Object} [options]
  * @param {string} [options.certDir] - directory holding cert.pem + key.pem
  * @param {string} [options.certFile] - explicit certificate path
  * @param {string} [options.keyFile] - explicit private key path
+ * @returns {{certPath: string, keyPath: string}}
+ */
+export function resolveCertPaths(options = {}) {
+  const dir = options.certDir ? path.resolve(options.certDir) : DEFAULT_CERT_DIR;
+  return {
+    certPath: options.certFile ? path.resolve(options.certFile) : path.join(dir, 'cert.pem'),
+    keyPath: options.keyFile ? path.resolve(options.keyFile) : path.join(dir, 'key.pem'),
+  };
+}
+
+/**
+ * The one-time command that makes this machine's browser trust a dev cert.
+ * @param {string} certPath
+ * @returns {string}
+ */
+export function trustCertCommand(certPath) {
+  return `security add-trusted-cert -k ~/Library/Keychains/login.keychain-db "${certPath}"`;
+}
+
+/**
+ * @param {Object} [options] - see resolveCertPaths
  * @returns {{https: {key: Buffer, cert: Buffer}}}
  */
 export function getViteHttpsConfig(options = {}) {
-  const dir = options.certDir ? path.resolve(options.certDir) : DEFAULT_CERT_DIR;
-  const certPath = options.certFile ? path.resolve(options.certFile) : path.join(dir, 'cert.pem');
-  const keyPath = options.keyFile ? path.resolve(options.keyFile) : path.join(dir, 'key.pem');
+  const { certPath, keyPath } = resolveCertPaths(options);
 
   for (const p of [certPath, keyPath]) {
     if (!fs.existsSync(p)) {

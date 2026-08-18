@@ -96,7 +96,7 @@ export function resolveApiTarget(config = {}, options = {}) {
   let apiSource;
   if (options.apiGatewayUrl) {
     apiUrl = options.apiGatewayUrl;
-    apiSource = 'caller option apiGatewayUrl';
+    apiSource = options.apiSource || 'caller option apiGatewayUrl';
   } else if (env.apiUrl) {
     apiUrl = env.apiUrl;
     apiSource = 'workspace env.apiUrl';
@@ -137,7 +137,7 @@ export function resolveSiteTarget(config = {}, options = {}) {
 
   if (options.siteUrl) {
     isLocalOrigin(options.siteUrl);
-    return { siteUrl: options.siteUrl, siteSource: 'caller option siteUrl' };
+    return { siteUrl: options.siteUrl, siteSource: options.siteSource || 'caller option siteUrl' };
   }
   if (env.siteUrl) {
     isLocalOrigin(env.siteUrl);
@@ -160,7 +160,8 @@ export function resolveSiteTarget(config = {}, options = {}) {
   throw new Error(
     '[Gateway] Cannot determine the site (root "/") target. The API resolved to the local ' +
     `origin ${apiUrl} (${apiSource}) and there is no shell to serve at "/".\n` +
-    '  Serve the CLOUD shell:  set env.siteUrl (e.g. "https://dev.descix.net") in .descix/workspace.json\n' +
+    '  Serve the CLOUD shell:  descix serve --site-url https://dev.descix.net\n' +
+    '                          (or set env.siteUrl in .descix/workspace.json to make it permanent)\n' +
     '  Serve a LOCAL shell:    set env.platform.site.port to your platform site dev-server port'
   );
 }
