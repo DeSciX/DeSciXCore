@@ -17,6 +17,7 @@ export {
   resolveSiteTarget,
   proxyEntry,
   isLocalOrigin,
+  assertTargetUrl,
   CLOUD_DEV_URL,
 } from './resolveGatewayTargets.js';
 export { buildWorkspaceProducts, resolveAppGatewayUrl } from './workspaceProducts.js';
