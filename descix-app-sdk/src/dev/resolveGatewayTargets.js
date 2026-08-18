@@ -27,19 +27,26 @@ export const CLOUD_DEV_URL = 'https://dev.descix.net';
 const LOCAL_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]', '::1', '0.0.0.0']);
 
 /**
+ * Parse a target URL, failing loud on a typo instead of deep inside the proxy.
+ * @param {string} url
+ * @returns {URL}
+ */
+export function assertTargetUrl(url) {
+  try {
+    return new URL(url);
+  } catch {
+    throw new Error(`[Gateway] Not a valid URL: ${JSON.stringify(url)}`);
+  }
+}
+
+/**
  * True when the URL points at this machine.
  * @param {string} url
  * @returns {boolean}
  */
 export function isLocalOrigin(url) {
   if (!url) return false;
-  let hostname;
-  try {
-    hostname = new URL(url).hostname;
-  } catch {
-    throw new Error(`[Gateway] Not a valid URL: ${JSON.stringify(url)}`);
-  }
-  return LOCAL_HOSTNAMES.has(hostname);
+  return LOCAL_HOSTNAMES.has(assertTargetUrl(url).hostname);
 }
 
 /**
@@ -109,8 +116,7 @@ export function resolveApiTarget(config = {}, options = {}) {
     apiUrl = CLOUD_DEV_URL;
     apiSource = 'default (cloud DEV)';
   }
-  // Validate early so a typo fails here, not deep inside the proxy.
-  isLocalOrigin(apiUrl);
+  assertTargetUrl(apiUrl); // fail on a typo here, not deep inside the proxy
 
   return { apiUrl, apiSource };
 }
@@ -136,11 +142,11 @@ export function resolveSiteTarget(config = {}, options = {}) {
   const env = config.env || {};
 
   if (options.siteUrl) {
-    isLocalOrigin(options.siteUrl);
+    assertTargetUrl(options.siteUrl);
     return { siteUrl: options.siteUrl, siteSource: options.siteSource || 'caller option siteUrl' };
   }
   if (env.siteUrl) {
-    isLocalOrigin(env.siteUrl);
+    assertTargetUrl(env.siteUrl);
     return { siteUrl: env.siteUrl, siteSource: 'workspace env.siteUrl' };
   }
   if (env.platform?.site?.port) {
