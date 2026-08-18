@@ -1,14 +1,19 @@
 /**
  * Gateway — Pure reverse proxy for the DeSciX local dev mesh.
  *
- * Boots a Vite server as a reverse-proxy routing the entire mesh
- * (Platform PWA, Powch, community apps, microservices) through a
- * single HTTPS port. Mirrors production's GCP Load Balancer locally.
+ * Boots a Vite server as a reverse-proxy routing the entire mesh through a
+ * single HTTPS origin. Mirrors production's GCP Load Balancer locally, so the
+ * App Shell, an app's own site and /apifront all share ONE origin (which is
+ * what makes a shell sign-in visible to the app, and passkeys possible).
  *
  * Routing is data-driven via .descix/workspace.json:
- *   - env.platform  → root proxy (the shell/store)
- *   - env.products[] → /p/{appId} per product
+ *   - root '/'       → the App Shell: env.siteUrl, or a local env.platform.site,
+ *                      or the API origin when that is remote (resolveGatewayTargets)
+ *   - env.products[] → /p/{appId} per product (dev server or static dir)
  *   - API, services, GCS → standard prefixes
+ *
+ * A workspace with no local platform checkout therefore serves the CLOUD shell
+ * and proxies /apifront to cloud DEV — local app dev needs no platform source.
  *
  * This module lives in @descix/app-sdk so that any app built on the
  * SDK can spin up the gateway. The CLI is a thin wrapper.
@@ -17,10 +22,11 @@
 import fs from 'fs';
 import path from 'path';
 import { createViteProxyConfig } from './createViteProxyConfig.js';
-import { getViteHttpsConfig } from './getViteHttpsConfig.js';
+import { getViteHttpsConfig, resolveCertPaths, trustCertCommand } from './getViteHttpsConfig.js';
 import { watchWorkspaceConfig } from './watchWorkspaceConfig.js';
 import { buildWorkspaceProducts } from './workspaceProducts.js';
 import { staticSitePlugin } from './staticSitePlugin.js';
+import { resolveGatewayTargets, proxyEntry, isLocalOrigin } from './resolveGatewayTargets.js';
 
 /**
  * Find the workspace root by walking up from startDir looking for .descix/workspace.json.
@@ -48,30 +54,28 @@ function readWorkspaceConfig(workspaceRoot) {
 }
 
 /**
- * Derive the API gateway URL from workspace config.
+ * Resolve the dev-cert options from workspace config.
+ * `env.devCerts.dir` (or explicit cert/key files) are resolved against the
+ * workspace root, so a developer supplies their own trusted cert without
+ * editing the SDK.
  */
-function deriveApiUrl(config) {
-  const env = config.env || {};
-  if (env.apiUrl || config.apiUrl) {
-    return env.apiUrl || config.apiUrl;
-  }
-  // Derive from platform microservice config — no fallback port
-  const ms = env.platform?.microservice;
-  if (!ms?.port) {
-    throw new Error('[Gateway] Cannot determine API URL: no env.apiUrl and no env.platform.microservice.port in workspace.json');
-  }
-  const proto = ms.protocol || 'https';
-  return `${proto}://localhost:${ms.port}`;
+function certOptions(config, workspaceRoot) {
+  const dc = config.env?.devCerts;
+  if (!dc) return {};
+  const abs = (p) => (p ? path.resolve(workspaceRoot, p) : undefined);
+  return { certDir: abs(dc.dir), certFile: abs(dc.cert), keyFile: abs(dc.key) };
 }
 
 /**
  * Build the Vite `define` map from workspace config.
- * Injected into frontend code served through the gateway.
+ * Injected into frontend code the gateway itself transforms (a LOCAL shell or
+ * app dev server). When the root is remote, the shell arrives pre-built from
+ * that origin and these defines are inert.
  */
-function buildDefines(config, workspaceRoot) {
+function buildDefines(config, workspaceRoot, targets) {
   const env = config.env || {};
 
-  // Powch URL: env.powchUrl > auto-discover from env.products[] > fail explicitly
+  // Powch URL: env.powchUrl > auto-discover from env.products[]
   let powchAppUrl = env.powchUrl ?? null;
   if (!powchAppUrl && Array.isArray(env.products)) {
     const powchProduct = env.products.find(p => p.appId === 'powch');
@@ -79,12 +83,10 @@ function buildDefines(config, workspaceRoot) {
       powchAppUrl = `https://localhost:${powchProduct.site.port}/`;
     }
   }
-  if (!powchAppUrl) {
+  if (!powchAppUrl && isLocalOrigin(targets.siteUrl)) {
+    // Only meaningful for a locally-built shell; a remote shell carries its own.
     console.warn('[Gateway] No Powch URL found in workspace config. Powch integration will not work.');
-    powchAppUrl = null; // Downstream code handles null gracefully
   }
-
-  const apiGatewayUrl = deriveApiUrl(config);
 
   // Build product map from workspace.json (shared helper)
   const products = buildWorkspaceProducts(workspaceRoot) || {};
@@ -93,7 +95,7 @@ function buildDefines(config, workspaceRoot) {
     '__STANDALONE_APP_ID__': 'null',
     '__STANDALONE_APP_URL__': 'null',
     '__POWCH_APP_URL__': JSON.stringify(powchAppUrl),
-    '__API_GATEWAY_URL__': JSON.stringify(apiGatewayUrl),
+    '__API_GATEWAY_URL__': JSON.stringify(targets.apiUrl),
     '__WORKSPACE_PRODUCTS__': JSON.stringify(products),
     'global': 'globalThis',
   };
@@ -101,24 +103,18 @@ function buildDefines(config, workspaceRoot) {
 
 /**
  * Build the full gateway proxy config.
- * Composes app-level proxy rules + root catch-all for the platform site.
+ * Composes app-level proxy rules + the root route for the App Shell.
+ *
+ * @param {string} workspaceRoot
+ * @param {{apiUrl: string, siteUrl: string}} targets
  */
-function buildGatewayProxy(workspaceRoot, apiGatewayUrl) {
+export function buildGatewayProxy(workspaceRoot, targets) {
   // App-level routes (API, services, products, GCS)
-  const proxy = createViteProxyConfig(workspaceRoot, { apiGatewayUrl });
+  const proxy = createViteProxyConfig(workspaceRoot, { apiGatewayUrl: targets.apiUrl });
 
-  // Root catch-all: platform site (must be LAST so specific routes take priority)
-  const config = readWorkspaceConfig(workspaceRoot);
-  const platform = config.env?.platform;
-  if (platform?.site?.port) {
-    const proto = platform.site.protocol || 'https';
-    proxy['/'] = {
-      target: `${proto}://localhost:${platform.site.port}`,
-      changeOrigin: true,
-      secure: false,
-      ws: true,
-    };
-  }
+  // Root: the App Shell — local checkout or cloud origin (must be LAST in the
+  // table so the specific routes above take priority).
+  proxy['/'] = proxyEntry(targets.siteUrl, { ws: true });
 
   return proxy;
 }
@@ -127,11 +123,19 @@ function buildGatewayProxy(workspaceRoot, apiGatewayUrl) {
  * @param {Object} options
  * @param {number} [options.port=5173]
  * @param {string} [options.workspaceRoot] - Workspace root (auto-discovered from CWD if omitted)
+ * @param {string} [options.apiUrl] - Override the API target for this run
+ * @param {string} [options.apiSource] - Human label for where apiUrl came from
+ * @param {string} [options.siteUrl] - Override the App Shell (root) target for this run
+ * @param {string} [options.siteSource] - Human label for where siteUrl came from
  * @param {function} [options.log] - Logger (defaults to console.log)
  */
 export async function runGateway(options = {}) {
   const port = options.port || 5173;
   const log = options.log || console.log;
+  const targetOverrides = {
+    ...(options.apiUrl ? { apiGatewayUrl: options.apiUrl, apiSource: options.apiSource } : {}),
+    ...(options.siteUrl ? { siteUrl: options.siteUrl, siteSource: options.siteSource } : {}),
+  };
 
   // Resolve workspace root
   const workspaceRoot = options.workspaceRoot
@@ -143,18 +147,21 @@ export async function runGateway(options = {}) {
   }
 
   const config = readWorkspaceConfig(workspaceRoot);
-  const apiGatewayUrl = deriveApiUrl(config);
+  const targets = resolveGatewayTargets(config, targetOverrides);
 
   log(`\n  descix-serve — Unified Local Gateway\n`);
   log(`  Workspace: ${workspaceRoot}`);
-  log(`  API:       ${apiGatewayUrl}`);
+  log(`  API:       ${targets.apiUrl}   [${targets.apiSource}]`);
+  log(`  Shell:     ${targets.siteUrl}   [${targets.siteSource}]`);
   log(`  Port:      ${port}`);
   log('');
 
-  const proxyRules = buildGatewayProxy(workspaceRoot, apiGatewayUrl);
+  const proxyRules = buildGatewayProxy(workspaceRoot, targets);
   const staticRoutes = proxyRules._staticRoutes || {};
   delete proxyRules._staticRoutes;
-  const httpsConfig = getViteHttpsConfig();
+  const certOpts = certOptions(config, workspaceRoot);
+  const httpsConfig = getViteHttpsConfig(certOpts);
+  const { certPath } = resolveCertPaths(certOpts);
 
   logProxyTable(proxyRules, log);
   if (Object.keys(staticRoutes).length > 0) {
@@ -178,12 +185,14 @@ export async function runGateway(options = {}) {
       hmr: false,
       proxy: proxyRules,
     },
-    define: buildDefines(config, workspaceRoot),
+    define: buildDefines(config, workspaceRoot, targets),
     optimizeDeps: { noDiscovery: true },
   });
 
   await server.listen();
   log(`\n  Gateway listening on https://localhost:${port}\n`);
+  log(`  Dev cert: ${certPath}`);
+  log(`  Passkey login needs this cert trusted once:\n    ${trustCertCommand(certPath)}\n`);
 
   // WS-7: Service discovery — fetch /manifest from all microservices
   discoverServices(config, log).catch(err => {
@@ -191,8 +200,8 @@ export async function runGateway(options = {}) {
   });
 
   const watcher = watchWorkspaceConfig(workspaceRoot, async (newConfig) => {
-    const newApiUrl = deriveApiUrl(newConfig);
-    const newProxy = buildGatewayProxy(workspaceRoot, newApiUrl);
+    const newTargets = resolveGatewayTargets(newConfig, targetOverrides);
+    const newProxy = buildGatewayProxy(workspaceRoot, newTargets);
     const newStaticRoutes = newProxy._staticRoutes || {};
     delete newProxy._staticRoutes;
 
@@ -212,7 +221,7 @@ export async function runGateway(options = {}) {
         hmr: false,
         proxy: newProxy,
       },
-      define: buildDefines(newConfig, workspaceRoot),
+      define: buildDefines(newConfig, workspaceRoot, newTargets),
       optimizeDeps: { noDiscovery: true },
     });
 
