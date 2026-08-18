@@ -13,11 +13,12 @@
 
 import fs from 'fs';
 import path from 'path';
+import { resolveApiTarget, proxyEntry } from './resolveGatewayTargets.js';
 
 /**
  * @param {string} workspacePath - Path to workspace root (contains .descix/workspace.json)
  * @param {Object} options
- * @param {string} [options.apiGatewayUrl] - API gateway URL override (falls back to workspace env/apiUrl)
+ * @param {string} [options.apiGatewayUrl] - API gateway URL override (else resolveApiTarget)
  * @returns {Object} Vite server.proxy config
  */
 export function createViteProxyConfig(workspacePath, options = {}) {
@@ -33,16 +34,8 @@ export function createViteProxyConfig(workspacePath, options = {}) {
   }
 
   const env = config.env || {};
-  // Derive API URL: explicit option > env.apiUrl > workspace microservice config — no fallback
-  let apiGatewayUrl = options.apiGatewayUrl ?? env.apiUrl ?? config.apiUrl;
-  if (!apiGatewayUrl) {
-    const ms = env.platform?.microservice;
-    if (!ms?.port) {
-      throw new Error('[createViteProxyConfig] Cannot determine API URL: no apiGatewayUrl option, no env.apiUrl, and no env.platform.microservice.port in workspace.json');
-    }
-    const proto = ms.protocol || 'https';
-    apiGatewayUrl = `${proto}://localhost:${ms.port}`;
-  }
+  // API target — resolved by the one owner (resolveGatewayTargets.js), never re-derived here.
+  const { apiUrl: apiGatewayUrl } = resolveApiTarget(config, options);
   // Powch URL: explicit env.powchUrl, or auto-discover from env.products[]
   let powchUrl = env.powchUrl ?? null;
   if (!powchUrl && Array.isArray(env.products)) {
@@ -86,81 +79,39 @@ export function createViteProxyConfig(workspacePath, options = {}) {
   const proxy = {};
 
   // Core API routes
-  proxy['/apifront'] = {
-    target: apiGatewayUrl,
-    changeOrigin: true,
-    secure: false,
-  };
-  proxy['/api'] = {
-    target: apiGatewayUrl,
-    changeOrigin: true,
-    secure: false,
-  };
-  proxy['/mcp'] = {
-    target: apiGatewayUrl,
-    changeOrigin: true,
-    secure: false,
-  };
+  proxy['/apifront'] = proxyEntry(apiGatewayUrl);
+  proxy['/api'] = proxyEntry(apiGatewayUrl);
+  proxy['/mcp'] = proxyEntry(apiGatewayUrl);
   // OAuth Authorization Server endpoints (WS-MCP-OAUTH) — served by the Core API
   // backend at the same paths (no rewrite). /oauth is a prefix covering
   // /oauth/register, /oauth/authorize, /oauth/github/callback, /oauth/token.
-  proxy['/oauth'] = {
-    target: apiGatewayUrl,
-    changeOrigin: true,
-    secure: false,
-  };
+  proxy['/oauth'] = proxyEntry(apiGatewayUrl);
   // Exact-path .well-known entries only — do NOT blanket-proxy all of /.well-known.
-  proxy['/.well-known/oauth-protected-resource'] = {
-    target: apiGatewayUrl,
-    changeOrigin: true,
-    secure: false,
-  };
-  proxy['/.well-known/oauth-authorization-server'] = {
-    target: apiGatewayUrl,
-    changeOrigin: true,
-    secure: false,
-  };
+  proxy['/.well-known/oauth-protected-resource'] = proxyEntry(apiGatewayUrl);
+  proxy['/.well-known/oauth-authorization-server'] = proxyEntry(apiGatewayUrl);
   // RFC 8414 / RFC 9728 path-inserted metadata locations (WS-MCP-OAUTH). Because
   // the issuer has a path (/oauth) and the resource has a path (/mcp), spec-strict
   // clients (Claude.ai) probe these path-inserted .well-known URLs. Exact paths only.
-  proxy['/.well-known/oauth-authorization-server/oauth'] = {
-    target: apiGatewayUrl,
-    changeOrigin: true,
-    secure: false,
-  };
-  proxy['/.well-known/oauth-protected-resource/mcp'] = {
-    target: apiGatewayUrl,
-    changeOrigin: true,
-    secure: false,
-  };
+  proxy['/.well-known/oauth-authorization-server/oauth'] = proxyEntry(apiGatewayUrl);
+  proxy['/.well-known/oauth-protected-resource/mcp'] = proxyEntry(apiGatewayUrl);
 
   // Debug Proxy (if VITE_DEBUG_PROXY is set)
-  proxy['/.proxy/api_debug'] = {
-    target: apiGatewayUrl,
-    changeOrigin: true,
-    secure: false,
+  proxy['/.proxy/api_debug'] = proxyEntry(apiGatewayUrl, {
     rewrite: (p) => p.replace(/^\/\.proxy\/api_debug/, ''),
-  };
+  });
 
   // Powch PWA route (local port or production URL)
   if (powchUrl) {
-    proxy['/powch'] = {
-      target: powchUrl,
-      changeOrigin: true,
-      secure: false,
-      ws: true,
-    };
+    proxy['/powch'] = proxyEntry(powchUrl, { ws: true });
   }
 
   // Microservice routes: /s/{appId} -> localhost:{service.port} (prefix stripped)
   Object.entries(serviceRoutes).forEach(([routeKey, route]) => {
     const prefix = `/s/${routeKey}`;
-    proxy[prefix] = {
-      target: `http://localhost:${route.port}`, // Services are usually HTTP
-      changeOrigin: true,
+    proxy[prefix] = proxyEntry(`http://localhost:${route.port}`, { // Services are usually HTTP
       ws: true,
       rewrite: (p) => p.replace(new RegExp(`^${prefix}`), ''),
-    };
+    });
   });
 
   // Product site dev server routes: /p/{productId} -> localhost:{site.port}
@@ -169,38 +120,27 @@ export function createViteProxyConfig(workspacePath, options = {}) {
     const pathPrefix = `/p/${productId}`;
     const proto = route.protocol || 'https';
 
-    proxy[pathPrefix] = {
-      target: `${proto}://localhost:${route.port}`,
-      changeOrigin: true,
-      secure: false,
-      ws: true,
-    };
+    proxy[pathPrefix] = proxyEntry(`${proto}://localhost:${route.port}`, { ws: true });
   });
 
   // GCS fallback for remote Community assets
-  proxy['/Community'] = {
-    target: 'https://storage.googleapis.com',
-    changeOrigin: true,
-    secure: true,
+  proxy['/Community'] = proxyEntry('https://storage.googleapis.com', {
     rewrite: (p) => {
       if (p.startsWith('/Community')) {
         return `/descix-assets-public${p}`;
       }
       return p;
     },
-  };
+  });
 
-  proxy['/.proxy/gcs_media'] = {
-    target: 'https://storage.googleapis.com',
-    changeOrigin: true,
-    secure: true,
+  proxy['/.proxy/gcs_media'] = proxyEntry('https://storage.googleapis.com', {
     rewrite: (p) => {
       let pathWithoutPrefix = p.replace('/.proxy/gcs_media', '');
       if (!pathWithoutPrefix.startsWith('/')) pathWithoutPrefix = '/' + pathWithoutPrefix;
       if (pathWithoutPrefix.startsWith('/descix-assets-public/')) return pathWithoutPrefix;
       return `/descix-assets-public${pathWithoutPrefix}`;
     },
-  };
+  });
 
   // Attach staticRoutes to the proxy object so gateway.js can access them
   // without changing the function signature (backward compatible)
