@@ -4979,14 +4979,17 @@ const updateCommand = program
 program
   .command('serve')
   .description('Start the unified local gateway (one HTTPS origin: App Shell at /, your app at /p/<app>, /apifront to the API)')
-  .option('-p, --port <port>', 'Gateway port', '5173')
+  .option('-p, --port <port>', 'Gateway port for this run (default: env.gateway.port, else 5173)')
   .option('-w, --workspace <path>', 'Workspace root override')
   .option('--site-url <url>', 'App Shell target for this run (default: env.siteUrl, a local platform site, else the API origin)')
   .action(async (options) => {
     try {
       const { runServe } = await import('../lib/commands/serve.js');
       await runServe({
-        port: parseInt(options.port, 10),
+        // No default here: an unset flag must stay UNSET so the gateway's
+        // resolveGatewayPort can see env.gateway.port. A CLI-side default would
+        // shadow the workspace's own port — the map/server disagreement bug.
+        port: options.port !== undefined ? parseInt(options.port, 10) : undefined,
         workspaceRoot: options.workspace || process.cwd(),
         siteUrl: options.siteUrl,
       });

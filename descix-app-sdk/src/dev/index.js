@@ -10,7 +10,8 @@ export {
 } from './getViteHttpsConfig.js';
 export { createViteServerConfig } from './createViteServerConfig.js';
 export { watchWorkspaceConfig } from './watchWorkspaceConfig.js';
-export { runGateway, buildGatewayProxy } from './gateway.js';
+export { runGateway, buildGatewayProxy, listenOrFailLoud } from './gateway.js';
+export { resolveGatewayPort, assertPort, portInUseMessage, DEFAULT_GATEWAY_PORT } from './gatewayPort.js';
 export { assertVitePin, pinnedViteVersion, resolvedVite, SDK_PACKAGE_JSON } from './vitePin.js';
 export {
   resolveGatewayTargets,
