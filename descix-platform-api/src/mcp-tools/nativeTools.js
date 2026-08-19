@@ -127,7 +127,7 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
     },
     {
         name: 'tell_me_how',
-        description: 'Discover platform tools and services by asking a natural language question. Searches the service mesh for relevant capabilities; results include callable schemas and an invocation envelope. Call with scope "bootstrap" FIRST on a new session: it deterministically returns the platform summary, your caller context, credit balance, and the essential tools. Ask it in plain language to set up or onboard to DeSciX (e.g. "set up DeSciX", "help me get started") and it returns a structured setup playbook you can walk the user through. If results are empty, try scope "discovery" or rephrase.',
+        description: 'Discover platform tools and services by asking a natural language question. Searches the service mesh for relevant capabilities; results include callable schemas and an invocation envelope. Call with scope "bootstrap" FIRST on a new session: it deterministically returns the platform summary, your caller context, credit balance, and the essential tools. Ask it in plain language to set up or onboard to DeSciX (e.g. "set up DeSciX", "help me get started") and it returns a structured setup playbook you can walk the user through. Asking about a SPECIFIC app or community? Pass project_context with its ids and scope "project" — the vector search is restricted to them. Asking how to BUILD ON or reproduce an app (npm package, artifact pages, notebooks, runnable benchmarks)? Use scope "artifact", which answers deterministically from the app registry with no vector search. If results are empty, try scope "discovery" or rephrase.',
         mutating: false,
         oauthReadonly: true,
         inputSchema: {
@@ -137,7 +137,46 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
                 // WS-MVP-FIRSTCONTACT F3: 'bootstrap' = deterministic first-contact on-ramp
                 // (no vector search). question becomes optional for that scope only; the
                 // server still hard-requires it for project/entitlements/discovery.
-                scope: { type: 'string', enum: ['bootstrap', 'project', 'entitlements', 'discovery'], description: '"bootstrap" = deterministic first-call on-ramp (platform summary + caller context + credit balance + essential tool schemas), "entitlements" = your purchased tools, "discovery" = all platform capabilities. Default: entitlements.' },
+                //
+                // THE ENUM IS THE CONTRACT AND IT MUST MATCH THE HANDLER. Measured on dev
+                // 2026-08-18, three hand-maintained copies of this list disagreed three ways
+                // (handler 6 scopes, this enum 4, the CLI 3), and the disagreement was not
+                // cosmetic: 'project' was advertised here while `project_context` was ABSENT from
+                // properties, so the param guard — which derives its accepted set from
+                // Object.keys(inputSchema.properties) — rejected the one parameter the scope
+                // requires. Every caller selecting it got an unconditional error from every
+                // surface. Meanwhile 'artifact' WORKED and was undiscoverable. Adding a scope
+                // here without its parameters ships a capability nobody can reach.
+                //
+                // 'admin' is DELIBERATELY EXCLUDED, not forgotten: it is fail-closed to
+                // platform-admins (communityCommands tell_me_how returns ADMIN_REQUIRED to
+                // everyone else), so advertising it to every external caller would only publish a
+                // door none of them can open.
+                scope: {
+                    type: 'string',
+                    enum: ['bootstrap', 'artifact', 'project', 'entitlements', 'discovery'],
+                    description: '"bootstrap" = deterministic first-call on-ramp (platform summary + caller context + credit balance + essential tool schemas), "artifact" = deterministic build/reproduce provenance for published apps (npm package + spec, jsdelivr artifact and notebook URLs, runnable npx commands) with no vector search, "project" = restrict the search to the communities/apps named in project_context, "entitlements" = your purchased tools, "discovery" = all platform capabilities. Default: entitlements.',
+                },
+                // OPT-IN, default OMITTED. `context` is the concatenated raw text of every
+                // matched service doc — measured 18,299 B of a 52,409 B reply (35%), duplicating
+                // in prose the same information the structured recommended_tools rows already
+                // carry. A discovery call should not spend a third of its payload on that unless
+                // the caller asks. Declared here for the same reason as project_context: the
+                // gateway guard accepts exactly the keys this bag names.
+                include_context: {
+                    type: 'boolean',
+                    description: 'Include the raw concatenated service-documentation text the answer was drawn from. Default false — the structured recommended_tools rows carry the same information in a form you can act on. Set true when you want the underlying prose to quote or verify against.',
+                },
+                // REQUIRED by scope 'project' — and it must be declared HERE, because the
+                // gateway param guard accepts exactly the keys this properties bag names.
+                project_context: {
+                    type: 'object',
+                    description: 'Scope the search to specific communities/apps. Required when scope is "project"; ignored otherwise. Supply at least one non-empty list.',
+                    properties: {
+                        community_ids: { type: 'array', items: { type: 'string' }, description: 'Community ids to restrict the search to, e.g. ["egpt"].' },
+                        app_ids: { type: 'array', items: { type: 'string' }, description: 'App ids to restrict the search to, e.g. ["egpt-godsworld"].' },
+                    },
+                },
             },
         },
     },
