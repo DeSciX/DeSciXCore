@@ -11,6 +11,7 @@ export {
 export { createViteServerConfig } from './createViteServerConfig.js';
 export { watchWorkspaceConfig } from './watchWorkspaceConfig.js';
 export { runGateway, buildGatewayProxy } from './gateway.js';
+export { assertVitePin, pinnedViteVersion, resolvedVite, SDK_PACKAGE_JSON } from './vitePin.js';
 export {
   resolveGatewayTargets,
   resolveApiTarget,
