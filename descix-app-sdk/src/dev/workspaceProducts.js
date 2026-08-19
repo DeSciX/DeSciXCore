@@ -6,6 +6,7 @@
  */
 import fs from 'fs';
 import path from 'path';
+import { resolveGatewayPort } from './gatewayPort.js';
 
 export function buildWorkspaceProducts(workspaceRoot) {
   const wsPath = path.resolve(workspaceRoot, '.descix/workspace.json');
@@ -21,8 +22,9 @@ export function buildWorkspaceProducts(workspaceRoot) {
   }
 
   // Products (community apps, Powch, etc.)
-  // Determine gateway port for static site products (default 5173)
-  const gatewayPort = ws.env?.gateway?.port || 5173;
+  // Gateway port for static site products — resolved by the ONE owner, so this
+  // map can never name a port the server is not listening on.
+  const { port: gatewayPort } = resolveGatewayPort(ws);
 
   if (Array.isArray(ws.env?.products)) {
     for (const p of ws.env.products) {
@@ -75,7 +77,7 @@ export function resolveAppGatewayUrl(workspaceRoot, appId) {
 
   const ws = JSON.parse(fs.readFileSync(wsPath, 'utf8'));
   const env = ws.env || {};
-  const gatewayPort = env.gateway?.port || 5173;
+  const { port: gatewayPort } = resolveGatewayPort(ws);
 
   // Platform app — served at the gateway root.
   if (env.platform?.appId === appId) {
