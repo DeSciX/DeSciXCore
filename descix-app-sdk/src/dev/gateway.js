@@ -27,6 +27,8 @@ import { watchWorkspaceConfig } from './watchWorkspaceConfig.js';
 import { buildWorkspaceProducts } from './workspaceProducts.js';
 import { staticSitePlugin } from './staticSitePlugin.js';
 import { resolveGatewayTargets, proxyEntry, isLocalOrigin } from './resolveGatewayTargets.js';
+import { resolveGatewayPort, portInUseMessage } from './gatewayPort.js';
+import { assertVitePin } from './vitePin.js';
 
 /**
  * Find the workspace root by walking up from startDir looking for .descix/workspace.json.
@@ -121,7 +123,9 @@ export function buildGatewayProxy(workspaceRoot, targets) {
 
 /**
  * @param {Object} options
- * @param {number} [options.port=5173]
+ * @param {number} [options.port] - Explicit port override (the --port flag). Omit to
+ *   resolve from env.gateway.port, else the built-in default (see gatewayPort.js).
+ * @param {string} [options.portSource] - Human label for where an explicit port came from
  * @param {string} [options.workspaceRoot] - Workspace root (auto-discovered from CWD if omitted)
  * @param {string} [options.apiUrl] - Override the API target for this run
  * @param {string} [options.apiSource] - Human label for where apiUrl came from
@@ -130,7 +134,6 @@ export function buildGatewayProxy(workspaceRoot, targets) {
  * @param {function} [options.log] - Logger (defaults to console.log)
  */
 export async function runGateway(options = {}) {
-  const port = options.port || 5173;
   const log = options.log || console.log;
   const targetOverrides = {
     ...(options.apiUrl ? { apiGatewayUrl: options.apiUrl, apiSource: options.apiSource } : {}),
@@ -148,12 +151,18 @@ export async function runGateway(options = {}) {
 
   const config = readWorkspaceConfig(workspaceRoot);
   const targets = resolveGatewayTargets(config, targetOverrides);
+  // ONE owner of the port, so the server and the product map the shell bakes
+  // (buildWorkspaceProducts) can never name different ports.
+  const { port, portSource } = resolveGatewayPort(config, {
+    port: options.port,
+    portSource: options.portSource || (options.port !== undefined ? '--port' : undefined),
+  });
 
   log(`\n  descix-serve — Unified Local Gateway\n`);
   log(`  Workspace: ${workspaceRoot}`);
   log(`  API:       ${targets.apiUrl}   [${targets.apiSource}]`);
   log(`  Shell:     ${targets.siteUrl}   [${targets.siteSource}]`);
-  log(`  Port:      ${port}`);
+  log(`  Port:      ${port}   [${portSource}]`);
   log('');
 
   const proxyRules = buildGatewayProxy(workspaceRoot, targets);
@@ -172,6 +181,11 @@ export async function runGateway(options = {}) {
     log('');
   }
 
+  // Model V: the proxy engine is exact-pinned by this package. Refuse to boot
+  // the local mesh on a version the gateway was not verified on.
+  const { pinned } = assertVitePin();
+  log(`  Proxy engine: vite ${pinned} (exact-pinned by @descix/app-sdk)\n`);
+
   const { createServer } = await import('vite');
 
   let server = await createServer({
@@ -180,6 +194,7 @@ export async function runGateway(options = {}) {
     plugins: [staticSitePlugin(staticRoutes)],
     server: {
       port,
+      strictPort: true,
       ...httpsConfig,
       host: true,
       hmr: false,
@@ -189,7 +204,7 @@ export async function runGateway(options = {}) {
     optimizeDeps: { noDiscovery: true },
   });
 
-  await server.listen();
+  await listenOrFailLoud(server, port, portSource);
   log(`\n  Gateway listening on https://localhost:${port}\n`);
   log(`  Dev cert: ${certPath}`);
   log(`  Passkey login needs this cert trusted once:\n    ${trustCertCommand(certPath)}\n`);
@@ -216,6 +231,7 @@ export async function runGateway(options = {}) {
       plugins: [staticSitePlugin(newStaticRoutes)],
       server: {
         port,
+        strictPort: true,
         ...httpsConfig,
         host: true,
         hmr: false,
@@ -225,12 +241,36 @@ export async function runGateway(options = {}) {
       optimizeDeps: { noDiscovery: true },
     });
 
-    await server.listen();
+    await listenOrFailLoud(server, port, portSource);
     log(`\n  Gateway restarted on https://localhost:${port}\n`);
   });
 
   process.on('SIGINT', () => { watcher.close(); server.close(); process.exit(0); });
   process.on('SIGTERM', () => { watcher.close(); server.close(); process.exit(0); });
+}
+
+/**
+ * Listen on the resolved port, or fail loud naming BOTH where the port came
+ * from and the flag that overrides it.
+ *
+ * `strictPort: true` is what makes this honest: without it Vite silently walks
+ * to the next free port, so the server ends up somewhere the product map the
+ * shell baked (buildWorkspaceProducts) does not point at — the map and the
+ * server disagree and nothing says so.
+ *
+ * @param {Object} server - a Vite dev server
+ * @param {number} port
+ * @param {string} portSource
+ */
+export async function listenOrFailLoud(server, port, portSource) {
+  try {
+    await server.listen();
+  } catch (err) {
+    if (err?.code === 'EADDRINUSE' || /(address|port).*in use/i.test(err?.message || '')) {
+      throw new Error(portInUseMessage(port, portSource));
+    }
+    throw err;
+  }
 }
 
 /**
