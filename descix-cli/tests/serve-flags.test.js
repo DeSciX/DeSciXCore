@@ -72,4 +72,40 @@ test('runServe consumes the normalized DESCIX_API_URL channel', () => {
 test('runServe hands the gateway a source label for each override it passes', () => {
   assert.match(serveSrc, /apiSource:/);
   assert.match(serveSrc, /siteSource:/);
+  assert.match(serveSrc, /portSource:/);
+});
+
+/**
+ * The same swallowing failure in its OTHER form: a commander DEFAULT makes
+ * `options.port` always-set, so the CLI can no longer tell "the developer asked
+ * for 5173" from "the developer asked for nothing". Passing that on shadowed
+ * env.gateway.port — the workspace said 5599, the gateway listened on 5173, and
+ * the product map the shell baked pointed at a port nothing was serving.
+ * The port default has ONE home: @descix/app-sdk's resolveGatewayPort.
+ */
+test('serve declares --port with NO default value — an unset flag stays unset', () => {
+  const start = binSrc.indexOf(".command('serve')");
+  const block = binSrc.slice(start, binSrc.indexOf('.action(', start));
+  const portOption = block.match(/\.option\('-p, --port <port>'[^\n]*\)/);
+  assert.ok(portOption, `--port option not found in:\n${block}`);
+  assert.ok(
+    !/,\s*'\d+'\s*\)$/.test(portOption[0]),
+    `--port carries a CLI-side default, which shadows env.gateway.port: ${portOption[0]}`,
+  );
+});
+
+test('the CLI substitutes no port default of its own', () => {
+  assert.ok(!/5173/.test(serveSrc), `serve.js hardcodes a port default: ${serveSrc}`);
+  assert.match(serveSrc, /port:\s*options\.port\b/);
+
+  const start = binSrc.indexOf(".command('serve')");
+  const action = binSrc.slice(binSrc.indexOf('.action(', start), binSrc.indexOf('// ============', start + 10));
+  assert.ok(!/5173/.test(action), `the serve action hardcodes a port default:\n${action}`);
+  assert.match(action, /options\.port !== undefined \? parseInt\(options\.port, 10\) : undefined/);
+});
+
+test('--port is still documented as the override, naming what it overrides', () => {
+  const start = binSrc.indexOf(".command('serve')");
+  const block = binSrc.slice(start, binSrc.indexOf('.action(', start));
+  assert.match(block, /--port <port>'.*env\.gateway\.port/);
 });
