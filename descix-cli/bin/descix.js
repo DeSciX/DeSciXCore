@@ -4792,7 +4792,7 @@ program
   .command('tell-me-how')
   .description('Discover platform tools using natural language (Intelligent MCP Mesh)')
   .argument('<question>', 'What do you want to accomplish? Use natural language.')
-  .option('-s, --scope <scope>', 'Search scope: project, entitlements (default), discovery', 'entitlements')
+  .option('-s, --scope <scope>', 'Search scope (validated against the published tell_me_how enum): bootstrap, artifact, project, entitlements (default), discovery', 'entitlements')
   .option('-j, --json', 'Output raw JSON response')
   .action(async (question, options) => {
     try {
@@ -4801,52 +4801,59 @@ program
       
       const { scope, json: jsonOutput } = options;
       
-      // Validate scope
-      const validScopes = ['project', 'entitlements', 'discovery'];
+      // Validate scope against the PUBLISHED enum, never a hand-copy. This list used to be a
+      // third mirror (['project','entitlements','discovery']) of a contract owned in
+      // @descix/platform-api/mcp-tools, and on 2026-08-18 all three copies disagreed: the handler
+      // knew 6 scopes, the published enum 4, this CLI 3 — so 'artifact' and 'bootstrap' were
+      // rejected here despite working on the wire. One owner, read at runtime.
+      const { NATIVE_MCP_TOOLS } = await import('@descix/platform-api/mcp-tools');
+      const validScopes = NATIVE_MCP_TOOLS
+        .find(t => t.name === 'tell_me_how')?.inputSchema?.properties?.scope?.enum;
+      if (!Array.isArray(validScopes) || validScopes.length === 0) {
+        console.error(chalk.red("tell_me_how scope enum missing from @descix/platform-api/mcp-tools — cannot validate."));
+        process.exit(1);
+      }
       if (!validScopes.includes(scope)) {
         console.error(chalk.red(`Invalid scope '${scope}'. Must be one of: ${validScopes.join(', ')}`));
         process.exit(1);
       }
       
-      // Get project context for 'project' scope
+      // Project context for 'project' scope, read from the v2.1 workspace.
+      //
+      // This previously read `primaryCommunity`, `directoryMappings` and `defaultContext` — all
+      // v1-format keys. A v2.1 workspace ({version, workspaceRoot, type, env{...}, driveConfig})
+      // has NONE of them, so this always produced {community_ids:[], app_ids:[]} and the server
+      // rejected every call with "project scope requires project_context with community_ids or
+      // app_ids". `--scope project` was dead on this surface for exactly as long as v2.1 has been
+      // the format.
+      //
+      // v2.1 carries APP IDS ONLY (env.platform.appId, env.products[].appId) — no community ids.
+      // We therefore send app_ids alone and let the server resolve ownership from Products.
+      // Deriving a community_id by splitting an app_id would violate the platform invariant that
+      // app ids are OPAQUE to routing and lookups.
       let project_context = null;
       if (scope === 'project') {
+        let wsConfig;
         try {
           const { WorkspaceConfig } = await import('../lib/workspace-config.js');
-          const wsConfig = await WorkspaceConfig.load(process.cwd());
-          if (wsConfig) {
-            // Extract community_ids from primaryCommunity and directoryMappings
-            const communityIds = new Set();
-            const appIds = new Set();
-            
-            if (wsConfig.primaryCommunity) {
-              communityIds.add(wsConfig.primaryCommunity);
-            }
-            
-            // Extract from directoryMappings
-            for (const mapping of Object.values(wsConfig.directoryMappings || {})) {
-              if (mapping.communityId) communityIds.add(mapping.communityId);
-              if (mapping.appId) appIds.add(mapping.appId);
-            }
-            
-            // Extract from defaultContext
-            if (wsConfig.defaultContext?.communityId) {
-              communityIds.add(wsConfig.defaultContext.communityId);
-            }
-            if (wsConfig.defaultContext?.appId) {
-              appIds.add(wsConfig.defaultContext.appId);
-            }
-            
-            project_context = {
-              community_ids: Array.from(communityIds),
-              app_ids: Array.from(appIds)
-            };
-          }
+          wsConfig = await WorkspaceConfig.load(process.cwd());
         } catch (e) {
           console.error(chalk.yellow(`⚠️  Could not read .descix/workspace.json for project scope`));
           console.error(chalk.gray(`    Run 'descix init' first, or use --scope entitlements`));
           process.exit(1);
         }
+        const appIds = new Set();
+        if (wsConfig?.env?.platform?.appId) appIds.add(wsConfig.env.platform.appId);
+        for (const product of wsConfig?.env?.products || []) {
+          if (product?.appId) appIds.add(product.appId);
+        }
+        // Fail LOUD rather than sending an empty context the server can only reject.
+        if (appIds.size === 0) {
+          console.error(chalk.red("project scope: no apps found in .descix/workspace.json (env.platform.appId / env.products[].appId)."));
+          console.error(chalk.gray("    Use --scope entitlements, or add products to the workspace."));
+          process.exit(1);
+        }
+        project_context = { app_ids: Array.from(appIds) };
       }
       
       console.log(chalk.cyan(`\n🔍 Searching for tools... (scope: ${scope})\n`));
