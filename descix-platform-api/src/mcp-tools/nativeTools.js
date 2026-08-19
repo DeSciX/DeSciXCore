@@ -157,6 +157,16 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
                     enum: ['bootstrap', 'artifact', 'project', 'entitlements', 'discovery'],
                     description: '"bootstrap" = deterministic first-call on-ramp (platform summary + caller context + credit balance + essential tool schemas), "artifact" = deterministic build/reproduce provenance for published apps (npm package + spec, jsdelivr artifact and notebook URLs, runnable npx commands) with no vector search, "project" = restrict the search to the communities/apps named in project_context, "entitlements" = your purchased tools, "discovery" = all platform capabilities. Default: entitlements.',
                 },
+                // OPT-IN, default OMITTED. `context` is the concatenated raw text of every
+                // matched service doc — measured 18,299 B of a 52,409 B reply (35%), duplicating
+                // in prose the same information the structured recommended_tools rows already
+                // carry. A discovery call should not spend a third of its payload on that unless
+                // the caller asks. Declared here for the same reason as project_context: the
+                // gateway guard accepts exactly the keys this bag names.
+                include_context: {
+                    type: 'boolean',
+                    description: 'Include the raw concatenated service-documentation text the answer was drawn from. Default false — the structured recommended_tools rows carry the same information in a form you can act on. Set true when you want the underlying prose to quote or verify against.',
+                },
                 // REQUIRED by scope 'project' — and it must be declared HERE, because the
                 // gateway param guard accepts exactly the keys this properties bag names.
                 project_context: {
