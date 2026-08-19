@@ -27,6 +27,7 @@ import { watchWorkspaceConfig } from './watchWorkspaceConfig.js';
 import { buildWorkspaceProducts } from './workspaceProducts.js';
 import { staticSitePlugin } from './staticSitePlugin.js';
 import { resolveGatewayTargets, proxyEntry, isLocalOrigin } from './resolveGatewayTargets.js';
+import { assertVitePin } from './vitePin.js';
 
 /**
  * Find the workspace root by walking up from startDir looking for .descix/workspace.json.
@@ -171,6 +172,11 @@ export async function runGateway(options = {}) {
     }
     log('');
   }
+
+  // Model V: the proxy engine is exact-pinned by this package. Refuse to boot
+  // the local mesh on a version the gateway was not verified on.
+  const { pinned } = assertVitePin();
+  log(`  Proxy engine: vite ${pinned} (exact-pinned by @descix/app-sdk)\n`);
 
   const { createServer } = await import('vite');
 
