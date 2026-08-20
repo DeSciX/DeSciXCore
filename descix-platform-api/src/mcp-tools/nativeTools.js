@@ -11,10 +11,16 @@
  * Cloud services/nativeMcpTools.js NATIVE_MCP_TOOLS — they drifted. They now both import
  * NATIVE_MCP_TOOLS from here. The duplicated curated literal is GONE.
  *
- * LEAF MODULE — DEPENDENCY-FREE BY DESIGN:
- *   This file imports nothing (no cloud-core, no googleapis). It is pure data so the
- *   thin CLI stdio server can import it via the '@descix/platform-api/mcp-tools' subpath
- *   WITHOUT dragging GCP infrastructure into the CLI process. Do not add imports here.
+ * LEAF MODULE — INFRASTRUCTURE-FREE BY DESIGN:
+ *   This file pulls in NO infrastructure (no cloud-core, no googleapis, no GCP client). It
+ *   is pure data so the thin CLI stdio server can import it via the
+ *   '@descix/platform-api/mcp-tools' subpath WITHOUT dragging GCP infrastructure into the
+ *   CLI process.
+ *   The ONLY imports permitted here are other PURE, ZERO-IMPORT LEAVES in this same
+ *   directory (today: chatMedia.js), and only so a schema can be BUILT FROM the contract it
+ *   advertises instead of restating it — a hand-restated schema is the schema-mirror drift
+ *   the engineering-culture mandate forbids, and it drifts silently. Anything that reaches
+ *   for a network, a filesystem or a cloud SDK does not belong in this import list.
  *
  * SCHEMA (CEO-approved):
  *   each entry = { name, description, inputSchema, mutating, oauthReadonly? }
@@ -31,6 +37,8 @@
  *
  * Every entry MUST be a real command in DeSciX_Cloud commandHandlers/registry.js.
  */
+
+import { mediaParamSchema } from './chatMedia.js';
 
 export const NATIVE_MCP_TOOLS = Object.freeze([
     {
@@ -96,6 +104,11 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
                 file_id: { type: 'string', description: 'Scope the answer to ONE source document by its file_id (as returned in a citation). Use it to ask follow-up questions against a specific paper or record.' },
                 ipdoc_file_id: { type: 'string', description: 'Scope to a specific IPDoc by file_id. Takes precedence over file_id when both are given.' },
                 doc_ids: { type: 'array', items: { type: 'string' }, description: 'Additional document ids whose full contents are added to this call\'s context (beyond what vector retrieval selects).' },
+                // ws-chat-multimodal-image-attach: images/video the model actually LOOKS AT.
+                // The schema fragment is BUILT from the chatMedia contract (kinds, MIME
+                // vocabulary, byte caps) rather than restated here — one owner for the
+                // advertised contract and the enforced policy, so the two cannot drift.
+                media: mediaParamSchema(),
             },
             required: ['app_id', 'user_input'],
         },

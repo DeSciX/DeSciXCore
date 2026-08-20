@@ -33,7 +33,7 @@ import { useNetworkLoading } from '../util/NetworkAPI';
 import { NetworkLoadingType, makeCommandRequestJSON, AppData, ProductTypes } from '../util/AppData';
 import { Api } from '../util/api';
 import { usePowchBridge } from '../providers/PowchBridgeProvider';
-import { normalizeContribution, composeTurnInput } from '../util/chatIngress';
+import { normalizeContribution, composeTurnInput, collectTurnMedia } from '../util/chatIngress';
 
 const messages = ["searching knowledgebase", "running analytics"];
 
@@ -1041,8 +1041,13 @@ const ChatWidget = (props = {}) => {
   const submitTurn = async ({ typedText = '', contributions = [] } = {}) => {
     if (!selectedApp || !activeThread) return;
     const composedInput = composeTurnInput(contributions, typedText);
-    // Nothing to say and nothing attached — not a turn.
-    if (!composedInput.trim()) return;
+    // ws-chat-multimodal-image-attach: media staged on the composer rides THIS turn.
+    // Pooled by the ingress owner (collectTurnMedia) rather than dug out of the
+    // contribution bags here — the transport ferries, it does not re-shape.
+    const turnMedia = collectTurnMedia(contributions);
+    // Nothing to say and nothing attached — not a turn. An attachment with no typed
+    // words IS a turn, so media alone must not be discarded here.
+    if (!composedInput.trim() && turnMedia.length === 0) return;
 
     setNetworkLoading(NetworkLoadingType.GET_AI_RESPONSE, true, 'Fetching AI response...');
     try {
@@ -1053,7 +1058,10 @@ const ChatWidget = (props = {}) => {
         streaming: useStreaming,
         previous_interaction_id: activeThread.interaction_id,
         doc_ids: selectedDocIds,
-        ipdoc_file_id: ipdocFileId || (selectedCommunity?.googleDocId || null)
+        ipdoc_file_id: ipdocFileId || (selectedCommunity?.googleDocId || null),
+        // Omitted entirely on an ordinary turn: the param guard accepts it, but sending
+        // an empty array on every text turn would be noise on the wire.
+        ...(turnMedia.length ? { media: turnMedia } : {})
       };
 
       setSelectedDocIds([]);

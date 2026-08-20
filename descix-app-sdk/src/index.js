@@ -16,6 +16,8 @@ export {
   stringifyResult,
   actionResultContribution,
   actionErrorContribution,
+  mediaContribution,
+  collectTurnMedia,
   composeTurnInput,
 } from './util/chatIngress.js';
 export { default as PowchSideBarWidget } from './components/PowchSideBarWidget.jsx';

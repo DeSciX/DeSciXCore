@@ -30,6 +30,11 @@ export const CHAT_INGRESS_DISPOSITIONS = Object.freeze(['stage', 'send']);
 export const CHAT_CONTRIBUTION_KINDS = Object.freeze([
   'action_result',
   'action_error',
+  // ws-chat-multimodal-image-attach: an image/video the model should LOOK AT. It is a
+  // contribution like any other — same ingress, same dispositions, same transcript — but
+  // it carries `media` (bytes or an app-asset reference) ALONGSIDE its text, because
+  // pixels cannot be stringified into the turn text.
+  'media_attachment',
 ]);
 
 /**
@@ -143,6 +148,41 @@ export function actionErrorContribution(functionName, error, { disposition = 'se
 }
 
 /**
+ * Build the canonical contribution bag for a MEDIA attachment (image or video).
+ *
+ * The bytes do NOT go into `text` — they ride in `media`, and ChatWidget ferries that
+ * array into the `media` parameter of ask_question_to_app. `text` carries only the
+ * model-visible framing, so a media contribution still renders in the transcript and
+ * still composes through composeTurnInput exactly like every other contribution.
+ *
+ * Disposition defaults to 'stage': an attachment rides into the NEXT submitted turn
+ * alongside whatever the user types about it, which is what an attachment wants.
+ *
+ * VALIDATION IS THE SERVER'S JOB, DELIBERATELY. The MIME vocabulary and the byte caps are
+ * owned by @descix/platform-api/mcp-tools chatMedia.js. This is a BROWSER package that does
+ * not (and must not) depend on that server-side package, and duplicating the constants here
+ * would be precisely the schema-mirror drift the engineering-culture mandate forbids. So an
+ * inadmissible attachment is refused at the API boundary, loudly, naming the limit it broke
+ * — never silently trimmed here against a second, drifting copy of the policy.
+ *
+ * @param {Object} media - { mime_type, data? | asset_ref?, label?, truncated?, track? }
+ */
+export function mediaContribution(media, { disposition = 'stage', note = '' } = {}) {
+  if (!media || typeof media !== 'object') {
+    throw new TypeError('[chatIngress] mediaContribution requires a media object');
+  }
+  const label = media.label || media.mime_type || 'attachment';
+  const via = media.asset_ref ? ` from app assets (${media.asset_ref})` : '';
+  return normalizeContribution({
+    kind: 'media_attachment',
+    label,
+    text: `[attached ${media.mime_type || 'media'} — \`${label}\`${via}]${note ? `\n\n${note}` : ''}`,
+    disposition,
+    media: [media],
+  });
+}
+
+/**
  * normalize(partial) -> full bag. THE contract. Consumers ferry this; they never
  * hand-list its fields (schema-mirror drift is a bug class — engineering-culture
  * mandate 2026-06-18).
@@ -155,7 +195,7 @@ export function normalizeContribution(partial) {
   if (!partial || typeof partial !== 'object') {
     throw new TypeError('[chatIngress] contribution must be an object');
   }
-  const { kind, label, text, disposition = 'stage' } = partial;
+  const { kind, label, text, disposition = 'stage', media } = partial;
   if (!CHAT_CONTRIBUTION_KINDS.includes(kind)) {
     throw new TypeError(
       `[chatIngress] unknown contribution kind "${kind}" — expected one of ${CHAT_CONTRIBUTION_KINDS.join(', ')}`
@@ -169,6 +209,14 @@ export function normalizeContribution(partial) {
       `[chatIngress] unknown disposition "${disposition}" — expected one of ${CHAT_INGRESS_DISPOSITIONS.join(', ')}`
     );
   }
+  if (media !== undefined && !Array.isArray(media)) {
+    throw new TypeError('[chatIngress] contribution `media` must be an array when present');
+  }
+  // A media_attachment with no media is the silent-drop failure this contract exists to
+  // prevent: it would render as a caption for an image the model never received.
+  if (kind === 'media_attachment' && (!media || media.length === 0)) {
+    throw new TypeError('[chatIngress] a "media_attachment" contribution carries no media');
+  }
   return {
     kind,
     label: label || kind,
@@ -177,8 +225,21 @@ export function normalizeContribution(partial) {
     truncated: !!partial.truncated,
     totalChars: partial.totalChars ?? text.length,
     omittedChars: partial.omittedChars ?? 0,
+    // Always present so consumers can ferry the bag unconditionally (`[...c.media]`)
+    // without testing for the field — an absent-vs-empty distinction here buys nothing
+    // and invites hand-written guards at every call site.
+    media: media || [],
     contributed_at: partial.contributed_at || new Date().toISOString(),
   };
+}
+
+/**
+ * Collect every staged contribution's media into ONE array for the turn, in contribution
+ * order. The transport (ChatWidget) hands this straight to the `media` parameter of
+ * ask_question_to_app — it does not repackage or re-shape it.
+ */
+export function collectTurnMedia(contributions) {
+  return contributions.flatMap((c) => c.media || []);
 }
 
 /**
