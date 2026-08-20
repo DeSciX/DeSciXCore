@@ -7,6 +7,7 @@ import { gcsMediaPath, AppData } from '../util/AppData';
 import { Api } from '../util/api';
 import { useAppContext } from '../AppContext';
 import ChatWidget from './ChatWidget';
+import { actionResultContribution, actionErrorContribution } from '../util/chatIngress';
 
 /**
  * Platform app IDs that should NOT render in the CodeSite iframe.
@@ -50,8 +51,27 @@ const PLATFORM_APP_MESSAGES = {
  * Platform apps (daita, powch) are guarded from iframe rendering to prevent
  * recursion (daita) and duplicate instances (powch). See PLATFORM_APP_IDS.
  */
-const CodeSiteWidget = ({ url, children, enableChat = true, chatPosition = 'right', chatWidth = 0.25, height = '90vh', chatEntitled, onRequestLogin }) => {
+const CodeSiteWidget = ({
+  url,
+  children,
+  enableChat = true,
+  chatPosition = 'right',
+  chatWidth = 0.25,
+  height = '90vh',
+  chatEntitled,
+  onRequestLogin,
+  // WS-B8: what happens to an executed action's result.
+  //  'send'  (default) — the result is posted as its own turn and the model reacts
+  //          to it. This is the live loop: Maxi runs a counterfactual, the AI reads
+  //          the outcome and continues. Costs one metered turn per Run click, which
+  //          the user explicitly initiated.
+  //  'stage' — the result renders on the composer and rides into the next turn the
+  //          user types. No extra metering.
+  actionResultDisposition = 'send',
+}) => {
   const iframeRef = useRef(null);
+  // Handle on THE chat ingress, published by the embedded ChatWidget.
+  const chatIngressRef = useRef(null);
   // Inter-view state read DIRECTLY from AppData (viewRouter assigns before the view
   // transition; the context mirror is provider-render-stale — see ChatWidget note).
   const selectedCommunity = AppData.selectedCommunity;
@@ -88,6 +108,22 @@ const CodeSiteWidget = ({ url, children, enableChat = true, chatPosition = 'righ
   }, [iframeSrc, selectedCommunity, selectedApp]);
 
   /**
+   * Hand a contribution to THE chat ingress. FAIL LOUD if the chat pane is not
+   * mounted: silently dropping a result is exactly the bug WS-B8 exists to kill.
+   */
+  const deliverToChat = (contribution) => {
+    const ingress = chatIngressRef.current;
+    if (!ingress?.contribute) {
+      console.error(
+        '[CodeSiteWidget] Action produced a result but the chat ingress is unavailable ' +
+        '(chat pane closed or not mounted). Result dropped:', contribution
+      );
+      return null;
+    }
+    return ingress.contribute(contribution);
+  };
+
+  /**
    * Direct execution handler: Calls functions in the CodeSite iframe's window object.
    * This leverages allow-same-origin to directly invoke functions exposed by the CodeSite.
    */
@@ -117,21 +153,37 @@ const CodeSiteWidget = ({ url, children, enableChat = true, chatPosition = 'righ
       targetFunction = childWindow._codesiteFrame[functionName];
     }
 
-    if (targetFunction) {
-      console.log(`[CodeSiteWidget] Executing ${functionName} with args:`, args);
-      try {
-        const result = targetFunction(args);
-        if (result instanceof Promise) {
-          result
-            .then((res) => console.log(`[CodeSiteWidget] ${functionName} completed:`, res))
-            .catch((err) => console.error(`[CodeSiteWidget] ${functionName} failed:`, err));
-        }
-      } catch (err) {
-        console.error(`[CodeSiteWidget] Error executing ${functionName}:`, err);
-      }
-    } else {
-      console.warn(`[CodeSiteWidget] Function ${functionName} not found.`);
+    if (!targetFunction) {
+      // WS-B8: a missing function used to vanish into console.warn. The user
+      // clicked Run and deserves to know nothing happened — and so does the model,
+      // which otherwise waits forever for a result it will never see.
+      return deliverToChat(
+        actionErrorContribution(
+          functionName,
+          new Error(
+            `No such action "${functionName}" on the CodeSite. Expose it as window.DeSciX_Actions.${functionName}, window.${functionName}, or window._codesiteFrame.${functionName}.`
+          ),
+          { disposition: actionResultDisposition }
+        )
+      );
     }
+
+    console.log(`[CodeSiteWidget] Executing ${functionName} with args:`, args);
+    // Await sync AND async returns uniformly, then route the outcome into THE chat
+    // ingress. This is the WS-B8 return path: results no longer die in console.log.
+    return (async () => {
+      try {
+        const result = await targetFunction(args);
+        return deliverToChat(
+          actionResultContribution(functionName, result, { disposition: actionResultDisposition })
+        );
+      } catch (err) {
+        console.error(`[CodeSiteWidget] ${functionName} failed:`, err);
+        return deliverToChat(
+          actionErrorContribution(functionName, err, { disposition: actionResultDisposition })
+        );
+      }
+    })();
   };
 
   if (!iframeSrc && !usesChildrenPanel) return null;
@@ -226,6 +278,7 @@ const CodeSiteWidget = ({ url, children, enableChat = true, chatPosition = 'righ
         >
           <ChatWidget
             onExecuteAction={handleExecuteAction}
+            ingressRef={chatIngressRef}
             mode="embedded"
             entitled={chatEntitled}
             onRequestLogin={onRequestLogin}
