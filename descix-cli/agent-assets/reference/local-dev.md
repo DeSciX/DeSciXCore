@@ -28,104 +28,104 @@ Instead of exposing implementation details (like GCS bucket URLs or specific por
 
 ### 2.1. Route Patterns
 
-| Resource Type | Canonical Path | Production Target (LB) | Local Target (Gateway Proxy) |
-| :--- | :--- | :--- | :--- |
-| **Core API** | `/apifront`, `/api`, `/mcp` | Core API | `https://localhost:4000` |
-| **Powch PWA** | `/powch` | Powch PWA | `https://localhost:5174` |
-| **Microservice** | `/s/{community}/{appId}` | k8s-service | `http://localhost:{service.port}` |
-| **CodeSite / App Site** | `/Community/{c}/Apps/{a}/site`, `/s/{appId}` | GCS / service | `http://localhost:{site.port}` |
-| **PWA** | `/*` | PWA bucket | Served from gateway root (when run from DeSciX_PWA) |
+| Canonical Path | Production Target (LB) | Local Target (Gateway) |
+| :--- | :--- | :--- |
+| `/apifront`, `/api`, `/mcp`, `/oauth`, `/.well-known/oauth-*` | Core API | the resolved **API origin** (see §3.2) |
+| `/powch` | Powch PWA | the origin the workspace names. **No route at all when unset** — there is no default wallet origin |
+| `/s/{appId}` | service | `http://localhost:{microservice.port}` — prefix **stripped** |
+| `/p/{appId}` | app site | `{proto}://localhost:{site.port}` (**no** path rewrite), or served from disk when the product has `site.static` |
+| `/Community`, `/.proxy/gcs_media` | GCS public bucket | proxied to `storage.googleapis.com` |
+| `/__descix/app-binding.json` | (not served in production) | answered by the gateway itself |
+| `/` | PWA bucket | the resolved **Shell origin** (see §3.2) — always matched **last** |
 
 ## 3. The "Local Mesh" Proxy
 
-The `descix serve` command spins up a **Local Gateway** on port `5173`. This gateway acts as the router, serving the PWA (when run from `DeSciX_PWA`) and proxying traffic based on the **Workspace Configuration**. Run `npm run dev:serve` from `DeSciX_PWA` or `npx descix serve` with PWA as cwd for Platform Dev.
+`descix serve` spins up a **Local Gateway**: one HTTPS origin that proxies the whole mesh. It is a Vite server used only as proxy + static + TLS, and it **starts nothing else** — no backend, no app dev server. An unreachable target surfaces as a 502/`ECONNREFUSED`; nothing is masked or retried against a fallback.
+
+**Port:** `--port` → `env.gateway.port` → built-in `5173`, with `strictPort` on. The resolved port and **its source** are printed at startup. Do not assume `:5173`; give a checkout its own with `descix config set-gateway-port <n>`.
+
+**It serves ONE app, standalone, with no store chrome.** The app is detected from the directory you are standing in (the product whose `localPath` contains your cwd; longest match wins), or named with `--app <id>`. Nothing is persisted to `workspace.json`. When it cannot name an app it fails loud and lists the workspace's apps rather than falling back to the store.
+
+The binding is **served, not compiled**: the gateway answers `GET /__descix/app-binding.json` on the shell's own origin with `{mode:'standalone', appId, appUrl, source}`, and the shell reads it before it mounts. One pre-built cloud shell bundle therefore boots as the store on `descix.net` and as your app locally, with no rebuild. No binding (or a timeout, or a malformed body) means the store — the safe degradation. There is no `__STANDALONE_APP_ID__` build define; an app that builds itself standalone declares it at its own mount, `<AppShell appId="..." standalone>`.
+
+**Every app the shell iframes is on the GATEWAY origin** — `/p/{appId}`, never the app's own dev-server port. The shell dispatches chat action blocks by reaching straight into `iframe.contentWindow.DeSciX_Actions` (direct interframe scripting, no postMessage bridge), so a cross-origin iframe kills SplitView with a `SecurityError`. **Powch is the deliberate exception** and stays cross-origin: it holds passkeys and the HD wallet, and same-origin would expose it to that same reach.
+
+Typical app-dev session, in full:
+
+```bash
+descix config set-env dev
+descix app init -a <app-id> -p ./my-app
+descix app set-site -a <app-id> --static .
+cd my-app && descix serve
+```
 
 ### 3.1. Configuration: `.descix/workspace.json`
 The `workspace.json` file is the **single source of truth** for local routing and app configuration. This is the only configuration methodology - `.descix.app/context.json` files are no longer used.
 
 **Key Features:**
-- Workspace root detection (searches upward for `.descix/`, `.cursor/`, or `.vscode/`)
+- Workspace root detection (walks upward looking for `.descix/workspace.json`)
 - App context autodiscovery (CLI commands auto-detect community/app from cwd)
-- Port registration for local dev servers
+- Explicit port registration for local dev servers — there is **no auto-allocation**
 - Drive folder configuration for `kb pull/push`
-- `apiUrl` derived automatically from `env.platform.microservice.port` in DEV mode
 
-#### Platform Dev format (V2.1)
+**Author it with CLI verbs, never by hand:**
+
+| Key | Verb |
+|---|---|
+| `env.apiUrl` | `descix config set-env <dev\|demo\|prod> [--url <url>]` (env is positional) |
+| `env.gateway.port` | `descix config set-gateway-port <n\|none>` |
+| `env.devCerts` | `descix config set-dev-certs --dir\|--cert\|--key\|--clear` |
+| `env.powchUrl` | `descix config set-powch-url <url\|none>` |
+| `env.siteUrl` | `descix config set-site-url <url\|none>` |
+| `env.products[]` | `descix app init` / `app set-site` / `app set-port` / `app set-localpath` / `app unmap` |
+
+#### Format (v2.1 — the only format)
 
 ```json
 {
   "version": "2.1",
-  "workspaceRoot": "/path/to/workspace",
-  "serve-port": 5173,
-  "driveConfig": { "base_folder_id": "..." },
   "env": {
     "environment": "DEV",
+    "apiUrl": "https://dev.descix.net",
+    "gateway": { "port": 5599 },
+    "devCerts": { "dir": "/Users/you/.descix/dev-certs-san" },
+    "powchUrl": "https://powch.dev.descix.net/",
     "platform": {
       "appId": "daita",
       "localPath": "DeSciX_Cloud",
-      "site": { "port": 5174, "devCommand": "npm run dev:site" },
-      "microservice": { "port": 4000, "devCommand": "npm run dev:service" }
+      "site": { "port": 5174 },
+      "microservice": { "port": 4000 }
     },
     "products": [
-      {
-        "appId": "powch",
-        "localPath": "DeSciX_Powch",
-        "site": { "port": 5175, "devCommand": "npm run dev:site" },
-        "microservice": { "port": 3003, "devCommand": "npm run dev:service" }
-      }
+      { "appId": "my-app", "localPath": "my-app", "site": { "static": "." } },
+      { "appId": "other-app", "localPath": "other", "site": { "port": 5599 }, "microservice": { "port": 4001 } }
     ]
   }
 }
 ```
 
-`env.platform.microservice.port` is the Core API port. CLI derives `apiUrl = https://localhost:{port}` automatically.
+`env.platform` is optional — an app developer has no platform checkout and needs none. A top-level `apiUrl` key (the v1 shape) fails loud naming its replacement.
 
-#### App Dev format (V2.0 — generated by `descix init`)
+### 3.2. Target resolution (one owner, explicit-first)
 
-```json
-{
-  "version": "2.0",
-  "communities": {
-    "descix": {
-      "apps": {
-        "myapp": {
-          "localPath": "myapp",
-          "kbId": "General",
-          "site": { "port": 3000, "devCommand": "npm run dev" },
-          "service": { "port": 4001, "devCommand": "npm run start" }
-        }
-      }
-    }
-  },
-  "driveConfig": { "base_folder_id": "..." }
-}
-```
+| Target | 1. flag | 2. workspace | 3. derived | 4. default |
+|---|---|---|---|---|
+| **API** | `--api-url` / `DESCIX_API_URL` | `env.apiUrl` | `env.platform.microservice.port` | **PROD** (`https://descix.net`) |
+| **Shell** (`/`) | `--site-url` | `env.siteUrl` | **the API origin, when the API is remote** | `env.platform.site.port`, else fail loud |
 
-### 3.2. Proxy Logic (createViteProxyConfig)
-The gateway uses `createViteProxyConfig` from `@descix/app-sdk/dev` to generate Vite proxy rules from `workspace.json`:
-
-- **`/apifront`, `/api`, `/mcp`** → `env.platform.microservice.port` (DEV) or `https://descix.net`
-- **`/powch`** → `env.products.find(p => p.appId === 'powch').site.port`
-- **`/s/{community}/{appId}`** → `localhost:{microservice.port}` for each product in `workspace.json`
-- **`/Community/{c}/Apps/{a}/site`** → `localhost:{site.port}` for local app dev
-- **`/Community`** → GCS fallback
-- **`/.proxy/gcs_media`** → GCS media proxy
+The derived Shell rule is the important one: point the API at a cloud environment and the shell comes from that same origin, so one origin carries shell + app + `/apifront` with nothing else configured. A stale `env.platform.site` block does not hijack the root once the API is remote. Platform developers opt IN to a local shell by naming it (`--site-url https://localhost:5174` or `env.siteUrl`).
 
 ## 4. Scenarios
 
-### Scenario 1: Platform Dev ("Dogfooding")
-*   **User**: Core Team.
-*   **Setup**: Full repo checkout. Run `npm run dev:serve` from `DeSciX_PWA` plus Core, Powch PWA, Powch service. `workspace.json` maps Powch and apps to local ports.
-*   **Result**: The gateway serves the PWA at `/` and routes `/apifront` to Core, `/powch` to Powch PWA, `/s/*` to microservices. Local app sites are proxied via `/Community/{c}/Apps/{a}/site`.
+### Scenario 1: App Dev (the common case)
+*   **User**: App developer. No platform checkout.
+*   **Setup**: `descix config set-env dev`, `descix app init`, `descix app set-site`, then `cd my-app && descix serve`.
+*   **Result**: one HTTPS origin. `/` → the cloud App Shell, `/apifront` → the cloud API, `/p/my-app` → your app, and the shell boots **standalone into your app** with no store chrome.
 
-### Scenario 2: End-User Dev (Hybrid)
-*   **User**: App Developer.
-*   **Setup**: `descix init` creates a `workspace.json` mapping *only* their specific app.
-*   **Result**:
-    *   `/apps/my-community/my-app` -> **Localhost** (User's Dev Server).
-    *   `/apps/other-app` -> **Production** (Live GCS).
-    *   `/api/core` -> **Production** (Live API).
-    *   `/*` (PWA Shell) -> **Production** (Live PWA).
+### Scenario 2: Platform Dev ("Dogfooding")
+*   **User**: Core team, full repo checkout.
+*   **Setup**: start the backend (`:4000`), the platform site (`:5174`), Powch site/service as needed, then `descix serve --site-url https://localhost:5174`.
+*   **Result**: the gateway routes `/` to the local shell, `/apifront` to the local Core, `/powch` to the configured Powch origin, `/s/*` to microservices, `/p/{appId}` to product sites.
 
 ### Scenario 3: Production
 *   **User**: End User.
@@ -134,5 +134,12 @@ The gateway uses `createViteProxyConfig` from `@descix/app-sdk/dev` to generate 
 
 ## 5. Client-Side Implications
 
-*   **"Dumb" Client**: The PWA Client (`AppData.js`) no longer needs complex logic to rewrite GCS URLs. It simply constructs the canonical path: `/apps/{community}/{app_id}/index.html`.
-*   **Embedded Mode**: For embedded scenarios (e.g., iframes), we may retain some legacy rewrite logic as a fallback, but the primary development flow relies on the Proxy.
+*   **"Dumb" client**: the shell constructs a canonical relative path and lets the gateway (locally) or the LB (in production) resolve it. No GCS-URL rewriting in client code.
+*   **The credential is a body field**, not a cookie and not a header: every call is a relative `POST /apifront/` with the token in the JSON body. There is no `SameSite` problem, no credentialed CORS preflight, and the browser origin is irrelevant to the mesh — same-origin is required for *frame scripting*, not for auth.
+*   **Set your framework's base path to `/p/{appId}`.** The gateway does not rewrite paths, so assets requested at `/` will 404.
+
+## 6. Running from a git worktree
+
+`.descix/workspace.json` is gitignored, so no worktree has one. The gateway walks **up** from cwd to find it, so an in-repo worktree silently inherits the **main checkout's** workspace — its port, its products, its `localPath`s. Copying the file into a worktree does not help: a saved workspace bakes an absolute `workspaceRoot` and prefers it over the discovered root, pointing back at the original checkout. Out-of-repo worktrees fail earlier and more confusingly: a credential-loading command reports **"Authentication required… Run: descix login"** when the real cause is a missing workspace file.
+
+Rules of thumb: run the CLI from the canonical checkout, and treat an auth error raised from a worktree as a workspace-resolution suspect *before* re-authenticating.
