@@ -79,22 +79,55 @@ The app-sdk is **self-contained**. It bundles:
 `descix serve` puts the App Shell, your app and the API on **one HTTPS origin**, which is
 what makes a shell sign-in visible to your app and what makes passkeys work at all. No
 platform checkout is required: with nothing configured, the shell and `/apifront` both
-resolve to cloud DEV.
+resolve to cloud DEV. What you see is **your app, standalone — no store chrome**.
 
 ```bash
 descix config set-env dev                   # ← today: the platform runs on dev.descix.net
 descix app init -a <app-id> -p ./my-app     # register the app in .descix/workspace.json
 descix app set-site -a <app-id> --static .  # serve ./my-app at /p/<app-id>/
-descix serve -p 5173
+cd my-app && descix serve                   # the app is detected from the directory
 ```
 
 ```
   API:       https://dev.descix.net   [workspace env.apiUrl]
   Shell:     https://dev.descix.net   [same origin as API (workspace env.apiUrl)]
+  Port:      5173                     [built-in default (5173)]
+  App:       <app-id>                 [cwd]  → standalone at https://localhost:5173/p/<app-id>
+
     /                                  → https://dev.descix.net   (App Shell — sign in here)
     /apifront                          → https://dev.descix.net
     /p/<app-id>                        → ./my-app
 ```
+
+`descix serve` starts **nothing else** — no backend, no app dev server. If your app has its
+own dev server you run it yourself and the gateway proxies to it; a `--static` app needs
+nothing running.
+
+#### Which app, and which port
+
+One serve session serves **one app, standalone**. It is detected from the directory you are
+standing in (the product whose `localPath` contains your cwd; longest match wins), or named
+with `--app <id>` from anywhere else. Nothing is written to `workspace.json` — a persistent
+"current app" pointer goes stale and lies. When it cannot name an app it says so and lists
+the workspace's apps rather than quietly showing you the store.
+
+The port resolves `--port` → `env.gateway.port` → `5173`, with `strictPort` on, and the
+resolved value is printed with **where it came from**. Give a checkout its own port once:
+
+```bash
+descix config set-gateway-port 5599
+```
+
+#### Standalone is a runtime binding, not a build
+
+The gateway answers `GET /__descix/app-binding.json` on the shell's own origin with
+`{mode:'standalone', appId, appUrl, source}`. The shell asks its own origin before it mounts,
+so the same pre-built cloud shell boots as the store on `descix.net` and as your app on
+localhost, with **no rebuild**. No binding served (or a timeout, or a malformed one) means the
+store — the safe degradation.
+
+There is no `__STANDALONE_APP_ID__` define; it is deleted. An app that builds *itself*
+standalone declares it at its own mount: `<AppShell appId="my-app" standalone>`.
 
 > **Which environment?** The SDK ships pointing at **PROD** (`https://descix.net`). While the
 > platform is still coming up on prod, run `descix config set-env dev` once per workspace —
@@ -132,15 +165,38 @@ security add-trusted-cert -k ~/Library/Keychains/login.keychain-db \
 ```
 
 Prefer your own cert (e.g. from `mkcert -install && mkcert localhost 127.0.0.1 ::1`)? Point
-the workspace at it — no SDK edit:
+the workspace at it — no SDK edit, no hand-edited JSON:
 
-```jsonc
-// .descix/workspace.json
-{ "env": { "devCerts": { "dir": "./certs" } } }   // or { "cert": "./certs/x.pem", "key": "./certs/x-key.pem" }
+```bash
+descix config set-dev-certs --dir ./certs          # expects cert.pem + key.pem
+descix config set-dev-certs --cert ./certs/x.pem --key ./certs/x-key.pem
+descix config set-dev-certs --clear                # back to the SDK-tracked SAN pair
 ```
 
-Any cert without a localhost `subjectAltName` is rejected at startup with the exact
-`openssl` command that mints a correct one.
+That pair has **one owner** and is used by the gateway *and* every app dev server behind it —
+passkey login is origin-bound, so a cert that reached only the gateway used to work there and
+fail on the app. Any cert without a localhost `subjectAltName` is rejected at startup with the
+exact `openssl` command that mints a correct one.
+
+### Configuring the workspace (no hand-editing)
+
+| Key | Verb |
+|---|---|
+| `env.apiUrl` | `descix config set-env <dev\|demo\|prod> [--url <url>]` (env is positional) |
+| `env.gateway.port` | `descix config set-gateway-port <n\|none>` |
+| `env.devCerts` | `descix config set-dev-certs --dir\|--cert\|--key\|--clear` |
+| `env.powchUrl` | `descix config set-powch-url <url\|none>` |
+| `env.siteUrl` | `descix config set-site-url <url\|none>` |
+| product entries | `descix app init` / `app set-site` / `app set-port` / `app set-localpath` / `app unmap` |
+
+Ports are explicit-only — there is no auto-allocation.
+
+### The proxy engine is exact-pinned
+
+Vite is a real runtime dependency of this package and is pinned exactly, not caret-ranged.
+`descix serve` asserts the pin before it imports vite and refuses to boot on drift, naming
+both the pinned and the resolved version and the `package.json` that would be loaded. The
+declaration in this package's `package.json` is the single owner; the assert reads it.
 
 ### Vite config for an app dev server
 
