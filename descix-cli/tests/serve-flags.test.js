@@ -109,3 +109,33 @@ test('--port is still documented as the override, naming what it overrides', () 
   const block = binSrc.slice(start, binSrc.indexOf('.action(', start));
   assert.match(block, /--port <port>'.*env\.gateway\.port/);
 });
+
+// ------------------------------------------------------------- --app (AMB-2)
+
+test('serve declares --app as an OVERRIDE, documenting that cwd is the default', () => {
+  const names = serveOptionNames();
+  assert.ok(names.includes('--app'), 'serve must offer --app for when you are not standing in the app');
+  const start = binSrc.indexOf(".command('serve')");
+  const block = binSrc.slice(start, binSrc.indexOf('.action(', start));
+  const appOption = block.match(/\.option\('-a, --app <id>',\s*'([^']+)'\)/);
+  assert.ok(appOption, 'could not read the --app description');
+  assert.match(appOption[1], /default: detected from the directory/i,
+    'the help text must say cwd-detection is the default, or nobody discovers it');
+});
+
+test('serve passes the developer\'s ACTUAL cwd, separately from workspaceRoot', () => {
+  // workspaceRoot is walked UP from to find .descix/workspace.json, so it cannot
+  // stand in for "where the developer is" — that directory is what picks the app.
+  assert.match(serveSrc, /cwd:\s*process\.cwd\(\)/, 'runServe must pass cwd explicitly');
+  assert.match(serveSrc, /app:\s*options\.app/, 'runServe must forward --app');
+  const start = binSrc.indexOf(".command('serve')");
+  const action = binSrc.slice(start, binSrc.indexOf('} catch', start));
+  assert.match(action, /app:\s*options\.app/, 'the serve action must forward --app to runServe');
+});
+
+test('the CLI decides nothing about WHICH app — that owner is the SDK', () => {
+  // A second cwd->app matcher in the CLI would be a schema mirror of
+  // serveBinding.resolveServeBinding and would drift from it.
+  assert.ok(!/localPath/.test(serveSrc), `serve.js re-derives app paths itself:\n${serveSrc}`);
+  assert.ok(!/detectAppFromCwd|bindableApps/.test(serveSrc), 'serve.js must not re-implement app detection');
+});

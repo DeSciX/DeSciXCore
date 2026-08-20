@@ -29,6 +29,7 @@ import { staticSitePlugin } from './staticSitePlugin.js';
 import { resolveGatewayTargets, proxyEntry, isLocalOrigin } from './resolveGatewayTargets.js';
 import { resolveGatewayPort, portInUseMessage } from './gatewayPort.js';
 import { assertVitePin } from './vitePin.js';
+import { resolveServeBinding, appBindingPlugin, APP_BINDING_PATH } from './serveBinding.js';
 
 /**
  * Find the workspace root by walking up from startDir looking for .descix/workspace.json.
@@ -93,9 +94,10 @@ function buildDefines(config, workspaceRoot, targets) {
   // Build product map from workspace.json (shared helper)
   const products = buildWorkspaceProducts(workspaceRoot) || {};
 
+  // Standalone is NOT a define here. It is SERVED, at APP_BINDING_PATH, because
+  // the shell this gateway fronts usually arrives pre-built from the cloud and
+  // never passes through a define. See serveBinding.js (AMB-1c).
   return {
-    '__STANDALONE_APP_ID__': 'null',
-    '__STANDALONE_APP_URL__': 'null',
     '__POWCH_APP_URL__': JSON.stringify(powchAppUrl),
     '__API_GATEWAY_URL__': JSON.stringify(targets.apiUrl),
     '__WORKSPACE_PRODUCTS__': JSON.stringify(products),
@@ -163,6 +165,15 @@ export async function runGateway(options = {}) {
   log(`  API:       ${targets.apiUrl}   [${targets.apiSource}]`);
   log(`  Shell:     ${targets.siteUrl}   [${targets.siteSource}]`);
   log(`  Port:      ${port}   [${portSource}]`);
+
+  // Which app is this session serving? cwd by default, --app to override.
+  // Fails loud rather than falling back to store chrome (AMB-2, AMB-5).
+  const binding = resolveServeBinding(workspaceRoot, config, {
+    app: options.app,
+    cwd: options.cwd || process.cwd(),
+    gatewayPort: port,
+  });
+  log(`  App:       ${binding.appId}   [${binding.source}]  → standalone at ${binding.appUrl}`);
   log('');
 
   const proxyRules = buildGatewayProxy(workspaceRoot, targets);
@@ -191,7 +202,7 @@ export async function runGateway(options = {}) {
   let server = await createServer({
     root: workspaceRoot,
     configFile: false,
-    plugins: [staticSitePlugin(staticRoutes)],
+    plugins: [appBindingPlugin(binding), staticSitePlugin(staticRoutes)],
     server: {
       port,
       strictPort: true,
@@ -206,6 +217,7 @@ export async function runGateway(options = {}) {
 
   await listenOrFailLoud(server, port, portSource);
   log(`\n  Gateway listening on https://localhost:${port}\n`);
+  log(`  App binding: https://localhost:${port}${APP_BINDING_PATH}\n`);
   log(`  Dev cert: ${certPath}`);
   log(`  Passkey login needs this cert trusted once:\n    ${trustCertCommand(certPath)}\n`);
 
@@ -223,12 +235,20 @@ export async function runGateway(options = {}) {
     log('\n  workspace.json changed — restarting gateway...\n');
     logProxyTable(newProxy, log);
 
+    // Re-resolve the binding too: a renamed or moved app must not keep serving
+    // the previous answer at APP_BINDING_PATH.
+    const newBinding = resolveServeBinding(workspaceRoot, newConfig, {
+      app: options.app,
+      cwd: options.cwd || process.cwd(),
+      gatewayPort: port,
+    });
+
     await server.close();
 
     server = await createServer({
       root: workspaceRoot,
       configFile: false,
-      plugins: [staticSitePlugin(newStaticRoutes)],
+      plugins: [appBindingPlugin(newBinding), staticSitePlugin(newStaticRoutes)],
       server: {
         port,
         strictPort: true,
@@ -242,7 +262,7 @@ export async function runGateway(options = {}) {
     });
 
     await listenOrFailLoud(server, port, portSource);
-    log(`\n  Gateway restarted on https://localhost:${port}\n`);
+    log(`\n  Gateway restarted on https://localhost:${port}  (app ${newBinding.appId})\n`);
   });
 
   process.on('SIGINT', () => { watcher.close(); server.close(); process.exit(0); });
