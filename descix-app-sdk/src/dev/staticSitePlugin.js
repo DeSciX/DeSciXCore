@@ -13,14 +13,19 @@
 import fs from 'fs';
 import path from 'path';
 
+// Text types carry an EXPLICIT charset. Without it a browser falls back to its
+// legacy encoding and decodes UTF-8 bytes as latin-1 — every non-ASCII character
+// in a statically-served app renders as mojibake (measured in Chromium: an em
+// dash came back as "a€\"" on a page served through /p/{appId}). The app's own
+// dev server sets charset for it; the gateway must not silently take it away.
 const MIME_TYPES = {
-  '.html': 'text/html',
-  '.htm': 'text/html',
-  '.js': 'application/javascript',
-  '.mjs': 'application/javascript',
-  '.css': 'text/css',
-  '.json': 'application/json',
-  '.jsonl': 'application/x-ndjson',
+  '.html': 'text/html; charset=utf-8',
+  '.htm': 'text/html; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8',
+  '.mjs': 'application/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.jsonl': 'application/x-ndjson; charset=utf-8',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
@@ -35,11 +40,11 @@ const MIME_TYPES = {
   '.mp4': 'video/mp4',
   '.webm': 'video/webm',
   '.pdf': 'application/pdf',
-  '.md': 'text/markdown',
-  '.txt': 'text/plain',
+  '.md': 'text/markdown; charset=utf-8',
+  '.txt': 'text/plain; charset=utf-8',
   '.xml': 'application/xml',
   '.wasm': 'application/wasm',
-  '.map': 'application/json',
+  '.map': 'application/json; charset=utf-8',
 };
 
 export function staticSitePlugin(staticRoutes) {
