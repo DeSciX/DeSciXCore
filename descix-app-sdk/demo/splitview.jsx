@@ -161,7 +161,7 @@ function DemoApp() {
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <AppShell appId="descix-docs" config={{}}>
+    <AppShell appId="descix-docs" standalone config={{}}>
       <DemoApp />
     </AppShell>
   </React.StrictMode>

@@ -64,7 +64,15 @@ function resolveBridgeUrl() {
   );
 }
 
-export default function AppShell({ appId, config = {}, children }) {
+/**
+ * @param {Object} props
+ * @param {string} props.appId - which app this shell is
+ * @param {Object} [props.config]
+ * @param {boolean} [props.standalone] - this build IS the app: boot straight into
+ *   it, no store chrome. An app that builds itself standalone declares it here,
+ *   at the mount that already knows, instead of through a build-time global.
+ */
+export default function AppShell({ appId, config = {}, children, standalone = false }) {
   const isIdentityProvider = appId === 'powch';
   const theme = config.theme ?? darkTheme;
 
@@ -88,7 +96,7 @@ export default function AppShell({ appId, config = {}, children }) {
   const innerContent = (
     <AppProvider>
       <NetworkLoadingProvider>
-        <SdkInitializer>
+        <SdkInitializer standalone={standalone} appId={appId}>
           <ErrorBoundary>
             <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', bgcolor: '#0D1117' }}>
               <ShellContent>{children}</ShellContent>

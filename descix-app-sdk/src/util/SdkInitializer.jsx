@@ -171,7 +171,7 @@ const initializeGtm = (isEmbeddedEnvironment) => {
 };
 
 
-const SdkInitializer = ({ children }) => {
+const SdkInitializer = ({ children, standalone = false, appId = null }) => {
     const { appEvent, setAppEvent, isEmbedded } = useAppContext(); // Get isEmbedded from context
     const isSdkInitialized = useRef(false);
     const isGtmInitialized = useRef(false); // Track GTM initialization specifically
@@ -216,23 +216,25 @@ const SdkInitializer = ({ children }) => {
         console.log('SdkInitializer: Starting SDK initialization...');
 
         // --- Standalone App Detection ---
-        // SERVED binding first (AMB-1c): this origin tells the shell what it is,
-        // so one bundle boots as the store on descix.net and as this developer's
-        // app on localhost with no rebuild. `descix serve` fronts a shell that
-        // arrives PRE-BUILT from the cloud, so a build-time define can never
-        // reach it — the served binding is the only mechanism that works there.
+        // Two sources, and neither is a build-time global any more.
+        //
+        // SERVED binding (AMB-1c) for the case the code CANNOT know: one shell
+        // bundle that boots as the store on descix.net and as a developer's app
+        // under `descix serve`. That shell arrives PRE-BUILT from the cloud, so a
+        // define could never have reached it.
+        //
+        // DECLARED prop for the case the code already knows: an app that builds
+        // ITSELF standalone says so at its own mount — <AppShell appId="powch"
+        // standalone>. The __STANDALONE_APP_ID__ define this replaced was a global
+        // carrying a fact the call site had in hand, and it forced one shared value
+        // on every entry point in a build (the demo's two entries both booted as
+        // 'demo'). Deleted, not fenced (CEO-D-2026-08-19, envelope amendment).
         const servedBinding = await fetchAppBinding();
+        const declaredAppId = standalone ? appId : null;
 
-        // Build-time constants remain the source for apps that BUILD themselves
-        // standalone (DeSciX_Powch site/vite.config.js, the SDK demo). Migrating
-        // those to serve the binding instead is tracked as a scope extension;
-        // until they do, deleting this read would break their deployed PWAs.
-        const buildTimeAppId = typeof __STANDALONE_APP_ID__ !== 'undefined' ? __STANDALONE_APP_ID__ : null;
-        const buildTimeAppUrl = typeof __STANDALONE_APP_URL__ !== 'undefined' ? __STANDALONE_APP_URL__ : null;
-
-        const standaloneAppId = servedBinding?.appId || buildTimeAppId;
-        const standaloneAppUrl = servedBinding?.appUrl || buildTimeAppUrl;
-        const bindingSource = servedBinding ? `served (${servedBinding.source || 'binding'})` : 'build-time define';
+        const standaloneAppId = servedBinding?.appId || declaredAppId;
+        const standaloneAppUrl = servedBinding?.appUrl || null;
+        const bindingSource = servedBinding ? `served (${servedBinding.source || 'binding'})` : 'declared by the app';
 
         // --- Deep Link Detection ---
         const path = window.location.pathname;
