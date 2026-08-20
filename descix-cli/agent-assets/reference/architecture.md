@@ -186,10 +186,10 @@ These commands auto-detect app context from `workspace.json` based on the curren
 | Command | Description |
 |---------|-------------|
 | `descix update` | Auto-detect what to update based on current folder |
-| `descix update app` | Sync app assets (icon, description, instructions) to Drive |
-| `descix update kb` | Full three-stage sync (Local → Drive → GCS → Pinecone) |
-| `descix update site` | Deploy CodeSite to GCS |
-| `descix update all` | Update all resources (App, KB, Site) in sequence |
+| `descix app sync-assets` | Sync app assets (icon, description, instructions) to Drive |
+| `descix kb corpus sync` | Full three-stage sync (Local → Drive → GCS → Pinecone) |
+| `descix site upload` | Deploy CodeSite to GCS |
+| ~~`descix update all`~~ | **Deleted.** There is no single all-resources verb. Run the three canonical commands: `descix app sync-assets`, `descix kb corpus sync`, `descix site upload`. |
 
 ### 4.2 KB Processing Commands (`descix kb`)
 
@@ -197,12 +197,12 @@ These commands provide granular control over the V2 local-first pipeline.
 
 | Command | Description |
 |---------|-------------|
-| `descix kb pull` | Download from Drive, convert to text in `kb/General/` |
-| `descix kb push` | Upload files from `kb/staging/` to Drive |
-| `descix kb chunk` | Generate JSON chunks from `kb/General/` to `kb/chunks/` |
-| `descix kb sync` | Push chunks to Pinecone via backend API |
-| `descix kb build` | Convenience: pull → chunk → sync |
-| `descix kb status` | Show sync status (local vs Pinecone) |
+| `descix drive pull` | Download from Drive, convert to text in `kb/General/` |
+| `descix drive push` | Upload files from `kb/staging/` to Drive |
+| `descix kb corpus sync` | Generate JSON chunks from `kb/General/` to `kb/chunks/` |
+| `descix kb corpus sync` | Push chunks to Pinecone via backend API |
+| `descix kb corpus sync` | Convenience: pull → chunk → sync |
+| `descix kb corpus status` | Show sync status (local vs Pinecone) |
 
 ### Scaffold Commands
 
@@ -229,7 +229,7 @@ These commands provide granular control over the V2 local-first pipeline.
 ### Setup Command
 
 ```bash
-descix setup [--dev]
+descix mcp quickstart [--dev]
 ```
 
 Flow:
@@ -318,15 +318,15 @@ flowchart LR
 ### Detailed Flow
 
 1. **Stage:** User adds `paper.pdf` to `kb/staging/`
-2. **Push:** `descix kb push` uploads to Drive `kb/General/`
-3. **Pull:** `descix kb pull` downloads and converts:
+2. **Push:** `descix drive push` uploads to Drive `kb/General/`
+3. **Pull:** `descix drive pull` downloads and converts:
    - Sees `paper.pdf` in Drive
    - Copies with `convert=true` → temp Google Doc
    - Exports as Markdown → `kb/General/paper.md`
    - Deletes temp doc
-4. **Chunk:** `descix kb chunk` processes `paper.md`:
+4. **Chunk:** `descix kb corpus sync` processes `paper.md`:
    - Generates `kb/chunks/paper.chunks.json`
-5. **Sync:** `descix kb sync` pushes to backend:
+5. **Sync:** `descix kb corpus sync` pushes to backend:
    - Backend validates metadata
    - Forwards to Pinecone
    - Pinecone embeds and stores
@@ -345,7 +345,7 @@ gcloud auth application-default login \
 ```
 
 **Verification:**
-- `descix setup` checks ADC before proceeding
+- `descix mcp quickstart` checks ADC before proceeding
 - `Hydrator` calls `verifyDriveAuth()` before operations
 
 ### Backend Authentication
