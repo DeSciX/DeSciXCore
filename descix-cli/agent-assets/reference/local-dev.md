@@ -16,9 +16,9 @@ This approach unifies three distinct scenarios:
 | Aspect | Git Mode (CLI) | Drive Mode (PWA) |
 |--------|---------------|-----------------|
 | **User Type** | Developers | Non-technical users |
-| **Content Source** | Local git repo (MD exports pulled from Drive via `kb pull`) | Google Drive |
+| **Content Source** | Local git repo (MD exports pulled from Drive via `descix drive pull`) | Google Drive |
 | **Version Control** | Git | Drive/GCS/Firestore |
-| **KB Processing** | `descix update kb` or `descix kb build` — local chunking → Pinecone directly | Server-side pipeline (Drive → GCS → Pinecone) — PWA users only |
+| **KB Processing** | `descix kb corpus sync` — manifest-driven git-aware sync → Pinecone | Server-side pipeline (Drive → GCS → Pinecone) — PWA users only |
 | **Configuration** | `workspace.json` | N/A (PWA handles) |
 | **Tools** | CLI, VSCode, Git | PWA only |
 
@@ -66,7 +66,7 @@ The `workspace.json` file is the **single source of truth** for local routing an
 - Workspace root detection (walks upward looking for `.descix/workspace.json`)
 - App context autodiscovery (CLI commands auto-detect community/app from cwd)
 - Explicit port registration for local dev servers — there is **no auto-allocation**
-- Drive folder configuration for `kb pull/push`
+- Drive folder configuration for `descix drive pull` / `descix drive push`
 
 **Author it with CLI verbs, never by hand:**
 
@@ -105,6 +105,22 @@ The `workspace.json` file is the **single source of truth** for local routing an
 ```
 
 `env.platform` is optional — an app developer has no platform checkout and needs none. A top-level `apiUrl` key (the v1 shape) fails loud naming its replacement.
+
+#### KB sync is manifest-driven
+
+`descix kb corpus sync -a <app-id> [-k <KB>]` is the KB sync. It is **git-aware**: it walks the
+sources named in a manifest at `<checkout>/.descix/manifests/<KB>.json`, resolves them at a git
+ref (`main` unless `--ref` overrides), and upserts only what changed — stale blob SHAs are purged
+in the same pass. **No manifest means nothing to sync**, so the manifest is the first thing a new
+KB needs, not an optimisation.
+
+Check before you write: `--dry-run` enumerates would-be upserts and purges with **no** Pinecone
+writes (exit 0 = no drift, 1 = drift), and `--show-walk` prints the resolved ref and the walked
+files. `descix kb corpus status` shows files, chunks, last sync and resolved ref.
+
+`descix kb chunk`, `descix kb sync` and `descix update kb` still run but are **superseded
+duplicates** — each names `kb corpus sync` as its replacement in its own `--help` and is slated
+for removal. Do not put them in new instructions.
 
 ### 3.2. Target resolution (one owner, explicit-first)
 

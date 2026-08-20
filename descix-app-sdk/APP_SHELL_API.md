@@ -17,14 +17,34 @@ Everything below is reachable from a plain `<script>` tag.
 
 ## `window.DeSciX` — what the shell gives you
 
-Read it off your **parent** window. It appears when the shell is ready; listen
-for `DESCX_BRIDGE_READY` on the parent if you need to wait.
+Read it off your **parent** window. The bus is assembled in **two independent
+steps**, which matters if your app loads early:
+
+| Member | Published by | When |
+|---|---|---|
+| `view` | `useDeSciXView` | shell mount — **does not wait on Powch**, so a wallet-less app still gets to pick its layout |
+| `powch`, `config` | `useDeSciXBridge` | only once a Powch bridge exists **and** the shell reaches `READY`; `DESCX_BRIDGE_READY` fires at that moment |
+
+`DESCX_BRIDGE_READY` republishes `view` (the call is idempotent), so waiting for
+the event gives you a complete bus:
 
 ```js
 window.parent.addEventListener('DESCX_BRIDGE_READY', () => {
   const { powch, config, view } = window.parent.DeSciX;
 });
 ```
+
+**But do not gate `view` on that event.** In a shell with no Powch bridge mounted
+the event never fires, while `view` has been working since mount. If all you need
+is the layout, feature-detect instead of waiting:
+
+```js
+const view = window.parent.DeSciX?.view;   // undefined = shell too old, or not yet mounted
+```
+
+`undefined` is ambiguous by construction — it cannot tell you "shell too old" from
+"not mounted yet". There is no version marker on the bus. If you must catch a very
+early mount, poll briefly rather than waiting on an event that may never come.
 
 ### `DeSciX.view` — choose your layout
 
@@ -48,6 +68,24 @@ window.parent.DeSciX.view.set('Chat');       // chat only
 Call it whenever you like — at boot, or later when your app changes what it is
 doing. The shell re-renders. Your choice is reset when the user switches to a
 different app, so it never leaks into someone else's.
+
+**Reach through `window.parent`, not `window`.** Inside your iframe there is no
+`window.DeSciX.view` — the bus lives on the shell's window. `window.DeSciX.view.set(...)`
+from an embedded app throws `TypeError: Cannot read properties of undefined`.
+
+**Do not import the view functions from the package.** `@descix/app-sdk` exports
+`setView`, `resetView` and `publishViewApi`, but those are the **shell's** side of the
+API. Imported into your app they mutate your own module copy of the state — same name,
+same arguments, same return value, and **no effect on the shell whatsoever**. The working
+path is `window.parent.DeSciX.view`; the import is a silent no-op.
+
+**Who implements it:** the App Shell — the store on `descix.net` and the same bundle
+under `descix serve`. A page that is not hosted by the shell has no `window.parent.DeSciX`
+at all, so guard with `?.` if your app is also meant to run standalone outside the frame.
+
+**One app at a time.** The view is a single shell-level value, not per-iframe. One
+embedded app is the design; two contending for the layout will silently overwrite each
+other, and the shell resets to `SplitView` on app switch.
 
 ### `DeSciX.powch` — identity and wallet
 
@@ -117,6 +155,23 @@ through the gateway at `/p/<yourAppId>`, not on its own dev-server port. That is
 what makes `window.parent.DeSciX` and `contentWindow.DeSciX_Actions` legal at
 all; across origins the browser throws a `SecurityError` and both directions of
 this contract die silently.
+
+Same-origin is a **hard precondition**, and violating it fails opaquely — the error
+names nothing about views or the shell. The verbatim text to grep for:
+
+```
+SecurityError: Blocked a frame with origin "https://localhost:5174" from accessing a cross-origin frame.
+```
+
+If you see that, you are loading your app from its own dev-server port instead of
+through the gateway at `/p/<yourAppId>`. Open the gateway URL, not the app port.
+
+**The full parent bus is exposed to your app on purpose.** A sandboxed iframe reaching
+into its parent looks like something to harden — it is not. Platform API calls are
+authorised server-side, and Powch is kept on a separate origin precisely so that
+identity and wallet are *not* in what your app can reach. Exposing the rest of the App
+Shell to app code is deliberate and load-bearing (CEO, 2026-08-20); "fixing" it severs
+the API this document describes.
 
 Two consequences for your app:
 
