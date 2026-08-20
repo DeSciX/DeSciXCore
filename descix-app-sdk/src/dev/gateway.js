@@ -29,6 +29,9 @@ import { staticSitePlugin } from './staticSitePlugin.js';
 import { resolveGatewayTargets, proxyEntry, isLocalOrigin } from './resolveGatewayTargets.js';
 import { resolveGatewayPort, portInUseMessage } from './gatewayPort.js';
 import { assertVitePin } from './vitePin.js';
+import { resolveServeBinding, appBindingPlugin, APP_BINDING_PATH } from './serveBinding.js';
+import { resolvePowchUrl } from './powchUrl.js';
+import { resolveDevCertOptions } from './devCerts.js';
 
 /**
  * Find the workspace root by walking up from startDir looking for .descix/workspace.json.
@@ -56,35 +59,14 @@ function readWorkspaceConfig(workspaceRoot) {
 }
 
 /**
- * Resolve the dev-cert options from workspace config.
- * `env.devCerts.dir` (or explicit cert/key files) are resolved against the
- * workspace root, so a developer supplies their own trusted cert without
- * editing the SDK.
- */
-function certOptions(config, workspaceRoot) {
-  const dc = config.env?.devCerts;
-  if (!dc) return {};
-  const abs = (p) => (p ? path.resolve(workspaceRoot, p) : undefined);
-  return { certDir: abs(dc.dir), certFile: abs(dc.cert), keyFile: abs(dc.key) };
-}
-
-/**
  * Build the Vite `define` map from workspace config.
  * Injected into frontend code the gateway itself transforms (a LOCAL shell or
  * app dev server). When the root is remote, the shell arrives pre-built from
  * that origin and these defines are inert.
  */
 function buildDefines(config, workspaceRoot, targets) {
-  const env = config.env || {};
-
-  // Powch URL: env.powchUrl > auto-discover from env.products[]
-  let powchAppUrl = env.powchUrl ?? null;
-  if (!powchAppUrl && Array.isArray(env.products)) {
-    const powchProduct = env.products.find(p => p.appId === 'powch');
-    if (powchProduct?.site?.port) {
-      powchAppUrl = `https://localhost:${powchProduct.site.port}/`;
-    }
-  }
+  // Powch URL — ONE owner, shared with the shell's own build (see powchUrl.js).
+  const powchAppUrl = resolvePowchUrl(config);
   if (!powchAppUrl && isLocalOrigin(targets.siteUrl)) {
     // Only meaningful for a locally-built shell; a remote shell carries its own.
     console.warn('[Gateway] No Powch URL found in workspace config. Powch integration will not work.');
@@ -93,9 +75,10 @@ function buildDefines(config, workspaceRoot, targets) {
   // Build product map from workspace.json (shared helper)
   const products = buildWorkspaceProducts(workspaceRoot) || {};
 
+  // Standalone is NOT a define here. It is SERVED, at APP_BINDING_PATH, because
+  // the shell this gateway fronts usually arrives pre-built from the cloud and
+  // never passes through a define. See serveBinding.js (AMB-1c).
   return {
-    '__STANDALONE_APP_ID__': 'null',
-    '__STANDALONE_APP_URL__': 'null',
     '__POWCH_APP_URL__': JSON.stringify(powchAppUrl),
     '__API_GATEWAY_URL__': JSON.stringify(targets.apiUrl),
     '__WORKSPACE_PRODUCTS__': JSON.stringify(products),
@@ -163,12 +146,25 @@ export async function runGateway(options = {}) {
   log(`  API:       ${targets.apiUrl}   [${targets.apiSource}]`);
   log(`  Shell:     ${targets.siteUrl}   [${targets.siteSource}]`);
   log(`  Port:      ${port}   [${portSource}]`);
+
+  // Which app is this session serving? cwd by default, --app to override.
+  // Fails loud rather than falling back to store chrome (AMB-2, AMB-5).
+  const binding = resolveServeBinding(workspaceRoot, config, {
+    app: options.app,
+    cwd: options.cwd || process.cwd(),
+    gatewayPort: port,
+  });
+  log(`  App:       ${binding.appId}   [${binding.source}]  → standalone at ${binding.appUrl}`);
   log('');
 
   const proxyRules = buildGatewayProxy(workspaceRoot, targets);
   const staticRoutes = proxyRules._staticRoutes || {};
   delete proxyRules._staticRoutes;
-  const certOpts = certOptions(config, workspaceRoot);
+  // Dev certs — ONE owner, shared with every app dev server behind this gateway
+  // (createViteServerConfig). They used to diverge, so a workspace-configured
+  // trusted cert reached :5173 and nothing else — and passkey login is
+  // origin-bound, so it worked on the gateway and failed on the app.
+  const certOpts = resolveDevCertOptions(workspaceRoot, {}, config);
   const httpsConfig = getViteHttpsConfig(certOpts);
   const { certPath } = resolveCertPaths(certOpts);
 
@@ -191,7 +187,7 @@ export async function runGateway(options = {}) {
   let server = await createServer({
     root: workspaceRoot,
     configFile: false,
-    plugins: [staticSitePlugin(staticRoutes)],
+    plugins: [appBindingPlugin(binding), staticSitePlugin(staticRoutes)],
     server: {
       port,
       strictPort: true,
@@ -206,6 +202,7 @@ export async function runGateway(options = {}) {
 
   await listenOrFailLoud(server, port, portSource);
   log(`\n  Gateway listening on https://localhost:${port}\n`);
+  log(`  App binding: https://localhost:${port}${APP_BINDING_PATH}\n`);
   log(`  Dev cert: ${certPath}`);
   log(`  Passkey login needs this cert trusted once:\n    ${trustCertCommand(certPath)}\n`);
 
@@ -223,12 +220,20 @@ export async function runGateway(options = {}) {
     log('\n  workspace.json changed — restarting gateway...\n');
     logProxyTable(newProxy, log);
 
+    // Re-resolve the binding too: a renamed or moved app must not keep serving
+    // the previous answer at APP_BINDING_PATH.
+    const newBinding = resolveServeBinding(workspaceRoot, newConfig, {
+      app: options.app,
+      cwd: options.cwd || process.cwd(),
+      gatewayPort: port,
+    });
+
     await server.close();
 
     server = await createServer({
       root: workspaceRoot,
       configFile: false,
-      plugins: [staticSitePlugin(newStaticRoutes)],
+      plugins: [appBindingPlugin(newBinding), staticSitePlugin(newStaticRoutes)],
       server: {
         port,
         strictPort: true,
@@ -242,7 +247,7 @@ export async function runGateway(options = {}) {
     });
 
     await listenOrFailLoud(server, port, portSource);
-    log(`\n  Gateway restarted on https://localhost:${port}\n`);
+    log(`\n  Gateway restarted on https://localhost:${port}  (app ${newBinding.appId})\n`);
   });
 
   process.on('SIGINT', () => { watcher.close(); server.close(); process.exit(0); });

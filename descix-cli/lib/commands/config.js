@@ -133,3 +133,116 @@ export async function setEnv(envName, options = {}) {
     throw error;
   }
 }
+
+// ─── Workspace-level env keys (redteam G-6) ──────────────────────────────────
+// env.gateway.port, env.devCerts, env.powchUrl and env.siteUrl are read by the
+// gateway and the shell build, but had NO verb — the only way to set them was to
+// hand-edit .descix/workspace.json. The target UX is that a developer never
+// hand-crafts that file, so each of these now has a command.
+
+/**
+ * Shared writer: set one key, report it, and say where it landed.
+ *
+ * `produceValue` is a THUNK, not a value, so validation runs INSIDE this
+ * try/catch. Passing an already-validated value meant a rejection threw at the
+ * call site, propagated to the CLI action's `catch { process.exit(1) }`, and the
+ * developer got a bare exit code with no message — a fail-loud that fails
+ * silently, which is worse than no validation because it looks like a crash.
+ */
+async function setWorkspaceEnvKey(dottedKey, produceValue, label) {
+  try {
+    const value = typeof produceValue === 'function' ? produceValue() : produceValue;
+    const workspaceConfig = await WorkspaceConfig.load();
+    const configPath = await workspaceConfig.setEnvKey(dottedKey, value);
+    console.log(chalk.green(`\n✅ ${label}\n`));
+    console.log(chalk.white(`   env.${dottedKey}: ${value === null ? chalk.gray('(removed)') : value}`));
+    console.log(chalk.gray(`   Saved to: ${configPath}\n`));
+    return configPath;
+  } catch (error) {
+    console.error(chalk.red(`\n❌ ${error.message}\n`));
+    throw error;
+  }
+}
+
+/** Reject anything that is not a usable port BEFORE it reaches the file. */
+function assertPort(value) {
+  const port = Number(value);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`Port must be an integer 1-65535, got "${value}".`);
+  }
+  return port;
+}
+
+/** Reject anything that is not an absolute http(s) URL BEFORE it reaches the file. */
+function assertUrl(value, what) {
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error(`${what} must be an absolute URL (e.g. https://powch.dev.descix.net), got "${value}".`);
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    throw new Error(`${what} must be http(s), got "${parsed.protocol}//".`);
+  }
+  return value;
+}
+
+/**
+ * Set the port `descix serve` listens on (env.gateway.port).
+ */
+export async function setGatewayPort(port) {
+  return setWorkspaceEnvKey(
+    'gateway.port',
+    () => (port === null ? null : assertPort(port)),
+    'Gateway port set — `descix serve` will listen here and the shell product map will match it.',
+  );
+}
+
+/**
+ * Point the local dev servers at a specific TLS cert pair (env.devCerts.*).
+ * One owner: the gateway AND every app dev server behind it read this.
+ */
+export async function setDevCerts(options = {}) {
+  const { dir, cert, key, clear } = options;
+  if (clear) {
+    await setWorkspaceEnvKey('devCerts.dir', null, 'Dev certs cleared — falling back to the SDK-tracked SAN pair.');
+    await setWorkspaceEnvKey('devCerts.cert', null, 'Dev cert file cleared.');
+    return setWorkspaceEnvKey('devCerts.key', null, 'Dev key file cleared.');
+  }
+  if (!dir && !cert && !key) {
+    const message =
+      'Nothing to set. Pass --dir <path> (a directory holding cert.pem + key.pem), ' +
+      'or --cert <path> and --key <path>, or --clear to remove.';
+    console.error(chalk.red(`\n❌ ${message}\n`));
+    throw new Error(message);
+  }
+  let last;
+  if (dir) last = await setWorkspaceEnvKey('devCerts.dir', path.resolve(dir), 'Dev cert directory set.');
+  if (cert) last = await setWorkspaceEnvKey('devCerts.cert', path.resolve(cert), 'Dev certificate set.');
+  if (key) last = await setWorkspaceEnvKey('devCerts.key', path.resolve(key), 'Dev private key set.');
+  return last;
+}
+
+/**
+ * Set where Powch lives (env.powchUrl).
+ * Powch is CROSS-ORIGIN from the shell by design — it holds passkeys and the
+ * wallet — so this is its own origin, never a path on the gateway.
+ */
+export async function setPowchUrl(url) {
+  return setWorkspaceEnvKey(
+    'powchUrl',
+    () => (url === null ? null : assertUrl(url, 'Powch URL')),
+    'Powch URL set — the gateway and the shell build now agree on it.',
+  );
+}
+
+/**
+ * Set the App Shell origin `descix serve` proxies `/` to (env.siteUrl).
+ */
+export async function setSiteUrl(url) {
+  return setWorkspaceEnvKey(
+    'siteUrl',
+    () => (url === null ? null : assertUrl(url, 'Site URL')),
+    'App Shell URL set — `descix serve` will proxy / here.',
+  );
+}

@@ -11,6 +11,11 @@
  * gateway's resolveGatewayPort owns the chain (--port > env.gateway.port >
  * built-in default), so the server and the product map the shell bakes cannot
  * name different ports.
+ *
+ * `cwd` is passed SEPARATELY from `workspaceRoot` on purpose. workspaceRoot is
+ * walked UP from to find .descix/workspace.json, so by the time the gateway has
+ * it, the directory the developer was actually standing in is gone — and that
+ * directory is exactly what picks the app to serve (AMB-2).
  */
 
 import { runGateway } from '@descix/app-sdk/dev';
@@ -26,5 +31,7 @@ export async function runServe(options = {}) {
     apiSource: apiUrl ? 'CLI --api-url/--env (DESCIX_API_URL)' : undefined,
     siteUrl: options.siteUrl,
     siteSource: options.siteUrl ? 'CLI --site-url' : undefined,
+    app: options.app,
+    cwd: process.cwd(),
   });
 }

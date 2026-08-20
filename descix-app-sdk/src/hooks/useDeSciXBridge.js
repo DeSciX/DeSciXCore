@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { usePowchBridge } from '../providers/PowchBridgeProvider';
 import { AppContextState } from '../util/AppData';
+import { publishViewApi } from '../util/appView.js';
 
 /**
  * useDeSciXBridge Hook
@@ -49,6 +50,12 @@ export const useDeSciXBridge = (appState) => {
       shellOrigin: window.location.origin,
       powchOrigin: bridge.config?.bridgeUrl,
     };
+
+    // The view API is part of the same bus, but it must NOT wait on Powch: an
+    // app with no wallet still gets to choose its layout. useDeSciXView publishes
+    // it independently; this call only makes the bus complete for anyone reading
+    // window.DeSciX after DESCX_BRIDGE_READY.
+    publishViewApi();
 
     window.dispatchEvent(new CustomEvent('DESCX_BRIDGE_READY'));
     initialized.current = true;

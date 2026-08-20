@@ -1,6 +1,10 @@
 # @descix/app-sdk
 
-Core package for all DeSciX web apps. Provides init-to-READY app shell logic, auth, API surface, Powch bridge integration, and dev proxy/config. Every app (Powch PWA, DeSciX PWA, standalone samples) imports `@descix/app-sdk` and builds with `__STANDALONE_APP_ID__ === [app id]`.
+Core package for all DeSciX web apps. Provides init-to-READY app shell logic, auth, API surface, Powch bridge integration, and dev proxy/config.
+
+**Hosting an app inside the shell?** The contract is [The App Shell API](./APP_SHELL_API.md) — `window.DeSciX.view` to choose your layout, `window.DeSciX.powch` for identity and wallet, and `window.DeSciX_Actions` for what the shell calls back into. Plain JavaScript on `window`; no SDK import required.
+
+The shell resolves which app it is serving at RUNTIME, from a binding served at `/__descix/app-binding.json` on its own origin, so one bundle boots as the store and as your app standalone with no rebuild. Apps that build themselves standalone (the Powch PWA, the demo) still set `__STANDALONE_APP_ID__` in their own Vite config.
 
 ## Installation
 
@@ -22,8 +26,8 @@ npm install @descix/app-sdk
 
 | Export | Description |
 |--------|-------------|
-| `.` | AppShell, AppContext, AppProvider, useAppContext, Api, ErrorBoundary, LoadingWidget, DebugWidget, CodeSiteWidget, ChatWidget, PowchSideBarWidget, PowchBridgeProvider, usePowchBridge, PowchClient |
-| `./dev` | createViteProxyConfig, createViteServerConfig, getViteHttpsConfig |
+| `.` | AppShell, AppContext, AppProvider, useAppContext, Api, ErrorBoundary, LoadingWidget, DebugWidget, CodeSiteWidget, ChatWidget, PowchSideBarWidget, PowchBridgeProvider, usePowchBridge, PowchClient, useDeSciXView, VIEW_MODES |
+| `./dev` | createViteProxyConfig, createViteServerConfig, getViteHttpsConfig, resolveGatewayPort, resolveServeBinding, resolvePowchUrl, resolveDevCertOptions, buildWorkspaceProducts |
 | `./powch-client` | PowchClient (for third-party sites) |
 
 ## Usage
@@ -151,5 +155,6 @@ export default defineConfig({
 
 ## References
 
+- [The App Shell API](./APP_SHELL_API.md) — what the shell publishes to your app, and what it calls back
 - [App Shell Core Design](../../design/architecture/app-shell-core-design.md)
 - [DeSciX Powch Integration Guide](../../DeSciX_Powch/docs/integration-guide.md)
