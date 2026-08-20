@@ -3,6 +3,34 @@ import * as path from 'path';
 import { ENV_ORIGINS, DEFAULT_API_URL } from '@descix/app-sdk/dev';
 
 /**
+ * ONE OWNER for turning a workspace-relative localPath into an absolute path.
+ *
+ * This was resolved four different ways across this file and its callers — three with
+ * path.join and one with path.resolve — and the two treatments DISAGREE on an absolute
+ * localPath. path.join('/ws', '/ws/app') yields '/ws/ws/app' (the "doubling"); path.resolve
+ * yields '/ws/app'. Concretely, getAppByAppId() and detectContext() both derive from the same
+ * _appIdToConfig entry, so an absolute localPath made detectContext match a directory that
+ * getAppByAppId reported as a doubled path that does not exist.
+ *
+ * FAIL LOUD rather than quietly absorbing it. An absolute localPath in workspace.json is a
+ * PORTABILITY defect, not a valid configuration: workspace.json is shared across checkouts and
+ * machines, and a machine-specific absolute path cannot survive either. Silently resolving it
+ * would make the doubling disappear while leaving the unshareable config in place. Name the
+ * offending entry and the config verb that fixes it.
+ */
+export function resolveWorkspacePath(workspaceRoot, localPath, label = 'app') {
+    if (!localPath) return null;
+    if (path.isAbsolute(localPath)) {
+        throw new Error(
+            `workspace.json: localPath for '${label}' is an absolute path (${localPath}). ` +
+            `localPath must be relative to the workspace root so the workspace is portable across ` +
+            `checkouts and machines. Fix it with the config verb — never by hand-editing workspace.json.`
+        );
+    }
+    return path.resolve(workspaceRoot, localPath);
+}
+
+/**
  * WorkspaceConfig - Manages workspace-specific configuration
  * 
  * This is the SOLE configuration methodology for DeSciX CLI.
@@ -85,7 +113,7 @@ export class WorkspaceConfig {
     // env.platform + env.products (primary for manually crafted workspace)
     const fromEnv = this._appIdToConfig[appId];
     if (fromEnv) {
-      const absPath = path.join(this.workspaceRoot, fromEnv.localPath);
+      const absPath = resolveWorkspacePath(this.workspaceRoot, fromEnv.localPath, appId);
       return {
         localPath: fromEnv.localPath,
         absolutePath: absPath,
@@ -262,7 +290,7 @@ export class WorkspaceConfig {
     // Compute absolute paths for products
     for (const [productId, product] of Object.entries(this.products || {})) {
       if (product.localPath) {
-        product.absolutePath = path.join(absWorkspaceRoot, product.localPath);
+        product.absolutePath = resolveWorkspacePath(absWorkspaceRoot, product.localPath, productId);
       }
     }
   }
@@ -406,7 +434,7 @@ export class WorkspaceConfig {
     // env.platform + env.products (Unified Registry - primary)
     if (wsRoot) {
       for (const [appId, cfg] of Object.entries(this._appIdToConfig || {})) {
-        const appPath = path.resolve(wsRoot, cfg.localPath);
+        const appPath = resolveWorkspacePath(wsRoot, cfg.localPath, appId);
         if (cwd.startsWith(appPath)) {
           return {
             appId,
@@ -421,7 +449,7 @@ export class WorkspaceConfig {
     for (const [productId, product] of Object.entries(this.products || {})) {
       let productPath = product.absolutePath;
       if (!productPath && product.localPath && wsRoot) {
-        productPath = path.join(wsRoot, product.localPath);
+        productPath = resolveWorkspacePath(wsRoot, product.localPath, productId);
       }
 
       if (productPath && cwd.startsWith(productPath)) {

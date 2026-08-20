@@ -16,6 +16,17 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
+
+/**
+ * ONE OWNER for scaffold path resolution. Hydrator.js lives at descix-cli/lib/core/, so two
+ * '..' walks reach the CLI package root. Two functions used to resolve this independently and
+ * they DISAGREED — copyScaffold walked two, getAvailableScaffolds walked four (and used a
+ * hand-rolled import.meta.url.replace('file://','') instead of fileURLToPath). The four-walk
+ * path does not exist, so getAvailableScaffolds returned [] on every call, and its bare catch
+ * made a path bug indistinguishable from "no scaffolds are installed".
+ */
+const CLI_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const SCAFFOLDS_DIR = path.join(CLI_ROOT, 'templates', 'scaffolds');
 import { google } from 'googleapis';
 import * as driveADC from '../google-storage-adc.js';
 
@@ -705,10 +716,8 @@ export async function copyScaffold(scaffoldType, appPath, options = {}) {
     throw new Error(`Invalid scaffold type: ${scaffoldType}. Valid types: ${validTypes.join(', ')}`);
   }
   
-  // Find scaffold template directory (templates live inside CLI package)
-  // Hydrator.js lives at descix-cli/lib/core/Hydrator.js — two '..' walks up to descix-cli/
-  const cliRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-  const scaffoldDir = path.join(cliRoot, 'templates', 'scaffolds', scaffoldType);
+  // Templates live inside the CLI package; SCAFFOLDS_DIR is the single owner of that path.
+  const scaffoldDir = path.join(SCAFFOLDS_DIR, scaffoldType);
   
   // Check if scaffold exists
   try {
@@ -782,15 +791,19 @@ async function copyDir(src, dest, stats, verbose) {
  * @returns {Promise<string[]>}
  */
 export async function getAvailableScaffolds() {
-  const sdkRoot = path.resolve(path.dirname(import.meta.url.replace('file://', '')), '..', '..', '..', '..');
-  const scaffoldsDir = path.join(sdkRoot, 'templates', 'scaffolds');
-  
+  let entries;
   try {
-    const entries = await fs.readdir(scaffoldsDir, { withFileTypes: true });
-    return entries.filter(e => e.isDirectory()).map(e => e.name);
-  } catch {
-    return [];
+    entries = await fs.readdir(SCAFFOLDS_DIR, { withFileTypes: true });
+  } catch (err) {
+    // FAIL LOUD: an unreadable scaffolds directory in a shipped CLI is a packaging failure,
+    // not "no scaffolds". Swallowing it to [] is what hid the path bug — the caller could not
+    // tell a broken install from an empty one. Name the path and the underlying error.
+    throw new Error(
+      `Scaffold templates are unreadable at ${SCAFFOLDS_DIR} (${err.code || err.message}). ` +
+      `This is a broken CLI installation, not an empty template set.`
+    );
   }
+  return entries.filter(e => e.isDirectory()).map(e => e.name);
 }
 
 // Named exports for functions not already exported inline

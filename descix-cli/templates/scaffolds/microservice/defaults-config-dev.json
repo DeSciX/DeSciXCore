@@ -1,0 +1,4 @@
+{
+  "_comment": "Per-env NON-SECRET config for the dev environment. Layer 2 of the cloud-core bootstrap (process.env > defaults-config-{env}.json > defaults-config.json > Secret Manager). FIRESTORE_DATABASE_ID is a UNIVERSAL required key for every cloud-core consumer and is deliberately null here: cloud-core hard-fails at boot on a null required key, which is correct. Set it to your named Firestore database. It is left null rather than given a plausible default because a wrong database id writes silently to the wrong place — a hard failure at boot is the cheaper outcome.",
+  "FIRESTORE_DATABASE_ID": null
+}
