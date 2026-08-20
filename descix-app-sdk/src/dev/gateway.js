@@ -69,7 +69,13 @@ function buildDefines(config, workspaceRoot, targets) {
   const powchAppUrl = resolvePowchUrl(config);
   if (!powchAppUrl && isLocalOrigin(targets.siteUrl)) {
     // Only meaningful for a locally-built shell; a remote shell carries its own.
-    console.warn('[Gateway] No Powch URL found in workspace config. Powch integration will not work.');
+    // Said early because the shell now FAILS at boot rather than defaulting to a
+    // production wallet — this warning is the hint that names the fix first.
+    console.warn(
+      '[Gateway] No Powch URL in workspace config — the shell will fail to boot.\n' +
+      '          Set env.powchUrl in .descix/workspace.json, or run Powch as a\n' +
+      '          product (env.products[] with appId "powch" and a site.port).'
+    );
   }
 
   // Build product map from workspace.json (shared helper)
