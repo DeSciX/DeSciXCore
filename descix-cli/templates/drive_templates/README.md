@@ -74,7 +74,7 @@ These are NOT automatically replaced - they serve as guidance for the user to ed
 If you need to re-upload:
 1. Upload the `community_template/` folder to the target Drive folder
 2. Upload the `agent_app_template/` folder to the target Drive folder
-3. Update folder IDs in `DeSciX_Cloud/defaults-config.json`
+3. Update folder IDs in `DeSciX_Cloud/microservice/defaults-config.json`
 
 **Note:** Default icons are already included (from `DeSciX_PWA/assets/icon.png`).
 
@@ -87,7 +87,7 @@ If you need to re-upload:
 
 ## Configuration
 
-Template folder IDs are stored in `DeSciX_Cloud/defaults-config.json` (not secrets):
+Template folder IDs are stored in `DeSciX_Cloud/microservice/defaults-config.json` (not secrets):
 
 ```json
 "DRIVE_COMMUNITY_TEMPLATE_FOLDER_ID": "1ocVhrODQPGMICWmod3OWSGAj4-t6-o-B",
