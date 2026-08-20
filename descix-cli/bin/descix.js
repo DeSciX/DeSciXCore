@@ -3264,6 +3264,23 @@ microserviceCommand
         console.warn(chalk.yellow(`  ⚠ Could not update defaults-config.json: ${err.message}`));
       }
 
+      // 1b. Claim the scaffold's package.json for THIS service.
+      // The template ships as "@descix/service-starter" — a real package name that is not
+      // this developer's. Left unclaimed, every scaffolded service on the machine reports the
+      // same identity to npm and to anything reading package.name, and `npm install` in the
+      // service resolves against a name the developer does not own.
+      try {
+        const pkgPath = path.join(microserviceDir, 'package.json');
+        const pkg = JSON.parse(await fs.readFile(pkgPath, 'utf-8'));
+        pkg.name = ctx.appId;
+        pkg.description = `${ctx.appId} microservice on the DeSciX mesh`;
+        pkg.version = '0.1.0';
+        await fs.writeFile(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
+        console.log(chalk.gray(`  ✓ Claimed package.json as '${ctx.appId}'`));
+      } catch (err) {
+        console.warn(chalk.yellow(`  ⚠ Could not claim package.json: ${err.message}`));
+      }
+
       // 2. Inject Context + Port into manifest.json
       try {
         const manifestContent = await fs.readFile(manifestPath, 'utf-8');
