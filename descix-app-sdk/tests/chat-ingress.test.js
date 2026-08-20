@@ -16,6 +16,8 @@ import {
   actionResultContribution,
   actionErrorContribution,
   composeTurnInput,
+  mediaContribution,
+  collectTurnMedia,
 } from '../src/util/chatIngress.js';
 
 test('size policy passes through text under the cap unchanged', () => {
@@ -105,7 +107,7 @@ test('normalizeContribution returns a FULL bag from a partial one', () => {
   const c = normalizeContribution({ kind: 'action_result', text: 'hi' });
   // Consumers ferry this bag; drift here is the schema-mirror bug class.
   assert.deepEqual(Object.keys(c).sort(), [
-    'contributed_at', 'disposition', 'kind', 'label', 'omittedChars', 'text', 'totalChars', 'truncated',
+    'contributed_at', 'disposition', 'kind', 'label', 'media', 'omittedChars', 'text', 'totalChars', 'truncated',
   ]);
   assert.equal(c.disposition, 'stage', 'default disposition must be the non-metered one');
 });
@@ -116,4 +118,57 @@ test('composeTurnInput puts the observation before the instruction', () => {
   // A self-sending contribution has no typed text and must not leave dangling blanks.
   assert.equal(composeTurnInput([c], ''), 'RESULT');
   assert.equal(composeTurnInput([], 'just typing'), 'just typing');
+});
+
+// ── ws-chat-multimodal-image-attach: media as a STAGED CONTRIBUTION ────────────
+// The point of these: media enters through the SAME ingress as every other external
+// contribution. If someone later adds a parallel path that appends media to a thread
+// without going through normalizeContribution, these stop describing reality.
+
+test('mediaContribution stages by default and carries bytes in `media`, not in `text`', () => {
+  const png = { mime_type: 'image/png', data: 'AAAA', label: 'still' };
+  const c = mediaContribution(png);
+  assert.equal(c.kind, 'media_attachment');
+  assert.equal(c.disposition, 'stage');       // an attachment rides into the NEXT turn
+  assert.deepEqual(c.media, [png]);
+  assert.ok(!c.text.includes('AAAA'), 'bytes must NOT be stringified into the turn text');
+  assert.match(c.text, /attached image\/png/);
+  assert.match(c.text, /still/);
+});
+
+test('an asset_ref attachment says so in its model-visible framing', () => {
+  const c = mediaContribution({ mime_type: 'video/mp4', asset_ref: 'flyby.mp4', label: 'flyby' });
+  assert.match(c.text, /from app assets \(flyby\.mp4\)/);
+});
+
+test('a media_attachment with no media is refused — that is the silent-drop failure', () => {
+  assert.throws(
+    () => normalizeContribution({ kind: 'media_attachment', text: 'look', media: [] }),
+    /carries no media/,
+  );
+  assert.throws(
+    () => normalizeContribution({ kind: 'media_attachment', text: 'look' }),
+    /carries no media/,
+  );
+  assert.throws(
+    () => normalizeContribution({ kind: 'action_result', text: 'x', media: 'nope' }),
+    /`media` must be an array/,
+  );
+});
+
+test('every contribution carries a media array so consumers ferry unconditionally', () => {
+  assert.deepEqual(normalizeContribution({ kind: 'action_result', text: 'hi' }).media, []);
+});
+
+test('collectTurnMedia pools staged media across contributions, in order', () => {
+  const a = mediaContribution({ mime_type: 'image/png', data: 'A', label: 'a' });
+  const b = mediaContribution({ mime_type: 'video/mp4', data: 'B', label: 'b' });
+  const text = normalizeContribution({ kind: 'action_result', text: 'RESULT' });
+  assert.deepEqual(collectTurnMedia([a, text, b]).map((m) => m.label), ['a', 'b']);
+  assert.deepEqual(collectTurnMedia([text]), []);
+});
+
+test('media contributions still compose their text through the ONE turn composer', () => {
+  const c = mediaContribution({ mime_type: 'image/png', data: 'A', label: 'shot' });
+  assert.equal(composeTurnInput([c], 'what is this?'), `${c.text}\n\nwhat is this?`);
 });

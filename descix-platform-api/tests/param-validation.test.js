@@ -120,6 +120,9 @@ test('ask_question_to_app declares every param its handler honors', () => {
         'intelligence_level', 'model', 'thinking_budget', 'temperature', 'max_output_tokens', 'streaming',
         // document scoping (communityManagement.js prepare_chat_context:1493)
         'file_id', 'ipdoc_file_id', 'doc_ids',
+        // multimodal attachments (ws-chat-multimodal-image-attach): prepare_chat_context
+        // normalizes+resolves them, geminiInteractions encodes them as provider blocks
+        'media',
         // core
         'app_id', 'user_input', 'knowledgebase_name', 'knowledgebase_names', 'previous_interaction_id',
     ]) {

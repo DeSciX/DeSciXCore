@@ -17,6 +17,29 @@ export {
     MCP_HANDSHAKE_INSTRUCTIONS,
     PLATFORM_BOOTSTRAP_SUMMARY,
 } from './handshake.js';
+// ws-chat-multimodal-image-attach — THE canonical media-on-a-chat-turn contract: kinds, MIME
+// vocabulary, byte policy, normalize(partial)->bag, and the ONE provider-block encoder. Both
+// the Cloud chat pipeline and the advertised nativeTools schema consume this; nobody
+// re-enumerates a MIME list or re-derives a cap.
+export {
+    CHAT_MEDIA_KINDS,
+    CHAT_MEDIA_MIME_TYPES,
+    MEDIA_SOURCES,
+    MAX_MEDIA_BYTES,
+    MAX_TURN_MEDIA_BYTES,
+    MAX_MEDIA_ATTACHMENTS_PER_TURN,
+    base64DecodedBytes,
+    kindForMimeType,
+    allAcceptedMimeTypes,
+    normalizeMediaAttachment,
+    normalizeMediaAttachments,
+    assertMediaBytesWithinPolicy,
+    assertTurnMediaWithinPolicy,
+    mediaTruncationNotice,
+    toProviderBlock,
+    buildProviderInput,
+    mediaParamSchema,
+} from './chatMedia.js';
 // ws-mcp-surface-basics (CEO-D-2026-08-14-MCP-BASICS) — strict fail-loud param validation.
 // The schema stopped being advertising-only: unknown/missing params are rejected AT the MCP
 // boundary, naming the offender and suggesting the canonical key. One owner; the Cloud MCP
