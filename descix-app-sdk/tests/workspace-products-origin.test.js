@@ -63,6 +63,7 @@ const CONFIG = {
       { appId: 'egpt-godsworld', localPath: 'godsworld/codesite', site: { static: '.' } },
       { appId: 'egpt-frqtl', localPath: 'FRAQTL/site', site: { port: 5511 } },
       { appId: 'powch', localPath: 'DeSciX/DeSciX_Powch', site: { port: 5175, protocol: 'https' } },
+      { appId: 'egpt-godsworld-dev', localPath: 'godsworld', site: { port: 5175, protocol: 'https' } },
       { appId: 'unmapped', localPath: 'nowhere' },
     ],
   },
@@ -76,7 +77,17 @@ test('a dev-server product is served to the shell on the GATEWAY origin, not its
   withWorkspace(CONFIG, (dir) => {
     const map = buildWorkspaceProducts(dir);
     assert.equal(map['egpt-frqtl'], `${GATEWAY}/p/egpt-frqtl`);
-    assert.equal(map['powch'], `${GATEWAY}/p/powch`);
+    assert.equal(map['egpt-godsworld-dev'], `${GATEWAY}/p/egpt-godsworld-dev`);
+  });
+});
+
+test('POWCH IS THE EXCEPTION and is absent from this map', () => {
+  // This assertion previously read `map['powch'] === GATEWAY/p/powch`, i.e. it
+  // asserted the security regression. Powch is the ZK-SSO identity silo and is
+  // cross-origin BY DESIGN; putting it in the shell-origin map hands the wallet
+  // to every hosted app. Full invariant: tests/powch-origin-isolation.test.js.
+  withWorkspace(CONFIG, (dir) => {
+    assert.equal(buildWorkspaceProducts(dir)['powch'], undefined);
   });
 });
 
