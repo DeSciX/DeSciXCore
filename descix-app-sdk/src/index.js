@@ -7,6 +7,17 @@ export { default as LoadingWidget } from './components/LoadingWidget.jsx';
 export { default as DebugWidget } from './util/DebugWidget.jsx';
 export { default as CodeSiteWidget } from './components/CodeSiteWidget.jsx';
 export { default as ChatWidget, ChatControls } from './components/ChatWidget.jsx';
+export {
+  MAX_CONTRIBUTION_CHARS,
+  CHAT_INGRESS_DISPOSITIONS,
+  CHAT_CONTRIBUTION_KINDS,
+  normalizeContribution,
+  applySizePolicy,
+  stringifyResult,
+  actionResultContribution,
+  actionErrorContribution,
+  composeTurnInput,
+} from './util/chatIngress.js';
 export { default as PowchSideBarWidget } from './components/PowchSideBarWidget.jsx';
 export { PowchBridgeProvider, usePowchBridge } from './providers/PowchBridgeProvider.jsx';
 export { PowchClient } from './powch/PowchClient.js';
