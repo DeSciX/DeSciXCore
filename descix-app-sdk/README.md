@@ -4,7 +4,7 @@ Core package for all DeSciX web apps. Provides init-to-READY app shell logic, au
 
 **Hosting an app inside the shell?** The contract is [The App Shell API](./APP_SHELL_API.md) — `window.DeSciX.view` to choose your layout, `window.DeSciX.powch` for identity and wallet, and `window.DeSciX_Actions` for what the shell calls back into. Plain JavaScript on `window`; no SDK import required.
 
-The shell resolves which app it is serving at RUNTIME, from a binding served at `/__descix/app-binding.json` on its own origin, so one bundle boots as the store and as your app standalone with no rebuild. Apps that build themselves standalone (the Powch PWA, the demo) still set `__STANDALONE_APP_ID__` in their own Vite config.
+The shell resolves which app it is serving at RUNTIME, from a binding served at `/__descix/app-binding.json` on its own origin, so one bundle boots as the store and as your app standalone with no rebuild. An app that builds *itself* standalone declares it at its own mount: `<AppShell appId="my-app" standalone>`.
 
 ## Installation
 
@@ -151,11 +151,46 @@ named. If the API is local and no shell is configured, the gateway refuses to st
 than proxying `/` at the API port. If the configured platform is unreachable, the proxy
 surfaces the failure as-is (502/timeout) — nothing is masked or retried against a fallback.
 
+#### Where the shell gets your app's URL (the product map)
+
+The URL the shell puts in the CodeSite iframe does **not** come from your app record on the
+platform — `get_app`'s `ip_site_gcs_path_url` is empty for a perfectly working local app. In dev it
+comes from a Vite `define` named `__WORKSPACE_PRODUCTS__`, built by `buildWorkspaceProducts()` from
+`.descix/workspace.json` at **config-load time**.
+
+Every URL in that map is on the **gateway origin, absolute, with the port in it** —
+`https://localhost:{gatewayPort}/p/{appId}` (the platform app gets the gateway root). That is the
+contract, not an implementation detail: the shell reaches into `iframe.contentWindow` and SplitView
+dispatches actions by direct interframe scripting, so an app served from its own dev-server origin
+would throw a cross-origin `SecurityError` and die silently. Your app's own dev-server port is the
+origin the gateway proxies *to*; it is never a URL anything opens or iframes.
+
+Two consequences worth knowing before they cost you an afternoon:
+
+- **A Vite `define` is compile-time text substitution.** A *prebuilt* shell bundle has its gateway
+  port baked in. Reuse that bundle behind a second gateway on a different port and the iframe
+  silently loads the **original** port's app, while `curl`ing `/p/{appId}` on the new port correctly
+  returns your bytes. Rebuild the shell when the gateway origin changes.
+- **A running app dev server does not have that problem.** `workspaceProductsPlugin` watches
+  `.descix/workspace.json` and pushes a fresh map over Vite's WebSocket
+  (`descix:workspace-products`), so `descix app set-site` shows up without a restart. It is
+  dev-only (`apply: 'serve'`) and auto-injects its own client runtime — no source change in your app.
+
+`resolveAppGatewayUrl()` is the one resolver that answers "where is this app", shared with
+`descix app open`, and returns the same URL the map contains.
+
 ### Trust the dev certificate (one time, required for passkey login)
 
 The SDK ships a self-signed cert for `https://localhost` with a `subjectAltName` block.
 Chrome will still warn until you trust it, and **WebAuthn refuses to run on an untrusted
 origin** — so passkey sign-in needs this step:
+
+> The failure has no SDK-level hint. The browser refuses the ceremony itself, verbatim:
+> `WebAuthn is not supported on sites with TLS certificate errors`. If Powch login dies with
+> that message, it is the certificate, not your code or your Powch config. **A cert you trusted
+> months ago and that has since EXPIRED fails exactly the same way** — trust is not the only
+> thing the browser checks, so re-mint and re-trust rather than assuming a one-time step holds
+> forever.
 
 `descix serve` prints the exact command with the resolved path on every start. On macOS:
 
