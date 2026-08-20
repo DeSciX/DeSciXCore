@@ -399,8 +399,8 @@ Both modes start with content on Google Drive (users create documents there). Th
 | Chunker | `DeSciX_Core/descix-cli/lib/core/Chunker.js` | KB chunking |
 | Syncer | `DeSciX_Core/descix-cli/lib/core/Syncer.js` | Pinecone sync |
 | KB Commands | `DeSciX_Core/descix-cli/lib/commands/kb.js` | Git-mode KB processing |
-| Setup Command | `DeSciX_Core/descix-cli/lib/commands/setup.js` | Initial workspace setup |
+| Setup Command | `DeSciX_Core/descix-cli/lib/wizard/setup.js` | Initial workspace setup |
 | Drive ADC | `DeSciX_Core/descix-cli/lib/google-storage-adc.js` | Google Drive API wrapper |
-| Backend KB API | `DeSciX_Cloud/services/commandHandlers/appCommands.js` | Server-side processing |
-| Pinecone Service | `DeSciX_Cloud/services/pineconeService.js` | Vector database |
-| Server Chunking | `DeSciX_Cloud/services/chunkingUtils.js` | Drive-mode chunking |
+| Backend KB API | `DeSciX_Cloud/microservice/services/commandHandlers/appCommands.js` | Server-side processing |
+| Pinecone Service | `DeSciX_Cloud/microservice/services/pineconeService.js` | Vector database |
+| Server Chunking | `DeSciX_Cloud/microservice/services/chunkingUtils.js` | Drive-mode chunking |
