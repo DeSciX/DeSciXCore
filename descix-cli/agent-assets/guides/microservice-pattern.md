@@ -82,7 +82,7 @@ descix microservice register
 descix microservice vectorize
 
 # 5. Sync KB
-descix kb sync -c <community> -a <app>
+descix kb corpus sync -c <community> -a <app>
 ```
 
 ## Capabilities

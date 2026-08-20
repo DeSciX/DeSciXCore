@@ -36,7 +36,7 @@ my-app/
 
 **IMPORTANT**: Check `.descix/workspace.json` for `_needsAgentSetup: true`.
 
-When this flag is set, the user has just completed `descix setup` and needs your help configuring their workspace:
+When this flag is set, the user has just completed `descix mcp quickstart` and needs your help configuring their workspace:
 
 1. **Greet the user** and confirm MCP is working: "I can see your DeSciX setup is complete. Let me help you configure your workspace."
 2. **Show their entitlements** from the cached JSON below (communities and apps they own)
@@ -169,12 +169,12 @@ Guide users to these git-mode commands:
 ### Knowledge Base Commands
 | Command | Purpose |
 |---------|---------|
-| `descix kb pull` | Pull text-converted content from Drive |
-| `descix kb push` | Push staging files to Drive |
-| `descix kb chunk` | Generate JSON chunks from text files |
-| `descix kb sync` | Push chunks to Pinecone |
-| `descix kb build` | Full pipeline: pull → chunk → sync |
-| `descix kb status` | Show local vs Pinecone sync status |
+| `descix drive pull` | Pull text-converted content from Drive |
+| `descix drive push` | Push staging files to Drive |
+| `descix kb corpus sync` | Generate JSON chunks from text files |
+| `descix kb corpus sync` | Push chunks to Pinecone |
+| `descix kb corpus sync` | Full pipeline: pull → chunk → sync |
+| `descix kb corpus status` | Show local vs Pinecone sync status |
 
 ### Site Commands
 | Command | Purpose |
@@ -234,7 +234,7 @@ If commands fail:
 | "Workspace not configured" | No workspace.json | Run `descix init` |
 | "Could not determine app context" | Not in app directory | `cd` to app or use `-c/-a` flags |
 | "ADC not configured" | Missing Google auth | Run `gcloud auth application-default login` |
-| "App not found in workspace" | App not registered | Run `descix setup` or add to workspace.json |
+| "App not found in workspace" | App not registered | Run `descix mcp quickstart` or add to workspace.json |
 
 ---
 

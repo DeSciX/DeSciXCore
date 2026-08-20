@@ -124,7 +124,7 @@ This app does not yet have a web UI.
 ## To Add a Site
 1. Add HTML/CSS/JS files directly here, OR
 2. Configure your build tool to output to `site/dist/`
-3. Run `descix update site` to deploy
+3. Run `descix site upload` to deploy
 
 ## Supported Content
 - Static HTML files
@@ -334,7 +334,7 @@ This folder doesn't appear to be configured as a DeSciX app.
 
 Options:
 1. Run `descix init` to configure this folder as a new app
-2. Run `descix setup` to configure the entire workspace
+2. Run `descix mcp quickstart` to configure the entire workspace
 3. Check if this is the correct folder
 
 Which would you like to do?
@@ -366,7 +366,7 @@ Please check:
 
 ## Integration with Workflows
 
-### Before `descix update app`
+### Before `descix app sync-assets`
 
 Always run validation:
 1. Check `assets/` folder structure
@@ -374,14 +374,14 @@ Always run validation:
 3. Warn about missing icon
 4. Confirm app_description has meaningful content
 
-### Before `descix update kb`
+### Before `descix kb corpus sync`
 
 1. Check `kb/General/` exists
 2. Verify at least one document exists
 3. Warn if no README.md
 4. Report total document count and size
 
-### Before `descix update site`
+### Before `descix site upload`
 
 1. Check `site/` exists
 2. Verify either index.html or dist/index.html exists
