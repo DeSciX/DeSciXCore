@@ -4,6 +4,7 @@ import { Api } from '../util/api';
 import { useAppContext } from '../AppContext';
 import { DiscordSDK, DiscordSDKMock, patchUrlMappings } from '@discord/embedded-app-sdk';
 import ErrorBoundary from './ErrorBoundary';
+import { fetchAppBinding } from './appBinding';
 
 // Module-level flag for SYNCHRONOUS OAuth detection (prevents race condition)
 let oauthCallbackDetected = false;
@@ -214,9 +215,24 @@ const SdkInitializer = ({ children }) => {
         isSdkInitialized.current = true;
         console.log('SdkInitializer: Starting SDK initialization...');
 
-        // --- Standalone App Detection (Build-time constants from vite.config.js) ---
+        // --- Standalone App Detection ---
+        // SERVED binding first (AMB-1c): this origin tells the shell what it is,
+        // so one bundle boots as the store on descix.net and as this developer's
+        // app on localhost with no rebuild. `descix serve` fronts a shell that
+        // arrives PRE-BUILT from the cloud, so a build-time define can never
+        // reach it — the served binding is the only mechanism that works there.
+        const servedBinding = await fetchAppBinding();
+
+        // Build-time constants remain the source for apps that BUILD themselves
+        // standalone (DeSciX_Powch site/vite.config.js, the SDK demo). Migrating
+        // those to serve the binding instead is tracked as a scope extension;
+        // until they do, deleting this read would break their deployed PWAs.
         const buildTimeAppId = typeof __STANDALONE_APP_ID__ !== 'undefined' ? __STANDALONE_APP_ID__ : null;
         const buildTimeAppUrl = typeof __STANDALONE_APP_URL__ !== 'undefined' ? __STANDALONE_APP_URL__ : null;
+
+        const standaloneAppId = servedBinding?.appId || buildTimeAppId;
+        const standaloneAppUrl = servedBinding?.appUrl || buildTimeAppUrl;
+        const bindingSource = servedBinding ? `served (${servedBinding.source || 'binding'})` : 'build-time define';
 
         // --- Deep Link Detection ---
         const path = window.location.pathname;
@@ -233,19 +249,26 @@ const SdkInitializer = ({ children }) => {
             deepLinkData = { type: 'SAMPLE', route: sampleMatch[1] };
         }
 
-        if (buildTimeAppId) {
-            console.log(`[SdkInitializer] Booting in STANDALONE_APP mode for: ${buildTimeAppId}`);
+        if (standaloneAppId) {
+            console.log(`[SdkInitializer] Booting in STANDALONE_APP mode for: ${standaloneAppId} [${bindingSource}]`);
             const appUrl =
-              buildTimeAppUrl ||
-              (buildTimeAppId === 'powch' && typeof __POWCH_APP_URL__ !== 'undefined'
+              standaloneAppUrl ||
+              (standaloneAppId === 'powch' && typeof __POWCH_APP_URL__ !== 'undefined'
                 ? __POWCH_APP_URL__
                 : null) ||
-              (buildTimeAppId === 'powch' ? 'https://powch.descix.net/' : null);
+              (standaloneAppId === 'powch' ? 'https://powch.descix.net/' : null);
+            // The two guards that branch on standalone mode read a WINDOW global
+            // (AppData.isEmbedded, CodeSiteWidget.isPlatformApp). A Vite define
+            // substitutes the bare identifier and never a member expression, so
+            // window.__STANDALONE_APP_ID__ was never actually set by anyone and
+            // both guards were permanently false. Set it here, where the value is
+            // real at runtime, so they finally mean what they say.
+            if (typeof window !== 'undefined') window.__STANDALONE_APP_ID__ = standaloneAppId;
             setAppEvent({
                 type: AppContextEvent.SDK_READY,
                 payload: {
                     mode: 'STANDALONE_APP',
-                    appId: buildTimeAppId,
+                    appId: standaloneAppId,
                     url: appUrl,
                     deepLink: deepLinkData
                 }

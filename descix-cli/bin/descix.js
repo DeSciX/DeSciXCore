@@ -4982,6 +4982,7 @@ program
   .option('-p, --port <port>', 'Gateway port for this run (default: env.gateway.port, else 5173)')
   .option('-w, --workspace <path>', 'Workspace root override')
   .option('--site-url <url>', 'App Shell target for this run (default: env.siteUrl, a local platform site, else the API origin)')
+  .option('-a, --app <id>', 'App to serve standalone (default: detected from the directory you are standing in)')
   .action(async (options) => {
     try {
       const { runServe } = await import('../lib/commands/serve.js');
@@ -4992,6 +4993,7 @@ program
         port: options.port !== undefined ? parseInt(options.port, 10) : undefined,
         workspaceRoot: options.workspace || process.cwd(),
         siteUrl: options.siteUrl,
+        app: options.app,
       });
     } catch (error) {
       console.error(chalk.red('Gateway error:', error.message));
