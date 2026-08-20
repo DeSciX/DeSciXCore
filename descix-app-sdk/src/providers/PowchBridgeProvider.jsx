@@ -9,6 +9,7 @@
 
 import React, { useRef, useEffect, useMemo } from 'react';
 import { PowchBridgeClient } from '../util/PowchBridgeClient';
+import { requirePowchUrl } from '../powch/powchOrigin.js';
 import { Api } from '../util/api';
 
 export function usePowchBridge() {
@@ -22,9 +23,11 @@ export function PowchBridgeProvider({ children, config = {} }) {
   const bridgeRef = useRef(null);
   const [, forceUpdate] = React.useReducer((x) => x + 1, 0);
 
-  const bridgeUrl =
-    config.bridgeUrl ??
-    (typeof __POWCH_APP_URL__ !== 'undefined' ? __POWCH_APP_URL__ : 'https://powch.descix.net/');
+  // Explicit config wins, else the origin the build injected. The hardcoded PROD
+  // tail that stood here is DELETED, not reordered: a dev build quietly mounting
+  // the production wallet is a cross-environment leak on the one origin where
+  // passkeys are typed. See ../powch/powchOrigin.js.
+  const bridgeUrl = requirePowchUrl(config.bridgeUrl, 'PowchBridgeProvider');
 
   const bridge = useMemo(() => {
     const client = new PowchBridgeClient({

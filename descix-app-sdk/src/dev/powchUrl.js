@@ -23,7 +23,16 @@
  * required VITE_POWCH_APP_URL or a powch entry in the product MAP and never read
  * env.powchUrl at all. Two owners for one value is how the workspace key became
  * invisible to the shell (redteam G-10).
+ *
+ * This module answers the BUILD/DEV-time question ("what does this workspace
+ * say?"). The RUNTIME question ("what origin do I mount right now, or fail")
+ * belongs to ../powch/powchOrigin.js, whose app id and normalisation this
+ * consumes so the two can never disagree.
  */
+
+import { POWCH_APP_ID, normalizePowchUrl } from '../powch/powchOrigin.js';
+
+export { POWCH_APP_ID };
 
 /**
  * Resolve Powch's origin from workspace config.
@@ -36,10 +45,10 @@
  * @returns {string|null} Powch's origin with a trailing slash, or null if unknown
  */
 export function resolvePowchUrl(config, options = {}) {
-  if (options.override) return withSlash(options.override);
+  if (options.override) return normalizePowchUrl(options.override);
 
   const env = config?.env || {};
-  if (env.powchUrl) return withSlash(env.powchUrl);
+  if (env.powchUrl) return normalizePowchUrl(env.powchUrl);
 
   const powch = (Array.isArray(env.products) ? env.products : []).find((p) => p.appId === POWCH_APP_ID);
   if (powch?.site?.port) {
@@ -48,11 +57,4 @@ export function resolvePowchUrl(config, options = {}) {
     return `${proto}://localhost:${powch.site.port}/`;
   }
   return null;
-}
-
-/** The one app id that is an identity silo rather than a hosted app. */
-export const POWCH_APP_ID = 'powch';
-
-function withSlash(url) {
-  return url.endsWith('/') ? url : url + '/';
 }
