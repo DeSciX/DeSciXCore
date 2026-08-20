@@ -251,12 +251,16 @@ const SdkInitializer = ({ children }) => {
 
         if (standaloneAppId) {
             console.log(`[SdkInitializer] Booting in STANDALONE_APP mode for: ${standaloneAppId} [${bindingSource}]`);
+            // Powch's own standalone build knows where it lives via __POWCH_APP_URL__.
+            // The hardcoded 'https://powch.descix.net/' tail that stood here is
+            // DELETED: a dev build silently resolving the wallet to PRODUCTION is a
+            // cross-environment leak, and this value decides where passkeys are
+            // typed. Absent is better than plausible-and-wrong.
             const appUrl =
               standaloneAppUrl ||
               (standaloneAppId === 'powch' && typeof __POWCH_APP_URL__ !== 'undefined'
                 ? __POWCH_APP_URL__
-                : null) ||
-              (standaloneAppId === 'powch' ? 'https://powch.descix.net/' : null);
+                : null);
             // The two guards that branch on standalone mode read a WINDOW global
             // (AppData.isEmbedded, CodeSiteWidget.isPlatformApp). A Vite define
             // substitutes the bare identifier and never a member expression, so
