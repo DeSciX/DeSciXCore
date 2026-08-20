@@ -46,6 +46,24 @@ function ShellContent({ children }) {
   return <LoadingWidget />;
 }
 
+/**
+ * Powch's origin, or a loud failure. Never a guess: this value decides where a
+ * user's passkeys and wallet are entered, so a wrong-but-plausible answer is
+ * worse than no answer.
+ */
+function resolveBridgeUrl() {
+  if (typeof __POWCH_APP_URL__ !== 'undefined' && __POWCH_APP_URL__) return __POWCH_APP_URL__;
+  throw new Error(
+    '[AppShell] Powch origin is unknown, so the Powch bridge cannot be mounted.\n' +
+    '  Set it one of these ways:\n' +
+    '    - pass config.powch.bridgeUrl to AppShell, or\n' +
+    '    - define __POWCH_APP_URL__ at build time (descix serve and the shell build\n' +
+    '      both inject it from env.powchUrl / the powch product; see resolvePowchUrl).\n' +
+    '  There is deliberately no default: Powch holds passkeys and the wallet, and a\n' +
+    '  fallback origin would send them somewhere the developer did not choose.'
+  );
+}
+
 export default function AppShell({ appId, config = {}, children }) {
   const isIdentityProvider = appId === 'powch';
   const theme = config.theme ?? darkTheme;
@@ -53,11 +71,18 @@ export default function AppShell({ appId, config = {}, children }) {
   const powchProviderConfig = {
     ...(config.powch ?? {}),
     brand: config.powch?.brand ?? { name: 'DeSciX', logo: null },
-    // Use __POWCH_APP_URL__ if available (injected by descix-serve), otherwise fallback to workspace map or default
-    bridgeUrl: config.powch?.bridgeUrl ?? (
-      typeof __POWCH_APP_URL__ !== 'undefined' ? __POWCH_APP_URL__ : 
-      (typeof __WORKSPACE_PRODUCTS__ !== 'undefined' && __WORKSPACE_PRODUCTS__?.powch ? __WORKSPACE_PRODUCTS__.powch : 'https://powch.descix.net/')
-    ),
+    // Where Powch lives. Explicit config wins, else __POWCH_APP_URL__, which both
+    // the gateway and the shell's own build inject from ONE owner (resolvePowchUrl).
+    //
+    // The two fallbacks that stood here are DELETED, not reordered:
+    //   __WORKSPACE_PRODUCTS__.powch — that map is the SHELL-ORIGIN map. Reading
+    //     Powch out of it puts the wallet same-origin with every hosted app,
+    //     collapsing the one boundary the platform deliberately keeps.
+    //   'https://powch.descix.net/' — a hardcoded PROD origin reached from a dev
+    //     build is a silent cross-environment leak, and this value decides where
+    //     passkeys and a wallet are typed. A misconfiguration must fail, not
+    //     quietly point somewhere real.
+    bridgeUrl: config.powch?.bridgeUrl ?? resolveBridgeUrl(),
   };
 
   const innerContent = (

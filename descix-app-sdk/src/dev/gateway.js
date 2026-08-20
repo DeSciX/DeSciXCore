@@ -30,6 +30,7 @@ import { resolveGatewayTargets, proxyEntry, isLocalOrigin } from './resolveGatew
 import { resolveGatewayPort, portInUseMessage } from './gatewayPort.js';
 import { assertVitePin } from './vitePin.js';
 import { resolveServeBinding, appBindingPlugin, APP_BINDING_PATH } from './serveBinding.js';
+import { resolvePowchUrl } from './powchUrl.js';
 
 /**
  * Find the workspace root by walking up from startDir looking for .descix/workspace.json.
@@ -76,16 +77,8 @@ function certOptions(config, workspaceRoot) {
  * that origin and these defines are inert.
  */
 function buildDefines(config, workspaceRoot, targets) {
-  const env = config.env || {};
-
-  // Powch URL: env.powchUrl > auto-discover from env.products[]
-  let powchAppUrl = env.powchUrl ?? null;
-  if (!powchAppUrl && Array.isArray(env.products)) {
-    const powchProduct = env.products.find(p => p.appId === 'powch');
-    if (powchProduct?.site?.port) {
-      powchAppUrl = `https://localhost:${powchProduct.site.port}/`;
-    }
-  }
+  // Powch URL — ONE owner, shared with the shell's own build (see powchUrl.js).
+  const powchAppUrl = resolvePowchUrl(config);
   if (!powchAppUrl && isLocalOrigin(targets.siteUrl)) {
     // Only meaningful for a locally-built shell; a remote shell carries its own.
     console.warn('[Gateway] No Powch URL found in workspace config. Powch integration will not work.');

@@ -20,6 +20,7 @@
 import fs from 'fs';
 import path from 'path';
 import { resolveGatewayPort } from './gatewayPort.js';
+import { POWCH_APP_ID } from './powchUrl.js';
 
 /**
  * The local gateway origin. ONE owner of the shape, so the map and
@@ -66,6 +67,12 @@ export function buildWorkspaceProducts(workspaceRoot) {
   if (Array.isArray(ws.env?.products)) {
     for (const p of ws.env.products) {
       if (!p.appId) continue;
+      // Powch is NOT a hosted app and must never appear here. This map is the
+      // shell-origin map — everything in it is same-origin with the shell by
+      // design. Powch is the ZK-SSO identity silo and is CROSS-origin by design:
+      // same-origin would let every hosted app read its DOM and memory through
+      // the same reach SplitView uses. Its location has one owner, resolvePowchUrl.
+      if (p.appId === POWCH_APP_ID) continue;
       if (p.site?.port || p.site?.static) {
         products[p.appId] = gatewayProductUrl(gatewayPort, p.appId);
       }

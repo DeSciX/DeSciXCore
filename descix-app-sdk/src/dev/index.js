@@ -31,3 +31,4 @@ export {
 export { buildWorkspaceProducts, resolveAppGatewayUrl } from './workspaceProducts.js';
 export { workspaceProductsPlugin, WORKSPACE_PRODUCTS_VIRTUAL_ID, WORKSPACE_PRODUCTS_HMR_EVENT } from './workspaceProductsPlugin.js';
 export { resolveServeBinding, appBindingPlugin, bindableApps, detectAppFromCwd, APP_BINDING_PATH } from './serveBinding.js';
+export { resolvePowchUrl, POWCH_APP_ID } from './powchUrl.js';
