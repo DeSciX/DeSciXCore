@@ -33,6 +33,7 @@ import { useNetworkLoading } from '../util/NetworkAPI';
 import { NetworkLoadingType, makeCommandRequestJSON, AppData, ProductTypes } from '../util/AppData';
 import { Api } from '../util/api';
 import { usePowchBridge } from '../providers/PowchBridgeProvider';
+import { normalizeContribution, composeTurnInput } from '../util/chatIngress';
 
 const messages = ["searching knowledgebase", "running analytics"];
 
@@ -397,6 +398,12 @@ const ChatWidget = (props = {}) => {
     // widget falls back to the in-shell Powch bridge (usePowchBridge().login — the
     // PWA/SignInButton pattern, which requires a registered Powch iframe).
     onRequestLogin,
+    // WS-B8: the host's handle on THE chat ingress. A React ref object; this
+    // widget assigns { contribute } onto it. The host (CodeSiteWidget) calls
+    // ingressRef.current.contribute(bag) to put an action result — and, once
+    // ws-chat-multimodal-image-attach lands, an image — into the conversation.
+    // Absent for chats with no external contributors.
+    ingressRef,
   } = props;
 
   const useStreaming = true;
@@ -422,6 +429,9 @@ const ChatWidget = (props = {}) => {
 
   // Chat state
   const [message, setMessage] = useState('');
+  // WS-B8: external contributions staged on the composer, waiting to ride into the
+  // next submitted turn. See util/chatIngress.js for the contract.
+  const [pendingContributions, setPendingContributions] = useState([]);
   const [selectedDocIds, setSelectedDocIds] = useState([]);
   const [sourcesModalOpen, setSourcesModalOpen] = useState(false);
   const [availableSources, setAvailableSources] = useState([]);
@@ -1019,38 +1029,54 @@ const ChatWidget = (props = {}) => {
     setSnackbar({ open: true, message: 'Chat deleted' });
   }, [communityId, appId]);
 
-  // Submit message
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  /**
+   * submitTurn — THE transport. One place builds the params, appends the turn to
+   * the thread, makes the metered call, and folds the answer back in.
+   *
+   * `typedText` is whatever the human typed (may be empty when a contribution is
+   * self-sending). `contributions` are normalized external-contribution bags from
+   * the chat ingress (see util/chatIngress.js) — they are composed INTO the same
+   * user_input, so there is exactly one shape of turn on the wire.
+   */
+  const submitTurn = async ({ typedText = '', contributions = [] } = {}) => {
     if (!selectedApp || !activeThread) return;
+    const composedInput = composeTurnInput(contributions, typedText);
+    // Nothing to say and nothing attached — not a turn.
+    if (!composedInput.trim()) return;
 
     setNetworkLoading(NetworkLoadingType.GET_AI_RESPONSE, true, 'Fetching AI response...');
     try {
-      const params = { 
-        community_id: communityId, 
-        user_input: message,
-        app_id: appId, 
+      const params = {
+        community_id: communityId,
+        user_input: composedInput,
+        app_id: appId,
         streaming: useStreaming,
         previous_interaction_id: activeThread.interaction_id,
         doc_ids: selectedDocIds,
         ipdoc_file_id: ipdocFileId || (selectedCommunity?.googleDocId || null)
       };
-      
+
       setSelectedDocIds([]);
       const newMessageId = `msg_${Date.now()}`;
-      const newMessage = { 
-        id: newMessageId, 
-        question: message, 
-        answer: '', 
-        sources: [], 
+      const newMessage = {
+        id: newMessageId,
+        // The transcript shows exactly what the model was given, so an action
+        // result is VISIBLE to the user (WS-B8: Maxi must SEE his results).
+        question: composedInput,
+        answer: '',
+        sources: [],
         checked: false,
+        // Provenance for rendering: which parts of this turn came from outside
+        // the composer. Empty for an ordinary typed turn.
+        contributions,
         timestamp: new Date().toISOString()
       };
-      
-      updateActiveThread({ 
-        messages: [...activeThread.messages, newMessage] 
+
+      updateActiveThread({
+        messages: [...activeThread.messages, newMessage]
       });
       setMessage('');
+      setPendingContributions([]);
 
       if (useStreaming) {
         const streamGenerator = await makeCommandRequestJSON('ask_question_to_app', params);
@@ -1179,6 +1205,54 @@ const ChatWidget = (props = {}) => {
       setNetworkLoading(NetworkLoadingType.GET_AI_RESPONSE, false);
     }
   };
+
+  // Live refs: `contribute` is referentially stable (the host holds it across
+  // renders) but must always see CURRENT state. Assigned every render.
+  const submitTurnRef = useRef(submitTurn);
+  submitTurnRef.current = submitTurn;
+  const pendingContributionsRef = useRef(pendingContributions);
+  pendingContributionsRef.current = pendingContributions;
+
+  // The composer's submit: the human's typed text plus anything staged on it.
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    await submitTurn({ typedText: message, contributions: pendingContributions });
+  };
+
+  /**
+   * contribute — THE chat ingress (WS-B8).
+   *
+   * The ONLY way content enters this conversation from outside the composer.
+   * CodeSite action results use it today; ws-chat-multimodal-image-attach plugs
+   * image attachments into this same handle with disposition 'stage'. Do not add
+   * a second path.
+   *
+   * @param {object} partial - an external-contribution bag (see util/chatIngress.js).
+   *   Normalized (and FAIL-LOUD validated) here; the size policy has already been
+   *   applied by the builder that produced it.
+   */
+  const contribute = useCallback(async (partial) => {
+    const contribution = normalizeContribution(partial);
+    if (contribution.disposition === 'send') {
+      // Flush anything already staged along with it — one turn, in arrival order.
+      const batch = [...pendingContributionsRef.current, contribution];
+      // Via ref: `contribute` must stay referentially stable for the host's ref
+      // handle, but must always run the CURRENT submitTurn (which closes over
+      // activeThread/message state that changes every render).
+      await submitTurnRef.current({ typedText: '', contributions: batch });
+      return contribution;
+    }
+    setPendingContributions((prev) => [...prev, contribution]);
+    return contribution;
+  }, []);
+
+  // Publish the ingress handle to the host (CodeSiteWidget). A ref object is the
+  // contract: the host calls ingressRef.current.contribute(bag).
+  useEffect(() => {
+    if (!ingressRef) return;
+    ingressRef.current = { contribute };
+    return () => { if (ingressRef.current?.contribute === contribute) ingressRef.current = null; };
+  }, [ingressRef, contribute]);
 
   const handleChatWithSources = (sources) => {
     setAvailableSources(sources);
@@ -1531,6 +1605,23 @@ const ChatWidget = (props = {}) => {
 
       {/* Input area */}
       <Box component="form" onSubmit={handleSubmit} sx={{ padding: 2, borderTop: '1px solid #ccc' }}>
+        {/* WS-B8: external contributions staged on the composer (CodeSite action
+            results with disposition 'stage'; image attachments once
+            ws-chat-multimodal-image-attach lands). They ride into the next turn. */}
+        {pendingContributions.length > 0 && (
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mb: 1 }} data-testid="chat-pending-contributions">
+            {pendingContributions.map((c, idx) => (
+              <Chip
+                key={`${c.contributed_at}-${idx}`}
+                size="small"
+                color={c.kind === 'action_error' ? 'error' : 'info'}
+                data-testid={`chat-contribution-${c.kind}`}
+                label={`${c.label}${c.truncated ? ` (truncated ${c.omittedChars} chars)` : ''}`}
+                onDelete={() => setPendingContributions((prev) => prev.filter((_, i) => i !== idx))}
+              />
+            ))}
+          </Box>
+        )}
         {loadingState.loading ? (
           <ActivityIndicator messages={messages} />
         ) : (
