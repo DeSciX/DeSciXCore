@@ -179,3 +179,80 @@ test('anti-drift: the ask/query tools disclose each other\'s parameter naming', 
     // and the alias table must carry the mapping the messages promise
     assert.ok(PARAM_ALIASES.kb_id.includes('knowledgebase_name'));
 });
+
+/**
+ * THE file_filter regression (MEMORIES red-team 2026-08-20, DEVPLANE triage).
+ *
+ * query_knowledge_base's own description said "Scope to a single source with file_filter",
+ * the setup playbook told callers to pass it, and the handler destructured and honored it
+ * (ragCommands.js `const { app_id, query, limit, file_filter } = params` -> queryRAG) — but the
+ * schema never declared it. Strict validation therefore rejected -32602 a caller who followed
+ * the tool's own instructions, on BOTH doors (tools/call and the execute_remote_command
+ * gateway; they validate against the same commandMeta, which derives from this list).
+ *
+ * Worse, the PLATFORM emits it: every citation carries a read_command of the shape
+ * { command: 'query_knowledge_base', params: { ..., file_filter: file_id } }
+ * (ipStorageUtils.js buildRetrievableCitations), so the platform was handing agents a
+ * dereference command its own validator refused.
+ */
+test('query_knowledge_base declares every param its handler honors', () => {
+    const qkbSchema = NATIVE_MCP_TOOLS.find(t => t.name === 'query_knowledge_base').inputSchema;
+    const props = Object.keys(qkbSchema.properties);
+    for (const p of [
+        // destructured by the handler (ragCommands.js query_knowledge_base)
+        'app_id', 'query', 'limit', 'file_filter',
+        // KB scoping, resolved via resolveKbNameScope
+        'kb_id', 'kb_ids',
+    ]) {
+        assert.ok(props.includes(p), `query_knowledge_base schema is missing '${p}' — the handler reads it, so a caller passing it would be wrongly rejected`);
+    }
+});
+
+test('the citation read_command shape validates against the schema it targets', () => {
+    // The exact params the platform puts on a citation's read_command. If this throws, the
+    // platform is emitting a dereference command its own gateway rejects.
+    assert.doesNotThrow(() => validateToolParams(NATIVE_MCP_TOOLS, 'query_knowledge_base', {
+        app_id: 'egpt-frqtl', kb_id: 'General', query: '<your question>', file_filter: 'corpus:3e1d5aa3',
+    }, { surface: 'citation read_command' }));
+});
+
+/**
+ * CLASS GUARD — a tool may not DOCUMENT a parameter it does not DECLARE.
+ *
+ * This is the general form of the file_filter bug: prose and schema drifted, and strict
+ * validation turned the drift from "silently ignored" into "rejected outright". Driven off the
+ * exported list, so it covers tools that do not exist yet.
+ *
+ * Descriptions legitimately name three kinds of snake_case identifier that are NOT input params
+ * of the tool being described: other tools' names, remote command names reachable through
+ * execute_remote_command, and RESPONSE fields the caller reads back. The third kind is the only
+ * one needing a list, and it is a named category — not a junk drawer. Adding an entry is a claim
+ * that the identifier is something the caller RECEIVES, never something it PASSES.
+ */
+const NON_PARAM_IDENTIFIERS = new Set([
+    // response fields
+    'ai_credits', 'amount_usd', 'daily_free_credit_available_today', 'daily_free_credit_usd',
+    'purchase_type', 'interaction_id', 'created_at', 'received_at', 'chunk_idx',
+    'current_holder_hint', 'agent_hint',
+    // commands reached through execute_remote_command, not native tools
+    'beast_get_dashboard', 'create_stripe_checkout_session', 'fetch_my_purchases',
+]);
+
+test('class guard: no tool documents a parameter it does not declare', () => {
+    const toolNames = new Set(NATIVE_MCP_TOOLS.map(t => t.name));
+    const declaredAnywhere = new Set(
+        NATIVE_MCP_TOOLS.flatMap(t => Object.keys(t.inputSchema?.properties || {})),
+    );
+    for (const tool of NATIVE_MCP_TOOLS) {
+        const identifiers = new Set((tool.description || '').match(/\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/g) || []);
+        for (const id of identifiers) {
+            if (toolNames.has(id) || declaredAnywhere.has(id) || NON_PARAM_IDENTIFIERS.has(id)) continue;
+            assert.fail(
+                `${tool.name}'s description names '${id}', which no native tool declares as a parameter. ` +
+                `Either declare it in ${tool.name}.inputSchema.properties, or — if it is a response field ` +
+                `or a remote command name — add it to NON_PARAM_IDENTIFIERS. Documenting a param the ` +
+                `schema omits makes strict validation reject a caller who followed the instructions.`,
+            );
+        }
+    }
+});
