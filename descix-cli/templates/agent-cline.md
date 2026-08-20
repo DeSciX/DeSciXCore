@@ -25,7 +25,8 @@ If it does:
 4. If `kb_ready` is true, skip KB setup and demonstrate value immediately:
    `descix chat -a <app_id> "What is this about?"` — show the user what the AI knows
 5. If `kb_ready` is false, skip the chat demo — the KB is not populated yet.
-   Proceed to setup (`descix init`, `app init`, `update kb`), then demo afterward.
+   Proceed to setup (`descix init`, `app init`, then a KB manifest + `kb corpus sync` —
+   see "KB sync is manifest-driven" below), then demo afterward.
    Frame it as: "Let's get this set up so you can start exploring."
 6. If `has_repo` is true and no source code is present locally, offer `descix clone -a <app_id>`.
    For non-technical users (infer from `agent_hint`): "Want to run this on your own machine?"
@@ -73,14 +74,50 @@ descix app init -a <app> -c <community>    # register app on platform
 Always use `-c <community> -a <app>` for all commands until verified:
 ```bash
 descix chat -c <community> -a <app> -q "..."
-descix update kb -c <community> -a <app>
+descix kb corpus sync -c <community> -a <app> -k <KB>
 ```
 
 ## Success Criteria
 
 - App visible in `descix app list`
-- KB sync succeeds: `descix update kb -c <community> -a <app>`
+- Dry-run walks the expected files: `descix kb corpus sync ... --dry-run --show-walk`
+- KB sync succeeds with a non-zero chunk count: `descix kb corpus sync -c <community> -a <app> -k <KB>`
 - Chat returns response: `descix chat -c <community> -a <app> -q "test"`
+
+## KB sync is manifest-driven
+
+`descix kb corpus sync` is the KB sync. It is **git-aware**: it walks the sources named in a
+manifest, resolves them at a git ref, and upserts only what changed, purging stale chunks in the
+same pass.
+
+**The manifest is a precondition, not an optimisation — no manifest means nothing to sync.** It
+lives at `<localPath>/.descix/manifests/<KB-name>.json`, where `<localPath>` is the product's
+`localPath` in `workspace.json`. That directory holds manifests only; it is not where
+`workspace.json` lives. Minimal shape:
+
+```json
+{
+  "kb_name": "General",
+  "sync_mode": "local",
+  "sources": [
+    { "path": "docs", "ref": "main", "tier": 1, "doc_type": "documentation", "syncignore": ["node_modules/"] }
+  ]
+}
+```
+
+**Check before you write.** `--dry-run` enumerates would-be upserts and purges with no writes at
+all (exit 0 = no drift, exit 1 = drift); `--show-walk` prints the resolved ref and the walked
+files. Run the dry-run first, confirm the file count is what you expect, then sync:
+
+```bash
+descix kb corpus sync -c <community> -a <app> -k <KB> --dry-run --show-walk
+descix kb corpus sync -c <community> -a <app> -k <KB>
+descix kb corpus status -c <community> -a <app>
+```
+
+`descix update kb`, `descix kb chunk` and `descix kb sync` still run, but each names
+`kb corpus sync` as its replacement in its own `--help` and is slated for removal. Do not put
+them in new instructions.
 
 ## Local Development
 
