@@ -6,6 +6,8 @@
  * If running inside the DeSciX App Shell, it delegates to the Shell's bridge instead of creating an iframe.
  */
 
+import { requirePowchUrl } from './powchOrigin.js';
+
 export class PowchClient {
   constructor(config = {}) {
     this.handlers = {};
@@ -27,7 +29,10 @@ export class PowchClient {
     } else {
       // 2. Standalone Mode (Legacy/Dev)
       console.log('[PowchClient] Running in Standalone Mode (No Shell Bridge), Bridge URL: ', config.bridgeUrl);
-      this.bridgeUrl = config.bridgeUrl || 'https://powch.descix.net/';
+      // Standalone hosts (frqtl.com, the splitview harness, third-party sites)
+      // reach us here. They pass bridgeUrl explicitly; if they forget, they hear
+      // about it rather than silently loading the production wallet.
+      this.bridgeUrl = requirePowchUrl(config.bridgeUrl, 'PowchClient');
       this.container = config.container || document.body;
       this.origin = new URL(this.bridgeUrl).origin;
       this.iframe = null;

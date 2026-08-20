@@ -1,22 +1,42 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import { buildWorkspaceProducts, getViteHttpsConfig } from '@descix/app-sdk/dev';
+import fs from 'fs';
+import { buildWorkspaceProducts, getViteHttpsConfig, resolvePowchUrl } from '@descix/app-sdk/dev';
 
 const __dirname = path.dirname(new URL(import.meta.url).pathname);
 
 // Workspace root (Unkamon/) — four levels up from descix-app-sdk/demo.
 const workspaceRoot = path.resolve(__dirname, '../../../..');
 
-// Canonical product map (same helper the platform PWA vite config uses) — gives us the
-// REAL local Powch origin for the login iframe instead of a hardcoded deployed URL.
+// Canonical product map (same helper the platform PWA vite config uses).
 let workspaceProducts = null;
 try {
   workspaceProducts = buildWorkspaceProducts(workspaceRoot);
 } catch (e) {
   console.warn('[splitview-harness] buildWorkspaceProducts failed:', e.message);
 }
-const powchAppUrl = workspaceProducts?.powch || 'https://localhost:5175/';
+
+// Where Powch lives has ONE owner (resolvePowchUrl), and it is deliberately NOT
+// workspaceProducts: that map is the SHELL-ORIGIN map and Powch is cross-origin by
+// design, so `workspaceProducts.powch` is always undefined — reading it here only
+// ever reached the hardcoded fallback underneath, which is how a harness silently
+// points the wallet somewhere nobody configured.
+let ws = null;
+try {
+  ws = JSON.parse(fs.readFileSync(path.join(workspaceRoot, '.descix/workspace.json'), 'utf8'));
+} catch (e) {
+  console.warn('[splitview-harness] could not read .descix/workspace.json:', e.message);
+}
+const powchAppUrl = resolvePowchUrl(ws, { override: process.env.VITE_POWCH_APP_URL });
+if (!powchAppUrl) {
+  throw new Error(
+    "[splitview-harness] Powch's origin is unknown, and this harness delegates WebAuthn\n" +
+    '  to that exact origin — a guessed value would hand passkey ceremonies to the wrong\n' +
+    '  environment. Set env.powchUrl in .descix/workspace.json, run Powch as a workspace\n' +
+    '  product (appId "powch" with a site.port), or set VITE_POWCH_APP_URL.'
+  );
+}
 const powchOriginForPolicy = new URL(powchAppUrl).origin;
 
 // HTTPS is MANDATORY (WebAuthn secure context) — the standalone-host trap: a plain-HTTP

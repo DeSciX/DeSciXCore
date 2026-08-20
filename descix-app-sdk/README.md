@@ -56,7 +56,10 @@ The shell handles init, auth, and providers. When `appState === READY`, it rende
 ```js
 import { PowchClient } from '@descix/app-sdk/powch-client';
 
-const powch = new PowchClient({ bridgeUrl: 'https://powch.descix.net/' });
+// bridgeUrl is REQUIRED and has no default. It decides where your users type a
+// passkey and unlock a wallet, so the SDK will not guess it — an unset origin
+// throws with the ways to set it. Point it at the environment you mean.
+const powch = new PowchClient({ bridgeUrl: import.meta.env.VITE_POWCH_APP_URL });
 powch.createButton(document.getElementById('powch-button'), { toggle: true });
 ```
 
@@ -142,16 +145,27 @@ Any cert without a localhost `subjectAltName` is rejected at startup with the ex
 ### Vite config for an app dev server
 
 ```js
-import { createViteServerConfig } from '@descix/app-sdk/dev';
+import fs from 'fs';
+import { createViteServerConfig, resolvePowchUrl } from '@descix/app-sdk/dev';
+
+// Where Powch lives has ONE owner. Never hardcode an origin here: a production
+// URL baked into a dev build silently points the wallet at production.
+const ws = JSON.parse(fs.readFileSync('.descix/workspace.json', 'utf8'));
+const powchAppUrl = resolvePowchUrl(ws, { override: process.env.VITE_POWCH_APP_URL });
+if (!powchAppUrl) {
+  throw new Error('Set env.powchUrl in .descix/workspace.json, or VITE_POWCH_APP_URL');
+}
 
 export default defineConfig({
   server: createViteServerConfig(process.cwd(), { port: 5174 }),  // API target resolved as above
   define: {
-    __STANDALONE_APP_ID__: JSON.stringify('powch'),
-    __POWCH_APP_URL__: JSON.stringify('https://powch.descix.net/'),
+    __POWCH_APP_URL__: JSON.stringify(powchAppUrl),
   },
 });
 ```
+
+An app declares itself standalone at its `<AppShell standalone />` mount, not through
+a build-time global.
 
 ## References
 
