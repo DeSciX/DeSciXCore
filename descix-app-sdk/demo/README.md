@@ -2,12 +2,17 @@
 
 > **THE canonical MVP dogfood demo is `daita-splitviewdemo`** — a self-contained static
 > sub-PWA (`Unkamon/apps/daita-splitviewdemo/site/`, egpt/scaffold pattern: no build
-> step) delivered into the PLATFORM SHELL's CodeSite iframe. Open the platform at the
-> gateway (`https://localhost:5173`), sign in with Powch, and launch **SplitViewDemo**:
-> the shell provides the chrome (TopNavBar login/logout), the Powch identity sidebar,
-> the credits-aware chat pane (right) and the CodeSite panel (left); the sub-PWA
-> scripts to the shell via the same-origin `window.top.DeSciX` bridge and registers
-> `window.DeSciX_Actions.ide_set_status` for AI-chat action blocks.
+> step) delivered into an App Shell CodeSite iframe. The sub-PWA scripts to the shell
+> via the same-origin `window.parent.DeSciX` bridge, chooses its layout with
+> `DeSciX.view.set(...)`, and registers `window.DeSciX_Actions.ide_set_status` for
+> AI-chat action blocks. The shell supplies the Powch identity sidebar and the
+> credits-aware chat pane.
+>
+> **Where to look at it.** `descix serve` boots the shell **standalone into one app**
+> with no store chrome, so there is no store view to browse from the gateway — run it
+> from the demo app's directory (or `--app daita-splitviewdemo`) and you land straight
+> in it. To exercise the store chrome (TopNavBar login/logout, app store, my-apps),
+> use a deployed shell such as `https://dev.descix.net`.
 > Lifecycle proof: `DeSciX/tests/playwright/smoke/a4-splitview-powch-login.spec.ts`.
 
 This directory keeps two SECONDARY component harnesses:

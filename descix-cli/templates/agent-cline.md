@@ -88,10 +88,19 @@ descix update kb -c <community> -a <app>
 |------|---------|
 | Serve `site/` locally | `npx serve site/` or `python3 -m http.server -d site/` on any port |
 | Register port with DeSciX | `descix site servelocal <port> -c <community> -a <app>` |
-| Run full gateway (multi-app) | `descix serve` (reverse proxy on :5173) |
+| Run your app on the DeSciX gateway | `cd <app dir> && descix serve` — one HTTPS origin, your app **standalone**, no store chrome |
 
-Single-app dev: a static server is sufficient. Gateway is for multi-app or
-platform routing tests.
+A plain static server is enough to look at your HTML. `descix serve` is what you
+want as soon as the app needs the platform: it puts the App Shell, your app and
+`/apifront` on ONE HTTPS origin, which is what makes shell sign-in visible to
+your app and passkeys work at all.
+
+It serves exactly ONE app, standalone — detected from the directory you are
+standing in, or named with `--app <id>`. There is no store chrome under
+`descix serve`, and it starts nothing else (no backend, no dev server). The port
+resolves `--port` > `env.gateway.port` > 5173 and is printed with its source, so
+never hardcode `:5173`. Set your framework's base path to `/p/<appId>` — the
+gateway does not rewrite paths.
 
 ## MCP Tools
 
