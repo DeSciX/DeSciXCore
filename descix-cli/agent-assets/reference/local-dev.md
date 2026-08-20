@@ -122,6 +122,28 @@ files. `descix kb corpus status` shows files, chunks, last sync and resolved ref
 duplicates** — each names `kb corpus sync` as its replacement in its own `--help` and is slated
 for removal. Do not put them in new instructions.
 
+#### What you put in a KB changes what comes out of it
+
+Retrieval is **vocabulary-dominated**, and when it goes wrong it does so silently. Measured against
+a live KB of primary papers: a domain-plausible paraphrase of a paper's thesis returned a *sibling*
+paper at 0.469 and never surfaced the correct one at all; rephrasing the same question in the
+paper's own wording returned it at 0.575. Same KB, same document, correctly indexed the whole time.
+
+Neither failure looked like a failure. Both returned confident, on-topic prose scoring in the same
+0.45–0.58 band as the right answer, so nothing in the response told the caller they had the wrong
+document.
+
+For callers:
+- Phrase queries in the **source's own vocabulary**; quote a distinctive phrase where you can.
+- Never treat rank-1 as authoritative alone. Pull `limit >= 3` and **check `fileName`**.
+- A confident, well-scored answer is not evidence the right document was retrieved. Verify by
+  **document identity**, not by score.
+
+For curators, which is the part that bites: **mixing overview or summary documents into a KB with
+the primary sources they describe systematically shadows those primaries.** Overviews are written in
+general vocabulary, so they match paraphrases *better* than the specific documents they summarise —
+the survey outranks the paper for exactly the reader who does not yet know the paper's terms.
+
 ### 3.2. Target resolution (one owner, explicit-first)
 
 | Target | 1. flag | 2. workspace | 3. derived | 4. default |
@@ -159,3 +181,31 @@ The derived Shell rule is the important one: point the API at a cloud environmen
 `.descix/workspace.json` is gitignored, so no worktree has one. The gateway walks **up** from cwd to find it, so an in-repo worktree silently inherits the **main checkout's** workspace — its port, its products, its `localPath`s. Copying the file into a worktree does not help: a saved workspace bakes an absolute `workspaceRoot` and prefers it over the discovered root, pointing back at the original checkout. Out-of-repo worktrees fail earlier and more confusingly: a credential-loading command reports **"Authentication required… Run: descix login"** when the real cause is a missing workspace file.
 
 Rules of thumb: run the CLI from the canonical checkout, and treat an auth error raised from a worktree as a workspace-resolution suspect *before* re-authenticating.
+
+### The SDK you edit is not always the SDK you serve
+
+A second, sharper worktree trap, and it is silent. `DeSciX_Cloud/site/node_modules/@descix/app-sdk`
+is a **symlink into the canonical Core checkout**:
+
+```
+$ readlink DeSciX_Cloud/site/node_modules/@descix/app-sdk
+../../../../DeSciX_Core/descix-app-sdk
+```
+
+and `@descix/app-sdk` has **no build step** — its `main` and its `.` export both point straight at
+`./src/index.js`, so Vite serves the package source as-is. Put those two facts together: **`descix
+serve` serves whatever the CANONICAL Core working tree contains**, no matter which worktree you are
+editing in. Change `app-sdk` on a branch, reload, and you are still running canonical `main` — your
+edit is not in the page, nothing errors, and the obvious conclusion ("my change had no effect") is
+wrong.
+
+Verify what is actually being served before you conclude anything about a change:
+
+```bash
+readlink DeSciX_Cloud/site/node_modules/@descix/app-sdk       # where the symlink points
+node -p "require.resolve('@descix/app-sdk')"                  # from the site directory
+```
+
+If it resolves to the canonical checkout and you are editing elsewhere, you are measuring the wrong
+tree. Re-point the symlink at your worktree for the measurement **and restore it afterwards** — it
+is untracked, so nothing will remind you.
