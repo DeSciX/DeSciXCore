@@ -516,6 +516,57 @@ export class WorkspaceConfig {
   };
 
   /**
+   * Set a WORKSPACE-LEVEL env key (env.gateway.port, env.devCerts, env.powchUrl,
+   * env.siteUrl) — the keys that describe the workspace itself rather than one app.
+   *
+   * These all previously had NO CLI verb, so the only way to set them was to hand-edit
+   * .descix/workspace.json (redteam G-6). Hand-editing a generated file is how the
+   * shape drifts and how a developer ends up debugging their own typo, which is the
+   * opposite of "it should all just work".
+   *
+   * Pass null to REMOVE a key; empty parent objects are cleaned up so the file never
+   * accumulates `"devCerts": {}` noise.
+   *
+   * @param {string} dottedKey - one of: gateway.port | devCerts.dir | devCerts.cert | devCerts.key | powchUrl | siteUrl
+   * @param {string|number|null} value
+   * @returns {Promise<string>} Path to saved config (from save())
+   */
+  async setEnvKey(dottedKey, value) {
+    const ALLOWED = ['gateway.port', 'devCerts.dir', 'devCerts.cert', 'devCerts.key', 'powchUrl', 'siteUrl'];
+    if (!ALLOWED.includes(dottedKey)) {
+      throw new Error(
+        `"${dottedKey}" is not a workspace-level env key.\n` +
+        `  Settable here: ${ALLOWED.join(', ')}\n` +
+        '  Per-app keys have their own verbs: descix app set-site / set-port / set-localpath.'
+      );
+    }
+
+    if (!this.env) this.env = {};
+    const parts = dottedKey.split('.');
+
+    if (value === null || value === undefined) {
+      if (parts.length === 1) {
+        delete this.env[parts[0]];
+      } else {
+        const parent = this.env[parts[0]];
+        if (parent) {
+          delete parent[parts[1]];
+          if (Object.keys(parent).length === 0) delete this.env[parts[0]];
+        }
+      }
+      return this.save();
+    }
+
+    if (parts.length === 1) {
+      this.env[parts[0]] = value;
+    } else {
+      if (!this.env[parts[0]]) this.env[parts[0]] = {};
+      this.env[parts[0]][parts[1]] = value;
+    }
+    return this.save();
+  }
+
+  /**
    * Update an app's site.port in env.products[] (or env.platform if it is the platform app).
    *
    * Pass `null` to remove site.port; if site.{} becomes empty, site.{} is also deleted.

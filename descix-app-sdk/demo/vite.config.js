@@ -45,7 +45,9 @@ export default defineConfig({
     },
   },
   define: {
-    __STANDALONE_APP_ID__: JSON.stringify('demo'),
+    // No __STANDALONE_APP_ID__: each entry declares itself at its own AppShell
+    // mount. One define could only ever name ONE app, so splitview.jsx (which is
+    // descix-docs) was booting as 'demo'.
     __POWCH_APP_URL__: JSON.stringify(powchAppUrl),
     __API_GATEWAY_URL__: JSON.stringify('https://localhost:4000'),
     __WORKSPACE_PRODUCTS__: JSON.stringify(workspaceProducts),

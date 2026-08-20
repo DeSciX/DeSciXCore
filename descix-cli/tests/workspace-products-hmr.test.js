@@ -29,6 +29,8 @@ import {
   workspaceProductsPlugin,
   WORKSPACE_PRODUCTS_VIRTUAL_ID,
   WORKSPACE_PRODUCTS_HMR_EVENT,
+  buildWorkspaceProducts,
+  createViteProxyConfig,
 } from '@descix/app-sdk/dev';
 
 async function makeTempWorkspace(t, env) {
@@ -97,6 +99,7 @@ test('workspaceProductsPlugin — pushes a live HMR update when a product site i
   const plugin = workspaceProductsPlugin(wsRoot, { debounceMs: 30 });
   const server = makeFakeServer();
   plugin.configureServer(server);
+  t.after(() => server.httpServer.emit('close'));
 
   // Now ADD a product with a static site (what `descix app set-site` would do).
   await writeWorkspace(wsRoot, {
@@ -118,8 +121,6 @@ test('workspaceProductsPlugin — pushes a live HMR update when a product site i
     'newly-added static product must appear in the pushed map at the gateway route'
   );
 
-  // Cleanup the watcher.
-  server.httpServer.emit('close');
 });
 
 test('workspaceProductsPlugin — does NOT push when the change does not alter the product map', async (t) => {
@@ -131,6 +132,7 @@ test('workspaceProductsPlugin — does NOT push when the change does not alter t
   const plugin = workspaceProductsPlugin(wsRoot, { debounceMs: 30 });
   const server = makeFakeServer();
   plugin.configureServer(server);
+  t.after(() => server.httpServer.emit('close'));
 
   // Rewrite the SAME product map (add an unrelated, non-product field).
   await writeWorkspace(wsRoot, {
@@ -143,11 +145,18 @@ test('workspaceProductsPlugin — does NOT push when the change does not alter t
   await new Promise((r) => setTimeout(r, 300));
   const pushed = server.sent.filter((m) => m.event === WORKSPACE_PRODUCTS_HMR_EVENT);
   assert.equal(pushed.length, 0, 'no HMR push when the resolved product map is unchanged');
-
-  server.httpServer.emit('close');
 });
 
-test('workspaceProductsPlugin — pushes update when a product site PORT changes', async (t) => {
+test('workspaceProductsPlugin — a dev-server PORT change does not churn the shell map; the gateway absorbs it', async (t) => {
+  // This test previously asserted the opposite ('changing a dev-server port must
+  // push a live update', with the map carrying https://localhost:6002). That was
+  // true only while the shell was handed the app's OWN origin — the G-1 defect
+  // that broke SplitView cross-origin. The map now carries the GATEWAY URL for
+  // dev-server products, which is deliberately STABLE across upstream port moves:
+  // the gateway restarts on the same workspace change and re-points /p/{appId} at
+  // the new port (gateway.js watchWorkspaceConfig -> buildGatewayProxy -> restart),
+  // so the browser-facing URL never has to change. Not pushing is the CORRECT
+  // behaviour here, and the shell is strictly quieter for it.
   const wsRoot = await makeTempWorkspace(t, {
     platform: { appId: 'daita', localPath: 'platform', site: { port: 5174 } },
     products: [{ appId: 'descix-devsrv', localPath: 'devsrv', site: { port: 6001 } }],
@@ -156,16 +165,32 @@ test('workspaceProductsPlugin — pushes update when a product site PORT changes
   const plugin = workspaceProductsPlugin(wsRoot, { debounceMs: 30 });
   const server = makeFakeServer();
   plugin.configureServer(server);
+  t.after(() => server.httpServer.emit('close'));
+
+  const before = buildWorkspaceProducts(wsRoot)['descix-devsrv'];
+  assert.equal(before, 'https://localhost:5173/p/descix-devsrv');
 
   await writeWorkspace(wsRoot, {
     platform: { appId: 'daita', localPath: 'platform', site: { port: 5174 } },
     products: [{ appId: 'descix-devsrv', localPath: 'devsrv', site: { port: 6002 } }],
   });
 
-  const got = await waitFor(() => server.sent.some((m) => m.event === WORKSPACE_PRODUCTS_HMR_EVENT));
-  assert.ok(got, 'changing a dev-server port must push a live update');
-  const msg = server.sent.find((m) => m.event === WORKSPACE_PRODUCTS_HMR_EVENT);
-  assert.equal(msg.data.products['descix-devsrv'], 'https://localhost:6002');
+  await new Promise((r) => setTimeout(r, 300));
+  const pushed = server.sent.filter((m) => m.event === WORKSPACE_PRODUCTS_HMR_EVENT);
+  assert.equal(pushed.length, 0, 'the browser-facing URL is unchanged, so there is nothing to push');
+  assert.equal(buildWorkspaceProducts(wsRoot)['descix-devsrv'], before);
+});
 
-  server.httpServer.emit('close');
+test('workspaceProductsPlugin — the port change is NOT lost: the gateway proxy follows it', async (t) => {
+  // The other half of the contract above. If the map stops carrying the port, the
+  // port must still reach the thing that actually needs it — the proxy target —
+  // or the change is silently dropped and the app 502s behind a stable URL.
+  const wsRoot = await makeTempWorkspace(t, {
+    platform: { appId: 'daita', localPath: 'platform', site: { port: 5174 } },
+    products: [{ appId: 'descix-devsrv', localPath: 'devsrv', site: { port: 6002 } }],
+  });
+
+  const config = JSON.parse(await fs.readFile(path.join(wsRoot, '.descix', 'workspace.json'), 'utf8'));
+  const proxy = createViteProxyConfig(wsRoot, config, { apiGatewayUrl: 'https://dev.descix.net' });
+  assert.equal(proxy['/p/descix-devsrv'].target, 'https://localhost:6002');
 });

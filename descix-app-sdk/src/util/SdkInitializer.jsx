@@ -4,6 +4,7 @@ import { Api } from '../util/api';
 import { useAppContext } from '../AppContext';
 import { DiscordSDK, DiscordSDKMock, patchUrlMappings } from '@discord/embedded-app-sdk';
 import ErrorBoundary from './ErrorBoundary';
+import { fetchAppBinding } from './appBinding';
 
 // Module-level flag for SYNCHRONOUS OAuth detection (prevents race condition)
 let oauthCallbackDetected = false;
@@ -170,7 +171,7 @@ const initializeGtm = (isEmbeddedEnvironment) => {
 };
 
 
-const SdkInitializer = ({ children }) => {
+const SdkInitializer = ({ children, standalone = false, appId = null }) => {
     const { appEvent, setAppEvent, isEmbedded } = useAppContext(); // Get isEmbedded from context
     const isSdkInitialized = useRef(false);
     const isGtmInitialized = useRef(false); // Track GTM initialization specifically
@@ -214,9 +215,26 @@ const SdkInitializer = ({ children }) => {
         isSdkInitialized.current = true;
         console.log('SdkInitializer: Starting SDK initialization...');
 
-        // --- Standalone App Detection (Build-time constants from vite.config.js) ---
-        const buildTimeAppId = typeof __STANDALONE_APP_ID__ !== 'undefined' ? __STANDALONE_APP_ID__ : null;
-        const buildTimeAppUrl = typeof __STANDALONE_APP_URL__ !== 'undefined' ? __STANDALONE_APP_URL__ : null;
+        // --- Standalone App Detection ---
+        // Two sources, and neither is a build-time global any more.
+        //
+        // SERVED binding (AMB-1c) for the case the code CANNOT know: one shell
+        // bundle that boots as the store on descix.net and as a developer's app
+        // under `descix serve`. That shell arrives PRE-BUILT from the cloud, so a
+        // define could never have reached it.
+        //
+        // DECLARED prop for the case the code already knows: an app that builds
+        // ITSELF standalone says so at its own mount — <AppShell appId="powch"
+        // standalone>. The __STANDALONE_APP_ID__ define this replaced was a global
+        // carrying a fact the call site had in hand, and it forced one shared value
+        // on every entry point in a build (the demo's two entries both booted as
+        // 'demo'). Deleted, not fenced (CEO-D-2026-08-19, envelope amendment).
+        const servedBinding = await fetchAppBinding();
+        const declaredAppId = standalone ? appId : null;
+
+        const standaloneAppId = servedBinding?.appId || declaredAppId;
+        const standaloneAppUrl = servedBinding?.appUrl || null;
+        const bindingSource = servedBinding ? `served (${servedBinding.source || 'binding'})` : 'declared by the app';
 
         // --- Deep Link Detection ---
         const path = window.location.pathname;
@@ -233,19 +251,30 @@ const SdkInitializer = ({ children }) => {
             deepLinkData = { type: 'SAMPLE', route: sampleMatch[1] };
         }
 
-        if (buildTimeAppId) {
-            console.log(`[SdkInitializer] Booting in STANDALONE_APP mode for: ${buildTimeAppId}`);
+        if (standaloneAppId) {
+            console.log(`[SdkInitializer] Booting in STANDALONE_APP mode for: ${standaloneAppId} [${bindingSource}]`);
+            // Powch's own standalone build knows where it lives via __POWCH_APP_URL__.
+            // The hardcoded 'https://powch.descix.net/' tail that stood here is
+            // DELETED: a dev build silently resolving the wallet to PRODUCTION is a
+            // cross-environment leak, and this value decides where passkeys are
+            // typed. Absent is better than plausible-and-wrong.
             const appUrl =
-              buildTimeAppUrl ||
-              (buildTimeAppId === 'powch' && typeof __POWCH_APP_URL__ !== 'undefined'
+              standaloneAppUrl ||
+              (standaloneAppId === 'powch' && typeof __POWCH_APP_URL__ !== 'undefined'
                 ? __POWCH_APP_URL__
-                : null) ||
-              (buildTimeAppId === 'powch' ? 'https://powch.descix.net/' : null);
+                : null);
+            // The two guards that branch on standalone mode read a WINDOW global
+            // (AppData.isEmbedded, CodeSiteWidget.isPlatformApp). A Vite define
+            // substitutes the bare identifier and never a member expression, so
+            // window.__STANDALONE_APP_ID__ was never actually set by anyone and
+            // both guards were permanently false. Set it here, where the value is
+            // real at runtime, so they finally mean what they say.
+            if (typeof window !== 'undefined') window.__STANDALONE_APP_ID__ = standaloneAppId;
             setAppEvent({
                 type: AppContextEvent.SDK_READY,
                 payload: {
                     mode: 'STANDALONE_APP',
-                    appId: buildTimeAppId,
+                    appId: standaloneAppId,
                     url: appUrl,
                     deepLink: deepLinkData
                 }
