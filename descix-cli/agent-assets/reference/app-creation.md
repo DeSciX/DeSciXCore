@@ -45,7 +45,7 @@ This separation ensures:
 
 **Location:** Google Drive, owned by `dip@descix.net`  
 **SDK Reference:** `DeSciX_Core/descix-cli/templates/drive/`  
-**Template IDs:** Configured in `DeSciX_Cloud/defaults-config.json`
+**Template IDs:** Configured in `DeSciX_Cloud/microservice/defaults-config.json`
 
 ```json
 {
@@ -369,13 +369,13 @@ descix site upload -a app   # Deploy static site
 
 | Component | Path | Description |
 |-----------|------|-------------|
-| Community Management | `DeSciX_Cloud/services/communityManagement.js` | Community/App creation |
-| App Commands | `DeSciX_Cloud/services/commandHandlers/appCommands.js` | Server-side app ops |
-| Google Storage Service | `DeSciX_Cloud/services/googleStorageService.js` | Drive/GCS operations |
-| Template Config | `DeSciX_Cloud/defaults-config.json` | Template folder IDs |
+| Community Management | `DeSciX_Cloud/microservice/services/communityManagement.js` | Community/App creation |
+| App Commands | `DeSciX_Cloud/microservice/services/commandHandlers/appCommands.js` | Server-side app ops |
+| Google Storage Service | `DeSciX_Cloud/microservice/services/googleStorageService.js` | Drive/GCS operations |
+| Template Config | `DeSciX_Cloud/microservice/defaults-config.json` | Template folder IDs |
 | Drive Templates | `DeSciX_Core/descix-cli/templates/drive/` | Content templates |
 | Git Scaffolds | `DeSciX_Core/descix-cli/templates/scaffolds/` | Code scaffolds |
 | Hydrator | `DeSciX_Core/descix-cli/lib/core/Hydrator.js` | Workspace hydration |
 | WorkspaceConfig | `DeSciX_Core/descix-cli/lib/workspace-config.js` | CLI configuration |
-| Setup Command | `DeSciX_Core/descix-cli/lib/commands/setup.js` | Initial setup |
+| Setup Command | `DeSciX_Core/descix-cli/lib/wizard/setup.js` | Initial setup |
 | Scaffold Command | `DeSciX_Core/descix-cli/bin/descix.js` | CLI scaffolds |

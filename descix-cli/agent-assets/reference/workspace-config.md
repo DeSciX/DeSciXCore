@@ -411,5 +411,5 @@ descix kb build -c descix -a appsdk
 | WorkspaceConfig | `DeSciX_Core/descix-cli/lib/workspace-config.js` | Sole configuration class for CLI |
 | GlobalConfig | `DeSciX_Core/descix-cli/lib/global-config.js` | User-level settings (~/.descix) |
 | Workspace Utils | `DeSciX_Core/descix-cli/lib/workspace-utils.js` | Helper utilities |
-| Setup Command | `DeSciX_Core/descix-cli/lib/commands/setup.js` | Initial workspace setup |
+| Setup Command | `DeSciX_Core/descix-cli/lib/wizard/setup.js` | Initial workspace setup |
 | Config Commands | `DeSciX_Core/descix-cli/lib/commands/config.js` | Configuration management |
