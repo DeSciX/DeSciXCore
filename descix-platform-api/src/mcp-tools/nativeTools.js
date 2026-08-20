@@ -54,6 +54,7 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
                 kb_ids: { type: 'array', items: { type: 'string' }, description: 'Optional: search several of the app\'s knowledge bases at once — the top chunks are pooled from all of them. Takes precedence over kb_id when both are given; a single "*" element searches every KB in the app.' },
                 query: { type: 'string', description: 'Search query' },
                 limit: { type: 'number', description: 'Max results (default: 5)' },
+                file_filter: { type: 'string', description: 'Optional: restrict the search to ONE source document. Takes the retrievable file id a citation exposes as file_path (e.g. "corpus:3e1d5aa3"), not the human-readable file_name — applied as an exact metadata match. This is the param the read_command on every citation supplies.' },
             },
             required: ['app_id', 'query'],
         },
