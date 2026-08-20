@@ -3232,9 +3232,8 @@ microserviceCommand
       if (!microservicePort) {
         console.error(chalk.red(`\n❌ App '${ctx.appId}' has no microservice.port in workspace.json.`));
         console.error(chalk.red(`   A port is required so the gateway knows where to route traffic.`));
-        console.log(chalk.gray(`\n   Add a port to workspace.json under env.products entry for '${ctx.appId}':`));
-        console.log(chalk.gray(`     "microservice": { "port": <your-port> }`));
-        console.log(chalk.gray(`\n   A 'descix app set-port' command for this is tracked as WS-CLI-MESH-ROUTING-GAP.\n`));
+        console.log(chalk.gray(`\n   Set it with the config verb (never hand-edit workspace.json):`));
+        console.log(chalk.gray(`     descix app set-port -a ${ctx.appId} --port <your-port>\n`));
         process.exit(1);
       }
 
