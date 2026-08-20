@@ -161,3 +161,26 @@ test('the url builders are pure and independently correct', () => {
   assert.equal(gatewayOrigin(5599), 'https://localhost:5599');
   assert.equal(gatewayProductUrl(5599, 'egpt-frqtl'), 'https://localhost:5599/p/egpt-frqtl');
 });
+
+// ---------------------------------------------------- static serving: charset
+
+test('the gateway serves text as UTF-8 — a static app must not be mojibake', async () => {
+  const { staticSitePlugin } = await import('../src/dev/staticSitePlugin.js');
+  const src = fs.readFileSync(path.join(SDK_ROOT, 'src', 'dev', 'staticSitePlugin.js'), 'utf8');
+  // Measured in Chromium 2026-08-19: an em dash in a page served through
+  // /p/{appId} rendered as mojibake because Content-Type carried no charset.
+  for (const ext of ['.html', '.htm', '.js', '.mjs', '.css', '.json', '.md', '.txt']) {
+    const line = src.split('\n').find((l) => l.trim().startsWith(`'${ext}':`));
+    assert.ok(line, `no MIME entry for ${ext}`);
+    assert.match(line, /charset=utf-8/, `${ext} is served without an explicit charset`);
+  }
+  assert.ok(typeof staticSitePlugin === 'function');
+});
+
+test('binary types are NOT given a charset', () => {
+  const src = fs.readFileSync(path.join(SDK_ROOT, 'src', 'dev', 'staticSitePlugin.js'), 'utf8');
+  for (const ext of ['.png', '.woff2', '.wasm', '.ico']) {
+    const line = src.split('\n').find((l) => l.trim().startsWith(`'${ext}':`));
+    if (line) assert.doesNotMatch(line, /charset/, `${ext} must not carry a charset`);
+  }
+});
