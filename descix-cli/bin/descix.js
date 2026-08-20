@@ -4457,6 +4457,57 @@ configCommand
     }
   });
 
+configCommand
+  .command('set-gateway-port')
+  .description('Set the port `descix serve` listens on (env.gateway.port)')
+  .argument('<port>', 'Port number 1-65535, or "none" to remove')
+  .action(async (port) => {
+    try {
+      await configCommands.setGatewayPort(port === 'none' ? null : port);
+    } catch (error) {
+      process.exit(1);
+    }
+  });
+
+configCommand
+  .command('set-dev-certs')
+  .description('Point local dev servers at your own TLS cert pair (env.devCerts) — the gateway AND every app behind it')
+  .option('-d, --dir <path>', 'Directory holding cert.pem + key.pem')
+  .option('-c, --cert <path>', 'Certificate file')
+  .option('-k, --key <path>', 'Private key file')
+  .option('--clear', 'Remove the setting and fall back to the SDK-tracked SAN pair')
+  .action(async (options) => {
+    try {
+      await configCommands.setDevCerts(options);
+    } catch (error) {
+      process.exit(1);
+    }
+  });
+
+configCommand
+  .command('set-powch-url')
+  .description('Set where Powch lives (env.powchUrl) — its OWN origin; Powch is cross-origin from the shell by design')
+  .argument('<url>', 'Powch origin (e.g. https://powch.dev.descix.net), or "none" to remove')
+  .action(async (url) => {
+    try {
+      await configCommands.setPowchUrl(url === 'none' ? null : url);
+    } catch (error) {
+      process.exit(1);
+    }
+  });
+
+configCommand
+  .command('set-site-url')
+  .description('Set the App Shell origin `descix serve` proxies / to (env.siteUrl)')
+  .argument('<url>', 'App Shell origin, or "none" to remove')
+  .action(async (url) => {
+    try {
+      await configCommands.setSiteUrl(url === 'none' ? null : url);
+    } catch (error) {
+      process.exit(1);
+    }
+  });
+
 // ============ Store Search Commands ============
 
 const storeCommand = program

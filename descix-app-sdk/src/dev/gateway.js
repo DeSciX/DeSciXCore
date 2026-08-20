@@ -31,6 +31,7 @@ import { resolveGatewayPort, portInUseMessage } from './gatewayPort.js';
 import { assertVitePin } from './vitePin.js';
 import { resolveServeBinding, appBindingPlugin, APP_BINDING_PATH } from './serveBinding.js';
 import { resolvePowchUrl } from './powchUrl.js';
+import { resolveDevCertOptions } from './devCerts.js';
 
 /**
  * Find the workspace root by walking up from startDir looking for .descix/workspace.json.
@@ -55,19 +56,6 @@ function findWorkspaceRoot(startDir) {
 function readWorkspaceConfig(workspaceRoot) {
   const configPath = path.join(workspaceRoot, '.descix', 'workspace.json');
   return JSON.parse(fs.readFileSync(configPath, 'utf8'));
-}
-
-/**
- * Resolve the dev-cert options from workspace config.
- * `env.devCerts.dir` (or explicit cert/key files) are resolved against the
- * workspace root, so a developer supplies their own trusted cert without
- * editing the SDK.
- */
-function certOptions(config, workspaceRoot) {
-  const dc = config.env?.devCerts;
-  if (!dc) return {};
-  const abs = (p) => (p ? path.resolve(workspaceRoot, p) : undefined);
-  return { certDir: abs(dc.dir), certFile: abs(dc.cert), keyFile: abs(dc.key) };
 }
 
 /**
@@ -172,7 +160,11 @@ export async function runGateway(options = {}) {
   const proxyRules = buildGatewayProxy(workspaceRoot, targets);
   const staticRoutes = proxyRules._staticRoutes || {};
   delete proxyRules._staticRoutes;
-  const certOpts = certOptions(config, workspaceRoot);
+  // Dev certs — ONE owner, shared with every app dev server behind this gateway
+  // (createViteServerConfig). They used to diverge, so a workspace-configured
+  // trusted cert reached :5173 and nothing else — and passkey login is
+  // origin-bound, so it worked on the gateway and failed on the app.
+  const certOpts = resolveDevCertOptions(workspaceRoot, {}, config);
   const httpsConfig = getViteHttpsConfig(certOpts);
   const { certPath } = resolveCertPaths(certOpts);
 
