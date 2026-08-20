@@ -31,7 +31,7 @@ app/
 
 These templates are:
 1. Uploaded to Google Drive (by admin)
-2. Referenced by folder ID in `DeSciX_Cloud/defaults-config.json`
+2. Referenced by folder ID in `DeSciX_Cloud/microservice/defaults-config.json`
 3. Copied by the backend when `create_community_with_app` is called
 
 **Note:** Code scaffolds (site, microservice) live in `../scaffolds/`, not here. Drive templates contain only content that syncs to/from Google Drive.
