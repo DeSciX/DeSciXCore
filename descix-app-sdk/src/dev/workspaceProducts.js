@@ -1,12 +1,45 @@
 /**
- * Shared helper — builds a product URL map from workspace.json.
+ * Shared helper — builds the product URL map the SHELL consumes
+ * (__WORKSPACE_PRODUCTS__), from workspace.json.
  * Used by both the gateway (gateway.js) and individual app Vite configs.
  *
- * Returns { [appId]: 'proto://localhost:port' } or null if no products found.
+ * EVERY URL IN THIS MAP IS ON THE GATEWAY ORIGIN. That is the contract, not an
+ * implementation detail: the shell feeds these URLs straight to the CodeSite
+ * iframe `src` (AppData.getProductUrl -> AppWidget -> CodeSiteWidget), and
+ * SplitView dispatches actions by reaching into `iframe.contentWindow` — direct
+ * interframe scripting, no postMessage bridge. Hand the shell an app's OWN
+ * dev-server origin and that reach throws a cross-origin SecurityError, so
+ * SplitView dies silently for exactly the apps a developer is working on.
+ * Apps are ALWAYS shell-origin when iframed (CEO-D-2026-08-19-SERVE-UX-AMB-RULINGS,
+ * AMB-4). The gateway already proxies /p/{appId} to the app's dev server with no
+ * path rewrite (createViteProxyConfig), so the gateway URL is the whole answer.
+ *
+ * Returns { [appId]: 'https://localhost:{gatewayPort}/p/{appId}' } (platform:
+ * the gateway root) or null if no products found.
  */
 import fs from 'fs';
 import path from 'path';
 import { resolveGatewayPort } from './gatewayPort.js';
+
+/**
+ * The local gateway origin. ONE owner of the shape, so the map and
+ * resolveAppGatewayUrl below cannot drift into two different answers.
+ * @param {number} gatewayPort
+ * @returns {string}
+ */
+export function gatewayOrigin(gatewayPort) {
+  return `https://localhost:${gatewayPort}`;
+}
+
+/**
+ * Where the shell loads a PRODUCT app from — always the gateway origin.
+ * @param {number} gatewayPort
+ * @param {string} appId
+ * @returns {string}
+ */
+export function gatewayProductUrl(gatewayPort, appId) {
+  return `${gatewayOrigin(gatewayPort)}/p/${appId}`;
+}
 
 export function buildWorkspaceProducts(workspaceRoot) {
   const wsPath = path.resolve(workspaceRoot, '.descix/workspace.json');
@@ -15,25 +48,26 @@ export function buildWorkspaceProducts(workspaceRoot) {
   const ws = JSON.parse(fs.readFileSync(wsPath, 'utf8'));
   const products = {};
 
-  // Platform (the shell/store app)
-  if (ws.env?.platform?.appId && ws.env.platform.site?.port) {
-    const proto = ws.env.platform.site.protocol || 'https';
-    products[ws.env.platform.appId] = `${proto}://localhost:${ws.env.platform.site.port}`;
-  }
-
-  // Products (community apps, Powch, etc.)
-  // Gateway port for static site products — resolved by the ONE owner, so this
-  // map can never name a port the server is not listening on.
+  // Gateway port — resolved by the ONE owner, so this map can never name a port
+  // the server is not listening on.
   const { port: gatewayPort } = resolveGatewayPort(ws);
 
+  // Platform (the shell/store app) — served at the gateway ROOT.
+  if (ws.env?.platform?.appId && (ws.env.platform.site?.port || ws.env.platform.site?.static)) {
+    products[ws.env.platform.appId] = `${gatewayOrigin(gatewayPort)}/`;
+  }
+
+  // Products (community apps, Powch, etc.) — served at the gateway /p/{appId},
+  // whether the gateway serves them from disk (site.static, staticSitePlugin) or
+  // proxies them to their own dev server (site.port, createViteProxyConfig).
+  // site.protocol describes that UPSTREAM origin and is consumed by the proxy
+  // builder; it is deliberately absent here, because the browser never talks to
+  // the upstream directly.
   if (Array.isArray(ws.env?.products)) {
     for (const p of ws.env.products) {
-      if (p.appId && p.site?.port) {
-        const proto = p.site.protocol || 'https';
-        products[p.appId] = `${proto}://localhost:${p.site.port}`;
-      } else if (p.appId && p.site?.static) {
-        // Static sites are served by the gateway at /p/{appId}
-        products[p.appId] = `https://localhost:${gatewayPort}/p/${p.appId}`;
+      if (!p.appId) continue;
+      if (p.site?.port || p.site?.static) {
+        products[p.appId] = gatewayProductUrl(gatewayPort, p.appId);
       }
     }
   }
@@ -56,9 +90,12 @@ export function buildWorkspaceProducts(workspaceRoot) {
  * Both static and dev-server PRODUCT sites are reached through the gateway at
  * /p/{appId} (createViteProxyConfig proxies dev-server products there;
  * staticSitePlugin serves static products there) — so the gateway URL is the
- * same shape for both. The app's own dev-server port (buildWorkspaceProducts'
- * value for a dev-server product) is the ORIGIN the gateway proxies TO; the URL
- * a developer opens is the gateway one.
+ * same shape for both. The app's own dev-server port is the ORIGIN the gateway
+ * proxies TO; it is never a URL anything opens or iframes.
+ *
+ * This returns the SAME answer buildWorkspaceProducts puts in the map — both go
+ * through gatewayProductUrl/gatewayOrigin above. Two answers to "where is this
+ * app" is the G-1 defect and it must not come back.
  *
  * @param {string} workspaceRoot - Workspace root (contains .descix/workspace.json)
  * @param {string} appId - App identifier
@@ -85,7 +122,7 @@ export function resolveAppGatewayUrl(workspaceRoot, appId) {
       throw new Error('App \'' + appId + '\' (platform) has no site config (no site.port or site.static) in workspace.json. Nothing to open.');
     }
     return {
-      url: 'https://localhost:' + gatewayPort + '/',
+      url: gatewayOrigin(gatewayPort) + '/',
       gatewayPort,
       kind: 'platform',
       via: 'gateway root (env.platform)',
@@ -99,7 +136,7 @@ export function resolveAppGatewayUrl(workspaceRoot, appId) {
     throw new Error('App \'' + appId + '\' is not mapped in workspace.json (not env.platform and not in env.products[]).');
   }
 
-  const url = 'https://localhost:' + gatewayPort + '/p/' + appId;
+  const url = gatewayProductUrl(gatewayPort, appId);
 
   if (product.site?.static !== undefined && product.site?.static !== null) {
     return { url, gatewayPort, kind: 'static', via: 'gateway /p/' + appId + ' (staticSitePlugin → ' + product.site.static + ')' };
