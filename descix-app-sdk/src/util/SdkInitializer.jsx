@@ -254,7 +254,7 @@ const SdkInitializer = ({ children, standalone = false, appId = null }) => {
         if (standaloneAppId) {
             console.log(`[SdkInitializer] Booting in STANDALONE_APP mode for: ${standaloneAppId} [${bindingSource}]`);
             // Powch's own standalone build knows where it lives via __POWCH_APP_URL__.
-            // The hardcoded 'https://powch.descix.net/' tail that stood here is
+            // The hardcoded production-Powch tail that stood here is
             // DELETED: a dev build silently resolving the wallet to PRODUCTION is a
             // cross-environment leak, and this value decides where passkeys are
             // typed. Absent is better than plausible-and-wrong.

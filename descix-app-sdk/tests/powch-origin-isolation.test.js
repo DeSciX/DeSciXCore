@@ -128,6 +128,8 @@ test('AppShell keeps NO fallback origin for the wallet', () => {
     'a hardcoded prod Powch origin in a dev build is a silent cross-environment leak');
   assert.ok(!/__WORKSPACE_PRODUCTS__\?\.powch/.test(src),
     'AppShell must not read Powch out of the shell-origin map');
-  assert.match(src, /throw new Error\(\s*'\[AppShell\] Powch origin is unknown/,
-    'an unknown Powch origin must fail loud, not default');
+  // The fail-loud policy itself now lives in ONE place (src/powch/powchOrigin.js,
+  // pinned by powch-origin-required.test.js); AppShell must call it, not carry a copy.
+  assert.match(src, /requirePowchUrl\(config\.powch\?\.bridgeUrl, 'AppShell'\)/,
+    'an unknown Powch origin must fail loud, via the one owner');
 });

@@ -7,6 +7,8 @@
  * Security: Validates event.origin on all received messages.
  */
 
+import { requirePowchUrl } from '../powch/powchOrigin.js';
+
 const TAB_IDS = {
   CARDS: 'cards',
   PASSES: 'passes',
@@ -16,7 +18,10 @@ const TAB_IDS = {
 
 export class PowchBridgeClient {
   constructor(config = {}) {
-    this.bridgeUrl = config.bridgeUrl || 'https://powch.descix.net/';
+    // Where the wallet lives — one owner, no default. `this.origin` is the value
+    // every inbound postMessage is checked against, so a guessed bridgeUrl would
+    // also mean trusting a guessed origin.
+    this.bridgeUrl = requirePowchUrl(config.bridgeUrl, 'PowchBridgeClient');
     this.origin = new URL(this.bridgeUrl).origin;
     this.brand = config.brand
       ? { name: config.brand.name ?? 'This site', logo: config.brand.logo ?? null }

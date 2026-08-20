@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Box } from '@mui/material';
 import { useAppContext } from '../AppContext';
 import { usePowchBridge } from '../providers/PowchBridgeProvider';
+import { requirePowchUrl } from '../powch/powchOrigin.js';
 
 /**
  * PowchSideBarWidget
@@ -24,7 +25,6 @@ const PowchSideBarWidget = ({ standalone = false }) => {
   const { isAppMode } = useAppContext();
   const iframeRef = useRef(null);
   const bridge = usePowchBridge();
-  const powchAppUrl = bridge?.config?.bridgeUrl || 'https://powch.descix.net/';
   const [isVisible, setIsVisible] = useState(bridge?.isIframeVisible ?? false);
   const suppressed = isAppMode && !standalone;
 
@@ -56,6 +56,13 @@ const PowchSideBarWidget = ({ standalone = false }) => {
   // rendering another here would duplicate the identity silo. Standalone-origin
   // hosts opt in via the `standalone` prop.
   if (suppressed) return null;
+
+  // Resolved only once we are actually going to mount the silo — a suppressed
+  // widget renders nothing and must not fail. When the bridge is missing its
+  // origin (no provider, no build define) this THROWS: the hardcoded PROD tail
+  // that stood here meant a dev build's sidebar loaded the production wallet,
+  // and this iframe is exactly where passkeys are typed.
+  const powchAppUrl = requirePowchUrl(bridge?.config?.bridgeUrl, 'PowchSideBarWidget');
 
   return (
     <Box

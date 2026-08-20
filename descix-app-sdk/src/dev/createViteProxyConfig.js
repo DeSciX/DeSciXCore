@@ -4,7 +4,7 @@
  * Reads .descix/workspace.json from workspacePath to discover local app/service
  * ports and environment URLs. Generates proxy rules for:
  *   - /apifront, /api, /mcp  -> Core API
- *   - /powch/*               -> Powch PWA (local or production)
+ *   - /powch/*               -> Powch PWA (only when the workspace names it)
  *   - /s/{appId}             -> Microservice ports (path rewritten, prefix stripped)
  *   - /p/{appId}             -> Product site dev servers (NO path rewrite)
  *   - /Community/*           -> GCS fallback for remote assets
@@ -14,6 +14,7 @@
 import fs from 'fs';
 import path from 'path';
 import { resolveApiTarget, proxyEntry } from './resolveGatewayTargets.js';
+import { resolvePowchUrl } from './powchUrl.js';
 
 /**
  * @param {string} workspacePath - Path to workspace root (contains .descix/workspace.json)
@@ -33,17 +34,15 @@ export function createViteProxyConfig(workspacePath, options = {}) {
     console.warn('[createViteProxyConfig] Could not load .descix/workspace.json:', e.message);
   }
 
-  const env = config.env || {};
   // API target — resolved by the one owner (resolveGatewayTargets.js), never re-derived here.
   const { apiUrl: apiGatewayUrl } = resolveApiTarget(config, options);
-  // Powch URL: explicit env.powchUrl, or auto-discover from env.products[]
-  let powchUrl = env.powchUrl ?? null;
-  if (!powchUrl && Array.isArray(env.products)) {
-    const powchProduct = env.products.find(p => p.appId === 'powch');
-    if (powchProduct?.site?.port) {
-      powchUrl = `https://localhost:${powchProduct.site.port}`;
-    }
-  }
+  // Powch URL — resolved by its ONE owner (powchUrl.js), the same function the
+  // gateway and the shell build use. The hand-rolled copy of that precedence that
+  // stood here was a second owner for the wallet's location. The trailing slash
+  // is stripped because this value is an http-proxy TARGET, where it would be
+  // joined with the request path.
+  const resolvedPowchUrl = resolvePowchUrl(config);
+  const powchUrl = resolvedPowchUrl ? resolvedPowchUrl.replace(/\/$/, '') : null;
 
   const localAppRoutes = {};
   const serviceRoutes = {};
@@ -100,7 +99,8 @@ export function createViteProxyConfig(workspacePath, options = {}) {
     rewrite: (p) => p.replace(/^\/\.proxy\/api_debug/, ''),
   });
 
-  // Powch PWA route (local port or production URL)
+  // Powch PWA route — whatever origin the workspace named. Absent means no route:
+  // there is no default wallet origin to fall back to.
   if (powchUrl) {
     proxy['/powch'] = proxyEntry(powchUrl, { ws: true });
   }
