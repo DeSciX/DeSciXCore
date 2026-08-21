@@ -262,7 +262,15 @@ test('the scaffold SDK exposes view, chat and ready to app authors', () => {
   assert.match(src, /get view\(\)/, 'the .view getter is the app-side face of the view API');
   assert.match(src, /get chat\(\)/, 'the .chat getter is the app-side face of the media handle');
   assert.match(src, /ready\s*[:=]/, 'the readiness contract must be reachable from the app');
-  assert.match(src, /window\.top\.DeSciX/, 'it proxies the shell bus over the same-origin hop');
+
+  // It proxies the shell bus over the same-origin hop — but it DETECTS that hop
+  // rather than naming it. This assertion used to require `window.top.DeSciX`, which
+  // pinned one of the two guesses the CEO's ruling removed (2026-08-21): an app author
+  // should never need to know `window` from `window.top`.
+  assert.match(src, /resolveBridge\(\)/,
+    'the app-side proxy resolves its own window level; see src/util/bridgeResolver.js');
+  assert.doesNotMatch(src, /window\.(top|parent)\s*\.\s*DeSciX/,
+    'no consumer-facing frame-level reach may survive in the app-side SDK');
 });
 
 test('the placebo suggestPrompt stub is DELETED, not left beside the real handle', () => {

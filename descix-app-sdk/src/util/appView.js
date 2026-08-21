@@ -1,11 +1,11 @@
 /**
- * appView — the app-facing VIEW API, reached from an embedded app as
- * `window.parent.DeSciX.view`.
+ * appView — the app-facing VIEW API, reached from an embedded app as `DeSciX.view`.
  *
- * (The shell publishes it on ITS OWN window, so `window.DeSciX.view` is the correct
- * form only for shell-side code. Inside the iframe — the stated audience — the
- * `parent` hop is not optional, and omitting it yields `TypeError: Cannot read
- * properties of undefined`.)
+ * (The shell publishes it on ITS OWN window. An app does NOT name that window: it
+ * loads `DeSciXAppSDK.js`, which resolves the level internally — see
+ * `util/bridgeResolver.js`. Hard-coding a `parent` or `top` hop at the call site is
+ * the mistake this bridge exists to remove, because the right hop depends on how
+ * deeply the app happens to be embedded, which app code cannot know.)
  *
  * ── What it is for ───────────────────────────────────────────────────────────
  * The shell decided the layout alone: AppWidget rendered CodeSite with
@@ -16,13 +16,13 @@
  *
  * ── The mechanism, and why it needs no new surface ───────────────────────────
  * The shell already publishes a service bus on its own window — `window.DeSciX`
- * carries `.powch` and `.config`, and an embedded app reads them off its PARENT.
- * The view API is one more member of that bus, so an app in the CodeSite iframe
+ * carries `.powch` and `.config`, and the app-side SDK resolves that window for the
+ * app. The view API is one more member of that bus, so an app in the CodeSite iframe
  * does:
  *
- *     window.parent.DeSciX.view.set('CodeSite');   // give me the whole frame
- *     window.parent.DeSciX.view.set('SplitView');  // app + chat side by side
- *     window.parent.DeSciX.view.set('Chat');       // chat only
+ *     DeSciX.view.set('CodeSite');   // give me the whole frame
+ *     DeSciX.view.set('SplitView');  // app + chat side by side
+ *     DeSciX.view.set('Chat');       // chat only
  *
  * That reach works because shell and app are SAME ORIGIN — the property this
  * workstream's G-1 fix restored. It is the identical mechanism SplitView uses in
@@ -129,8 +129,8 @@ export function viewAvailable() {
 
 /**
  * Publish the API onto the shell's `window.DeSciX.view` (an embedded app reaches it
- * as `window.parent.DeSciX.view`). Idempotent — safe to call from every render path
- * that might be the first one.
+ * as `DeSciX.view`, with the frame level resolved for it). Idempotent — safe to call
+ * from every render path that might be the first one.
  *
  * Goes through the bridge owner rather than touching `window.DeSciX` directly, so
  * publication is announced (the readiness contract) and the bus is created in
