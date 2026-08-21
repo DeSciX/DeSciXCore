@@ -33,6 +33,16 @@ Note what that error gives you: the correction (`did you mean`), the full accept
 explicit statement that **nothing was written and no default was substituted**. You can act on it
 without guessing what half-happened.
 
+**A tool's handshake schema is not the whole surface.** The MCP handshake schema advertised for
+`ask_question_to_app` currently omits the `media` parameter — while the platform accepts and bills
+it. A consumer reading only that schema would conclude multimodal is unsupported, and be wrong.
+The parameter is documented by `tell_me_how` with `scope: "discovery"`, and reaching it through
+`execute_remote_command` works today.
+
+The general lesson, since this cuts both ways: **an advertised parameter can be refused, and a
+working one can go unadvertised.** Where a capability matters, probe it rather than inferring it
+from the tool list.
+
 **Unknown parameters are refused everywhere, with the accepted set in the error.** That is the
 surface's most useful property: you can probe it. It also means a parameter you read about
 somewhere but that the schema does not declare will fail loudly rather than be silently dropped —
@@ -64,6 +74,29 @@ did you mean?
 structurally identical shape, but they have not been live-measured on this surface, and the
 platform does not ship capabilities it has not observed working. The refusal names them
 explicitly so you can tell a scope boundary from a typo.
+
+**`asset_ref` is APP-SCOPED, and getting this wrong produces an error that reads like a broken
+platform.** A reference must resolve inside *this* app's own assets prefix
+(`gs://descix-assets-public/{env}/{appId}/assets/`). Two different failures, and telling them
+apart saves an hour:
+
+```
+# ref points outside the app's prefix
+Asset reference '...' RESOLVES OUTSIDE app 'egpt-godsworld' assets prefix 'dev/egpt-godsworld/assets/'.
+
+# ref is inside the prefix, but the object is not there
+ASSET NOT FOUND at gs://... Upload it first with `descix app media-upload`.
+```
+
+Both come back as `MEDIA_ASSET_UNREADABLE`. The first means you referenced the wrong app's asset;
+the second means you have not uploaded yet. Upload into the app that will do the asking.
+
+**The `gs://` form is accepted.** A `gs://` URI works as an `asset_ref` — it is parsed,
+scope-checked and resolved. That is worth stating plainly because the opposite rule circulates:
+`gs://` is fatal as a *provider* URI (the provider refuses GCS references outright) and correct as
+a *DeSciX-side* `asset_ref`. Those are two different layers, and collapsing them into "never
+`gs://`" removes the very mechanism that makes `asset_ref` work — the platform resolves the
+reference to bytes server-side precisely because the provider will not take the URI.
 
 **The server is the single validation authority.** The client stages a contribution; every rule
 above — accepted MIME types, size limits, `data` XOR `asset_ref`, asset resolution — is enforced

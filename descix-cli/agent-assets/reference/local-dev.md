@@ -48,6 +48,20 @@ Instead of exposing implementation details (like GCS bucket URLs or specific por
 
 The binding is **served, not compiled**: the gateway answers `GET /__descix/app-binding.json` on the shell's own origin with `{mode:'standalone', appId, appUrl, source}`, and the shell reads it before it mounts. One pre-built cloud shell bundle therefore boots as the store on `descix.net` and as your app locally, with no rebuild. No binding (or a timeout, or a malformed body) means the store — the safe degradation. There is no `__STANDALONE_APP_ID__` build define; an app that builds itself standalone declares it at its own mount, `<AppShell appId="..." standalone>`.
 
+### `/p/<appId>` is a LOCAL route only
+
+The gateway serves your app at `/p/<appId>`. **That path does not exist in the cloud.** Deployed
+apps are served on their own host, `{appId}.{env}.descix.net`. Measured against dev:
+
+```
+https://egpt-godsworld.dev.descix.net/       -> 200   (the deployed app)
+https://dev.descix.net/p/egpt-godsworld/     -> 404   (local-only route)
+```
+
+So a URL that works all through local development 404s the moment you point it at a deployed
+environment. If you are writing a link, a redirect, or a test that must survive deployment, use
+the per-app host; keep `/p/` for the local gateway, where it is the correct and necessary form.
+
 **Every app the shell iframes is on the GATEWAY origin** — `/p/{appId}`, never the app's own dev-server port. The shell dispatches chat action blocks by reaching straight into `iframe.contentWindow.DeSciX_Actions` (direct interframe scripting, no postMessage bridge), so a cross-origin iframe kills SplitView with a `SecurityError`. **Powch is the deliberate exception** and stays cross-origin: it holds passkeys and the HD wallet, and same-origin would expose it to that same reach.
 
 Typical app-dev session, in full:
