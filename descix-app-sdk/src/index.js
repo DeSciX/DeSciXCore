@@ -25,4 +25,6 @@ export { PowchBridgeProvider, usePowchBridge } from './providers/PowchBridgeProv
 export { PowchClient } from './powch/PowchClient.js';
 export { NetworkLoadingProvider, useNetworkLoading } from './util/NetworkAPI.jsx';
 export { useDeSciXView } from './hooks/useDeSciXView.js';
-export { VIEW_MODES, DEFAULT_VIEW, getView, setView, subscribeView, resetView, publishViewApi } from './util/appView.js';
+export { VIEW_MODES, DEFAULT_VIEW, getView, setView, subscribeView, resetView, publishViewApi, viewAvailable } from './util/appView.js';
+export { BRIDGE_READY_EVENT, BRIDGE_VERSION, getBridge, publishBridgeMember, retractBridgeMember } from './util/appBridge.js';
+export { CHAT_MEMBER, publishChatApi, retractChatApi } from './util/appChat.js';

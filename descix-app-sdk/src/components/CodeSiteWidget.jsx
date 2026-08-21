@@ -8,6 +8,7 @@ import { Api } from '../util/api';
 import { useAppContext } from '../AppContext';
 import ChatWidget from './ChatWidget';
 import { actionResultContribution, actionErrorContribution } from '../util/chatIngress';
+import { publishChatApi, retractChatApi } from '../util/appChat.js';
 
 /**
  * Platform app IDs that should NOT render in the CodeSite iframe.
@@ -122,6 +123,30 @@ const CodeSiteWidget = ({
     }
     return ingress.contribute(contribution);
   };
+
+  /**
+   * ws-c3-bridge-media-handle: publish that same reach to the EMBEDDED APP.
+   *
+   * `deliverToChat` above is the only door into THE chat ingress, and until now it
+   * was reachable from the shell alone — the shell could push an action result in,
+   * but an app that had something to SHOW (a rendered frame, a flyby) had no way to
+   * hand pixels across. Publishing the existing closure on the bus is the whole fix;
+   * no second media path is created, and the bytes still ride the one lane
+   * (mediaContribution -> contribute -> collectTurnMedia -> ask_question_to_app).
+   *
+   * `isAvailable` reports the SAME condition deliverToChat fails on, so the app's
+   * pre-flight check and the actual delivery can never disagree.
+   */
+  useEffect(() => {
+    publishChatApi({
+      deliver: deliverToChat,
+      isAvailable: () => !!chatIngressRef.current?.contribute,
+    });
+    return () => retractChatApi();
+    // Published once per mount: `deliver` reads chatIngressRef at CALL time, so the
+    // handle never goes stale as the chat pane mounts and unmounts beneath it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /**
    * Direct execution handler: Calls functions in the CodeSite iframe's window object.
