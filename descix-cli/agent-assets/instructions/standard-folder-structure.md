@@ -33,12 +33,19 @@ DeSciX uses a "Mono-Repo" style structure where multiple communities and apps ca
 │       │
 │       ├── site/               # Frontend UI (Optional)
 │       │   ├── index.html
-│       │   └── src/
+│       │   ├── styles.css
+│       │   ├── app.js
+│       │   └── DeSciXAppSDK.js # The DeSciX bridge — GENERATED, do not hand-edit
 │       │
 │       └── microservice/       # Backend Logic (Optional)
+│           ├── app.js          # Entry point
 │           ├── Dockerfile
 │           ├── package.json
-│           └── src/
+│           ├── scripts/
+│           └── services/       # NOT src/ — see below
+│               ├── utils.js    # Config bootstrap — read this first
+│               ├── apiFront.js
+│               └── commandHandlers/
 ```
 
 ## Folder Purposes
@@ -81,7 +88,9 @@ descix kb corpus sync  # Convenience: pull → chunk → sync
 #### `microservice/` - Backend
 - Contains the server-side logic.
 - **`Dockerfile`**: Defines the runtime environment.
-- **`src/`**: Source code.
+- **`services/`**: Service code. **There is no `src/` directory** in a scaffolded
+  microservice — the entry point is `app.js` at the root and the code lives under
+  `services/`, with `services/utils.js` as the config bootstrap over `@descix/cloud-core`.
 
 ## Configuration Files
 
