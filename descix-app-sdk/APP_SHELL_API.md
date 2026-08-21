@@ -3,22 +3,28 @@
 What the DeSciX App Shell publishes to the app it hosts, and what it expects back.
 
 Your app runs in an iframe inside the shell. The two are **same-origin on
-purpose**, so the contract between them is plain JavaScript on `window` — no
-postMessage bridge, no SDK import, no build step. From inside your app:
+purpose**, so the contract between them is plain JavaScript — no postMessage
+bridge, no build step. Include `DeSciXAppSDK.js` (the scaffold ships it) and you get:
 
 ```js
-window.parent.DeSciX          // the shell's service bus
+DeSciX                        // the shell's service bus
 window.DeSciX_Actions         // what YOU publish for the shell to call
 ```
 
 Everything below is reachable from a plain `<script>` tag.
 
+**You never write `window.parent.` or `window.top.`** The shell publishes its bus on
+its own window, so the correct frame level depends on how deeply your app happens to
+be embedded — one level down in the ordinary case, more when nested, and *neither* when
+the shell is itself embedded in an outer page. Your code cannot know that and should
+not have to. `DeSciXAppSDK.js` detects it on every access; you just say `DeSciX.…`.
+
 ---
 
-## `window.DeSciX` — what the shell gives you
+## `DeSciX` — what the shell gives you
 
-Read it off your **parent** window. The bus is assembled in **two independent
-steps**, which matters if your app loads early:
+The bus is assembled in **two independent steps**, which matters if your app loads
+early:
 
 | Member | Published by | When |
 |---|---|---|
@@ -34,12 +40,16 @@ shell window, and leaves a synchronously-readable marker. So an app that starts
 early hears the event; an app that starts late reads the marker. Neither polls:
 
 ```js
-const top = window.parent;
-function whenBridgeReady(fn) {
-  if (top.DeSciX?.bridge?.ready) return fn(top.DeSciX);
-  top.addEventListener('descix:bridge-ready', () => fn(top.DeSciX), { once: true });
+const { mode, members, version } = await DeSciX.ready();
+if (mode === 'standalone') {
+  // No shell above this page. `ready()` resolves rather than hanging, so you can
+  // take whatever path your app supports on its own.
 }
 ```
+
+`DeSciX.ready()` is the whole of it: it resolves immediately when the bus is already
+published, and otherwise waits for the shell's announcement on the window that owns
+it. You never attach the listener yourself, and never name the window it fires on.
 
 `bridge` carries `version` (a number, bumped when the bus shape changes),
 `ready`, `members()` and `has(name)` — so "shell too old" is now distinguishable
@@ -61,9 +71,9 @@ The shell defaults to **SplitView** (your app beside the chat panel). Say so if
 you want something else:
 
 ```js
-window.parent.DeSciX.view.set('CodeSite');   // your app gets the whole frame
-window.parent.DeSciX.view.set('SplitView');  // your app beside chat (default)
-window.parent.DeSciX.view.set('Chat');       // chat only
+DeSciX.view.set('CodeSite');   // your app gets the whole frame
+DeSciX.view.set('SplitView');  // your app beside chat (default)
+DeSciX.view.set('Chat');       // chat only
 ```
 
 | Member | Signature | Notes |
@@ -82,7 +92,7 @@ back the mode you asked for while nothing moves. `available()` is the honest ans
 — it reports whether anything is listening:
 
 ```js
-const view = window.parent.DeSciX.view;
+const view = DeSciX.view;
 if (view.available()) view.set('CodeSite');
 else console.warn('this host does not implement view switching');
 ```
@@ -91,19 +101,23 @@ Call it whenever you like — at boot, or later when your app changes what it is
 doing. The shell re-renders. Your choice is reset when the user switches to a
 different app, so it never leaks into someone else's.
 
-**Reach through `window.parent`, not `window`.** Inside your iframe there is no
-`window.DeSciX.view` — the bus lives on the shell's window. `window.DeSciX.view.set(...)`
-from an embedded app throws `TypeError: Cannot read properties of undefined`.
+**Say `DeSciX.view`, never a frame level.** The bus lives on the shell's window, not
+yours — but which window that is depends on your embedding depth, so `DeSciXAppSDK.js`
+resolves it for you at every access. Hard-coding `window.parent.DeSciX.view` breaks
+the moment your app is nested one level deeper; hard-coding `window.top.DeSciX.view`
+breaks the moment the shell is itself embedded in an outer page.
 
 **Do not import the view functions from the package.** `@descix/app-sdk` exports
 `setView`, `resetView` and `publishViewApi`, but those are the **shell's** side of the
 API. Imported into your app they mutate your own module copy of the state — same name,
 same arguments, same return value, and **no effect on the shell whatsoever**. The working
-path is `window.parent.DeSciX.view`; the import is a silent no-op.
+path is `DeSciX.view`; the import is a silent no-op.
 
 **Who implements it:** the App Shell — the store on `descix.net` and the same bundle
-under `descix serve`. A page that is not hosted by the shell has no `window.parent.DeSciX`
-at all, so guard with `?.` if your app is also meant to run standalone outside the frame.
+under `descix serve`. A page that is not hosted by the shell resolves as
+`DeSciX.mode === 'standalone'`, where `DeSciX.view` is `null` and says so by name — so
+check `DeSciX.mode` (or `await DeSciX.ready()`) if your app is also meant to run
+outside the frame.
 
 **One app at a time.** The view is a single shell-level value, not per-iframe. One
 embedded app is the design; two contending for the layout will silently overwrite each
@@ -117,7 +131,7 @@ Your app can hand an **image or video** into the conversation, so the model can
 ```js
 const shot = myCanvas.toDataURL('image/png').split(',')[1];   // RAW base64, no data: prefix
 
-const { delivered, reason } = await window.parent.DeSciX.chat.sendMedia(
+const { delivered, reason } = await DeSciX.chat.sendMedia(
   { mime_type: 'image/png', data: shot, label: 'flyby' },
   { note: 'What do you see at the centre of this frame?' }
 );
@@ -167,9 +181,9 @@ passkeys and the wallet. Your app never talks to Powch directly and cannot read
 its DOM — that isolation is the point.
 
 ```js
-await window.parent.DeSciX.powch.login();
-const address = window.parent.DeSciX.powch.getAddress();
-const sig     = await window.parent.DeSciX.powch.signMessage('hello', address);
+await DeSciX.powch.login();
+const address = DeSciX.powch.getAddress();
+const sig     = await DeSciX.powch.signMessage('hello', address);
 ```
 
 `login` · `logout` · `sign` · `signTransaction` · `signMessage` ·
@@ -179,7 +193,7 @@ const sig     = await window.parent.DeSciX.powch.signMessage('hello', address);
 ### `DeSciX.config` — where you are
 
 ```js
-const { env, shellOrigin, powchOrigin } = window.parent.DeSciX.config;
+const { env, shellOrigin, powchOrigin } = DeSciX.config;
 ```
 
 ---
@@ -225,22 +239,29 @@ registry; the browser origin is irrelevant to it.
 
 `descix serve` puts the shell and your app on **one origin** — your app is served
 through the gateway at `/p/<yourAppId>`, not on its own dev-server port. That is
-what makes `window.parent.DeSciX` and `contentWindow.DeSciX_Actions` legal at
-all; across origins the browser throws a `SecurityError` and both directions of
-this contract die silently.
+what makes the `DeSciX` bus and `contentWindow.DeSciX_Actions` legal at all;
+across origins the browser refuses the reach and both directions of this contract
+die.
 
-Same-origin is a **hard precondition**, and violating it fails opaquely — the error
-names nothing about views or the shell. The verbatim text to grep for:
+Same-origin is a **hard precondition**. `DeSciXAppSDK.js` catches the browser's refusal
+rather than letting it take your app down, so the symptom is not a `SecurityError` in
+your code but a shell that is simply *not found*:
 
+```js
+DeSciX.mode          // 'standalone' — even though you ARE inside the shell's iframe
+DeSciX.view          // null, with a console.error naming the situation
 ```
-SecurityError: Blocked a frame with origin "https://localhost:5174" from accessing a cross-origin frame.
-```
 
-If you see that, you are loading your app from its own dev-server port instead of
-through the gateway at `/p/<yourAppId>`. Open the gateway URL, not the app port.
+If you see `'standalone'` where you expected `'shell'`, you are loading your app from
+its own dev-server port instead of through the gateway at `/p/<yourAppId>`. Open the
+gateway URL, not the app port.
 
-**The full parent bus is exposed to your app on purpose.** A sandboxed iframe reaching
-into its parent looks like something to harden — it is not. Platform API calls are
+(You may still see the browser's own message in the console, which names nothing about
+views or the shell. The verbatim text to grep for:
+`SecurityError: Blocked a frame with origin "https://localhost:5174" from accessing a cross-origin frame.`)
+
+**The full shell bus is exposed to your app on purpose.** A sandboxed iframe reaching
+into its host looks like something to harden — it is not. Platform API calls are
 authorised server-side, and Powch is kept on a separate origin precisely so that
 identity and wallet are *not* in what your app can reach. Exposing the rest of the App
 Shell to app code is deliberate and load-bearing (CEO, 2026-08-20); "fixing" it severs

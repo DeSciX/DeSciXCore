@@ -32,69 +32,7 @@ window.DeSciX = (() => {
     'use strict';
 
 /* ── inlined from @descix/app-sdk src/util/bridgeResolver.js ─────────────── */
-    /**
-     * Hard ceiling on the frame-chain walk. A malformed or hostile frame graph must not
-     * be able to spin the resolver; 32 is far beyond any real embedding depth.
-     */
-    const BRIDGE_RESOLUTION_MAX_HOPS = 32;
-
-    /**
-     * Does this window carry the shell's bus?
-     *
-     * @param {Window} w
-     * @returns {object|null} the bus, or null when absent OR unreadable (cross-origin).
-     */
-    function busOn(w) {
-      try {
-        const bus = w && w.DeSciX;
-        // The version marker, not merely a `DeSciX` property: an app-side proxy also
-        // lives at `window.DeSciX`, and only the OWNER publishes `bridge.version`.
-        if (bus && bus.bridge && bus.bridge.version) return bus;
-      } catch (e) {
-        // Cross-origin ancestor. Not the shell as far as we can ever know — and not an
-        // error: the walk continues past it (see the docblock).
-      }
-      return null;
-    }
-
-    /**
-     * Find the window carrying the DeSciX bus, walking up from `startWindow`.
-     *
-     * This is the ONE place the `self` / `parent` / `top` question is answered. Consumers
-     * ask for the bus, never for a window level.
-     *
-     * @param {Window} [startWindow] - defaults to the ambient `window`.
-     * @returns {{window: Window|null, bus: object|null, hops: number, mode: 'shell'|'standalone'}}
-     *   `mode: 'shell'` with `hops` = frames traversed (0 = this page owns the bus);
-     *   `mode: 'standalone'` with `bus: null` and `hops: -1` when nothing carries it.
-     */
-    function resolveBridge(startWindow) {
-      const start =
-        startWindow || (typeof window === 'undefined' ? null : window);
-
-      // No DOM at all (SSR / node): honestly standalone, and never throws.
-      if (!start) return { window: null, bus: null, hops: -1, mode: 'standalone' };
-
-      let w = start;
-      for (let hops = 0; hops <= BRIDGE_RESOLUTION_MAX_HOPS; hops++) {
-        const bus = busOn(w);
-        if (bus) return { window: w, bus, hops, mode: 'shell' };
-
-        let next;
-        try {
-          next = w.parent;
-        } catch (e) {
-          // Even `.parent` can be refused in exotic sandboxes. Nothing above is
-          // reachable, so the answer is standalone rather than a throw.
-          break;
-        }
-        // `window.parent === window` at the top of the chain: that is the terminator.
-        if (!next || next === w) break;
-        w = next;
-      }
-
-      return { window: start, bus: null, hops: -1, mode: 'standalone' };
-    }
+__BRIDGE_RESOLVER__
 /* ── end inlined resolver ───────────────────────────────────────────────── */
 
     // ── Never clobber an owner ───────────────────────────────────────────────
