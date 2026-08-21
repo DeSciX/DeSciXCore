@@ -1,6 +1,6 @@
 {
   "name": "@descix/sdk",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "DeSciX SDK - Shared runtime libraries for Node.js and Browser",
   "type": "module",
   "main": "./src/index.js",
@@ -27,7 +27,8 @@
     "wizard"
   ],
   "author": "DeSciX",
-  "license": "@Daita_DeSci_Community_License_v1/Daita_DeSci_Community_License_v1.pdf",
+  "license": "SEE LICENSE IN LICENSE.md",
+  "files": ["src", "mcp"],
   "scripts": {
     "pack": "npm pack"
   },

@@ -1,6 +1,6 @@
 {
   "name": "@descix/cli",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "DeSciX CLI and MCP Server - Unified command-line interface for DeSciX platform",
   "type": "module",
   "main": "./bin/descix.js",
@@ -22,7 +22,7 @@
     "ai"
   ],
   "author": "DeSciX",
-  "license": "@Daita_DeSci_Community_License_v1/Daita_DeSci_Community_License_v1.pdf",
+  "license": "SEE LICENSE IN LICENSE.md",
   "dependencies": {
     "@descix/app-sdk": "^0.1.0",
     "@descix/sdk": "^1.0.0",

@@ -1,6 +1,6 @@
 {
   "name": "@descix/cloud-core",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Shared config bootstrap, Firestore, PubSub, and service manifest for DeSciX platform microservices",
   "type": "module",
   "main": "src/index.js",
@@ -21,7 +21,7 @@
     "firestore",
     "pubsub"
   ],
-  "license": "UNLICENSED",
+  "license": "SEE LICENSE IN LICENSE.md",
   "engines": {
     "node": ">=24.0.0"
   },
