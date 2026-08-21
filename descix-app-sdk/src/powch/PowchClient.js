@@ -7,6 +7,7 @@
  */
 
 import { requirePowchUrl } from './powchOrigin.js';
+import { resolveBridge } from '../util/bridgeResolver.js';
 
 export class PowchClient {
   constructor(config = {}) {
@@ -44,23 +45,21 @@ export class PowchClient {
 
   /**
    * Detect if we are running inside a DeSciX Shell that exposes the Powch Bridge.
+   *
+   * The frame level is not our question to answer: this used to check `window` and
+   * then `window.top`, which is a guess that is wrong whenever the shell is neither
+   * (a nested app, or a shell that is itself embedded). `resolveBridge()` owns that
+   * walk — including the cross-origin hops, which it reports as "no shell" rather
+   * than throwing, so a cross-origin host falls through to standalone as before.
    */
   _findShellBridge() {
-    try {
-      // Case 1: Same window (Console or Host App)
-      if (window.DeSciX?.powch) return window.DeSciX.powch;
-
-      // Case 2: Embedded Iframe (Guest App)
-      // Note: This requires the Shell to be on the same origin or have relaxed document.domain,
-      // OR we need to use postMessage proxying.
-      // For now, we assume direct access (same-origin or subdomain with document.domain set if needed).
-      // If cross-origin access is blocked, this throws and we fall back to standalone.
-      if (window.top !== window && window.top?.DeSciX?.powch) {
-        return window.top.DeSciX.powch;
-      }
-    } catch (e) {
-      // SecurityError: Blocked a frame with origin "..." from accessing a cross-origin frame.
-      console.warn('[PowchClient] Cannot access window.top.DeSciX (Cross-Origin). Falling back to standalone mode.');
+    const { bus } = resolveBridge();
+    if (bus?.powch) return bus.powch;
+    if (bus) {
+      // A shell IS hosting us, it just has no wallet bridge mounted. Distinct from
+      // "no shell", and worth saying: the standalone fallback below will load a
+      // SECOND wallet inside a page that already has a shell.
+      console.warn('[PowchClient] A DeSciX shell is hosting this page but publishes no Powch bridge. Falling back to standalone mode.');
     }
     return null;
   }

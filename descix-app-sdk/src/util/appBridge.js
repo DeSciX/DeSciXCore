@@ -35,12 +35,19 @@
  *
  *     await DeSciX.ready();                       // the bus exists
  *     if (DeSciX.chat.available()) { ... }        // ...and chat can take it NOW
+ *
+ * ── Publication is here; RESOLUTION is bridgeResolver.js ─────────────────────
+ * This module answers "how does the shell publish?". The mirror question — "which
+ * window is an app's bus actually on?" — is answered exactly once, in the sibling
+ * `bridgeResolver.js`, and re-exported below so there is one import surface. No
+ * consumer computes a `self`/`parent`/`top` hop for itself.
  */
 
+export { resolveBridge, BRIDGE_RESOLUTION_MAX_HOPS } from './bridgeResolver.js';
+
 /**
- * Fired on the SHELL window every time a member is published. Apps in the iframe
- * listen on `window.parent` / `window.top` (same-origin, the property the whole
- * bridge depends on).
+ * Fired on the window that OWNS the bus, every time a member is published. An app
+ * listens on the window `resolveBridge()` returns — it never names a frame level.
  */
 export const BRIDGE_READY_EVENT = 'descix:bridge-ready';
 
@@ -57,6 +64,12 @@ export function getBridge() {
   return window.DeSciX || null;
 }
 
+/** The bus as it exists RIGHT NOW on this window. See the note in `ensureBus`. */
+function currentBus() {
+  if (typeof window === 'undefined') return {};
+  return window.DeSciX || {};
+}
+
 /**
  * Ensure `window.DeSciX` and its `bridge` marker exist. Idempotent, and NEVER
  * clobbers members another publisher already put there.
@@ -71,8 +84,15 @@ function ensureBus() {
       ready: true,
       // A function, not a frozen array: members arrive across several mounts, and a
       // snapshot handed out early would silently be wrong later.
-      members: () => Object.keys(bus).filter((k) => k !== 'bridge'),
-      has: (name) => Object.prototype.hasOwnProperty.call(bus, name),
+      //
+      // These read `window.DeSciX` LIVE rather than closing over the `bus` captured
+      // above, because a publisher can REPLACE the bus object rather than mutate it
+      // (AppContext.jsx does exactly that: `window.DeSciX = { ...window.DeSciX, … }`).
+      // The spread carries this `bridge` marker onto the new object, so a closure over
+      // the old one would keep answering about a bus nothing reads any more — a
+      // members() list that is confidently wrong, which is worse than an empty one.
+      members: () => Object.keys(currentBus()).filter((k) => k !== 'bridge'),
+      has: (name) => Object.prototype.hasOwnProperty.call(currentBus(), name),
       EVENT: BRIDGE_READY_EVENT,
     };
   }
@@ -110,7 +130,14 @@ export function retractBridgeMember(name) {
 /** Dispatch the readiness/change event, tolerating environments without CustomEvent. */
 function announce(member) {
   if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') return;
-  const detail = { member, version: BRIDGE_VERSION, members: window.DeSciX.bridge.members() };
+  const marker = currentBus().bridge;
+  const detail = {
+    member,
+    version: BRIDGE_VERSION,
+    // A publisher that replaced the bus without carrying the marker over leaves no
+    // one to ask; report the keys we can see rather than throwing mid-announce.
+    members: marker ? marker.members() : Object.keys(currentBus()).filter((k) => k !== 'bridge'),
+  };
   let evt;
   if (typeof CustomEvent === 'function') {
     evt = new CustomEvent(BRIDGE_READY_EVENT, { detail });

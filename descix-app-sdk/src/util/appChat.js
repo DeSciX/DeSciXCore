@@ -1,5 +1,8 @@
 /**
- * appChat — the app-facing CHAT handle published at `window.parent.DeSciX.chat`.
+ * appChat — the app-facing CHAT handle, reached from an embedded app as `DeSciX.chat`.
+ *
+ * (Published on the SHELL's own window. An app never names that window: the app-side
+ * SDK resolves the frame level for it — see `util/bridgeResolver.js`.)
  *
  * ── The defect this closes (ws-c3-bridge-media-handle) ───────────────────────
  * Every piece of the media lane already existed and was already canonical:
@@ -58,7 +61,7 @@ export function publishChatApi({ deliver, isAvailable }) {
     /**
      * Hand an image or video to the model on this conversation.
      *
-     *     await window.parent.DeSciX.chat.sendMedia(
+     *     await DeSciX.chat.sendMedia(
      *       { mime_type: 'image/png', data: base64, label: 'flyby' },
      *       { note: 'what do you see?' }
      *     );

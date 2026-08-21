@@ -3,7 +3,8 @@
 > **THE canonical MVP dogfood demo is `daita-splitviewdemo`** — a self-contained static
 > sub-PWA (`Unkamon/apps/daita-splitviewdemo/site/`, egpt/scaffold pattern: no build
 > step) delivered into an App Shell CodeSite iframe. The sub-PWA scripts to the shell
-> via the same-origin `window.parent.DeSciX` bridge, chooses its layout with
+> via the same-origin `DeSciX` bridge (`DeSciXAppSDK.js` resolves which window carries
+> it, so no frame level is ever named), chooses its layout with
 > `DeSciX.view.set(...)`, and registers `window.DeSciX_Actions.ide_set_status` for
 > AI-chat action blocks. The shell supplies the Powch identity sidebar and the
 > credits-aware chat pane.
