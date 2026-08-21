@@ -28,10 +28,22 @@ early:
 
 | Member | Published by | When |
 |---|---|---|
-| `view` | `useDeSciXView` | shell mount — **does not wait on Powch**, so a wallet-less app still gets to pick its layout |
-| `chat` | `CodeSiteWidget` | shell mount, wherever a CodeSite panel is rendered |
-| `powch`, `config` | `useDeSciXBridge` | only once a Powch bridge exists **and** the shell reaches `READY`; `DESCX_BRIDGE_READY` fires at that moment |
+| `view` | `publishViewApi()` — called by `useDeSciXBridge` (shell-wide) and again by `useDeSciXView` | at shell mount — **does not wait on Powch**, so a wallet-less app still gets to pick its layout |
+| `chat` | `publishChatApi()`, called by `CodeSiteWidget` | its mount, **ungated by `enableChat`** — so `chat` is on the bus even on a face that will never render a chat pane |
+| `powch`, `config` | `useDeSciXBridge`, by direct assignment | once a Powch bridge exists **and** the shell reaches `READY`; `DESCX_BRIDGE_READY` fires at that moment |
+| `AppData`, `Api`, `call`, `AppContext`, `loginWithSessionToken`, `registerSessionExpiryCallback` | the SDK's `AppContext.jsx`, by direct assignment at `READY` | with the shell's session |
 | `bridge` | the bus itself | the moment any member above is published |
+
+`useDeSciXBridge` and `AppContext` are not mounted by the host site directly — they arrive
+with `AppShell`, which every shell renders (`App.jsx` → `AppShell` → `AppProvider` →
+`useDeSciXBridge`). Searching a shell's own source for those names finds nothing and proves
+nothing; the mount is one level inside the component it imports.
+
+Note that only `view` and `chat` go through `publishBridgeMember`. The others are assigned
+onto `window.DeSciX` directly, and `AppContext.jsx` **replaces** the bus object with a
+spread-merged literal when the shell reaches `READY`. Two consequences for an app: those
+members do not fire `descix:bridge-ready`, and a reference to the bus captured before
+`READY` is not the object the shell ends up using. Read `DeSciX` at the point of use.
 
 ### Readiness — never poll
 
@@ -65,6 +77,57 @@ only once a Powch bridge exists. In a shell with no Powch mounted that event nev
 fires, while `view` and `chat` have been working since mount. Gate on
 `descix:bridge-ready`; gate on `DESCX_BRIDGE_READY` only for `powch`/`config`.
 
+Members can also go **away**. When the host backing one unmounts it is deleted from
+the bus, so `members()` and `has()` shrink as well as grow, and a handle you cached
+in a variable outlives the thing that served it. Read members off the bus at the
+point of use rather than hoisting them at boot.
+
+### Which face is hosting you — what is actually on the bus
+
+Which members exist depends on which face of the shell is hosting you, and presence and
+capability are **separate questions** that do not move together.
+
+Measured on the running shells, anonymous (no sign-in), 2026-08-21T17:58Z:
+
+| Face | `Object.keys(DeSciX)` | `view` | `chat` |
+|---|---|---|---|
+| App subdomain, standalone (`egpt-godsworld.dev.descix.net`) | `Api, AppContext, AppData, bridge, call, chat, config, loginWithSessionToken, powch, registerSessionExpiryCallback, view` (11) | present | present (`typeof 'object'`) |
+| Apex store (`dev.descix.net`) | the same **minus `chat`** (10) | present | **absent** |
+
+`view` is present on **both**, including the standalone face, because `useDeSciXBridge`
+publishes it shell-wide — not `AppWidget`. `chat` is the member that varies: it is published
+by `CodeSiteWidget`, so it exists only where a CodeSite panel has mounted.
+
+**Presence is still not capability.** `view.available()` reports whether any host has
+SUBSCRIBED, and subscription comes from `useDeSciXView`, which only `AppWidget` mounts — so a
+face showing `view` on the bus can still have nothing listening, and `set()` will return your
+mode while the screen does not move. Treat `available()` as the only answer, and read it at
+the moment of use.
+
+*(The `available()` values on each face are not measured here — the key lists above are. One
+console line settles it on any loaded shell: `DeSciX.view.available()`. The apex numbers are
+anonymous only; the post-sign-in state is behind a passkey and unmeasured.)*
+
+**The two members are not equally honest about it, and this is the difference that
+should shape your code:**
+
+- `chat.sendMedia()` tells you **afterwards** — it resolves `{ delivered: false, reason }`
+  and logs. You can check the result.
+- `view.set()` **cannot** tell you afterwards — it returns the mode you asked for
+  whether or not anything is listening, so a post-hoc check is impossible by
+  construction.
+
+So: for chat you *may* check the return; for view you **must** check `available()`
+**before** you rely on the layout changing.
+
+Note that "standalone" names two different things and they do not coincide. The
+resolver's standalone means *no bus was found on any ancestor* (see
+`util/bridgeResolver.js`) — there is no shell. The shell's `STANDALONE_APP` face is
+the opposite situation: the bus is right there, one hop up, fully populated; it is the
+store CHROME that is off. An app that treats "I am standalone" as one condition will
+guard for the wrong one — on the shell's standalone face the resolver succeeds, every
+member is present, and the only open question is whether anything is `available()`.
+
 ### `DeSciX.view` — choose your layout
 
 The shell defaults to **SplitView** (your app beside the chat panel). Say so if
@@ -85,11 +148,11 @@ DeSciX.view.set('Chat');       // chat only
 | `MODES` | `{CODESITE, SPLITVIEW, CHAT}` | The string constants, so you never hand-type them. |
 | `DEFAULT` | `string` | `SplitView`. |
 
-**`set()` returning your mode does not mean the screen changed.** Some hosts render
-the app frame without a view-aware container and subscribe to nothing; there,
-`set()` validates, updates the value, notifies an empty subscriber list, and hands
-back the mode you asked for while nothing moves. `available()` is the honest answer
-— it reports whether anything is listening:
+**`set()` returning your mode does not mean the screen changed.** Wherever the
+publishing host is mounted but nothing has subscribed, `set()` validates, updates the
+value, notifies an empty subscriber list, and hands back the mode you asked for while
+nothing moves (see the bus table above). `available()` is the honest answer; it
+reports whether anything is listening:
 
 ```js
 const view = DeSciX.view;
