@@ -35,7 +35,7 @@ my-site/
 │   ├── styles.css
 │   ├── app.js
 │   ├── DeSciXAppSDK.js         # The DeSciX bridge — GENERATED, see below
-│   └── README.md
+│   ├── README.md
 │   └── dist/                   # Build output (if using bundler)
 ├── src/                        # Source files (not deployed)
 │   └── ...
