@@ -264,7 +264,7 @@ Created:
 ✓ site/README.md (placeholder)
 ✓ microservice/README.md (placeholder)
 
-Your app structure is now ready. Run `descix update app` to sync.
+Your app structure is now ready. Run `descix app sync-assets` to sync.
 ```
 
 ## Key Principles
@@ -300,10 +300,10 @@ Once configured, guide user to:
 
 ### Sync Commands (in order)
 
-1. **Sync app assets**: `descix update app`
+1. **Sync app assets**: `descix app sync-assets`
    - Uploads app_description.md, icon.png, system_instructions.md to Drive
    
-2. **Sync knowledge base**: `descix update kb`
+2. **Sync knowledge base**: `descix kb corpus sync`
    - Indexes documents to Pinecone for RAG
    
 3. **Deploy static site** (if applicable): `descix site upload`
@@ -374,7 +374,7 @@ All done! Your app is configured.
 **What you can do now:**
 - Use `tell_me_how` to discover tools
 - Ask me to sync content when you make changes
-- Run `descix kb sync` to update RAG index
+- Run `descix kb corpus sync` to update RAG index
 
 Anything else I can help with?
 ```

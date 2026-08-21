@@ -232,7 +232,7 @@ The PWA Workspace Builder allows users to configure which apps to sync to their 
 ### Setup Command
 
 ```bash
-descix setup [--dev]
+descix mcp quickstart [--dev]
 ```
 
 **Flow:**
@@ -272,10 +272,10 @@ After initial setup, users can hydrate specific apps:
 
 ```bash
 # Pull entire app from Drive
-descix kb pull -c community -a app
+descix drive pull -c community -a app
 
 # Or use the build command for full pipeline
-descix kb build
+descix kb corpus sync
 ```
 
 ---
@@ -352,14 +352,14 @@ The CLI does not create apps directly. Users should:
 
 1. Go to PWA dashboard
 2. Create app/community
-3. Run `descix setup` or `descix login --setup` to hydrate
+3. Run `descix mcp quickstart` or `descix login --setup` to hydrate
 
 ### Post-Creation Commands
 
 ```bash
 # After app is created via PWA:
-descix setup --dev            # Hydrate workspace (first time)
-descix kb build               # Pull, chunk, sync KB
+descix mcp quickstart --dev            # Hydrate workspace (first time)
+descix kb corpus sync               # Pull, chunk, sync KB
 descix site upload -a app   # Deploy static site
 ```
 

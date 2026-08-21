@@ -133,7 +133,7 @@ tell_me_how({
 
 ### 3.5 Integration with SDK V2 Setup
 
-After `descix setup` completes:
+After `descix mcp quickstart` completes:
 
 1. `workspace.json` is created with community/app mappings
 2. Credentials are saved to `.descix/wallet.json`
@@ -233,7 +233,7 @@ const result = await execute_remote_command({
 ### 5.1 Initial Setup Phase
 
 ```
-descix setup [--dev]
+descix mcp quickstart [--dev]
        │
        ▼
    Prerequisites Check (gcloud, ADC)
@@ -368,7 +368,7 @@ if (tools.recommended_tools.length > 0) {
 
 **Pattern: Project-Scoped Operations**
 ```javascript
-// Only works after descix setup
+// Only works after descix mcp quickstart
 const tools = await tell_me_how({ 
   question: "How do I update this app?",
   scope: "project"  // Uses workspace.json
@@ -395,7 +395,7 @@ descix microservice vectorize -r SERVICE_README.md
 **Solution:**
 ```bash
 # Run setup first
-descix setup --dev
+descix mcp quickstart --dev
 
 # Or ensure you're in the workspace root
 cd /path/to/workspace

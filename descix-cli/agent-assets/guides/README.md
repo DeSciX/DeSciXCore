@@ -34,7 +34,7 @@ Does the user need a public website?
 ### Knowledge-Only
 - Just docs/content for RAG search
 - No `site/` or `microservice/` folders needed
-- Commands: `descix kb pull/push/chunk/sync`
+- Commands: `descix drive pull` / `descix drive push` / `descix kb corpus sync`
 
 ### Static Site
 - Built HTML/CSS/JS deployed to CDN
@@ -49,7 +49,7 @@ Does the user need a public website?
 ### Dynamic Site
 - SSR app where microservice serves the site
 - Everything in `microservice/` (no separate `site/`)
-- Commands: `descix deploy service`
+- Commands: `descix microservice deploy` (ADMIN/LOCAL only — public deploy is not open yet)
 
 ## Two-Tier Template System
 

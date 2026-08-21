@@ -61,17 +61,17 @@ Self-contained folder for a single application.
 
 #### `kb/` - Knowledge Base
 The KB folder supports both local-first (Git mode) and Drive-based workflows:
-- **`staging/`**: Place raw files here (PDFs, images) to push them to Drive via `descix kb push`.
-- **`General/`**: The canonical source of text content. Files here are pulled from Drive and converted to Markdown via `descix kb pull`.
-- **`chunks/`**: Processed JSON chunk files ready for vectorization via `descix kb sync`.
+- **`staging/`**: Place raw files here (PDFs, images) to push them to Drive via `descix drive push`.
+- **`General/`**: The canonical source of text content. Files here are pulled from Drive and converted to Markdown via `descix drive pull`.
+- **`chunks/`**: Processed JSON chunk files ready for vectorization via `descix kb corpus sync`.
 
 **CLI-Centric Processing (Git Mode):**
 ```bash
-descix kb push   # Push staging/ -> Drive
-descix kb pull   # Pull Drive -> General/ (converted to markdown)
-descix kb chunk  # Generate chunks from General/ -> chunks/
-descix kb sync   # Push chunks to Pinecone via service layer
-descix kb build  # Convenience: pull → chunk → sync
+descix drive push   # Push staging/ -> Drive
+descix drive pull   # Pull Drive -> General/ (converted to markdown)
+descix kb corpus sync  # Generate chunks from General/ -> chunks/
+descix kb corpus sync   # Push chunks to Pinecone via service layer
+descix kb corpus sync  # Convenience: pull → chunk → sync
 ```
 
 #### `site/` - Frontend
