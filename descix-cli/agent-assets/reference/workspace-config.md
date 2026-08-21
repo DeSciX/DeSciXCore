@@ -193,10 +193,10 @@ DeSciX supports two sync modes, determined by how the app is managed:
 
 **Workflow:**
 1. User creates/edits documents in Google Drive
-2. User runs `descix kb pull` to get text-converted content
+2. User runs `descix drive pull` to get text-converted content
 3. User edits text files locally (Git version control)
-4. User runs `descix kb chunk` to generate chunks
-5. User runs `descix kb sync` to push chunks to Pinecone
+4. User runs `descix kb corpus sync` to generate chunks
+5. User runs `descix kb corpus sync` to push chunks to Pinecone
 6. User commits changes to Git
 
 **When to Use:**
@@ -311,7 +311,7 @@ async function verifyDriveAuth() {
 |-------|-------|----------|
 | "Could not load default credentials" | ADC not configured | Run `gcloud auth application-default login` |
 | "Drive authentication failed" | Scopes missing | Re-run with Drive scopes |
-| "base_folder_id missing" | Not setup | Run `descix setup` |
+| "base_folder_id missing" | Not setup | Run `descix mcp quickstart` |
 
 ---
 
@@ -395,11 +395,11 @@ resolveContextWithOptions(options = {}) {
 ```bash
 # From within an app directory - auto-detects community/app
 cd descix/appsdk
-descix kb build           # Works without -c/-a flags
+descix kb corpus sync           # Works without -c/-a flags
 
 # From workspace root - requires flags
 cd /workspace
-descix kb build -c descix -a appsdk
+descix kb corpus sync -c descix -a appsdk
 ```
 
 ---

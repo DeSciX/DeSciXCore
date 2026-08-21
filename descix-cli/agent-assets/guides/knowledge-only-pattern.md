@@ -57,22 +57,22 @@ my-docs/
 
 ```bash
 # 1. Pull content from Drive (if any)
-descix kb pull -c <community> -a <app>
+descix drive pull -c <community> -a <app>
 
 # 2. Add local files to staging
 cp my-new-doc.pdf kb/staging/
 
 # 3. Push to Drive (converts to text)
-descix kb push -c <community> -a <app>
+descix drive push -c <community> -a <app>
 
 # 4. Pull converted text back
-descix kb pull -c <community> -a <app>
+descix drive pull -c <community> -a <app>
 
 # 5. Chunk for RAG
-descix kb chunk -c <community> -a <app>
+descix kb corpus sync -c <community> -a <app>
 
 # 6. Sync to Pinecone
-descix kb sync -c <community> -a <app>
+descix kb corpus sync -c <community> -a <app>
 ```
 
 ## Capabilities
