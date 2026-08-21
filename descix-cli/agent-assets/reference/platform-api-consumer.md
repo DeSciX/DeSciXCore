@@ -65,6 +65,13 @@ structurally identical shape, but they have not been live-measured on this surfa
 platform does not ship capabilities it has not observed working. The refusal names them
 explicitly so you can tell a scope boundary from a typo.
 
+**The server is the single validation authority.** The client stages a contribution; every rule
+above — accepted MIME types, size limits, `data` XOR `asset_ref`, asset resolution — is enforced
+server-side. None of it lives in the browser bundle, and that is deliberate rather than a gap: the
+package that owns the contract depends on `googleapis` and must never be pulled into a browser
+build. If you go looking in the shipped client for `mime_type` or `asset_ref` you will not find
+them, and finding nothing there is the correct result, not evidence of a missing check.
+
 **Limits:** 8 attachments per turn, 8 MiB each, 16 MiB per turn. Oversized media is **rejected,
 not truncated** — you will know. Media tokens bill as input tokens.
 
@@ -102,6 +109,13 @@ read, setting a disposition, updating a lease:
 **Send only the keys you own.** Defensively re-putting a whole record is how a reader overwrites
 an author's content with its own reconstruction of it.
 
+**A record's `status` tells you what the last writer wrote, not what anyone has read.** If you
+send a record with `status: "unread"`, that value is *your own default* — it is evidence of
+nothing about delivery or attention. The positive signal is the flip to `read`, which only the
+recipient performs. If you need to know a message landed, look for that flip, or for the
+recipient's own subsequent record referring to it. Absence of a flip is not absence of a reader,
+and presence of `unread` is not proof anyone was told.
+
 `mode: "create"` is different by design — an atomic first-claim-wins conditional create that
 refuses rather than overwriting, for electing a single holder of a named resource (a lease, a
 seat, an idempotency key).
@@ -134,6 +148,23 @@ vocabulary, pull `limit >= 3`, and **check `fileName`** — a confident, well-sc
 evidence that the right document was retrieved.
 
 ---
+
+## How the claims on this page were verified
+
+Every statement here was executed against the live platform. Two techniques did most of the work
+and are worth stealing:
+
+**Send a deliberately wrong value and read which layer complains.** When you cannot test a
+parameter properly — no fixture, no real asset — you can still find out whether it exists. Passing
+a nonsense `asset_ref` returned `MEDIA_ASSET_UNREADABLE` naming the exact path it looked at: the
+parameter was *accepted* and the handler *ran*. An undeclared parameter fails completely
+differently, with `unknown parameter` and the accepted set. The two errors come from different
+layers, and which layer answers is the measurement.
+
+**Check the artifact that actually executes, not the one you changed.** A fix can be merged and
+still unreachable; today one sat on the main branch for roughly five hours before a deploy carried
+it. Code present in a shipped bundle proves it shipped, not that it works. So the order that holds
+is: merged → deployed → shipped → working, and each arrow is a real gap somebody has to cross.
 
 ## Scope of this page
 
