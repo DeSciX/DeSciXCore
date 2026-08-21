@@ -33,22 +33,31 @@ my-dynamic-app/
 ├── site/
 │   └── README.md               # "Site served by microservice"
 ├── microservice/
+│   ├── app.js                  # Entry point (from the scaffold)
 │   ├── manifest.json
 │   ├── SERVICE_README_myapp.md
 │   ├── package.json
 │   ├── Dockerfile
 │   ├── app.yaml
-│   └── src/
-│       ├── index.js
-│       ├── pages/              # SSR routes
-│       │   ├── index.js
-│       │   └── dashboard.js
-│       ├── api/                # API routes
-│       │   └── ...
-│       └── views/              # Templates
-│           └── ...
+│   ├── services/               # From the scaffold — NOT src/
+│   │   ├── utils.js            # Config bootstrap over @descix/cloud-core
+│   │   ├── apiFront.js
+│   │   └── commandHandlers/
+│   ├── pages/                  # YOU add these: SSR routes
+│   │   ├── index.js
+│   │   └── dashboard.js
+│   ├── api/                    # YOU add these: API routes
+│   │   └── ...
+│   └── views/                  # YOU add these: templates
+│       └── ...
 └── package.json
 ```
+
+The first group comes from the scaffold and should not be reshaped: `app.js` is the entry
+point and service code lives under `services/` — **there is no `src/` directory**. The
+`pages/`, `api/` and `views/` directories are yours; the layout inside them is your call.
+Keeping the scaffold's shape is what lets the service keep inheriting platform behaviour
+(see `guides/microservice-pattern.md`).
 
 ## Configuration (`workspace.json`)
 

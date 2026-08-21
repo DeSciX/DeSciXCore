@@ -122,9 +122,11 @@ All core SDK logic resides in `DeSciX_Core/descix-cli/lib/core/`.
 │       ├── research.chunks.json
 │       └── notes.chunks.json
 ├── site/                       # Static site files (push-only)
-│   └── index.html
+│   ├── index.html
+│   └── DeSciXAppSDK.js         # The DeSciX bridge (generated)
 └── microservice/               # Service code (push-only)
-    └── src/index.js
+    ├── app.js                  # Entry point
+    └── services/               # Service code — there is no src/
 ```
 
 ### Folder Purposes

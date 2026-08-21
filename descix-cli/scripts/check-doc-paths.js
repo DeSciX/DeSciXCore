@@ -27,6 +27,13 @@
  * warnings-only mode: a doc that lies is a failure, not a note (house rule — fail
  * loud, no fallbacks).
  *
+ * SECOND CHECK (tree glyphs): inside fenced blocks, a `└──` closes its indent level, so a
+ * LATER sibling at that same level is a malformed tree. This is a deliberately dumb rule —
+ * NOT a tree parser — added because a hand-spliced tree passed both diff review and the path
+ * check while rendering wrong (measured: two `└──` at one level shipped in a doc whose own
+ * subject was tree accuracy). It reads glyphs and indentation only; it knows nothing about
+ * filesystems.
+ *
  * KNOWN BLIND SPOT, stated because a gate's limits must be: a worktree parked
  * OUTSIDE the workspace tree (e.g. /Users/<u>/Code/.agent-worktrees/DeSciX_Core/<branch>)
  * has no ancestor holding the sibling repos, so the workspace frame cannot be found
@@ -293,6 +300,56 @@ for (const file of files) {
       }
     }
   });
+}
+
+/**
+ * Malformed-tree check. Inside a fenced block, `└── ` is the LAST child at its indent, so
+ * seeing another `├──`/`└──` at the SAME indent afterwards means the tree is wrong.
+ *
+ * State resets at every fence boundary and at blank lines, because one fence can legitimately
+ * hold two separate trees separated by a blank line. Deliberately dumb: no nesting model, no
+ * filesystem, no parser.
+ */
+const TREE_LINE = /^([\s│]*?)(├── |└── )/;
+
+function malformedTrees(file) {
+  const out = [];
+  const lines = fs.readFileSync(file, 'utf8').split('\n');
+  let inFence = false;
+  let closed = new Set();
+  lines.forEach((line, i) => {
+    if (/^\s*```/.test(line)) { inFence = !inFence; closed = new Set(); return; }
+    if (!inFence) return;
+    const m = TREE_LINE.exec(line);
+    // ANY non-glyph line ends the current tree — blank lines, the root line, and the prose
+    // and arrows of a flow diagram alike. A real directory tree is a CONTIGUOUS run of glyph
+    // lines, so this costs nothing there, and it is what stops an ASCII flow diagram with two
+    // `└──` under two different headings from being read as a broken tree (measured: that was
+    // the last false positive). The bias is deliberate: a missed malformation is a bad line in
+    // one doc, a false alarm is a gate someone switches off.
+    if (!m) { closed = new Set(); return; }
+    const [, indent, glyph] = m;
+    // Ascending to a shallower level ENDS every deeper subtree, so those levels reopen.
+    // Without this, a second `site/` branch looks like a duplicate sibling of the first
+    // branch's last child. (Measured: 11 false positives before this line existed.)
+    for (const c of [...closed]) if (c.length > indent.length) closed.delete(c);
+    if (closed.has(indent)) {
+      out.push({ file: path.relative(REPO_ROOT, file), line: i + 1, token: line.trim() });
+      return;
+    }
+    if (glyph === '└── ') closed.add(indent);
+  });
+  return out;
+}
+
+const treeFailures = files.flatMap(malformedTrees);
+if (treeFailures.length > 0) {
+  console.error(`\ncheck-doc-paths: ${treeFailures.length} malformed tree line(s)`);
+  console.error('A `└──` closes its indent level; a later sibling at that level renders wrong.');
+  console.error('These are read by agents as the literal layout of a real directory.\n');
+  for (const f of treeFailures) console.error(`  ${f.file}:${f.line}  ->  ${f.token}`);
+  console.error('');
+  process.exit(1);
 }
 
 if (failures.length > 0) {
