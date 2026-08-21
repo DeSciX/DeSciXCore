@@ -29,8 +29,11 @@
 #   · Trusted publishing needs npm >= 11.5.1 and Node >= 22.14.0.
 #   · A trusted publisher CANNOT be configured for a package that does not exist yet — npm docs,
 #     Prerequisites: "Package must exist: The package you're configuring must already exist on
-#     the npm registry." @descix/cloud-core and @descix/platform-api have NEVER been published,
-#     so each needs ONE interactive first publish by the CEO before this workflow can take over.
+#     the npm registry." @descix/cloud-core has NEVER been published,
+#     so cloud-core needs ONE interactive first publish by the CEO before this workflow can take
+#     over. (@descix/sdk already exists at 1.0.0, so it does not.) NOTE, measured by VISION from
+#     the live form: npm SAVES a trusted-publisher connection with NO workflow file in the repo —
+#     existence is not validated at setup, so configuring before this branch merges is fine.
 #     See the runbook: docs/runbooks/npm-trusted-publishing.md
 name: npm publish (trusted publishing)
 
@@ -42,11 +45,12 @@ on:
         required: true
         type: choice
         options:
-          - descix-cloud-core
-          - descix-platform-api
+          # PUBLIC STORY IS ONE PACKAGE (CEO 2026-08-21): @descix/sdk, with cloud-core as
+          # PLUMBING that sdk re-exports at /microservice. cli, platform-api and app-sdk are
+          # deliberately NOT here — not published, not listed. Adding a name back is a product
+          # decision, not a convenience.
           - descix-sdk
-          - descix-app-sdk
-          - descix-cli
+          - descix-cloud-core
       dist_tag:
         description: "npm dist-tag"
         required: true
@@ -88,7 +92,7 @@ jobs:
       - name: Refuse to publish excluded packages
         run: |
           case "${{ inputs.package }}" in
-            cryptoapis-sdk|descix-vscode|.)
+            cryptoapis-sdk|descix-vscode|descix-cli|descix-platform-api|descix-app-sdk|.)
               echo "::error::'${{ inputs.package }}' is NOT publishable to npm under @descix."
               exit 1
               ;;

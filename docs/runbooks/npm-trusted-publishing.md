@@ -22,45 +22,57 @@ prerequisites, verbatim:
 
 > "Package must exist: The package you're configuring must already exist on the npm registry."
 
-Measured registry state for our five publishable packages:
+**The public story is ONE package** (your call, 2026-08-21): `@descix/sdk`, which will re-export
+the microservice backend at `@descix/sdk/microservice`. `@descix/cloud-core` still publishes, but
+as **plumbing** — named in no docs, installed by nobody directly.
 
-| package | on npm today | needs a manual first publish? |
-|---|---|---|
-| `@descix/sdk` | 1.0.0 | no |
-| `@descix/cli` | 1.0.1 | no |
-| `@descix/app-sdk` | 0.1.0 | no |
-| `@descix/cloud-core` | **never published** | **yes — once** |
-| `@descix/platform-api` | **never published** | **yes — once** |
+Measured registry state:
 
-So the sequence is: **Step 0 for those two only**, then Steps 1–3 for all five, then never again.
+| package | role | on npm today | needs a manual first publish? |
+|---|---|---|---|
+| `@descix/sdk` | the story | 1.0.0 | no |
+| `@descix/cloud-core` | plumbing | **never published** | **yes — once** |
 
-*(`cryptoapis-sdk` is vendored third-party code and is never published under our scope — the
-workflow refuses it explicitly. `descix-vscode` ships to the VS Code Marketplace, not npm.)*
+So the sequence is: **Step 0 for `cloud-core` only**, then Steps 1–3, then never again.
+
+*Not published, deliberately:* `@descix/cli` (stays at 1.0.1 as-is), `@descix/platform-api` and
+`@descix/app-sdk` — the workflow refuses all three by name. `cryptoapis-sdk` is vendored
+third-party code and must never reach the registry under our scope. `descix-vscode` ships to the
+VS Code Marketplace, not npm.
+
+**`@descix/platform-api` does NOT have to be published** — checked rather than assumed:
+`@descix/cloud-core` has zero imports of it today, and its dependencies are only Google Cloud
+libraries plus `chokidar`/`dotenv`/`google-auth-library`. Nothing forces platform-api public.
 
 ---
 
-## Step 0 — one interactive first publish (only `cloud-core` and `platform-api`)
+## Step 0 — one interactive first publish (`cloud-core` only)
 
-On your machine, in the canonical `DeSciX_Core` checkout, once per package:
+On your machine, in the canonical `DeSciX_Core` checkout — **once, for `cloud-core` only**:
 
 ```bash
 npm login                       # browser + 2FA
 cd descix-cloud-core && npm publish --access public
-cd ../descix-platform-api && npm publish --access public
 ```
 
 `--access public` matters: `@descix` is a scope, and scoped packages default to **restricted**,
 which a free org will refuse.
 
-Then **log out again** — `npm logout` — so no session lingers. After Step 2 the account should
+Then **log out again** — `npm logout` — so no session lingers. After Step 3 the account should
 not be able to publish from a laptop at all.
 
 ---
 
 ## Step 1 — configure the trusted publisher (npmjs.com, once per package)
 
-For each of the five packages: **npmjs.com → the package → Settings → Trusted Publisher →
-GitHub Actions**, and enter exactly:
+**You have already done this for `@descix/sdk`** (2026-08-21, verified). Only `@descix/cloud-core`
+remains, and it can only be configured *after* Step 0, because npm requires the package to exist.
+
+**Useful thing you discovered:** npm saved the connection **with no workflow file in the repo** —
+the form warns about it but does not validate it. So configuring ahead of the merge is fine.
+
+For each package: **npmjs.com → the package → Settings → Trusted Publisher → GitHub Actions**,
+and enter exactly:
 
 | field | value |
 |---|---|
@@ -68,28 +80,32 @@ GitHub Actions**, and enter exactly:
 | Repository | `DeSciXCore` |
 | Workflow filename | `npm-publish.yml` |
 | Environment | `npm-publish` |
+| Allowed actions | **`npm publish` only** (leave stage-publish unchecked) |
 
-All four must match or the publish is refused — that exactness *is* the security property. The
+All of these must match or the publish is refused — that exactness *is* the security property. The
 workflow filename is why the file may never be renamed or moved without redoing this step.
 
 ---
 
-## Step 2 — harden publishing access (npmjs.com, once per package)
-
-Same Settings page: set publishing access to **require trusted publishing / disallow tokens**
-(npm's wording varies by rollout; choose the strictest option that excludes token publishing).
-
-This is the step that converts "we have a nice CI path" into "there is no other path." Do it
-after Step 1, or you will lock out the publisher you have not configured yet.
-
----
-
-## Step 3 — create the approval gate (GitHub, once for the repo)
+## Step 2 — create the approval gate (GitHub, once for the repo) — **still open**
 
 **github.com/eabadir/DeSciXCore → Settings → Environments → New environment → `npm-publish`**,
 then tick **Required reviewers** and add **`eabadir`**.
 
 Name it exactly `npm-publish` — the workflow and the npm trusted-publisher config both name it.
+
+---
+
+## Step 3 (LAST) — harden publishing access (npmjs.com, once per package)
+
+**Do this only AFTER the first successful publish through the workflow.** Same Settings page: set
+publishing access to **require trusted publishing / disallow tokens** (npm's wording varies by
+rollout; choose the strictest option that excludes token publishing).
+
+This converts "we have a nice CI path" into "there is no other path" — which is exactly why it
+goes last. Flip it before CI has published successfully even once and you have removed the old
+road before confirming the new one carries traffic. Publishing access stays on the current
+token setting until then, by design.
 
 ---
 
