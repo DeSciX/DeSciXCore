@@ -1,0 +1,104 @@
+# npm Trusted Publishing — the ONLY sanctioned path to publish a @descix package.
+#
+# WHY THIS EXISTS (CEO, 2026-08-21, verbatim):
+#   "npm is turning off 2FA bypass and now is moving to Trusted Publisher model through CI
+#    so we need to set-up GitHub actions. Let me know how you recommend we set-up the automation."
+#
+# THE FEATURE IS THE ABSENCE OF A SECRET. There is no NODE_AUTH_TOKEN and no repo secret here.
+# Authentication is a short-lived OIDC token minted per run and bound to THIS repository, THIS
+# workflow file path, and THIS environment. A leaked log cannot be replayed; there is no
+# long-lived credential to leak in the first place. That is also why the workflow file itself is
+# now a credential-equivalent: whoever can edit this path can publish. CODEOWNERS guards it.
+#
+# EVERY PUBLISH IS A DELIBERATE CEO CLICK. Trigger is workflow_dispatch only — no push, no tag.
+# The `npm-publish` environment additionally requires the CEO's approval before the job runs,
+# which makes deploy_gate=ceo mechanical rather than a convention someone has to remember.
+#
+# MEASURED FACTS THIS FILE IS BUILT ON (verified 2026-08-21, not assumed):
+#   · eabadir/DeSciXCore is a PRIVATE repository (gh repo view -> "isPrivate": true).
+#   · npm provenance requires a PUBLIC source repo — npm docs: "Ensure your package.json is
+#     configured with a public repository that matches (case-sensitive) where you are publishing
+#     with provenance from." Publishing with provenance from private source repos has been
+#     unsupported since 2023-07-26.
+#   · Trusted publishing generates provenance AUTOMATICALLY, with no --provenance flag. For a
+#     private repo it will not be generated, and NPM_CONFIG_PROVENANCE=false is the documented
+#     way to opt out explicitly rather than rely on that implicit behaviour.
+#   => hence NPM_CONFIG_PROVENANCE: "false" below. If this repo is ever made PUBLIC, DELETE that
+#      line so provenance turns back on — it is a real supply-chain gain we are only forgoing
+#      because of visibility.
+#   · Trusted publishing needs npm >= 11.5.1 and Node >= 22.14.0.
+#   · A trusted publisher CANNOT be configured for a package that does not exist yet — npm docs,
+#     Prerequisites: "Package must exist: The package you're configuring must already exist on
+#     the npm registry." @descix/cloud-core and @descix/platform-api have NEVER been published,
+#     so each needs ONE interactive first publish by the CEO before this workflow can take over.
+#     See the runbook: docs/runbooks/npm-trusted-publishing.md
+name: npm publish (trusted publishing)
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: "Which package to publish"
+        required: true
+        type: choice
+        options:
+          - descix-cloud-core
+          - descix-platform-api
+          - descix-sdk
+          - descix-app-sdk
+          - descix-cli
+      dist_tag:
+        description: "npm dist-tag"
+        required: true
+        default: latest
+        type: string
+
+# Least privilege. id-token:write is what mints the OIDC token; contents:read is what checks the
+# code out. Nothing else is granted, and in particular no packages: or id-token beyond this job.
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # Requires CEO approval in Settings -> Environments -> npm-publish before the job starts.
+    # This is the gate: the run sits waiting until he clicks.
+    environment: npm-publish
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.14.0"
+          registry-url: "https://registry.npmjs.org"
+
+      # setup-node bundles whatever npm shipped with the Node line; trusted publishing needs
+      # >= 11.5.1, so pin the floor explicitly rather than hoping the image is current.
+      - name: Ensure npm supports trusted publishing
+        run: |
+          npm install -g npm@latest
+          npm --version
+          node --version
+
+      # FAIL LOUD BEFORE PUBLISHING. cryptoapis-sdk is vendored THIRD-PARTY code and must never
+      # reach the registry under our scope; it is not in the input choices, but a choice list is
+      # a UI affordance, not an enforcement boundary.
+      - name: Refuse to publish excluded packages
+        run: |
+          case "${{ inputs.package }}" in
+            cryptoapis-sdk|descix-vscode|.)
+              echo "::error::'${{ inputs.package }}' is NOT publishable to npm under @descix."
+              exit 1
+              ;;
+          esac
+
+      - name: Publish
+        working-directory: ${{ inputs.package }}
+        env:
+          # See the header: private source repo => provenance cannot be generated. Explicit beats
+          # implicit. DELETE this if the repository ever becomes public.
+          NPM_CONFIG_PROVENANCE: "false"
+        run: |
+          npm publish --access public --tag "${{ inputs.dist_tag }}"
