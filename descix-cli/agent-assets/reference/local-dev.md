@@ -182,6 +182,53 @@ The derived Shell rule is the important one: point the API at a cloud environmen
 
 Rules of thumb: run the CLI from the canonical checkout, and treat an auth error raised from a worktree as a workspace-resolution suspect *before* re-authenticating.
 
+### Deploying: probe the credential the action actually uses
+
+`deploy-env.sh` will refuse to start rather than fail halfway:
+
+```
+gcloud credentials are NOT usable (expired user session, or no active account)...
+Refusing to start a real deploy that would fail partway through.
+```
+
+That refusal is the script working correctly, and **an expired gcloud user session alongside live
+ADC is a normal steady state**, not a broken machine. The two are different credentials behind one
+word: the deploy path needs the **user session**, while most quick probes reach for **ADC**.
+
+This is the trap: `gcloud auth application-default print-access-token` returns a token, you record
+"gcloud is fine", and that observation is *true and irrelevant*. **Probe the credential the action
+actually uses, not an adjacent one that happens to answer.**
+
+The remedy is one line, needs no re-auth prompt, and the script prints it itself:
+
+```bash
+export CLOUDSDK_AUTH_ACCESS_TOKEN="$(gcloud auth application-default print-access-token)"
+[ -n "$CLOUDSDK_AUTH_ACCESS_TOKEN" ] || { echo "empty token"; exit 1; }
+```
+
+Assert it non-empty before launching — an empty token reproduces the same refusal one layer later,
+where it is harder to recognise.
+
+**Why this is written down rather than left to be rediscovered:** without it, the next agent reads
+a correct fail-loud refusal as *platform unreachable* and stops under the platform-reachability
+rule — halting a lane and escalating, over a one-line export the script had already told it. A
+fail-loud message nobody knows how to act on still costs a lane.
+
+### Exit codes from wrappers are not evidence
+
+A deploy wrapper ending in `| tail` returns **tail's** status, not the deploy's. A run can report
+exit 0 while the deploy correctly returned 1. Capture the real status *before* anything pipes it:
+
+```bash
+deploy-env.sh dev; rc=$?          # capture FIRST
+deploy-env.sh dev 2>&1 | tail -40 # then look at output separately
+```
+
+To confirm a deploy succeeded, **read the log, not the exit code** — and where the artifact is
+observable (a served object's timestamp, a string in the shipped bundle), check that instead. A
+pipe silently drops information in both directions: `| tail` hides a failure, and `| head` hides
+later matches from a search that looks complete.
+
 ### The SDK you edit is not always the SDK you serve
 
 A second, sharper worktree trap, and it is silent. `DeSciX_Cloud/site/node_modules/@descix/app-sdk`
