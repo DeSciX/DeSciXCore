@@ -40,19 +40,47 @@ so trust the error, not the prose.
 
 ---
 
-## 2. Input is text-only
+## 2. Sending images and video
 
-`ask_question_to_app` takes no image, media, or file-upload parameter. The full parameter set is
-`app_id`, `user_input`, the KB name(s), `doc_ids`, `file_id`, `ipdoc_file_id`,
-`intelligence_level`, `model`, `max_output_tokens`, `temperature`, `thinking_budget`,
-`previous_interaction_id`, `streaming`.
+`ask_question_to_app` takes a `media` array — images and video for the model to **look at** on
+this turn. Each entry supplies **exactly one** of `data` (raw base64, no `data:` URL prefix) or
+`asset_ref` (an object in *this app's* own GCS asset space). Declaring both is refused: which one
+did you mean?
 
-This is worth stating because the natural assumption — "there is a multimodal model underneath, so
-I can send it a screenshot" — is wrong, and nothing on the surface says so. An app whose agent
-needs to *see* something (a rendered canvas, a chart, a screenshot) cannot get that through this
-API today. Design around it rather than discovering it late.
+```jsonc
+{
+  "app_id": "my-app",
+  "user_input": "What colour sequence does this show?",
+  "media": [
+    { "mime_type": "video/mp4", "asset_ref": "probe.mp4", "label": "probe clip" }
+  ]
+}
+```
 
----
+**Accepted today:** images (`png`, `jpeg`, `webp`, `heic`, `heif`, `gif`, `bmp`, `tiff`) and video
+(`mp4`, `mpeg`, `mpg`, `mov`, `avi`, `x-flv`, `webm`, `wmv`, `3gpp`).
+
+**Audio and PDF are refused on purpose, not by oversight.** The provider accepts them with a
+structurally identical shape, but they have not been live-measured on this surface, and the
+platform does not ship capabilities it has not observed working. The refusal names them
+explicitly so you can tell a scope boundary from a typo.
+
+**Limits:** 8 attachments per turn, 8 MiB each, 16 MiB per turn. Oversized media is **rejected,
+not truncated** — you will know. Media tokens bill as input tokens.
+
+**Do not resend media on follow-up turns.** It persists in the conversation thread: continue with
+`previous_interaction_id` and the model still has it. Resending costs you the tokens twice.
+
+**`asset_ref` resolves server-side, and that is the whole point.** A `gs://` URI is a DeSciX-side
+reference, never a provider one — the provider rejects GCS URIs outright, so the platform reads
+the bytes for you. Upload with `descix app media-upload` (or `get_asset_upload_token`). If the
+object is not there you get an error that names the exact path it looked at:
+
+```
+[chatMedia] could not read media asset "probe.mp4" for app "my-app":
+Asset not found at gs://descix-assets-public/dev/my-app/assets/probe.mp4.
+Upload it first with `descix app media-upload`.
+```
 
 ## 3. Writes merge per FIELD, so send only the keys you own
 
@@ -80,7 +108,25 @@ seat, an idempotency key).
 
 ---
 
-## 4. Retrieval is vocabulary-sensitive, and fails quietly
+## 4. Scoping a search to one document
+
+`query_knowledge_base` takes `file_filter` to restrict a search to a single source.
+
+**It takes the retrievable file id, not the human-readable file name.** The id is opaque and
+looks like `corpus:ce66a173…`. You do not have to construct it: every result row carries it as
+`file_path`, and every citation returns a ready-made `read_command` containing the correct
+`file_filter`. **Copy the id the citation gave you** — never type the filename.
+
+```jsonc
+{ "app_id": "unk-beast", "kb_id": "DevX-Evangelist",
+  "query": "intake and triage", "file_filter": "corpus:ce66a173…" }
+```
+
+Passing the display `file_name` instead returns empty or 404s, and the platform warns about
+exactly this mistake in its own retrieval notes. If a scoped search comes back empty, check that
+first before concluding the document is missing.
+
+## 5. Retrieval is vocabulary-sensitive, and fails quietly
 
 Covered in depth in [local-dev.md](./local-dev.md) under KB sync, because it is as much a curation
 concern as a calling one. The short version for callers: phrase queries in the source's own
@@ -92,6 +138,11 @@ evidence that the right document was retrieved.
 ## Scope of this page
 
 Every claim above was executed against the live platform, not inferred from source or design
-documents. Behaviour that is implemented but **not yet reachable on the deployed surface** is
-deliberately absent: documenting a call the platform currently refuses would hand you an
-instruction that errors, which is the defect this page exists to avoid.
+documents — including the two newest sections, whose behaviour was merged for hours before it was
+actually reachable. Behaviour that is implemented but **not yet reachable on the deployed
+surface** stays out of this page: documenting a call the platform currently refuses would hand you
+an instruction that errors, which is the defect this page exists to avoid.
+
+One consequence worth knowing as a reader: **a merge is not a deploy.** If something here does
+not work for you, it is worth checking whether your environment has taken the deploy that carries
+it, before concluding the doc is wrong.
