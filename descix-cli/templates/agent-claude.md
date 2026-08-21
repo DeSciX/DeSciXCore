@@ -187,6 +187,7 @@ If the repo already has content (an HTML page, a React app, an SDK with docs),
 **If the project has an `index.html` or web app already:**
 - Serve it directly — it IS the site. Don't duplicate into `site/`.
 - To add DeSciX integration (auth, API access), include `DeSciXAppSDK.js`
+  `DeSciXAppSDK.js` is GENERATED (from `descix-app-sdk/templates/DeSciXAppSDK.template.js`, with a `--check` drift gate) — copy it in, never hand-edit it; a local patch forks the bridge and stops inheriting its fixes.
   (scaffolded by `descix app init`) in your HTML:
   ```html
   <script src="DeSciXAppSDK.js"></script>
