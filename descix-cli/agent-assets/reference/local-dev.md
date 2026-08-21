@@ -136,6 +136,13 @@ Check before you write: `--dry-run` enumerates would-be upserts and purges with 
 writes (exit 0 = no drift, 1 = drift), and `--show-walk` prints the resolved ref and the walked
 files. `descix kb corpus status` shows files, chunks, last sync and resolved ref.
 
+**Only `.md` is ingested.** The corpus walk takes Markdown; a `.mdc` file is shipped and read
+from disk but never enters a knowledge base. That matters for
+`agent-assets/rules/descix_mcp.template.mdc`, which agents read as a file and which no amount of
+KB querying will surface. If you fix something there, the fix reaches readers of the file and
+nobody asking the KB — so do not assume KB coverage for a surface that has none. This is a known
+boundary, not a defect.
+
 `descix kb chunk`, `descix kb sync` and `descix update kb` still run but are **superseded
 duplicates** — each names `kb corpus sync` as its replacement in its own `--help` and is slated
 for removal. Do not put them in new instructions.
