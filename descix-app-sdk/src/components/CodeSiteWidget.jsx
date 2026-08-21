@@ -47,10 +47,21 @@ const PLATFORM_APP_MESSAGES = {
  *    registers. Same action vocabulary, same user-clicks-Run gate.
  *
  * The chat pane is the credits-aware embedded ChatWidget (balance, debit feedback,
- * buy-credits CTA — chat is metered per CEO-D-2026-07-01 D2).
+ * buy-credits CTA — chat is metered per CEO-D-2026-07-01 D2). `enableChat={false}`
+ * is a full mode, not a cosmetic hide: no ChatWidget mounts and no toggle renders,
+ * so the widget is a bare app frame that needs no session and makes no server call.
+ *
+ * That mode is what the shell's STANDALONE_APP view mounts — the guest-safe face of
+ * the app a shell is BOUND to (`descix serve`, or a deployed app face). It is the
+ * same container the store uses at APP_USAGE, differing only by this prop, which is
+ * why there is one iframe-app widget here and not two.
  *
  * Platform apps (daita, powch) are guarded from iframe rendering to prevent
- * recursion (daita) and duplicate instances (powch). See PLATFORM_APP_IDS.
+ * recursion (daita) and duplicate instances (powch) — but ONLY when this widget is
+ * the store's app surface. Standalone, `window.__STANDALONE_APP_ID__` is set and the
+ * guard lifts: a shell bound to powch is powch's own front door, so the wallet is
+ * the content rather than a duplicate of a sidebar that is showing something else.
+ * See PLATFORM_APP_IDS and `isPlatformApp` below.
  */
 const CodeSiteWidget = ({
   url,
@@ -59,6 +70,10 @@ const CodeSiteWidget = ({
   chatPosition = 'right',
   chatWidth = 0.25,
   height = '90vh',
+  // The iframe's accessible name. Defaults to the store's framing ("Code Site");
+  // a standalone mount names the app it is bound to, because there the frame is not
+  // a code site beside a chat — it IS the application.
+  title = 'Code Site',
   chatEntitled,
   onRequestLogin,
   // WS-B8: what happens to an executed action's result.
@@ -259,7 +274,7 @@ const CodeSiteWidget = ({
           <iframe
             ref={iframeRef}
             src={iframeSrc}
-            title="Code Site"
+            title={title}
             style={{ width: '100%', height: '100%', border: 'none' }}
             sandbox={sandboxPermissions}
           />

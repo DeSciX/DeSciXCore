@@ -285,7 +285,7 @@ export const AppProvider = ({ children }) => {
           if (payload?.mode === 'STANDALONE_APP') {
             console.log(`AppContext: Detected STANDALONE_APP mode for ${payload.appId}, skipping standard checks`);
             setIsAppMode(true);
-            // Store app mode config in AppData for StandAloneAppWidget
+            // Store app mode config in AppData for the shell's STANDALONE_APP view
             AppData.appModeConfig = {
               appId: payload.appId,
               url: payload.url
@@ -296,7 +296,7 @@ export const AppProvider = ({ children }) => {
               console.log('AppContext: Handling standalone deep link:', payload.deepLink);
               if (payload.deepLink.type === 'CLAIM') {
                 setViewEventData({ claimCode: payload.deepLink.code });
-                // We don't change view here, StandAloneAppWidget will handle it or we stay in STANDALONE_APP
+                // We don't change view here, the STANDALONE_APP view will handle it or we stay in STANDALONE_APP
               }
             }
 

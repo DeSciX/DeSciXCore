@@ -109,9 +109,12 @@ export function resetView() {
  * Is a host actually LISTENING to view changes?
  *
  * Publication is not capability. `AppWidget` subscribes (via useDeSciXView) and
- * honours the request; `StandAloneAppWidget` renders a bare iframe and subscribes to
- * nothing — so on that host `set()` validates, updates `current`, notifies an empty
- * subscriber set, and returns the mode you asked for while the screen never changes.
+ * honours the request; the shell's STANDALONE_APP view mounts `CodeSiteWidget`
+ * DIRECTLY, with no useDeSciXView between them, so that host subscribes to nothing —
+ * `set()` validates, updates `current`, notifies an empty subscriber set, and returns
+ * the mode you asked for while the screen never changes.
+ * (Subscription lives in the shell's view layer, not in the widget: the same
+ * CodeSiteWidget is honour-bound under AppWidget and inert standalone.)
  * A no-op that returns success is indistinguishable from success, which is the exact
  * failure class this platform's doctrine exists to prevent.
  *
