@@ -7,10 +7,12 @@
  * app could say changed it.
  *
  * The mechanism is the existing service bus — window.DeSciX already carries
- * .powch and .config, and an embedded app reads them off its PARENT window. The
- * view API is one more member, reached the same way:
- *   window.parent.DeSciX.view.set('CodeSite')
- * That works because shell and app are same-origin, the property G-1 restored.
+ * .powch and .config, published on the SHELL's own window. The view API is one more
+ * member, and an app reaches it the same way it reaches the others:
+ *   DeSciX.view.set('CodeSite')
+ * The frame level is resolved by the app-side SDK (src/util/bridgeResolver.js), not
+ * named by the app. That reach works because shell and app are same-origin, the
+ * property G-1 restored.
  *
  * Run: `node --test tests/app-view-api.test.js` from descix-app-sdk/.
  */
@@ -24,6 +26,7 @@ import { fileURLToPath } from 'node:url';
 import {
   VIEW_MODES, DEFAULT_VIEW, getView, setView, subscribeView, resetView, publishViewApi,
 } from '../src/util/appView.js';
+import { resolveBridge } from '../src/util/bridgeResolver.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SDK_ROOT = path.resolve(__dirname, '..');
@@ -111,13 +114,19 @@ test('publishViewApi is a no-op without a window (SSR / node)', () => {
   assert.doesNotThrow(() => publishViewApi());
 });
 
-test('an embedded app drives it exactly as documented, through window.parent', () => {
-  // Simulate the real call shape: the app reaches its PARENT's bus, which is only
-  // possible because the frames are same-origin.
+test('an embedded app drives it through the bus the resolver hands it', () => {
+  // The physical hop still exists — the app's bus lives on an ancestor window, which
+  // is only readable because the frames are same-origin. What changed is WHO computes
+  // it: the app says `DeSciX.view.set(...)` and the SDK resolves the level.
   globalThis.window = {};
   publishViewApi();
   const appFrame = { parent: globalThis.window };
-  appFrame.parent.DeSciX.view.set('CodeSite');
+  appFrame.parent.DeSciX.bridge.version = 1; // the marker the resolver discriminates on
+
+  const { bus } = resolveBridge(appFrame);
+  assert.equal(bus, globalThis.window.DeSciX, 'the resolver finds the shell without the app naming a level');
+
+  bus.view.set('CodeSite');
   assert.equal(getView(), VIEW_MODES.CODESITE);
 });
 

@@ -2,7 +2,7 @@
 
 Core package for all DeSciX web apps. Provides init-to-READY app shell logic, auth, API surface, Powch bridge integration, and dev proxy/config.
 
-**Hosting an app inside the shell?** The contract is [The App Shell API](./APP_SHELL_API.md) — `window.DeSciX.view` to choose your layout, `window.DeSciX.powch` for identity and wallet, and `window.DeSciX_Actions` for what the shell calls back into. Plain JavaScript on `window`; no SDK import required.
+**Hosting an app inside the shell?** The contract is [The App Shell API](./APP_SHELL_API.md) — `DeSciX.view` to choose your layout, `DeSciX.chat` to show the model something, `DeSciX.powch` for identity and wallet, and `window.DeSciX_Actions` for what the shell calls back into. Include `DeSciXAppSDK.js` and use `DeSciX.…`: it detects which window carries the bus, so you never write `window.parent.` or `window.top.`
 
 The shell resolves which app it is serving at RUNTIME, from a binding served at `/__descix/app-binding.json` on its own origin, so one bundle boots as the store and as your app standalone with no rebuild. An app that builds *itself* standalone declares it at its own mount: `<AppShell appId="my-app" standalone>`.
 

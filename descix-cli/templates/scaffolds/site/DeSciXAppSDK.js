@@ -1,108 +1,182 @@
 /**
- * DeSciXAppSDK.js (V2 - App Shell Edition)
+ * DeSciXAppSDK.js — the APP side of the DeSciX bridge.
  *
- * A thin wrapper for CodeSites and ChatWidgets running within the DeSciX PWA.
- * Leverages Same-Origin interframe scripting to provide direct access to
- * PWA helpers and the backend API.
+ * !!! GENERATED FILE — DO NOT EDIT !!!
+ * Source:    @descix/app-sdk templates/DeSciXAppSDK.template.js
+ *            + src/util/bridgeResolver.js (inlined below)
+ * Regenerate: node descix-app-sdk/scripts/generate-app-sdk-copies.js
+ * Verify:     node descix-app-sdk/scripts/generate-app-sdk-copies.js --check
+ * A hand-edit here is drift by construction and the --check gate will fail loud.
  *
- * ── What this file is ────────────────────────────────────────────────────────
- * The APP side of the bridge. The shell publishes its service bus on its own
- * window (`window.DeSciX`, owned by @descix/app-sdk util/appBridge.js); this file
- * is the proxy an embedded app talks to, so app code never repeats the
- * `window.top` hop or the same-origin guard at every call site.
+ * ── What this file gives you ─────────────────────────────────────────────────
+ * One object, `DeSciX`, that works the same whether your page is embedded in the
+ * DeSciX App Shell, nested deeper inside it, or opened standalone:
  *
- * Same-origin is a HARD PRECONDITION. When it does not hold, reaching for
- * `window.top.DeSciX` throws
- *     SecurityError: Blocked a frame with origin "…" from accessing a cross-origin frame
- * which names nothing about DeSciX. That is why the reach is probed once, in
- * hasParentAccess(), and reported in plain language instead of at every property.
+ *     await DeSciX.ready();                      // is the shell's bus there?
+ *     DeSciX.view.set('CodeSite');               // ask for the whole frame
+ *     if (DeSciX.chat.available()) { … }         // can chat take an attachment now?
+ *     await DeSciX.chat.sendMedia({ … });        // hand the model something to look at
+ *     await DeSciX.call('some_command', { … });  // call the platform through the shell
+ *
+ * You never write `window.parent.` or `window.top.` — that hop is DETECTED, not
+ * declared. The shell publishes its bus on its own window, so the correct level
+ * depends on how deeply your app happens to be embedded, which your code cannot
+ * know and should not have to. `resolveBridge()` below answers it on every access.
+ *
+ * Standalone is a first-class case, not a failure: with no shell above you,
+ * `DeSciX.ready()` resolves `{ mode: 'standalone' }` (it does not hang), and
+ * `DeSciX.view` / `DeSciX.chat` report their absence by name instead of throwing.
  */
 
 window.DeSciX = (() => {
-    const isEmbedded = window.top !== window;
+    'use strict';
 
-    // Check for same-origin access
-    const hasParentAccess = () => {
+/* ── inlined from @descix/app-sdk src/util/bridgeResolver.js ─────────────── */
+    /**
+     * Hard ceiling on the frame-chain walk. A malformed or hostile frame graph must not
+     * be able to spin the resolver; 32 is far beyond any real embedding depth.
+     */
+    const BRIDGE_RESOLUTION_MAX_HOPS = 32;
+
+    /**
+     * Does this window carry the shell's bus?
+     *
+     * @param {Window} w
+     * @returns {object|null} the bus, or null when absent OR unreadable (cross-origin).
+     */
+    function busOn(w) {
+      try {
+        const bus = w && w.DeSciX;
+        // The version marker, not merely a `DeSciX` property: an app-side proxy also
+        // lives at `window.DeSciX`, and only the OWNER publishes `bridge.version`.
+        if (bus && bus.bridge && bus.bridge.version) return bus;
+      } catch (e) {
+        // Cross-origin ancestor. Not the shell as far as we can ever know — and not an
+        // error: the walk continues past it (see the docblock).
+      }
+      return null;
+    }
+
+    /**
+     * Find the window carrying the DeSciX bus, walking up from `startWindow`.
+     *
+     * This is the ONE place the `self` / `parent` / `top` question is answered. Consumers
+     * ask for the bus, never for a window level.
+     *
+     * @param {Window} [startWindow] - defaults to the ambient `window`.
+     * @returns {{window: Window|null, bus: object|null, hops: number, mode: 'shell'|'standalone'}}
+     *   `mode: 'shell'` with `hops` = frames traversed (0 = this page owns the bus);
+     *   `mode: 'standalone'` with `bus: null` and `hops: -1` when nothing carries it.
+     */
+    function resolveBridge(startWindow) {
+      const start =
+        startWindow || (typeof window === 'undefined' ? null : window);
+
+      // No DOM at all (SSR / node): honestly standalone, and never throws.
+      if (!start) return { window: null, bus: null, hops: -1, mode: 'standalone' };
+
+      let w = start;
+      for (let hops = 0; hops <= BRIDGE_RESOLUTION_MAX_HOPS; hops++) {
+        const bus = busOn(w);
+        if (bus) return { window: w, bus, hops, mode: 'shell' };
+
+        let next;
         try {
-            return isEmbedded && !!window.top.DeSciX;
+          next = w.parent;
         } catch (e) {
-            return false;
+          // Even `.parent` can be refused in exotic sandboxes. Nothing above is
+          // reachable, so the answer is standalone rather than a throw.
+          break;
         }
-    };
+        // `window.parent === window` at the top of the chain: that is the terminator.
+        if (!next || next === w) break;
+        w = next;
+      }
+
+      return { window: start, bus: null, hops: -1, mode: 'standalone' };
+    }
+/* ── end inlined resolver ───────────────────────────────────────────────── */
+
+    // ── Never clobber an owner ───────────────────────────────────────────────
+    // If the bus resolves at hop 0, THIS page published it: the page is the shell
+    // (or a host that already ran @descix/app-sdk), and `window.DeSciX` is already
+    // the real thing. Overwriting it with an app-side proxy would delete the owner's
+    // bus — every member, and the marker every embedded app resolves against. So we
+    // hand back the very same object: the assignment below becomes an identity no-op.
+    const owned = resolveBridge();
+    if (owned.hops === 0) return owned.bus;
+
+    // Otherwise resolution is LIVE — recomputed at each access, never captured at
+    // load time. The shell renders this iframe, but script order is not a contract:
+    // a snapshot taken while the shell was still mounting would pin this app to
+    // "standalone" forever, which is precisely the stale-capture failure this file
+    // exists to end. (A self-reference is harmless: the proxy carries no `bridge`
+    // marker, so the resolver walks straight past it to the real owner.)
 
     /**
      * Readiness, without polling.
      *
-     * The shell renders this iframe, so it has almost always published before app
-     * code runs — but "almost always" is not a contract, and the failure it leaves
-     * (`window.top.DeSciX.view === undefined`) is indistinguishable from a shell
-     * too old to have the API at all. So: resolve immediately if the bus is already
-     * there, otherwise wait for the shell's `descix:bridge-ready` announcement.
-     * Every app would otherwise have invented its own retry loop for this.
+     * Resolve immediately when the bus is already published; otherwise wait for the
+     * shell's `descix:bridge-ready` announcement on the window that owns it. An app
+     * with no shell above it resolves as standalone rather than waiting for a bridge
+     * that is never coming — an app that hangs forever is indistinguishable from an
+     * app that is broken, and it can no longer take the standalone path it may well
+     * support.
      *
      * @returns {Promise<{mode: string, members: string[], version: number|null}>}
      */
     const ready = () => new Promise((resolve) => {
-        const snapshot = () => ({
-            mode: 'shell',
-            version: window.top.DeSciX.bridge ? window.top.DeSciX.bridge.version : null,
-            members: window.top.DeSciX.bridge
-                ? window.top.DeSciX.bridge.members()
-                : Object.keys(window.top.DeSciX),
-        });
+        const found = resolveBridge();
 
-        // Standalone / cross-origin: RESOLVE, do not hang. An app that waits forever
-        // for a bridge that is never coming looks identical to an app that is broken,
-        // and it can no longer take the standalone path it might well support.
-        if (!hasParentAccess()) {
+        if (found.mode === 'standalone') {
             resolve({ mode: 'standalone', members: [], version: null });
             return;
         }
-        if (window.top.DeSciX.bridge && window.top.DeSciX.bridge.ready) {
+
+        const snapshot = () => {
+            const now = resolveBridge();
+            if (now.mode === 'standalone') return { mode: 'standalone', members: [], version: null };
+            return {
+                mode: 'shell',
+                version: now.bus.bridge ? now.bus.bridge.version : null,
+                members: now.bus.bridge ? now.bus.bridge.members() : Object.keys(now.bus),
+            };
+        };
+
+        if (found.bus.bridge && found.bus.bridge.ready) {
             resolve(snapshot());
             return;
         }
-        const evtName = (window.top.DeSciX.bridge && window.top.DeSciX.bridge.EVENT) || 'descix:bridge-ready';
+
+        const evtName = (found.bus.bridge && found.bus.bridge.EVENT) || 'descix:bridge-ready';
         const onReady = () => {
-            window.top.removeEventListener(evtName, onReady);
+            found.window.removeEventListener(evtName, onReady);
             resolve(snapshot());
         };
-        window.top.addEventListener(evtName, onReady);
+        found.window.addEventListener(evtName, onReady);
     });
 
-    if (!hasParentAccess()) {
-        console.warn('[DeSciX SDK] Running in standalone mode or cross-origin. Direct PWA helpers unavailable.');
-        return {
-            mode: 'standalone',
-            ready,
-            // Loud, and NOT fatal. A throw here would kill a running app for a
-            // condition it cannot fix; naming the gap lets it degrade deliberately.
-            get view() {
-                console.error('[DeSciX SDK] DeSciX.view is unavailable: this app is not embedded in the DeSciX App Shell (standalone or cross-origin). View switching is a shell capability.');
-                return null;
-            },
-            get chat() {
-                console.error('[DeSciX SDK] DeSciX.chat is unavailable: this app is not embedded in the DeSciX App Shell (standalone or cross-origin), so there is no chat conversation to contribute to.');
-                return null;
-            },
-            call: async (command, params) => {
-                throw new Error('SDK not initialized in PWA App Shell mode.');
-            }
-        };
-    }
-
-    console.log('[DeSciX SDK] Initialized in App Shell mode.');
-
     /**
-     * Read a member off the shell's bus, or explain its absence.
+     * Read a member off the shell's bus, or explain its absence in plain language.
      *
-     * Absence is real and distinct from "not ready yet": a host may publish a chat
-     * pane and no view switching, or vice versa. Await ready() to settle the timing
-     * question; a member still missing after that is a capability this host does
-     * not offer.
+     * Three distinct situations, three distinct messages — collapsing them into one
+     * "undefined" is what sent app authors hunting through frame levels:
+     *   - no shell at all (standalone / cross-origin): a capability you do not have here;
+     *   - shell present, member absent: this host does not implement it;
+     *   - shell present, member present: you get it.
      */
     const member = (name, why) => {
-        const api = window.top.DeSciX[name];
+        const found = resolveBridge();
+
+        if (found.mode === 'standalone') {
+            console.error(
+                `[DeSciX SDK] DeSciX.${name} is unavailable: no DeSciX App Shell was found ` +
+                `above this page (running standalone, or the shell is cross-origin). ${why}`
+            );
+            return null;
+        }
+
+        const api = found.bus[name];
         if (!api) {
             console.error(
                 `[DeSciX SDK] DeSciX.${name} is not published by this host. ${why} ` +
@@ -113,27 +187,31 @@ window.DeSciX = (() => {
         return api;
     };
 
-    // Proxy to the PWA's global DeSciX object
+    /** Read a plain (non-member) property off the bus, or null when there is no shell. */
+    const busProp = (name) => {
+        const found = resolveBridge();
+        return found.mode === 'standalone' ? null : found.bus[name];
+    };
+
     return {
-        mode: 'shell',
+        /** 'shell' when a DeSciX App Shell is hosting this page, else 'standalone'. Live. */
+        get mode() { return resolveBridge().mode; },
+
+        /**
+         * How many frames up the bus was found: 0 = this page owns it, 1 = the parent
+         * (the ordinary embedded case), 2+ = nested, -1 = standalone. Diagnostics only —
+         * app code should never branch on it, which is the whole point of this file.
+         */
+        get bridgeLevel() { return resolveBridge().hops; },
 
         /** Resolves once the shell's bus is published. See ready() above. */
         ready,
 
-        /**
-         * Access to global application data (Communities, Apps, User Profile)
-         */
-        get AppData() { return window.top.DeSciX.AppData; },
+        /** Global application data (Communities, Apps, User Profile). */
+        get AppData() { return busProp('AppData'); },
 
-        /**
-         * Access to the PWA state machine and navigation
-         */
-        get AppContext() { return window.top.DeSciX.AppContext; },
-
-        /**
-         * Direct API call helper (proxied through PWA session)
-         */
-        call: (command, params) => window.top.DeSciX.call(command, params),
+        /** The PWA state machine and navigation. */
+        get AppContext() { return busProp('AppContext'); },
 
         /**
          * Layout control — ask the shell for a view:
@@ -148,7 +226,7 @@ window.DeSciX = (() => {
          * otherwise indistinguishable from a real one.
          */
         get view() {
-            return member('view', 'This host does not implement view switching (it renders the app frame without a view-aware container).');
+            return member('view', 'View switching is a shell capability (this host renders the app frame without a view-aware container).');
         },
 
         /**
@@ -168,7 +246,23 @@ window.DeSciX = (() => {
          * `DeSciX.chat.available()` reports whether the ingress can take it right now.
          */
         get chat() {
-            return member('chat', 'This host renders no chat pane, so there is no conversation to contribute to.');
-        }
+            return member('chat', 'There is no chat pane here, so there is no conversation to contribute to.');
+        },
+
+        /**
+         * Call a platform command through the shell's authenticated session.
+         * Throws when there is no shell — a call that cannot possibly be delivered
+         * must not resolve as though it were.
+         */
+        call: (command, params) => {
+            const found = resolveBridge();
+            if (found.mode === 'standalone') {
+                throw new Error(
+                    `[DeSciX SDK] DeSciX.call('${command}') requires the DeSciX App Shell: ` +
+                    'no shell was found above this page (running standalone, or cross-origin).'
+                );
+            }
+            return found.bus.call(command, params);
+        },
     };
 })();
