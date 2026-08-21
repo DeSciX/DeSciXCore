@@ -104,9 +104,17 @@ face showing `view` on the bus can still have nothing listening, and `set()` wil
 mode while the screen does not move. Treat `available()` as the only answer, and read it at
 the moment of use.
 
-*(The `available()` values on each face are not measured here — the key lists above are. One
-console line settles it on any loaded shell: `DeSciX.view.available()`. The apex numbers are
-anonymous only; the post-sign-in state is behind a passkey and unmeasured.)*
+And measured, on the same two faces and also anonymous: **`view.available()` is `false` on
+BOTH** — published, with zero subscribers, on the app subdomain and on the apex store alike.
+So the anonymous default for every public face today is *`view` is on the bus and nothing is
+listening*. An app that skips the check because the member is obviously there gets exactly the
+silent no-op this section warns about.
+
+It does become true: view switching has been observed working after sign-in (chat icon →
+SplitView), which is what `AppWidget` mounting looks like from outside. That observation is
+human, not instrumented — the post-sign-in state sits behind a passkey — so treat "capability
+arrives with an authenticated session that has opened an app" as the shape, and
+`available()` at the moment of use as the answer.
 
 **The two members are not equally honest about it, and this is the difference that
 should shape your code:**
