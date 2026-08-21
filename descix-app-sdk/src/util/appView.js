@@ -1,5 +1,11 @@
 /**
- * appView — the app-facing VIEW API published at `window.DeSciX.view`.
+ * appView — the app-facing VIEW API, reached from an embedded app as
+ * `window.parent.DeSciX.view`.
+ *
+ * (The shell publishes it on ITS OWN window, so `window.DeSciX.view` is the correct
+ * form only for shell-side code. Inside the iframe — the stated audience — the
+ * `parent` hop is not optional, and omitting it yields `TypeError: Cannot read
+ * properties of undefined`.)
  *
  * ── What it is for ───────────────────────────────────────────────────────────
  * The shell decided the layout alone: AppWidget rendered CodeSite with
@@ -27,6 +33,8 @@
  * changes its mind at runtime (the app is loaded AFTER the layout is drawn, so
  * a one-shot read at mount would always miss it).
  */
+
+import { publishBridgeMember } from './appBridge.js';
 
 /** The three views an app may ask for. */
 export const VIEW_MODES = Object.freeze({
@@ -98,17 +106,41 @@ export function resetView() {
 }
 
 /**
- * Publish the API onto `window.DeSciX.view`. Idempotent — safe to call from
- * every render path that might be the first one.
+ * Is a host actually LISTENING to view changes?
+ *
+ * Publication is not capability. `AppWidget` subscribes (via useDeSciXView) and
+ * honours the request; `StandAloneAppWidget` renders a bare iframe and subscribes to
+ * nothing — so on that host `set()` validates, updates `current`, notifies an empty
+ * subscriber set, and returns the mode you asked for while the screen never changes.
+ * A no-op that returns success is indistinguishable from success, which is the exact
+ * failure class this platform's doctrine exists to prevent.
+ *
+ * Subscriber count is the truthful answer, and it is already tracked here — so an
+ * app can ask before it trusts the layout to change.
+ *
+ * @returns {boolean} true when at least one host will re-render on a view change
+ */
+export function viewAvailable() {
+  return subscribers.size > 0;
+}
+
+/**
+ * Publish the API onto the shell's `window.DeSciX.view` (an embedded app reaches it
+ * as `window.parent.DeSciX.view`). Idempotent — safe to call from every render path
+ * that might be the first one.
+ *
+ * Goes through the bridge owner rather than touching `window.DeSciX` directly, so
+ * publication is announced (the readiness contract) and the bus is created in
+ * exactly one place.
  */
 export function publishViewApi() {
   if (typeof window === 'undefined') return;
-  window.DeSciX = window.DeSciX || {};
-  window.DeSciX.view = {
+  publishBridgeMember('view', {
     set: setView,
     get: getView,
     subscribe: subscribeView,
+    available: viewAvailable,
     MODES: VIEW_MODES,
     DEFAULT: DEFAULT_VIEW,
-  };
+  });
 }
