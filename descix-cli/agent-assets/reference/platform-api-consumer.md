@@ -148,6 +148,23 @@ read, setting a disposition, updating a lease:
 **Send only the keys you own.** Defensively re-putting a whole record is how a reader overwrites
 an author's content with its own reconstruction of it.
 
+**`app_records_query` honours `$eq`, `$in` and `$ne` — and fails in OPPOSITE directions on
+anything else.** This one is worth knowing before you trust a result set:
+
+| What you pass | What happens | How you find out |
+|---|---|---|
+| an unknown FIELD key | applied as equality against a field nothing has → **0 rows** | immediately — an empty result is loud |
+| an unsupported OPERATOR on a known field (e.g. `created_at: {$gt: …}`) | **silently dropped** → you get the *unfiltered* set | you don't |
+
+Measured: `{type:'message'}` matched 793 records; `{type:'message', created_at:{$gt:'…T04:00:00Z'}}`
+matched **the same 793**, including records from ~28 hours before the bound.
+
+The second row is the dangerous one, because it fails **open**. A filter that returns everything
+looks exactly like a filter that excluded nothing, so paging a large collection by timestamp
+gives you the whole history while reading as though you narrowed it. **Filter on `$eq`/`$in`/`$ne`
+only, and if a result set looks suspiciously complete, check whether your predicate was honoured
+at all** — compare against the same query with the predicate removed.
+
 **A record's `status` tells you what the last writer wrote, not what anyone has read.** If you
 send a record with `status: "unread"`, that value is *your own default* — it is evidence of
 nothing about delivery or attention. The positive signal is the flip to `read`, which only the
