@@ -54,8 +54,12 @@ The gateway serves your app at `/p/<appId>`. **That path does not exist in the c
 apps are served on their own host, `{appId}.{env}.descix.net`. Measured against dev:
 
 ```
-https://egpt-godsworld.dev.descix.net/       -> 200   (the deployed app)
-https://dev.descix.net/p/egpt-godsworld/     -> 404   (local-only route)
+# LOCAL — the /p/ form, served by your own gateway
+https://localhost:5173/p/egpt-godsworld/       works   (gateway port varies)
+
+# CLOUD — measured against dev
+https://egpt-godsworld.dev.descix.net/         -> 200  (the deployed app, per-app host)
+https://dev.descix.net/p/egpt-godsworld/       -> 404  (the /p/ form does not exist here)
 ```
 
 So a URL that works all through local development 404s the moment you point it at a deployed
