@@ -91,6 +91,12 @@ ASSET NOT FOUND at gs://... Upload it first with `descix app media-upload`.
 Both come back as `MEDIA_ASSET_UNREADABLE`. The first means you referenced the wrong app's asset;
 the second means you have not uploaded yet. Upload into the app that will do the asking.
 
+**The upload verb hands you both forms, and both work.** `descix app media-upload` returns a
+`path` (relative to the app's assets prefix) and a `ref` (the `gs://` URI) for every file, plus a
+`public_url`; `--json` prints them for scripting. Either `path` or `ref` is a valid `asset_ref` —
+so if a rule in your head says the tool's own `ref` field is unusable, the rule is wrong, not the
+tool.
+
 **The `gs://` form is accepted.** A `gs://` URI works as an `asset_ref` — it is parsed,
 scope-checked and resolved. That is worth stating plainly because the opposite rule circulates:
 `gs://` is fatal as a *provider* URI (the provider refuses GCS references outright) and correct as
