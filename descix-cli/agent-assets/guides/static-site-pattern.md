@@ -34,6 +34,8 @@ my-site/
 │   ├── index.html
 │   ├── styles.css
 │   ├── app.js
+│   ├── DeSciXAppSDK.js         # The DeSciX bridge — GENERATED, see below
+│   └── README.md
 │   └── dist/                   # Build output (if using bundler)
 ├── src/                        # Source files (not deployed)
 │   └── ...
@@ -104,6 +106,12 @@ This copies the site template with:
 - `index.html` - Main entry point
 - `styles.css` - Basic styling
 - `app.js` - Client-side JavaScript
+- `DeSciXAppSDK.js` - The DeSciX bridge: reaches `DeSciX.view`, `DeSciX.chat` and the rest
+  of the shell's bus, resolving the frame level for you. **Do not hand-edit it.** It is
+  GENERATED from `descix-app-sdk/templates/DeSciXAppSDK.template.js`, which inlines the one
+  owner of level detection (`descix-app-sdk/src/util/bridgeResolver.js`); a `--check` drift
+  gate keeps the copies identical. Edit the template, regenerate — a local patch forks the
+  bridge and silently stops inheriting its fixes.
 - `README.md` - Usage instructions
 
 ## Deployment

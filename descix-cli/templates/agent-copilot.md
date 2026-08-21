@@ -155,6 +155,7 @@ gateway does not rewrite paths.
 **NEVER copy existing project files into `site/` or `kb/`.** Integrate in place:
 
 - **Existing HTML/JS app:** Serve as-is. Add `DeSciXAppSDK.js` for DeSciX integration.
+  `DeSciXAppSDK.js` is GENERATED (from `descix-app-sdk/templates/DeSciXAppSDK.template.js`, with a `--check` drift gate) — copy it in, never hand-edit it; a local patch forks the bridge and stops inheriting its fixes.
 - **React/Vite app:** Wrap root in `<AppShell appId="{{appId}}">` from `@descix/app-sdk/AppShell`.
 - **Auth only (no DeSciX UI):** Use `PowchClient` from `@descix/app-sdk/powch-client`.
 - **Existing docs:** Copy `docs/*.md` to `kb/General/` for sync. Keep originals as source of truth.
