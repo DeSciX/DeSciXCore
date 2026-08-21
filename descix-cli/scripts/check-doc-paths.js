@@ -81,9 +81,14 @@ function tokensOnLine(line) {
   return out;
 }
 
+/** Directories never worth walking. A gate that scans a thousand dependency READMEs is
+ *  slow, and a slow gate is one somebody eventually switches off. */
+const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'coverage']);
+
 function walkMarkdown(dir, acc = []) {
   if (!fs.existsSync(dir)) return acc;
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isDirectory() && SKIP_DIRS.has(entry.name)) continue;
     const p = path.join(dir, entry.name);
     if (entry.isDirectory()) walkMarkdown(p, acc);
     else if (entry.name.endsWith('.md')) acc.push(p);
@@ -103,16 +108,40 @@ function parseArgs(argv) {
 
 const opts = parseArgs(process.argv.slice(2));
 const root = path.resolve(opts.root || path.resolve(PKG_ROOT, '..', '..'));
+/**
+ * THE GUARDED SET — one definition, in one place.
+ *
+ * A gate protects the set it was given, and a new shipped doc does not join that set by
+ * being important. This list outgrew itself once already: it was written covering this
+ * package's agent-assets and templates, and three package READMEs were added to the repo
+ * afterwards with nothing watching them. If you ship a doc that names cross-package paths,
+ * add it HERE.
+ */
+const CORE_ROOT = path.resolve(PKG_ROOT, '..');
+const DEFAULT_DOC_TARGETS = [
+  path.join(PKG_ROOT, 'agent-assets'),
+  path.join(PKG_ROOT, 'templates'),
+  path.join(CORE_ROOT, 'descix-app-sdk', 'README.md'),
+  path.join(CORE_ROOT, 'descix-app-sdk', 'APP_SHELL_API.md'),
+  path.join(CORE_ROOT, 'descix-cloud-core', 'README.md'),
+  path.join(CORE_ROOT, 'descix-platform-api', 'README.md'),
+  path.join(CORE_ROOT, 'descix-sdk', 'README.md'),
+];
+
 const docDirs = opts.docs.length
   ? opts.docs.map((d) => path.resolve(d))
-  : [path.join(PKG_ROOT, 'agent-assets'), path.join(PKG_ROOT, 'templates')];
+  : DEFAULT_DOC_TARGETS;
 
 if (!fs.existsSync(root)) {
   console.error(`check-doc-paths: --root does not exist: ${root}`);
   process.exit(2);
 }
 
-const files = docDirs.flatMap((d) => walkMarkdown(d));
+// Targets may be a directory to walk or a single file to check directly.
+const files = docDirs.flatMap((d) => {
+  if (fs.existsSync(d) && fs.statSync(d).isFile()) return d.endsWith('.md') ? [d] : [];
+  return walkMarkdown(d);
+});
 if (files.length === 0) {
   // An empty scan silently "passing" is how a gate stops guarding anything.
   console.error(`check-doc-paths: no markdown found under: ${docDirs.join(', ')}`);
