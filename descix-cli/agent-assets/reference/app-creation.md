@@ -87,22 +87,42 @@ templates/scaffolds/site/
 ├── index.html        # Entry point
 ├── styles.css        # Basic styling
 ├── app.js            # Client-side JavaScript
+├── DeSciXAppSDK.js   # The DeSciX bridge — GENERATED, do not hand-edit
 └── README.md         # Usage instructions
 ```
+
+`DeSciXAppSDK.js` ships IN the scaffold; it is not something you add afterwards. It is
+generated from `descix-app-sdk/templates/DeSciXAppSDK.template.js` (which inlines
+`descix-app-sdk/src/util/bridgeResolver.js`, the one owner of frame-level detection) and a
+`--check` drift gate keeps the copies identical. Patch the template and regenerate — never
+the copy.
 
 **Microservice Scaffold:**
 ```
 templates/scaffolds/microservice/
+├── app.js                      # Entry point — binds the server, mounts the router
 ├── package.json
 ├── Dockerfile
 ├── app.yaml
 ├── manifest.json
-├── SERVICE_README_TEMPLATE.md
-└── src/
-    ├── index.js
-    ├── apiFront.js
-    └── utils.js
+├── defaults-config.json        # Layered config: committed defaults
+├── defaults-config-dev.json
+├── setup-schema.json
+├── SERVICE_README_sdk.md
+├── scripts/
+│   └── register.js             # Registers the service with the gateway
+├── services/
+│   ├── utils.js                # Config bootstrap over @descix/cloud-core — read first
+│   ├── apiFront.js
+│   ├── mcpClient.js
+│   └── commandHandlers/
+└── templates/
+    └── SERVICE_README_TEMPLATE.md
 ```
+
+There is no `src/` directory. The entry point is `app.js` at the root and the service code
+lives under `services/`. See `guides/microservice-pattern.md` for why `services/utils.js` is
+the file to open first.
 
 ### Adding Scaffolds to Apps
 
