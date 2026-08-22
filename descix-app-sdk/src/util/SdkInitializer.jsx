@@ -229,8 +229,22 @@ const SdkInitializer = ({ children, standalone = false, appId = null }) => {
         // carrying a fact the call site had in hand, and it forced one shared value
         // on every entry point in a build (the demo's two entries both booted as
         // 'demo'). Deleted, not fenced (CEO-D-2026-08-19, envelope amendment).
-        const servedBinding = await fetchAppBinding();
+        // A SELF-DECLARING APP DOES NOT ASK ITS ORIGIN WHO IT IS. The probe below is
+        // INTENTIONALLY NOT MADE when `standalone` is declared — identity is compile-time for an
+        // app that builds itself, and the comment above already blesses exactly that case. Do NOT
+        // re-add the fetch "for safety": it would resurrect a guaranteed 404 on every load of
+        // every self-declaring app. Powch is the live instance — its origin is SHELL_EXEMPT at the
+        // edge by design (ZK-SSO isolation), so the edge correctly synthesizes nothing there and
+        // the probe could only ever 404. Same-origin relative path, so this was never a
+        // cross-origin reach.
+        //
+        // THE ACCEPTED TRADE, stated so nobody rediscovers it as a bug: this does not FAIL LOUD on
+        // a declared-vs-served conflict, it makes that conflict UNOBSERVABLE by construction. The
+        // misconfiguration it hides is "an edge serves a binding for an origin whose app
+        // self-declares" — which SHELL_EXEMPT prevents for the only live case.
+        // (VISION ruling A, 2026-08-22, under window discretion; listed for CEO ratification.)
         const declaredAppId = standalone ? appId : null;
+        const servedBinding = declaredAppId ? null : await fetchAppBinding();
 
         const standaloneAppId = servedBinding?.appId || declaredAppId;
         const standaloneAppUrl = servedBinding?.appUrl || null;
