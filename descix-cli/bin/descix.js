@@ -40,6 +40,31 @@ import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 
+
+/**
+ * Emit human-facing PROGRESS for a command that can also emit JSON.
+ *
+ * When `--json` is set, stdout is a DATA CHANNEL: it must contain the JSON document and
+ * nothing else, or every scripted consumer breaks. Progress then goes to stderr, where a
+ * human piping stdout still sees it. Without `--json`, stdout is the human channel and
+ * progress belongs there.
+ *
+ * ONE OWNER of that decision. Before this existed, each --json command re-decided it by
+ * calling console.log directly, and both of them got it wrong: `mcp execute --json` prefixed
+ * the document with "Executing <tool>..." and `app media-upload --json` prefixed it with a
+ * header, a per-file listing and a per-file +/x line. Both exited 0, so a consumer saw a
+ * success code and an unparseable stream. Measured 2026-08-21/22 (seat BEAST): two seats had
+ * independently hand-rolled prefix-stripping workarounds (`tail -n +2`, `raw.find('[')`)
+ * rather than reporting it.
+ *
+ * @param {Object} options - the command's parsed options (read for .json)
+ * @param {...any} args - passed through to console.log / console.error
+ */
+function progress(options, ...args) {
+  if (options && options.json) console.error(...args);
+  else console.log(...args);
+}
+
 const program = new Command();
 
 program
@@ -1318,7 +1343,7 @@ appCommand
       }
 
       console.log(chalk.cyan(`\n  Media Upload: ${appId} → GCS assets/\n`));
-      fileDescriptors.forEach(f => console.log(chalk.gray(`  • ${f.path} (${(f.size / 1024).toFixed(1)}KB, ${f.content_type})`)));
+      fileDescriptors.forEach(f => progress(options, chalk.gray(`  • ${f.path} (${(f.size / 1024).toFixed(1)}KB, ${f.content_type})`)));
 
       // 1. Request a signed-PUT upload token over the API surface.
       const tokenResponse = await apiClient.invoke('get_asset_upload_token', {
@@ -1329,14 +1354,14 @@ appCommand
       const { signed_urls, objects } = token;
 
       // 2. PUT each file directly to GCS using its signed URL.
-      console.log(chalk.gray(`\n  Uploading ${fileDescriptors.length} file(s)...`));
+      progress(options, chalk.gray(`\n  Uploading ${fileDescriptors.length} file(s)...`));
       const uploaded = [];
       const errors = [];
       for (const f of fileDescriptors) {
         const signedUrl = signed_urls?.[f.path];
         if (!signedUrl) {
           errors.push(`No signed URL for: ${f.path}`);
-          console.log(chalk.red(`  x ${f.path}`));
+          progress(options, chalk.red(`  x ${f.path}`));
           continue;
         }
         try {
@@ -1348,7 +1373,7 @@ appCommand
           });
           if (!resp.ok) {
             errors.push(`Failed ${f.path}: ${resp.status} ${resp.statusText}`);
-            console.log(chalk.red(`  x ${f.path}`));
+            progress(options, chalk.red(`  x ${f.path}`));
           } else {
             const obj = (objects || []).find(o => o.path === f.path) || {};
             // The asset REFERENCE an app handler / get_app_asset consumes: the gs:// URI.
@@ -1363,17 +1388,17 @@ appCommand
               content_type: f.content_type,
               size: f.size
             });
-            console.log(chalk.green(`  + ${f.path}`));
+            progress(options, chalk.green(`  + ${f.path}`));
           }
         } catch (err) {
           errors.push(`Error ${f.path}: ${err.message}`);
-          console.log(chalk.red(`  x ${f.path}`));
+          progress(options, chalk.red(`  x ${f.path}`));
         }
       }
 
       if (errors.length > 0) {
-        console.log(chalk.yellow(`\n  ${errors.length} error(s):`));
-        errors.forEach(e => console.log(chalk.red(`  - ${e}`)));
+        progress(options, chalk.yellow(`\n  ${errors.length} error(s):`));
+        errors.forEach(e => progress(options, chalk.red(`  - ${e}`)));
       }
 
       if (uploaded.length === 0) {
@@ -4821,7 +4846,7 @@ mcpCommand
         params.app_id = options.app;
       }
 
-      console.log(chalk.gray(`Executing ${options.tool}...`));
+      progress(options, chalk.gray(`Executing ${options.tool}...`));
 
       const response = await apiClient.invoke(options.tool, params);
 
