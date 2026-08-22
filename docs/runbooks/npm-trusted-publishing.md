@@ -9,9 +9,17 @@ workflow file is already written and lands with this branch.
 
 **What you get:** no publish token exists anywhere — not on a laptop, not in GitHub secrets, not
 in a password manager. Each publish authenticates with a short-lived token minted for that one
-run and bound to this repo + this workflow file + this environment. And because the workflow
-needs environment approval, **every publish becomes a click you make**, which is the deploy gate
-enforced by machinery instead of by discipline.
+run and bound to this repo + this workflow file + this environment.
+
+**A correction to what I first wrote here.** I said the GitHub environment's *required reviewer*
+would make every publish a click you make. **That is not available to us** — required-reviewer
+protection on a PRIVATE repository is an Enterprise-plan feature, and it was measured refusing
+with a 422 under the Team org. So the gate is NOT a GitHub approval prompt.
+
+**What actually gates a publish today, and it is stronger than a convention:**
+1. The workflow only runs when you press *Run workflow* — there is no push or tag trigger.
+2. npm refuses any publish whose OIDC claim does not match the trusted-publisher binding exactly.
+   That check is server-side, fail-closed, and only you can change it.
 
 ---
 
@@ -65,8 +73,17 @@ not be able to publish from a laptop at all.
 
 ## Step 1 — configure the trusted publisher (npmjs.com, once per package)
 
-**You have already done this for `@descix/sdk`** (2026-08-21, verified). Only `@descix/cloud-core`
-remains, and it can only be configured *after* Step 0, because npm requires the package to exist.
+⚠️ **The repository moved, so the existing binding no longer matches.** `DeSciXCore` now lives at
+**`DeSciX/DeSciXCore`** (org). The `@descix/sdk` binding you created still names `eabadir/DeSciXCore`,
+so every OIDC claim from the new path **mismatches and npm refuses the publish**. That is the
+system working: fail-closed, server-side, and only your key can change it.
+
+So `@descix/sdk` needs **re-binding** (org `DeSciX`), and `@descix/cloud-core` needs binding for
+the first time after Step 0. Git remotes keep working via redirects — this is an npm-side change
+only.
+
+**Re-binding is the LAST step of whichever posture you choose, not a prerequisite for anything
+else.** The workflow can merge now; publishes simply remain impossible until you re-bind.
 
 **Useful thing you discovered:** npm saved the connection **with no workflow file in the repo** —
 the form warns about it but does not validate it. So configuring ahead of the merge is fine.
@@ -76,7 +93,7 @@ and enter exactly:
 
 | field | value |
 |---|---|
-| Organization or user | `eabadir` |
+| Organization or user | `DeSciX` |
 | Repository | `DeSciXCore` |
 | Workflow filename | `npm-publish.yml` |
 | Environment | `npm-publish` |
@@ -87,12 +104,18 @@ workflow filename is why the file may never be renamed or moved without redoing 
 
 ---
 
-## Step 2 — create the approval gate (GitHub, once for the repo) — **still open**
+## Step 2 — the `npm-publish` environment (GitHub) — **no approval prompt available**
 
-**github.com/eabadir/DeSciXCore → Settings → Environments → New environment → `npm-publish`**,
-then tick **Required reviewers** and add **`eabadir`**.
+The workflow declares `environment: npm-publish`, and it must keep doing so: **the npm binding
+includes the environment name in the OIDC claim**, so removing it would break publishing.
 
-Name it exactly `npm-publish` — the workflow and the npm trusted-publisher config both name it.
+But do **not** expect an approval prompt. **Required-reviewer protection on a private repo is
+Enterprise-only** — measured 422 under the Team org. GitHub creates the environment on first use;
+there is nothing for you to configure here at the current plan and visibility.
+
+If you want a human approval step back, that is a posture decision, not a setting:
+make the repo public (also restores provenance), move to Enterprise, or add a
+type-to-confirm input to the workflow. Queued for you; none is required to publish.
 
 ---
 
