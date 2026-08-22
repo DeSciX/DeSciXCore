@@ -11,11 +11,17 @@
 # now a credential-equivalent: whoever can edit this path can publish. CODEOWNERS guards it.
 #
 # EVERY PUBLISH IS A DELIBERATE CEO CLICK. Trigger is workflow_dispatch only — no push, no tag.
-# The `npm-publish` environment additionally requires the CEO's approval before the job runs,
-# which makes deploy_gate=ceo mechanical rather than a convention someone has to remember.
+# CORRECTION (measured 2026-08-22): the environment does NOT add an approval prompt. Required-
+# reviewer protection on a PRIVATE repo is Enterprise-only and was refused with 422 under the Team
+# org. `environment: npm-publish` STAYS anyway and must not be removed — the npm trusted-publisher
+# binding includes the environment name in the OIDC claim, so dropping it breaks publishing.
+# The real gate is npm-side and fail-closed: a claim that does not match the binding is refused,
+# server-side, and only the CEO's npm account can change the binding.
 #
 # MEASURED FACTS THIS FILE IS BUILT ON (verified 2026-08-21, not assumed):
-#   · eabadir/DeSciXCore is a PRIVATE repository (gh repo view -> "isPrivate": true).
+#   · The repo is PRIVATE (gh repo view -> "isPrivate": true) and now lives at DeSciX/DeSciXCore
+#     (transferred to the org 2026-08-22; git redirects keep remotes working). The npm binding
+#     must name the ORG path or every OIDC claim mismatches and npm refuses the publish.
 #   · npm provenance requires a PUBLIC source repo — npm docs: "Ensure your package.json is
 #     configured with a public repository that matches (case-sensitive) where you are publishing
 #     with provenance from." Publishing with provenance from private source repos has been
@@ -66,8 +72,8 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    # Requires CEO approval in Settings -> Environments -> npm-publish before the job starts.
-    # This is the gate: the run sits waiting until he clicks.
+    # REQUIRED FOR THE BINDING, not for approval: npm's trusted-publisher claim includes this
+    # environment name. No approval prompt exists at the current plan/visibility (see header).
     environment: npm-publish
 
     steps:
