@@ -16,6 +16,7 @@ import CancelIcon from '@mui/icons-material/Cancel';
 import RestartAltIcon from '@mui/icons-material/PhonelinkErase';
 import SendIcon from '@mui/icons-material/Send';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import StopIcon from '@mui/icons-material/Stop';
 import DescriptionIcon from '@mui/icons-material/Description';
 import AddCircleIcon from '@mui/icons-material/AddCircle';
 import HistoryIcon from '@mui/icons-material/History';
@@ -61,7 +62,84 @@ const ActivityIndicator = ({ messages }) => {
  * MessageContent component to render individual chat messages
  * Includes source likes with like counts
  */
-const MessageContent = ({ item, isAiResponse, onExecuteAction, onChatWithSources, onLikeSource }) => {
+/**
+ * One emitted action: a Run button, or — when the PAGE has declared this op self-guidable and the
+ * shell agrees — an automatic invoke with a visible STOP.
+ *
+ * THE GATE STAYS IN THE PARENT FRAME. This does not synthesise a click and does not open a second
+ * command pipe: a declared op takes the SAME onExecuteAction path a human click would have taken.
+ * An UNDECLARED op renders exactly what it rendered before this existed — that invariant has a
+ * negative-control test in tests/self-guided.test.js, because "auto-run works" and "auto-run
+ * happens to everything" look identical from a screenshot.
+ *
+ * THE PAGE OWNS THE STOP STATE. The STOP button asks the page (selfGuidance.stop); this component
+ * keeps no flag of its own, so there is nothing to drift out of step with the page and no way to
+ * hit a stop that stops half the system.
+ */
+const ActionRow = ({ action, onExecuteAction, selfGuidance }) => {
+  const firedRef = useRef(false);
+  const [state, setState] = useState({ auto: false, reason: null });
+
+  useEffect(() => {
+    if (!selfGuidance || firedRef.current) return;
+    // Decided at EFFECT time, not render time: the app frame publishes its declaration
+    // asynchronously, and budget/stop-state change during a run.
+    const { autoRun, reason } = selfGuidance.decide(action.functionName);
+    if (!autoRun) {
+      if (reason) setState({ auto: false, reason });
+      return;
+    }
+    firedRef.current = true;                 // once per action, never on re-render
+    selfGuidance.spend();                    // one hop, even with no media — bounds text-only loops
+    setState({ auto: true, reason: null });
+    onExecuteAction(action.functionName, action.args);
+    // Intentionally keyed on identity only: re-deciding on every render would re-fire.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [action.functionName]);
+
+  const running = state.auto;
+  return (
+    <Alert
+      severity={running ? 'success' : 'info'}
+      icon={false}
+      sx={{
+        py: 0,
+        px: 1,
+        '& .MuiAlert-message': { width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }
+      }}
+    >
+      <Typography variant="caption" sx={{ fontWeight: 'bold' }}>
+        Action: {action.functionName}
+        {state.reason ? (
+          <Typography component="span" variant="caption" sx={{ ml: 1, opacity: 0.75, fontWeight: 'normal' }}>
+            — {state.reason}
+          </Typography>
+        ) : null}
+      </Typography>
+      {running ? (
+        <IconButton
+          size="small"
+          color="warning"
+          onClick={() => selfGuidance?.stop('user pressed stop')}
+        >
+          <StopIcon fontSize="small" />
+          <Typography variant="button" sx={{ ml: 0.5, fontSize: '0.7rem' }}>Stop</Typography>
+        </IconButton>
+      ) : (
+        <IconButton
+          size="small"
+          color="primary"
+          onClick={() => onExecuteAction(action.functionName, action.args)}
+        >
+          <PlayArrowIcon fontSize="small" />
+          <Typography variant="button" sx={{ ml: 0.5, fontSize: '0.7rem' }}>Run</Typography>
+        </IconButton>
+      )}
+    </Alert>
+  );
+};
+
+const MessageContent = ({ item, isAiResponse, onExecuteAction, onChatWithSources, onLikeSource, selfGuidance }) => {
   const text = item.answer || item.text || item.content || '';
   const sources = item.sources || [];
   const ads = item.advertisements || [];
@@ -212,28 +290,12 @@ const MessageContent = ({ item, isAiResponse, onExecuteAction, onChatWithSources
       {actions.length > 0 && onExecuteAction ? (
         <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', gap: 1 }}>
           {actions.map((action, idx) => (
-            <Alert 
-              key={idx} 
-              severity="info" 
-              icon={false}
-              sx={{ 
-                py: 0, 
-                px: 1, 
-                '& .MuiAlert-message': { width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 } 
-              }}
-            >
-              <Typography variant="caption" sx={{ fontWeight: 'bold' }}>
-                Action: {action.functionName}
-              </Typography>
-              <IconButton 
-                size="small" 
-                color="primary" 
-                onClick={() => onExecuteAction(action.functionName, action.args)}
-              >
-                <PlayArrowIcon fontSize="small" />
-                <Typography variant="button" sx={{ ml: 0.5, fontSize: '0.7rem' }}>Run</Typography>
-              </IconButton>
-            </Alert>
+            <ActionRow
+              key={idx}
+              action={action}
+              onExecuteAction={onExecuteAction}
+              selfGuidance={selfGuidance}
+            />
           ))}
         </Box>
       ) : actions.length > 0 ? (
@@ -311,7 +373,7 @@ const DocumentPanel = ({ docContent, docMetadata, docLoading, docPurchased, onPu
 
 // ============ CHAT PANEL COMPONENT (for split view) ============
 
-const ChatPanel = ({ mode, selectedApp, activeThread, onExecuteAction, handleChatWithSources, handleLikeSource, responseContainerRef }) => {
+const ChatPanel = ({ mode, selectedApp, activeThread, onExecuteAction, selfGuidance, handleChatWithSources, handleLikeSource, responseContainerRef }) => {
   return (
     <Paper elevation={0} sx={{ flex: '1 1 auto', overflowY: 'auto', padding: 2 }}>
       <Typography variant="subtitle2" gutterBottom>
@@ -327,6 +389,7 @@ const ChatPanel = ({ mode, selectedApp, activeThread, onExecuteAction, handleCha
             item={item} 
             isAiResponse={true} 
             onExecuteAction={onExecuteAction}
+            selfGuidance={selfGuidance}
             onChatWithSources={handleChatWithSources}
             onLikeSource={handleLikeSource}
           />
@@ -383,6 +446,7 @@ const ChatWidget = (props = {}) => {
   const {
     ipdocFileId,
     onExecuteAction,
+    selfGuidance,
     mode = 'standalone',  // standalone, embedded
     preloadedThread,
     documentId,           // IPDoc file ID for document mode
@@ -1430,6 +1494,7 @@ const ChatWidget = (props = {}) => {
           {/* Chat Panel */}
           <Grid item xs={12} md={6} sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
             <ChatPanel 
+              selfGuidance={selfGuidance}
               mode={mode}
               selectedApp={selectedApp}
               activeThread={activeThread}
@@ -1465,6 +1530,7 @@ const ChatWidget = (props = {}) => {
                 item={item} 
                 isAiResponse={true} 
                 onExecuteAction={onExecuteAction}
+                selfGuidance={selfGuidance}
                 onChatWithSources={handleChatWithSources}
                 onLikeSource={handleLikeSource}
               />
