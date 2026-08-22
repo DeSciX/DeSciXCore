@@ -1,0 +1,13 @@
+# CODEOWNERS — DeSciXCore
+#
+# THE PUBLISH WORKFLOW IS NOW A CREDENTIAL. Under npm trusted publishing there is no token to
+# steal: authentication is an OIDC identity bound to this repo, this workflow FILE PATH, and the
+# npm-publish environment. So the right to edit that file IS the right to publish @descix
+# packages. It gets the same review posture a secret would have had.
+#
+# Anyone who can change npm-publish.yml can change WHAT gets published and from WHERE.
+/.github/workflows/npm-publish.yml   @eabadir
+
+# The runbook is the operational half of the same control — it tells the owner which npmjs.com
+# settings to trust. A wrong instruction here is as damaging as a wrong workflow.
+/docs/runbooks/npm-trusted-publishing.md   @eabadir
