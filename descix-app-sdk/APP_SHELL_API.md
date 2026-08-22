@@ -128,13 +128,32 @@ should shape your code:**
 So: for chat you *may* check the return; for view you **must** check `available()`
 **before** you rely on the layout changing.
 
-Note that "standalone" names two different things and they do not coincide. The
-resolver's standalone means *no bus was found on any ancestor* (see
-`util/bridgeResolver.js`) — there is no shell. The shell's `STANDALONE_APP` face is
-the opposite situation: the bus is right there, one hop up, fully populated; it is the
-store CHROME that is off. An app that treats "I am standalone" as one condition will
-guard for the wrong one — on the shell's standalone face the resolver succeeds, every
-member is present, and the only open question is whether anything is `available()`.
+### Standalone is an INITIAL VIEW, not a reduced mode
+
+There is ONE App Shell. The platform site and a developer's app mount the same
+`@descix/app-sdk/AppShell`, and a developer's shell can be embedded inside the platform's
+— they are the same object, nested.
+
+**Standalone selects what the shell opens ON.** In standalone the initial view is your
+app's CodeSite instead of the store. That is all "no chrome" ever meant: *no store chrome
+in the initial view*. It does not mean chrome is gone for good, and it does not remove
+platform capability — every platform view, Powch included, stays reachable by navigation.
+One pre-built bundle boots as the store on `descix.net` and as your app under
+`descix serve`, because the served binding is read before the shell mounts.
+
+This is why capability appears to "arrive": at the standalone initial view nothing
+view-aware has subscribed yet, so `view.available()` reads `false`; open an app and the
+subscribing container mounts. Same shell, later view.
+
+**Standalone means MANAGED — a shell is present and the app is actively declaring
+itself.** The opposite case is an app with NO shell above it at all: that is **UNMANAGED**,
+not standalone.
+
+⚠️ **Naming collision, live today:** `bridgeResolver.js` returns the literal
+`mode: 'standalone'` for the UNMANAGED case (no bus on any ancestor, `bus: null`,
+`hops: -1`). That literal is the unmanaged condition wearing the managed condition's name.
+Branch on it for "is there a shell at all?" — never read it as "am I in standalone view?",
+which is a different question with a different answer.
 
 ### `DeSciX.view` — choose your layout
 
