@@ -157,9 +157,11 @@ unconditionally (`App.jsx:118`), and it hides the STORE nav items in standalone 
 initial view is your app rather than the store, with a nav bar present and its store items
 suppressed. Both of those are true today; neither is a reading of the other.
 
-⚠️ **Naming collision, live today:** `bridgeResolver.js` returns the literal
-`mode: 'standalone'` for the UNMANAGED case (no bus on any ancestor, `bus: null`,
-`hops: -1`). That literal is the unmanaged condition wearing the managed condition's name.
+⚠️ **Naming collision, live today:** the value lives on the OBJECT `bridgeResolver()`
+RETURNS — `{ window, bus, hops, mode }` — and that returned `mode` is the literal
+`'standalone'` for the UNMANAGED case (`bus: null`, `hops: -1`). **There is no `DeSciX.mode`
+property on the bus**; do not look for one. You see this value only if you call the
+resolver yourself. That literal is the unmanaged condition wearing the managed condition's name.
 Branch on it for "is there a shell at all?" — never read it as "am I in standalone view?",
 which is a different question with a different answer.
 
