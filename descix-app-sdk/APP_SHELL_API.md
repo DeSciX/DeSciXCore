@@ -149,6 +149,14 @@ subscribing container mounts. Same shell, later view.
 itself.** The opposite case is an app with NO shell above it at all: that is **UNMANAGED**,
 not standalone.
 
+**What "no other views showing" means for the nav bar — both facts, stated plainly.**
+The intent, in the CEO's words: *"no chrome in the initial view. which is a reference to
+the initial view not being the platform store mode."* The as-built: `TopNavBar` renders
+unconditionally (`App.jsx:118`), and it hides the STORE nav items in standalone via
+`showsStoreChrome()` (`TopNavBar.jsx:46`, one owner in `util/standaloneShell.js`). So the
+initial view is your app rather than the store, with a nav bar present and its store items
+suppressed. Both of those are true today; neither is a reading of the other.
+
 ⚠️ **Naming collision, live today:** `bridgeResolver.js` returns the literal
 `mode: 'standalone'` for the UNMANAGED case (no bus on any ancestor, `bus: null`,
 `hops: -1`). That literal is the unmanaged condition wearing the managed condition's name.
