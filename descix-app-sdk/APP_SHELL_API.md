@@ -54,10 +54,19 @@ early hears the event; an app that starts late reads the marker. Neither polls:
 ```js
 const { mode, members, version } = await DeSciX.ready();
 if (mode === 'standalone') {
-  // No shell above this page. `ready()` resolves rather than hanging, so you can
-  // take whatever path your app supports on its own.
+  // UNMANAGED: no shell above this page at all. `ready()` resolves rather than
+  // hanging, so you can take whatever path your app supports on its own.
 }
 ```
+
+**Read that `mode` carefully — the literal is misnamed and it is the one trap in this
+API.** `mode: 'standalone'` here means **UNMANAGED**: there is no shell above you. It does
+NOT mean "the shell opened on my app", which is the managed standalone view described
+below and is a completely different situation. The name is a known collision, filed for
+rename; until it changes, read this value as *"is there a shell at all?"* and nothing more.
+
+`mode` is a FIELD of what `ready()` resolves to. It is not a property on the bus — there is
+no `DeSciX.mode` to read.
 
 `DeSciX.ready()` is the whole of it: it resolves immediately when the bus is already
 published, and otherwise waits for the shell's announcement on the window that owns
@@ -157,11 +166,14 @@ unconditionally (`App.jsx:118`), and it hides the STORE nav items in standalone 
 initial view is your app rather than the store, with a nav bar present and its store items
 suppressed. Both of those are true today; neither is a reading of the other.
 
-⚠️ **Naming collision, live today:** the value lives on the OBJECT `bridgeResolver()`
-RETURNS — `{ window, bus, hops, mode }` — and that returned `mode` is the literal
-`'standalone'` for the UNMANAGED case (`bus: null`, `hops: -1`). **There is no `DeSciX.mode`
-property on the bus**; do not look for one. You see this value only if you call the
-resolver yourself. That literal is the unmanaged condition wearing the managed condition's name.
+⚠️ **Naming collision, live today — and you meet it in `ready()`.** The `mode` field that
+`await DeSciX.ready()` resolves to (and the same field on the object `bridgeResolver()`
+returns, `{ window, bus, hops, mode }`) carries the literal `'standalone'` for the
+**UNMANAGED** case: `bus: null`, `hops: -1`, no shell anywhere above. That is the unmanaged
+condition wearing the managed condition's name. Branch on it for *"is there a shell at
+all?"* — never for *"am I in standalone view?"*, which is a different question with a
+different answer. Filed for rename; do not write `mode: 'unmanaged'` anywhere until it
+ships. That literal is the unmanaged condition wearing the managed condition's name.
 Branch on it for "is there a shell at all?" — never read it as "am I in standalone view?",
 which is a different question with a different answer.
 
