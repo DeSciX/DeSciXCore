@@ -65,8 +65,18 @@ NOT mean "the shell opened on my app", which is the managed standalone view desc
 below and is a completely different situation. The name is a known collision, filed for
 rename; until it changes, read this value as *"is there a shell at all?"* and nothing more.
 
-`mode` is a FIELD of what `ready()` resolves to. It is not a property on the bus — there is
-no `DeSciX.mode` to read.
+**`DeSciX.mode` is real — and knowing WHICH `DeSciX` you are holding is the whole trick.**
+Two different objects wear that name:
+
+| You are holding | What it is | Has `mode`? |
+|---|---|---|
+| `DeSciX` in YOUR page (from `DeSciXAppSDK.js`) | the app-side SDK object | **yes** — a live getter: `'shell'` when a shell hosts you, `'standalone'` when none does |
+| the shell's own `window.DeSciX` | the bus `appBridge` publishes (`view`, `chat`, `bridge`, `powch`, …) | no — the bus carries members, not a mode |
+
+As an app author you hold the first one, so `DeSciX.mode` reads correctly and
+`await DeSciX.ready()` resolves a `mode` field with the same meaning. Both are the SAME
+misnamed literal described above: `'standalone'` there means UNMANAGED — no shell found —
+never "the shell opened on my app".
 
 `DeSciX.ready()` is the whole of it: it resolves immediately when the bus is already
 published, and otherwise waits for the shell's announcement on the window that owns
