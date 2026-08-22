@@ -44,7 +44,7 @@ Instead of exposing implementation details (like GCS bucket URLs or specific por
 
 **Port:** `--port` → `env.gateway.port` → built-in `5173`, with `strictPort` on. The resolved port and **its source** are printed at startup. Do not assume `:5173`; give a checkout its own with `descix config set-gateway-port <n>`.
 
-**It serves ONE app, standalone, with no store chrome.** The app is detected from the directory you are standing in (the product whose `localPath` contains your cwd; longest match wins), or named with `--app <id>`. Nothing is persisted to `workspace.json`. When it cannot name an app it fails loud and lists the workspace's apps rather than falling back to the store.
+**It serves ONE app, standalone — the shell opens ON your app instead of the store.** (Standalone is the INITIAL VIEW, not a reduced mode: the platform views stay reachable by navigation.) The app is detected from the directory you are standing in (the product whose `localPath` contains your cwd; longest match wins), or named with `--app <id>`. Nothing is persisted to `workspace.json`. When it cannot name an app it fails loud and lists the workspace's apps rather than falling back to the store.
 
 The binding is **served, not compiled**: the gateway answers `GET /__descix/app-binding.json` on the shell's own origin with `{mode:'standalone', appId, appUrl, source}`, and the shell reads it before it mounts. One pre-built cloud shell bundle therefore boots as the store on `descix.net` and as your app locally, with no rebuild. No binding (or a timeout, or a malformed body) means the store — the safe degradation. There is no `__STANDALONE_APP_ID__` build define; an app that builds itself standalone declares it at its own mount, `<AppShell appId="..." standalone>`.
 
@@ -183,7 +183,7 @@ The derived Shell rule is the important one: point the API at a cloud environmen
 ### Scenario 1: App Dev (the common case)
 *   **User**: App developer. No platform checkout.
 *   **Setup**: `descix config set-env dev`, `descix app init`, `descix app set-site`, then `cd my-app && descix serve`.
-*   **Result**: one HTTPS origin. `/` → the cloud App Shell, `/apifront` → the cloud API, `/p/my-app` → your app, and the shell boots **standalone into your app** with no store chrome.
+*   **Result**: one HTTPS origin. `/` → the cloud App Shell, `/apifront` → the cloud API, `/p/my-app` → your app, and the shell boots **standalone into your app** — its INITIAL VIEW is your app rather than the store, with the platform views still reachable from there.
 
 ### Scenario 2: Platform Dev ("Dogfooding")
 *   **User**: Core team, full repo checkout.
