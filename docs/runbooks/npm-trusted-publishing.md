@@ -104,18 +104,14 @@ workflow filename is why the file may never be renamed or moved without redoing 
 
 ---
 
-## Step 2 — the `npm-publish` environment (GitHub) — **no approval prompt available**
+## Step 2 — the `npm-publish` environment (GitHub) — configured, approval prompt ON
 
 The workflow declares `environment: npm-publish`, and it must keep doing so: **the npm binding
 includes the environment name in the OIDC claim**, so removing it would break publishing.
 
-But do **not** expect an approval prompt. **Required-reviewer protection on a private repo is
-Enterprise-only** — measured 422 under the Team org. GitHub creates the environment on first use;
-there is nothing for you to configure here at the current plan and visibility.
-
-If you want a human approval step back, that is a posture decision, not a setting:
-make the repo public (also restores provenance), move to Enterprise, or add a
-type-to-confirm input to the workflow. Queued for you; none is required to publish.
+The repository is **public** (`DeSciX/DeSciXCore`, 2026-08-22) and the environment is configured:
+**required reviewer = `eabadir`**, deployment branch policy = `main` only. Every *Run workflow*
+therefore pauses for your approval in the GitHub UI before any publish step runs. Nothing to set.
 
 ---
 
