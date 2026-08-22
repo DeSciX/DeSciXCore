@@ -42,7 +42,7 @@ my-service/
 │   ├── defaults-config.json    # Layered config: committed defaults
 │   ├── defaults-config-dev.json
 │   ├── scripts/
-│   │   └── register.js         # Registers the service with the gateway
+│   │   └── register.js         # Registers the service MANIFEST (commands) for discovery
 │   └── services/
 │       ├── utils.js            # Config bootstrap — see below, read this first
 │       ├── apiFront.js
@@ -112,7 +112,7 @@ descix microservice init
 
 # 2. Implement your commands in commandHandlers/
 
-# 3. Register service with gateway
+# 3. Publish the service MANIFEST so its commands are discoverable
 descix microservice register
 
 # 4. Vectorize SERVICE_README for discovery
@@ -121,6 +121,13 @@ descix microservice vectorize
 # 5. Sync KB
 descix kb corpus sync -c <community> -a <app>
 ```
+
+**What registration is, and is not.** It publishes your `manifest.json` — the command list —
+so `tell_me_how` can discover your tools. `scripts/register.js` writes that manifest and logs
+the commands it published. It is a DISCOVERY step.
+
+It is not how your service becomes reachable, and nothing here asks you to declare a route or
+a URL. Do not read this step as wiring up addressing.
 
 ## Capabilities
 
