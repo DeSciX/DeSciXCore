@@ -125,7 +125,7 @@ them in new instructions.
 |------|---------|
 | Serve `site/` locally | `npx serve site/` or `python3 -m http.server -d site/` on any port |
 | Register port with DeSciX | `descix site servelocal <port> -c <community> -a <app>` |
-| Run your app on the DeSciX gateway | `cd <app dir> && descix serve` — one HTTPS origin, your app **standalone**, no store chrome |
+| Run your app on the DeSciX gateway | `cd <app dir> && descix serve` — one HTTPS origin, the shell opens ON your app (**standalone** = initial view, not a reduced mode — platform views stay reachable) |
 
 A plain static server is enough to look at your HTML. `descix serve` is what you
 want as soon as the app needs the platform: it puts the App Shell, your app and
