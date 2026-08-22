@@ -97,8 +97,13 @@ the second means you have not uploaded yet. Upload into the app that will do the
 so if a rule in your head says the tool's own `ref` field is unusable, the rule is wrong, not the
 tool.
 
-**The `gs://` form is accepted.** A `gs://` URI works as an `asset_ref` — it is parsed,
-scope-checked and resolved. That is worth stating plainly because the opposite rule circulates:
+**The `gs://` form is accepted.** A `gs://` URI works as an `asset_ref` — it is parsed and
+scope-checked, and the handler then looks the object up by path. What is PROVEN is the form and
+the scoping: two different `gs://` strings return two different errors (out-of-prefix vs
+not-found), which is only possible if the URI was accepted, parsed and scope-checked first.
+What is NOT proven is the last hop — nobody has yet demonstrated a successful fetch of a REAL
+object through `asset_ref`, so treat resolution-to-bytes as the documented intent rather than a
+measured result. That is worth stating plainly because the opposite rule circulates:
 `gs://` is fatal as a *provider* URI (the provider refuses GCS references outright) and correct as
 a *DeSciX-side* `asset_ref`. Those are two different layers, and collapsing them into "never
 `gs://`" removes the very mechanism that makes `asset_ref` work — the platform resolves the
