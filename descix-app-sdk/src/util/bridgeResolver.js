@@ -11,6 +11,14 @@
  * are three derivations of one fact — the general form of mirror drift — and they
  * are wrong in different situations:
  *
+ * The scaffold's share of that drift, measured 2026-08-21 before this module existed:
+ * `window.top` 17 occurrences, `window.parent` 0, and its guard was named
+ * `hasParentAccess()` while reading `window.top` — the name and the behaviour had
+ * already come apart. That file is now GENERATED from templates/DeSciXAppSDK.template.js
+ * with this resolver inlined, so the count is history; it is recorded here because a
+ * resolver that costs a hop-walk deserves to say how bad the hand-rolled version got.
+ *
+ *
  *   - `parent` is wrong when an app is nested more than one level below the shell.
  *   - `top` is wrong when the shell is itself embedded in some outer page, because
  *     `top` is then the OUTER page, which carries no bus.
