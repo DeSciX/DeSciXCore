@@ -110,7 +110,7 @@ templates/scaffolds/microservice/
 ├── setup-schema.json
 ├── SERVICE_README_sdk.md
 ├── scripts/
-│   └── register.js             # Registers the service with the gateway
+│   └── register.js             # Registers the service MANIFEST (commands) for discovery
 ├── services/
 │   ├── utils.js                # Config bootstrap over @descix/cloud-core — read first
 │   ├── apiFront.js
