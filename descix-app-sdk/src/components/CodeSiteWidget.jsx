@@ -9,6 +9,13 @@ import { useAppContext } from '../AppContext';
 import ChatWidget from './ChatWidget';
 import { actionResultContribution, actionErrorContribution } from '../util/chatIngress';
 import { publishChatApi, retractChatApi } from '../util/appChat.js';
+import {
+  readSelfGuidedDeclaration,
+  decideAutoRun,
+  recordHopSpend,
+  requestStop,
+  isStopped as readIsStopped,
+} from '../util/selfGuided.js';
 
 /**
  * Platform app IDs that should NOT render in the CodeSite iframe.
@@ -162,6 +169,30 @@ const CodeSiteWidget = ({
     // handle never goes stale as the chat pane mounts and unmounts beneath it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /**
+   * Self-guidance: the page DECLARES which of its ops may run unattended, the shell DECIDES
+   * whether to honour it. The Run button stays a parent-frame gate — this is the only sanctioned
+   * way it opens, and an undeclared op is untouched.
+   *
+   * EVERY METHOD RE-READS THE DECLARATION AT CALL TIME. The app frame loads asynchronously and
+   * publishes DeSciX_SelfGuided when it is ready, so a declaration captured at mount would be
+   * absent forever; and budget/stop-state change DURING a run, so a captured one would be a
+   * snapshot. (The page owner shipped exactly that bug once — see util/selfGuided.js.)
+   * `usesChildrenPanel` mirrors handleExecuteAction: in children mode the host window IS the app.
+   */
+  const selfGuidance = useMemo(() => {
+    const frame = () => (usesChildrenPanel ? window : iframeRef.current?.contentWindow);
+    const decl = () => readSelfGuidedDeclaration(frame());
+    return {
+      decide: (functionName) => decideAutoRun(decl(), functionName),
+      spend: (mediaCount) => recordHopSpend(decl(), mediaCount),
+      stop: (reason) => requestStop(decl(), reason),
+      isStopped: () => readIsStopped(decl()),
+      // Present at all? Used only to decide whether to render the STOP affordance.
+      available: () => decl() !== null,
+    };
+  }, [usesChildrenPanel]);
 
   /**
    * Direct execution handler: Calls functions in the CodeSite iframe's window object.
@@ -318,6 +349,7 @@ const CodeSiteWidget = ({
         >
           <ChatWidget
             onExecuteAction={handleExecuteAction}
+            selfGuidance={selfGuidance}
             ingressRef={chatIngressRef}
             mode="embedded"
             entitled={chatEntitled}
