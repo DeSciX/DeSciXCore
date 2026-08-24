@@ -19,6 +19,7 @@ import {
     validateToolParams,
     toolAcceptsParam,
 } from '../src/mcp-tools/index.js';
+import { BEAT_CLOCK_FIELD_NAMES, BEAT_CLOCK_AGE_FIELDS } from '../src/fabric/index.js';
 
 const askSchema = NATIVE_MCP_TOOLS.find(t => t.name === 'ask_question_to_app').inputSchema;
 
@@ -237,6 +238,26 @@ const NON_PARAM_IDENTIFIERS = new Set([
     'ai_credits', 'amount_usd', 'daily_free_credit_available_today', 'daily_free_credit_usd',
     'purchase_type', 'interaction_id', 'created_at', 'received_at', 'chunk_idx',
     'current_holder_hint', 'agent_hint',
+    // fabric heartbeat record fields — SERVER-written and read back, never passed. `occurred_at`
+    // is the beat's server clock; the two beat clocks are BEAT_CLOCK_FIELDS, and they are named
+    // here from the vocabulary so a rename in the table cannot leave a stale literal behind.
+    'occurred_at', ...BEAT_CLOCK_FIELD_NAMES,
+    // fabric RESPONSE fields — every one is something the caller READS BACK, never passes. The
+    // fabric verbs derive their keys, clocks and selectors server-side precisely so a caller cannot
+    // send these, which is why each is documented and none is declared.
+    'judged_on', 'wake_overdue', 'wake_next_fire_at', 'next_fire_at',
+    // fabric_liveness reports one age per clock, each named FROM the clock it ages by
+    // beatClockAgeField — registered through that same derivation, so a rename in BEAT_CLOCK_FIELDS
+    // cannot leave a stale literal here. (`age_seconds` is deliberately ABSENT: it was deleted, not
+    // re-pointed, and nothing may document it again.)
+    'received_at_age_seconds', ...BEAT_CLOCK_AGE_FIELDS,
+    'selector_applied', 'census_truncated', 'empty_reason', 'no_unread', 'unknown_seat',
+    'key_discriminated', 'already_seen', 'cleared_fields',
+    // REFUSED parameters, named by the refusals so a caller knows what not to send. Declaring one
+    // would make it look accepted, which is the opposite of what the description says.
+    'seat_token',
+    // commands reached through execute_remote_command / the BEAST surface, not native tools
+    'beast_rag_ingest', 'beast_seat_read',
     // commands reached through execute_remote_command, not native tools
     'beast_get_dashboard', 'create_stripe_checkout_session', 'fetch_my_purchases',
 ]);
@@ -246,16 +267,20 @@ test('class guard: no tool documents a parameter it does not declare', () => {
     const declaredAnywhere = new Set(
         NATIVE_MCP_TOOLS.flatMap(t => Object.keys(t.inputSchema?.properties || {})),
     );
+    // EVERY offender, not the first. Failing on the first made this guard report one identifier per
+    // run, so registering N of them took N runs — an accurate gate that is expensive to satisfy
+    // gets satisfied by deleting the prose instead.
+    const offenders = [];
     for (const tool of NATIVE_MCP_TOOLS) {
         const identifiers = new Set((tool.description || '').match(/\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/g) || []);
         for (const id of identifiers) {
             if (toolNames.has(id) || declaredAnywhere.has(id) || NON_PARAM_IDENTIFIERS.has(id)) continue;
-            assert.fail(
-                `${tool.name}'s description names '${id}', which no native tool declares as a parameter. ` +
-                `Either declare it in ${tool.name}.inputSchema.properties, or — if it is a response field ` +
-                `or a remote command name — add it to NON_PARAM_IDENTIFIERS. Documenting a param the ` +
-                `schema omits makes strict validation reject a caller who followed the instructions.`,
-            );
+            offenders.push(`${tool.name}: '${id}'`);
         }
     }
+    assert.deepEqual(offenders, [],
+        `These descriptions name identifiers no native tool declares as a parameter:\n  ${offenders.join('\n  ')}\n` +
+        `Either declare each in its tool's inputSchema.properties, or — if it is a response field ` +
+        `or a remote command name — add it to NON_PARAM_IDENTIFIERS. Documenting a param the ` +
+        `schema omits makes strict validation reject a caller who followed the instructions.`);
 });

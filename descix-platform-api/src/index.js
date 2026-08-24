@@ -72,6 +72,20 @@ export {
     computeManifestHash
 } from './manifest/index.js';
 
+// Coordination-fabric vocabulary (a pure, dependency-free leaf; also at
+// @descix/platform-api/fabric). Re-exported here so a consumer that already imports the package
+// root does not reach for `src/fabric/vocab.js` by path and pin itself to a file location.
+export {
+    BEAT_CLOCK_FIELDS,
+    BEAT_CLOCK_FIELD_NAMES,
+    beatClockFieldFor,
+    normalizeBeatClocks,
+    judgeModelLiveness,
+    beatClockAgeSeconds,
+    beatClockAgeField,
+    BEAT_CLOCK_AGE_FIELDS,
+} from './fabric/index.js';
+
 // Canonical id derivation (token <-> community <-> app)
 export {
     communityIdFromTokenSymbol,
