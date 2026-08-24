@@ -50,6 +50,30 @@ const EXPECTED_SSOT_TOOLS = [
     'get_credit_balance',
     // WS-MCP-SURFACE-SPLIT-EXEC §6.3 (CEO-D-2026-07-04): DISCOVERY-CORE invoke gateway (mutating).
     'execute_remote_command',
+    // ── ws-devplane-fabric-verbs: the coordination fabric's typed verbs ───────────────────────
+    // ONE LINE PER TOOL, per this file's own rule: a conscious edit, never a count that drifts.
+    // These are the server-side replacement for hand-composed app_records_* coordination on
+    // egpt-frqtl/coordination. They are advertised on BOTH transports because the whole point is
+    // that the rules hold on every transport — a CLI/stdio client that could not see them would go
+    // on hand-composing keys, clocks and selectors, which is the drift the verbs exist to close.
+    // LOCK-STEP: each name here must also be a registered command in DeSciX_Cloud
+    // commandHandlers/registry.js (fabricCommands.js). The two repos merge in ONE operation —
+    // see the contract's §Migration stage 1.
+    'fabric_beat',
+    'fabric_liveness',
+    'fabric_inbox_sweep',
+    'fabric_msg_send',
+    'fabric_msg_ack',
+    'fabric_broadcast_send',
+    'fabric_broadcast_ack',
+    'fabric_seat_state_get',
+    'fabric_seat_state_put',
+    'fabric_watermark_get',
+    'fabric_watermark_put',
+    'fabric_envelope',
+    'fabric_lease_claim',
+    'fabric_lease_release',
+    'fabric_vocabulary',
 ];
 
 test('shared SSOT resolves from the CLI WITHOUT pulling GCP infra (leaf module)', () => {

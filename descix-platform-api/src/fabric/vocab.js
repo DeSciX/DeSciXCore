@@ -32,14 +32,13 @@
 export const FABRIC_APP = 'egpt-frqtl';
 export const FABRIC_KB = 'coordination';
 
-/**
- * The org master's seat LABEL.
- *
- * Named here because two refusals need it and neither may retype it: the retired `CEO`/`master`
- * sentinels are refused by name and must say what to address instead. A role is not an address —
- * the master is reachable only at the label it beats under.
- */
-export const ORG_MASTER_SEAT_LABEL = 'VISION';
+// THERE IS NO ORG-MASTER LABEL CONSTANT HERE, AND THAT IS THE POINT. A seat label names a HOLDER,
+// and a holder changes; a literal in a shipped package is a snapshot of who held the org seat on the
+// day the package was cut, and it does not update when the holder does. The identical class as
+// `CEO`/`master` below: a value that reads authoritative, is wrong, and cannot detect that it is
+// wrong. The seat's CURRENT holder has one owner — the BEAST seat surface — so every refusal that
+// needs to say "address the org master" says how to LOOK IT UP (`beast_seat_read {seat_id:'org'}`)
+// and names no label.
 
 // ── Heartbeat statuses ───────────────────────────────────────────────────────────────────────
 //
@@ -128,9 +127,11 @@ export const TO_AGENT_SENTINELS = Object.freeze(['all', 'ALL']);
 /**
  * Sentinels that were accepted and delivered to NOBODY. `CEO` and `master` are ROLES, and
  * `inboxAddresses()` has never composed either: a beat or message addressed to one was written,
- * returned success, and no sweep on the fabric could ever select it. They are refused BY NAME,
- * pointing at ORG_MASTER_SEAT_LABEL — the label the master actually beats under and actually
- * sweeps. A refusal that does not say what to say instead is an invitation to work around it.
+ * returned success, and no sweep on the fabric could ever select it. They are refused BY NAME, and
+ * the refusal says how to FIND the org master's current seat label (`beast_seat_read
+ * {seat_id:'org'}`) rather than naming one — a label names a holder, and a literal here would be a
+ * snapshot that goes wrong silently the first time the seat changes hands. A refusal that does not
+ * say what to say instead is an invitation to work around it.
  */
 export const RETIRED_SENTINELS = Object.freeze(['CEO', 'master']);
 
@@ -293,12 +294,22 @@ export function inboxAddresses(label, session_id) {
  * This exists so a client GENERATES its copy rather than keeping one. Every set a client needs in
  * order to validate a call before making it is here; anything absent from this bag is a set the
  * client would have to hand-type, which is the drift this module was moved to close.
+ *
+ * THREE THINGS ARE DELIBERATELY NOT IN THIS PAYLOAD, and each absence is load-bearing:
+ *
+ *   · `fabric_app_id` / `fabric_kb_id` — the raw-path COORDINATES. No `fabric_*` verb accepts
+ *     either (both are refused with FABRIC_PLANE_NOT_CALLER_CHOSEN), so a client has nothing to do
+ *     with them except hand-compose the `app_records_*` call this surface exists to replace and
+ *     stage 3 refuses. Publishing them here would be the vocabulary handing out the address of the
+ *     door it just locked.
+ *   · `org_master_seat_label` — a seat label names a HOLDER and holders change. A literal returned
+ *     by a compile-time payload is a snapshot that goes wrong silently the first time the org seat
+ *     changes hands, and a client that cached it would address mail to a label nobody sweeps —
+ *     which is exactly the RETIRED_SENTINELS failure in newer clothes. The seat's current holder has
+ *     one owner: `beast_seat_read {seat_id:'org'}`.
  */
 export function fabricVocabulary() {
     return {
-        fabric_app_id: FABRIC_APP,
-        fabric_kb_id: FABRIC_KB,
-        org_master_seat_label: ORG_MASTER_SEAT_LABEL,
         beat_statuses: [...BEAT_STATUSES],
         working_statuses: [...WORKING_STATUSES],
         declared_stops: [...DECLARED_STOPS],
