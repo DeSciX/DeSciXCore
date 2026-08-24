@@ -100,6 +100,11 @@ export const WAKE_FIELDS = Object.freeze(['mechanism', 'survives_death', 'next_f
 // defaulted and it cannot be inherited: a merge-upsert that omitted it would silently keep the
 // PREVIOUS writer's value, so a hook's beat on a seat that last beat as `model` would keep
 // claiming a live model. That inheritance was measured in the client mirror.
+//
+// `liveness` SAYS WHO WROTE LAST, AND THAT IS ALL IT SAYS. It is NOT the model's clock: the two
+// writers share this one key and the hook writes ~15x more often, so a reader that judged the model
+// on it read UNDETERMINED for every correctly-armed seat (measured 2026-08-24T21:37Z). The clocks
+// are BEAT_CLOCK_FIELDS below, and the judgement is judgeModelLiveness().
 export const LIVENESS_MODEL = 'model';
 export const LIVENESS_PROCESS = 'process';
 export const LIVENESS_VALUES = Object.freeze([LIVENESS_MODEL, LIVENESS_PROCESS]);
@@ -238,6 +243,185 @@ export const VERDICT = Object.freeze({
     NONE: 'none',
 });
 
+// ── THE BEAT CLOCK PAIR: two writers, two clocks, ONE owner ──────────────────────────────────
+//
+// MEASURED DEFECT (BEAST, 2026-08-24T21:37Z). The record `heartbeat-<LABEL>-<session8>` has TWO
+// writers on ONE key — the seat's AGENT (liveness `model`) and the plugin's doorbell hook every
+// 60 seconds (liveness `process`). Both wrote the same field, `liveness`, and the reader judged
+// the MODEL on whichever value was current. The hook writes 15x more often than the agent, so the
+// current value is almost always `process`, and EVERY correctly-armed seat read UNDETERMINED. The
+// process beat did not merely fail to prove the model alive: it ERASED the proof.
+//
+// A second measurement (18:25Z, 20:42Z) found the mirror failure on the write side: `fabric_beat`
+// with liveness=model CLEARED `model_beat_at`, because the whole-state rule ("a beat is not a
+// diff") swept it up as "a field the previous beat left behind".
+//
+// THE FIX IS NOT A THIRD FIELD, IT IS TWO CLOCKS. "When did an agent last prove itself alive" and
+// "when did a process last prove itself alive" are TWO FACTS. One field cannot hold two facts, and
+// two writers sharing one field is the general form of mirror drift — the copies WILL disagree
+// silently, and here the disagreement is invisible because the loser is overwritten rather than
+// contradicted. So each writer gets its OWN clock, and neither may touch the other's.
+//
+// `liveness` REMAINS, and it still means what it meant: WHO wrote the most recent beat. It is no
+// longer the model's clock and no reader may use it as one.
+//
+// THIS TABLE IS THE CONTRACT. It is exported so the plugin reader (unkamon-beast
+// `hooks/lib/fabric_read.py`), the secretary definition and DeSciX_Cloud's `fabricStore.js` consume
+// ONE description instead of three hand-listed field sets — the schema-mirror-drift rule in
+// Unkamon/CLAUDE.md §Engineering Culture. `projectable: true` is load-bearing: both fields are
+// FLAT top-level record fields, so a raw reader may name them in a `fields` projection. A nested
+// clock block would be unprojectable AND unfilterable, and the raw reader would have to fetch the
+// whole record to answer one question.
+export const BEAT_CLOCK_FIELDS = Object.freeze([
+    Object.freeze({
+        field: 'model_beat_at',
+        meaning: 'The server clock at the last beat an AGENT wrote. THE ONLY evidence a model is alive.',
+        written_by: LIVENESS_MODEL,
+        preserved_by: LIVENESS_PROCESS,
+        projectable: true,
+    }),
+    Object.freeze({
+        field: 'process_beat_at',
+        meaning: 'The server clock at the last beat a HOOK wrote. Proves a process is alive and says '
+            + 'NOTHING about the model.',
+        written_by: LIVENESS_PROCESS,
+        preserved_by: LIVENESS_MODEL,
+        projectable: true,
+    }),
+]);
+
+/** The two clock field NAMES, DERIVED from the table above — never a second hand-typed list. Every
+ *  consumer that needs "which fields are the beat clocks" (the store's never-cleared set, a
+ *  projection, a conformance test) reads this rather than retyping two strings. */
+export const BEAT_CLOCK_FIELD_NAMES = Object.freeze(BEAT_CLOCK_FIELDS.map((f) => f.field));
+
+/** Which clock a beat of this `liveness` WRITES. Derived from the table, so a third liveness value
+ *  added to the table gets its clock for free and one added without a clock is visibly absent. */
+export function beatClockFieldFor(liveness) {
+    const v = typeof liveness === 'string' ? liveness.trim().toLowerCase() : null;
+    return BEAT_CLOCK_FIELDS.find((f) => f.written_by === v)?.field ?? null;
+}
+
+/**
+ * normalize(partial) -> FULL BAG. The canonical reader of a heartbeat's clock pair.
+ *
+ * Every key of the contract is present on the result, `null` where the record carries nothing
+ * readable. A consumer that destructures this can never be surprised by an absent key, and — the
+ * point of the exercise — it never re-enumerates the field list to find them.
+ *
+ * `null` IS NOT `0` AND IS NOT `now`. An absent model clock means UNKNOWN (a pre-contract record,
+ * or a seat only its hook has ever beaten for). Substituting any instant here would manufacture the
+ * exact claim — "an agent is alive" — that this pair exists to make falsifiable.
+ *
+ * `liveness` is carried through the same normalization because it is read from the same record by
+ * the same consumers, and because a reader that took it raw would re-open the case-and-vocabulary
+ * question this module answers once.
+ */
+export function normalizeBeatClocks(record) {
+    const r = (record && typeof record === 'object') ? record : {};
+    const str = (v) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : null);
+    const out = {};
+    for (const { field } of BEAT_CLOCK_FIELDS) out[field] = str(r[field]);
+    const lv = str(r.liveness);
+    out.liveness = (lv && isLivenessValue(lv)) ? lv.toLowerCase() : null;
+    return out;
+}
+
+/**
+ * THE liveness judgement, as ONE exported rule.
+ *
+ * The plugin reader and `fabricStore.liveness()` are two consumers in two repositories asking one
+ * question. Two derivations of one fact is the bug class this whole module exists to close, and
+ * the two-writers defect above is what it costs when the copies disagree.
+ *
+ * JUDGED ON `model_beat_at` AND NOTHING ELSE. Not on `liveness` (that says who wrote LAST, and a
+ * hook writes 15x more often), not on `received_at` (that is the record's clock, which a process
+ * beat refreshes — the mask), not on `occurred_at`.
+ *
+ *   none   — no readable model clock. The record has never carried proof an agent was alive. This
+ *            is UNKNOWN, and it is deliberately NOT `stale`: "nobody has ever beaten as a model"
+ *            and "an agent beat and then went quiet" are different facts for a master.
+ *   stale  — a model clock exists and is older than the threshold, OR is present but unreadable.
+ *            An unreadable instant must never read alive; it is the friendliest possible lie.
+ *   alive  — a model clock exists, is readable, and is within the threshold.
+ *
+ * A FUTURE model clock is `alive`, not an error: this rule reads only the server's own stamps
+ * (`fabric_beat` refuses a caller-asserted clock), so a future value cannot be a forgery — it can
+ * only be clock skew, and refusing on it would take a live seat dark. Detecting skew is the
+ * caller's job and it has the two instants to do it with.
+ *
+ * DECLARED STOPS ARE NOT JUDGED HERE. A declaration is not a death
+ * (CEO-D-2026-08-18-SEATS-STAY-REACHABLE) and it is judged on `status`, not on a clock. The caller
+ * applies that precedence over this verdict; folding it in would make this rule need a status it
+ * has no business reading.
+ *
+ * `threshold_s` HAS NO DEFAULT HERE. The platform default is `DEFAULT_LIVENESS_THRESHOLD_S` and it
+ * is the CALLER's to pass, so a caller that forgot one fails loudly instead of silently being
+ * judged against a number it never chose.
+ *
+ * THE ARGUMENT IS THE NORMALIZED BAG PLUS THE TWO SCALARS, and callers are meant to SPREAD
+ * `normalizeBeatClocks(record)` into it (`{...clocks, now, threshold_s}`) rather than pick
+ * `model_beat_at` out and re-label it. Extra keys from the bag are ignored. That is not cosmetic:
+ * a call site that names the field is a second place the string lives, which is the drift this
+ * whole contract exists to close — DeSciX_Cloud's conformance gate refuses a hand-typed clock name
+ * in `fabricStore.js` on exactly that ground.
+ *
+ * @param {{model_beat_at: ?string, now: string, threshold_s: number}} args
+ * @returns {'alive'|'stale'|'none'}
+ */
+export function judgeModelLiveness({ model_beat_at, now, threshold_s } = {}) {
+    if (typeof threshold_s !== 'number' || !Number.isFinite(threshold_s) || threshold_s <= 0) {
+        throw new TypeError('judgeModelLiveness: threshold_s must be a positive finite number of seconds '
+            + `(got ${JSON.stringify(threshold_s)}). There is no default here — pass `
+            + 'DEFAULT_LIVENESS_THRESHOLD_S, so a caller judged against a number it never chose is impossible.');
+    }
+    const nowMs = Date.parse(now);
+    if (!Number.isFinite(nowMs)) {
+        throw new TypeError(`judgeModelLiveness: 'now' must be a readable ISO-8601 instant (got ${JSON.stringify(now)}). `
+            + 'An unreadable now would silently make every seat look fresh or every seat look dead.');
+    }
+    if (model_beat_at === null || model_beat_at === undefined || model_beat_at === '') return VERDICT.NONE;
+    const beatMs = Date.parse(model_beat_at);
+    // Present but unreadable: STALE, never ALIVE and never NONE. It is not "no beat" — a value IS
+    // there — and it must not be credited as fresh.
+    if (!Number.isFinite(beatMs)) return VERDICT.STALE;
+    return ((nowMs - beatMs) / 1000) > threshold_s ? VERDICT.STALE : VERDICT.ALIVE;
+}
+
+/**
+ * The RESPONSE FIELD NAME that carries a beat clock's age — derived FROM the clock it ages.
+ *
+ * `fabric_liveness` reports one age per clock, and a hand-typed age field is the same mirror as a
+ * hand-typed clock: rename `model_beat_at` in the table above and a literal `model_beat_age_seconds`
+ * elsewhere goes quietly wrong, still passing every test that also hand-typed it. So the name has
+ * ONE derivation, here, and the server, the published tool description and the MCP class guard all
+ * read it from this function.
+ *
+ * The trailing `_at` is dropped because it is the CLOCK's tense, not the AGE's — `model_beat_at` is
+ * an instant, `model_beat_age_seconds` is a duration, and `model_beat_at_age_seconds` reads as the
+ * age of an instant-named-thing rather than the age of the beat.
+ */
+export function beatClockAgeField(clockField) {
+    const f = typeof clockField === 'string' ? clockField.trim() : '';
+    if (!f) return null;
+    return `${f.replace(/_at$/, '')}_age_seconds`;
+}
+
+/** Every beat-clock age field, DERIVED — what a consumer (the MCP class guard) registers instead of
+ *  listing two more literals beside the two it already had to stop listing. */
+export const BEAT_CLOCK_AGE_FIELDS = Object.freeze(BEAT_CLOCK_FIELD_NAMES.map(beatClockAgeField));
+
+/** Age in seconds of a beat clock against `now`, or null when either instant is unreadable —
+ *  NEVER 0, which reads as "brand new" and is the friendliest possible lie for a liveness check.
+ *  Exported beside the rule that consumes the same two instants, so a caller reporting the age it
+ *  was judged on cannot compute it a second way. */
+export function beatClockAgeSeconds(beatIso, nowIso) {
+    const a = Date.parse(beatIso);
+    const b = Date.parse(nowIso);
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+    return (b - a) / 1000;
+}
+
 /** The watermark's per-seat delivery ledger. Named so a writer cannot invent a sixth field that no
  *  reader consults, and so fabric_watermark_put can refuse an unknown one instead of storing it
  *  where it will never be read. */
@@ -365,6 +549,12 @@ export function fabricVocabulary() {
         write_modes: [...WRITE_MODES],
         watermark_fields: [...WATERMARK_FIELDS],
         wake_fields: [...WAKE_FIELDS],
+        // The beat-clock contract, so the plugin reader GENERATES its copy of "which field is the
+        // model's clock" instead of hand-typing it — the exact mirror that made the two-writers
+        // defect invisible for a day. The names are derived from the table, not listed beside it.
+        beat_clock_fields: BEAT_CLOCK_FIELDS.map((f) => ({ ...f })),
+        beat_clock_field_names: [...BEAT_CLOCK_FIELD_NAMES],
+        beat_clock_age_fields: [...BEAT_CLOCK_AGE_FIELDS],
         record_types: {
             heartbeat: TYPE_HEARTBEAT, message: TYPE_MESSAGE, envelope: TYPE_ENVELOPE,
             seat_state: TYPE_SEAT_STATE, watermark: TYPE_WATERMARK, seat_name: TYPE_SEAT_NAME,
