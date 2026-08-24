@@ -129,3 +129,43 @@ test('the clause is GENERATED — the description embeds it verbatim', () => {
         'if these ever differ, the description was hand-edited and the mirror is back'
     );
 });
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// CEO/VISION RULING 2026-08-24 on the deterministic gate's blind case. Verbatim: "{tags:
+// 'never-used-anywhere'} over an array field → matched:0 is acceptable and MUST be stated in the
+// docstring as the one case the gate cannot see. No sampled-read alternative."
+//
+// The gate refuses a scalar operator on an array field by asking Firestore the complementary
+// question — "would $contains have matched THIS value?" — because Firestore cannot be asked
+// whether a field IS an array. So when the sought value appears in no record under either
+// operator, nothing is hidden and the answer is an honest matched:0. That is a real edge, and an
+// edge a caller cannot see is an edge that will be mistaken for a bug. It is therefore part of the
+// PUBLISHED contract, not just a code comment.
+//
+// The prose is asserted LITERALLY so a silent reword is a CI failure; only the operator token is
+// interpolated from the vocabulary owner, so renaming the operator is not a two-place edit.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
+const BLIND_CASE_SENTENCE =
+    `BLIND CASE: a scalar operator on a field that holds an array in SOME records but whose sought `
+    + `value appears in NONE of them under either operator returns matched:0 rather than a refusal, `
+    + `because Firestore cannot be asked whether a field is an array, only whether `
+    + `${ARRAY_FILTER_OPERATORS[0]} would have matched THIS value.`;
+
+test('the contract PUBLISHES the one case the gate cannot see', () => {
+    assert.ok(
+        tool.description.includes(BLIND_CASE_SENTENCE),
+        'the description must carry the blind-case sentence verbatim. An undocumented edge in a '
+        + 'fail-loud gate reads to a caller as an inconsistency in the gate — matched:0 here, '
+        + 'FILTER_UNSUPPORTED there, with no stated rule separating them.\n\nEXPECTED:\n'
+        + BLIND_CASE_SENTENCE
+    );
+});
+
+test('the blind-case sentence arrives through the ONE owner, not hand-typed into the description', () => {
+    assert.ok(
+        filterOperatorClause().includes(BLIND_CASE_SENTENCE),
+        'the sentence must live in recordFilter.js filterOperatorClause() — pasting it straight '
+        + 'into nativeTools.js would re-create the mirror this vocabulary owner exists to remove'
+    );
+});
