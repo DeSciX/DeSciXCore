@@ -68,6 +68,7 @@ const EXPECTED_SSOT_TOOLS = [
     'fabric_broadcast_ack',
     'fabric_seat_state_get',
     'fabric_seat_state_put',
+    'fabric_seat_note_put',
     'fabric_watermark_get',
     'fabric_watermark_put',
     'fabric_envelope',
