@@ -47,7 +47,8 @@ import { mediaParamSchema } from './chatMedia.js';
 // zero-import leaf, so this import respects the infrastructure-free rule above.
 import {
     BEAT_STATUSES, LEGACY_WORKING_STATUSES, LEGACY_STOP_STATUSES, LIVENESS_VALUES,
-    WRITE_MODES, WATERMARK_FIELDS, ENVELOPE_STATUSES, TO_AGENT_SENTINELS, RETIRED_SENTINELS,
+    WRITE_MODES, WATERMARK_FIELDS, ENVELOPE_STATUSES, ENVELOPE_STATUS_DEFAULT, TO_AGENT_SENTINELS,
+    RETIRED_SENTINELS,
 } from '../fabric/vocab.js';
 
 /**
@@ -533,6 +534,32 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
                 status: { type: 'array', items: { type: 'string', enum: [...ENVELOPE_STATUSES] }, description: 'Optional ARRAY of envelope statuses to include: ' + ENVELOPE_STATUSES.join(', ') + '. Omit for all. A bare string is refused (one shape, so a caller cannot half-learn the parameter), and a status outside the vocabulary is refused rather than matching nothing.' },
             },
             required: ['seat_label'],
+        },
+    },
+    {
+        // CEO-D-2026-08-24-ENVELOPES-NAME-KBS-TO-CONSULT-AND-MAINTAIN. `kbs_consult`,
+        // `kbs_maintain` and `rulings` are SERVER-OWNED FIELDS, not prose inside `text`: buried in
+        // a body, nothing can query which seats maintain a KB and nothing can check that an
+        // envelope carries the ruling it was dispatched under. `rulings` is VERBATIM by contract —
+        // a paraphrase acquires the CEO's authority without his words.
+        name: 'fabric_envelope_put',
+        description: 'Write the envelope for a workstream — the assignment a seat executes. The key is DERIVED as "envelope-<workstream_id>", so one workstream has exactly ONE envelope and a caller cannot compose a second; a client-supplied file_id/key is REFUSED. `to_agent` is the assignee\'s seat LABEL and is validated by the SAME address vocabulary as fabric_msg_send — an envelope is 1:1, so a "ws-*" workstream id, a bare role name and the "all"/"ALL" sentinels are all refused by name: they would be written successfully and read by nobody. It is written to BOTH `to_agent` and `seat_label`, which is why fabric_envelope has to union two queries. `mode` is REQUIRED and has NO DEFAULT (patch = merge these fields, replace = these fields ARE the envelope and every field it omits is CLEARED and reported in cleared_fields) — a silent partial merge is how a re-dispatched envelope kept a stale branch and a superseded ruling under a fresh received_at, and get-after-put is structurally blind to it. `kbs_consult` and `kbs_maintain` name the knowledge bases this seat must READ and the ones it must MAINTAIN; `rulings` carries the CEO/orchestrator ruling VERBATIM, never a paraphrase. The clocks are the server\'s — a caller-supplied created_at/occurred_at/received_at is refused.',
+        mutating: true,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                workstream_id: { type: 'string', description: 'The workstream this envelope assigns. It is the KEY\'s subject ("envelope-<workstream_id>"), so one workstream has exactly one envelope.' },
+                to_agent: { type: 'string', description: 'The assignee\'s seat LABEL. ' + SEAT_RESOLUTION_RULE + ' An envelope is 1:1: "all"/"ALL", a "ws-*" workstream id and a bare role name are all REFUSED by name.' },
+                mode: { type: 'string', enum: [...WRITE_MODES], description: 'REQUIRED, no default. "replace" = this call IS the envelope and omitted fields are cleared. "patch" = merge these fields only.' },
+                text: { type: 'string', description: 'The envelope body: what is being asked for, and the acceptance criteria it will be judged against.' },
+                branch: { type: 'string', description: 'The branch this work lives on.' },
+                initiative_id: { type: 'string', description: 'The initiative this workstream belongs to.' },
+                kbs_consult: { type: 'array', items: { type: 'string' }, description: 'Knowledge bases this seat must CONSULT before acting. A list, so it can be queried — not prose inside `text`.' },
+                kbs_maintain: { type: 'array', items: { type: 'string' }, description: 'Knowledge bases this seat is responsible for MAINTAINING as part of the work. A list, so "who maintains this KB" is an answerable question.' },
+                rulings: { type: 'string', description: 'The CEO/orchestrator ruling this envelope is dispatched under, VERBATIM. Never a paraphrase: a compressed ruling acquires its author\'s authority without their words, and the vivid clause travels while the ruling stays behind.' },
+                status: { type: 'string', enum: [...ENVELOPE_STATUSES], description: `Envelope status. Defaults to "${ENVELOPE_STATUS_DEFAULT}" when omitted.` },
+            },
+            required: ['workstream_id', 'to_agent', 'mode'],
         },
     },
     {

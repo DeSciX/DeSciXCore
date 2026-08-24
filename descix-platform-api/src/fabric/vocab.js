@@ -115,6 +115,30 @@ export const ENVELOPE_STATUSES = Object.freeze([
     'recalled-unassigned', 'accepted', 'rejected',
 ]);
 
+/** The status `fabric_envelope_put` writes when the caller names none. Named rather than indexed,
+ *  because `ENVELOPE_STATUSES[0]` is a position and a position is not a meaning. */
+export const ENVELOPE_STATUS_DEFAULT = 'assigned';
+
+/**
+ * The envelope's caller-writable payload fields — ONE owner, consumed by the schema and the writer.
+ *
+ * WHY THE LAST THREE ARE HERE AND NOT IN A PROSE BODY (CEO-D-2026-08-24-ENVELOPES-NAME-KBS-TO-
+ * CONSULT-AND-MAINTAIN). An envelope that names the KBs a seat must consult and the KBs it must
+ * maintain, and that carries the ruling it was dispatched under VERBATIM, only works if those are
+ * FIELDS the server owns. Buried in `text` they are prose: nothing can query "which seats maintain
+ * this KB", nothing can check an envelope carries its ruling, and a paraphrase of a ruling acquires
+ * the CEO's authority without his words. As fields they are addressable, and `rulings` holds the
+ * verbatim text so the vivid clause cannot travel without the ruling behind it.
+ *
+ * `workstream_id`, `to_agent` and `mode` are NOT here: the first is the KEY's subject, the second
+ * is the address (written to both `to_agent` and `seat_label`), and the third is the write mode.
+ * All three are owned by the verb itself, the same way `seat_label`/`mode`/`extra` are owned by
+ * `fabric_seat_state_put`.
+ */
+export const ENVELOPE_FIELDS = Object.freeze([
+    'text', 'branch', 'initiative_id', 'kbs_consult', 'kbs_maintain', 'rulings', 'status',
+]);
+
 // ── to_agent: the ONLY delivery selector ─────────────────────────────────────────────────────
 //
 // ONE LIST. A record is delivered by `to_agent` + `status`, and the addresses a seat actually
@@ -160,6 +184,12 @@ export const KEY_MESSAGE = 'msg-';
 export const KEY_SEAT_STATE = 'seat-state-';
 export const KEY_WATERMARK = 'watermark-';
 export const KEY_LEASE = 'lease-';
+/** `envelope-<workstream_id>` — composed by `fabric_envelope_put`, never by a caller. */
+export const KEY_ENVELOPE = 'envelope-';
+/** `seat-name-<LABEL>` — the roster record. No fabric verb WRITES one yet; the prefix is here
+ *  because the raw-surface guard must recognise a roster read, and a prefix known in one place and
+ *  hand-typed in the other is the mirror this module exists to close. */
+export const KEY_SEAT_NAME = 'seat-name-';
 
 // ── Write modes ──────────────────────────────────────────────────────────────────────────────
 //
@@ -302,6 +332,13 @@ export function inboxAddresses(label, session_id) {
  *     with them except hand-compose the `app_records_*` call this surface exists to replace and
  *     stage 3 refuses. Publishing them here would be the vocabulary handing out the address of the
  *     door it just locked.
+ *
+ *     AND NO `fabric_*` RESPONSE ECHOES THEM EITHER — the withholding is ONE story across the whole
+ *     surface, not a rule this payload keeps while every success response breaks it. There is a
+ *     single named exception and it is the refusal ABOUT the address: a caller told
+ *     FABRIC_PLANE_NOT_CALLER_CHOSEN is being told to STOP aiming at a plane, and the refusal names
+ *     the collection so the caller can see it did not need to choose one. A refusal that cannot be
+ *     acted on is a refusal that gets worked around.
  *   · `org_master_seat_label` — a seat label names a HOLDER and holders change. A literal returned
  *     by a compile-time payload is a snapshot that goes wrong silently the first time the org seat
  *     changes hands, and a client that cached it would address mail to a label nobody sweeps —
@@ -320,6 +357,8 @@ export function fabricVocabulary() {
         delivery_statuses: [...DELIVERY_STATUSES],
         status_read: STATUS_READ,
         envelope_statuses: [...ENVELOPE_STATUSES],
+        envelope_status_default: ENVELOPE_STATUS_DEFAULT,
+        envelope_fields: [...ENVELOPE_FIELDS],
         to_agent_sentinels: [...TO_AGENT_SENTINELS],
         retired_sentinels: [...RETIRED_SENTINELS],
         forbidden_role_addresses: [...FORBIDDEN_ROLE_ADDRESSES],
@@ -333,7 +372,8 @@ export function fabricVocabulary() {
         },
         key_prefixes: {
             heartbeat: KEY_HEARTBEAT, message: KEY_MESSAGE, seat_state: KEY_SEAT_STATE,
-            watermark: KEY_WATERMARK, lease: KEY_LEASE,
+            watermark: KEY_WATERMARK, lease: KEY_LEASE, envelope: KEY_ENVELOPE,
+            seat_name: KEY_SEAT_NAME,
         },
         verdicts: { ...VERDICT },
         defaults: {
