@@ -48,8 +48,20 @@ import { mediaParamSchema } from './chatMedia.js';
 import {
     BEAT_STATUSES, LEGACY_WORKING_STATUSES, LEGACY_STOP_STATUSES, LIVENESS_VALUES,
     WRITE_MODES, WATERMARK_FIELDS, ENVELOPE_STATUSES, ENVELOPE_STATUS_DEFAULT, TO_AGENT_SENTINELS,
-    RETIRED_SENTINELS,
+    RETIRED_SENTINELS, BEAT_CLOCK_FIELDS, beatClockFieldFor, beatClockAgeField,
+    LIVENESS_MODEL, LIVENESS_PROCESS,
 } from '../fabric/vocab.js';
+
+/**
+ * The beat-clock pair, as prose, INTERPOLATED from the vocabulary's table — never hand-typed.
+ *
+ * Two tool descriptions state this contract (the writer's and the reader's) and two hand-typed
+ * copies drift the moment the table does. The field NAMES come out of BEAT_CLOCK_FIELDS, so
+ * renaming a clock in the vocabulary renames it in everything a caller is shown.
+ */
+const BEAT_CLOCK_RULE = 'THE CLOCK PAIR: '
+    + BEAT_CLOCK_FIELDS.map((f) => `\`${f.field}\` (set by a "${f.written_by}" beat, PRESERVED by a "${f.preserved_by}" beat) — ${f.meaning}`).join(' ')
+    + ' Two writers share this ONE record — an agent and the plugin\'s doorbell hook — so ONE shared field could not hold both facts: the hook beats ~15x more often, its value was always the current one, and every correctly-armed seat read UNDETERMINED (measured 2026-08-24T21:37Z). Each writer now has its OWN clock and neither touches the other\'s. Both are FLAT record fields, so a raw reader may name them in a `fields` projection.';
 
 /**
  * The three-probe seat-existence rule, in ONE string, because three tool descriptions state it and
@@ -334,7 +346,9 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
             + BEAT_STATUSES.join(', ')
             + '. "unread" and "broadcast" are refused BY NAME for the inbox collision they cause (a live heartbeat has sat unread in its master\'s inbox for 35 hours and its seat is dead, so nothing will ever clear it). `liveness` is REQUIRED and says WHO wrote this beat — an agent ("'
             + LIVENESS_VALUES[0] + '") or a hook ("' + LIVENESS_VALUES[1]
-            + '"). It is written on every beat and never inherited: a hook beating on a dead model is a mask that reports health while nobody is home. `wake` is MANDATORY on a working beat as much as a resting one — without it "I am still going" is unfalsifiable and a seat goes dark while looking busy; wake_overdue:true comes back when your own next_fire_at has already passed. Returns unchanged:true when the beat is identical to the stored one. Does NOT renew a BEAST seat and takes no seat_token: renewal binds to the authenticated caller under ws-seat-session-bound-auth.',
+            + '"). It is written on every beat and never inherited: a hook beating on a dead model is a mask that reports health while nobody is home. It says WHO WROTE LAST and is NOT the model\'s clock. '
+            + BEAT_CLOCK_RULE
+            + ' `wake` is MANDATORY on a working beat as much as a resting one — without it "I am still going" is unfalsifiable and a seat goes dark while looking busy; wake_overdue:true comes back when your own next_fire_at has already passed. Returns unchanged:true when the beat is identical to the stored one. Does NOT renew a BEAST seat and takes no seat_token: renewal binds to the authenticated caller under ws-seat-session-bound-auth.',
         mutating: true,
         inputSchema: {
             type: 'object',
@@ -342,7 +356,7 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
                 seat_label: { type: 'string', description: 'The seat LABEL this session answers to (the CEO-given name it beats under).' },
                 session_id: { type: 'string', description: 'This session id. Normalized to its bare first 8 characters; a "seat-" prefix is stripped and the response reports the normalization.' },
                 status: { type: 'string', enum: [...BEAT_STATUSES], description: 'Closed liveness enum. Legacy values (' + [...LEGACY_WORKING_STATUSES, ...LEGACY_STOP_STATUSES].join(', ') + ') are still READABLE on old records but are no longer writable.' },
-                liveness: { type: 'string', enum: [...LIVENESS_VALUES], description: 'REQUIRED, no default and never inherited. "' + LIVENESS_VALUES[0] + '" = an AGENT wrote this beat (proves the model is alive). "' + LIVENESS_VALUES[1] + '" = a HOOK wrote it (proves the process is alive and says NOTHING about the model). Omitting it is refused rather than defaulted, because a merge-upsert would silently keep the previous writer\'s value.' },
+                liveness: { type: 'string', enum: [...LIVENESS_VALUES], description: 'REQUIRED, no default and never inherited. "' + LIVENESS_MODEL + '" = an AGENT wrote this beat (proves the model is alive) and stamps `' + beatClockFieldFor(LIVENESS_MODEL) + '`. "' + LIVENESS_PROCESS + '" = a HOOK wrote it (proves the process is alive, says NOTHING about the model) and stamps `' + beatClockFieldFor(LIVENESS_PROCESS) + '` while PRESERVING `' + beatClockFieldFor(LIVENESS_MODEL) + '`. Omitting it is refused rather than defaulted, because a merge-upsert would silently keep the previous writer\'s value.' },
                 wake: {
                     type: 'object',
                     description: 'REQUIRED on EVERY beat, working or resting. What will wake this seat, whether that survives the process dying, and when it next fires.',
@@ -363,7 +377,9 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
     },
     {
         name: 'fabric_liveness',
-        description: 'Read a seat\'s liveness, judged on the SERVER clock. This is the repo-less liveness read: no checkout, no shell and no CLI, so it works from claude.ai / Cowork where a hook-based check has none of those. Returns verdict alive | stale | declared-stop | none, plus age_seconds computed from the server-stamped received_at — NEVER from the caller-asserted created_at, which is unvalidated and is exactly what blinds a staleness sweep to the worst-maintained seats. A seat with no beat returns verdict "none", NOT an error. Runs three probes (the composed key, holder_session, and a bounded key-prefix census) and reports every disagreement between them in `defects[]` rather than silently picking a winner — that is how key sprawl and a missing holder_session are surfaced instead of hidden. Also answers the WAKE WATCHDOG without a second call: `wake_next_fire_at` and `wake_overdue` come back on every read, so "this seat says it is alive while its wake chain is already dead" is one question with one answer. `liveness` reports WHO wrote the freshest beat — an agent or a hook — and is null on a pre-contract record that carried none, which is UNKNOWN and never assumed to be an agent. threshold_s defaults to the platform value returned in the response.',
+        description: 'Read a seat\'s liveness, judged on the SERVER clock. This is the repo-less liveness read: no checkout, no shell and no CLI, so it works from claude.ai / Cowork where a hook-based check has none of those. Returns verdict alive | stale | declared-stop | none, plus `' + beatClockAgeField(beatClockFieldFor(LIVENESS_MODEL)) + '` — the age of the clock the verdict was judged on, NAMED for that clock, so the age and the verdict beside it can never be two different facts. EVERY age on this response is named for the clock it measures; there is no un-named age field, so no consumer can hold a duration without knowing which clock produced it. Every other clock is reported for diagnosis and decides nothing — `' + beatClockAgeField(beatClockFieldFor(LIVENESS_PROCESS)) + '` (how long ago a HOOK beat) and `received_at_age_seconds` (when this RECORD last moved, which on a two-writer key is the hook\'s cadence). None of them is the caller-asserted created_at, which is unvalidated and is exactly what blinds a staleness sweep to the worst-maintained seats. A seat with no beat returns verdict "none", NOT an error. Runs three probes (the composed key, holder_session, and a bounded key-prefix census) and reports every disagreement between them in `defects[]` rather than silently picking a winner — that is how key sprawl and a missing holder_session are surfaced instead of hidden. Also answers the WAKE WATCHDOG without a second call: `wake_next_fire_at` and `wake_overdue` come back on every read, so "this seat says it is alive while its wake chain is already dead" is one question with one answer. THE MODEL VERDICT IS JUDGED ON `' + beatClockFieldFor(LIVENESS_MODEL) + '` AND ON NOTHING ELSE — `judged_on` says so on every response. It is NOT judged on `liveness` (which says only who wrote LAST, and the hook writes ~15x more often, so judging on it read UNDETERMINED for every correctly-armed seat) and NOT on the record\'s `received_at` (which a process beat refreshes — the mask). '
+            + BEAT_CLOCK_RULE
+            + ' `liveness` still reports WHO wrote the freshest beat and is null on a pre-contract record that carried none, which is UNKNOWN and never assumed to be an agent. A seat whose hook is beating while its agent is long gone therefore reads STALE, which is the whole point. threshold_s defaults to the platform value returned in the response.',
         mutating: false,
         oauthReadonly: true,
         inputSchema: {
