@@ -71,6 +71,9 @@ const EXPECTED_SSOT_TOOLS = [
     'fabric_watermark_get',
     'fabric_watermark_put',
     'fabric_envelope',
+    // CEO-D-2026-08-24-ENVELOPES-NAME-KBS-TO-CONSULT-AND-MAINTAIN: the envelope WRITE, carrying
+    // kbs_consult / kbs_maintain / rulings as server-owned fields.
+    'fabric_envelope_put',
     'fabric_lease_claim',
     'fabric_lease_release',
     'fabric_vocabulary',
