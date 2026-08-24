@@ -12,6 +12,18 @@ export {
     MESH_INVOKE_GATEWAY_TOOLS,
     isMeshInvokeGatewayTool,
 } from './nativeTools.js';
+// RESIDUAL 16 (seat DEVPLANE, 2026-08-24) — the record-filter OPERATOR VOCABULARY. One owner
+// for "which operators exist" and "what shape of stored value each one can evaluate"; the Cloud
+// evaluator and the advertised app_records_query description both import it instead of listing
+// operators by hand.
+export {
+    SCALAR_FILTER_OPERATORS,
+    ARRAY_FILTER_OPERATORS,
+    SUPPORTED_FILTER_OPERATORS,
+    operatorValueKind,
+    remedyOperatorFor,
+    filterOperatorClause,
+} from './recordFilter.js';
 export {
     ESSENTIAL_TOOL_NAMES,
     MCP_HANDSHAKE_INSTRUCTIONS,

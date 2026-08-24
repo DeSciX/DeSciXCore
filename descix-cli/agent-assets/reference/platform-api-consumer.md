@@ -153,22 +153,26 @@ read, setting a disposition, updating a lease:
 **Send only the keys you own.** Defensively re-putting a whole record is how a reader overwrites
 an author's content with its own reconstruction of it.
 
-**`app_records_query` honours `$eq`, `$in` and `$ne` — and fails in OPPOSITE directions on
-anything else.** This one is worth knowing before you trust a result set:
+**`app_records_query` operators, and what each kind of mistake now does.** The operator
+vocabulary has one owner (`@descix/platform-api/mcp-tools` `SUPPORTED_FILTER_OPERATORS`) and the
+tool description is generated from it — so the tool's own text is authoritative, not this table.
 
-| What you pass | What happens | How you find out |
+| Operator | Use it on | Example |
 |---|---|---|
-| an unknown FIELD key | applied as equality against a field nothing has → **0 rows** | immediately — an empty result is loud |
-| an unsupported OPERATOR on a known field (e.g. `created_at: {$gt: …}`) | **silently dropped** → you get the *unfiltered* set | you don't |
+| `$eq` (or a bare value) / `$ne` / `$in` | a **scalar** field | `{ "type": "message" }`, `{ "status": { "$in": ["unread","read"] } }` |
+| `$contains` | an **array** field (membership) | `{ "tags": { "$contains": "handoff" } }` |
 
-Measured: `{type:'message'}` matched 793 records; `{type:'message', created_at:{$gt:'…T04:00:00Z'}}`
-matched **the same 793**, including records from ~28 hours before the bound.
+Every mistake now FAILS LOUD rather than answering:
 
-The second row is the dangerous one, because it fails **open**. A filter that returns everything
-looks exactly like a filter that excluded nothing, so paging a large collection by timestamp
-gives you the whole history while reading as though you narrowed it. **Filter on `$eq`/`$in`/`$ne`
-only, and if a result set looks suspiciously complete, check whether your predicate was honoured
-at all** — compare against the same query with the predicate removed.
+| What you pass | What happens |
+|---|---|
+| an unsupported operator (`$gt`, `$exists`, …) | **refused** `INVALID_PARAMS`, naming the operator and the accepted list. Range and existence predicates are not implemented — filter client-side. |
+| a scalar operator on an **array** field (`{"tags":"handoff"}`) | **refused** `FILTER_UNSUPPORTED`, naming the field and telling you to use `$contains` |
+| `$contains` on a **scalar** field | **refused** `FILTER_UNSUPPORTED`, naming `$eq` as the remedy |
+| an unknown FIELD key | 0 rows — but the receipt says so unambiguously: `matched: 0` with `scanned: 40` means YOUR PREDICATE matched nothing, while `matched: 0` with `scanned: 0` means the collection is empty |
+
+Read the receipt, not just `records`: `count <= matched <= scanned`, and `truncated` is true
+exactly when `limit` cut the match set.
 
 **A record's `status` tells you what the last writer wrote, not what anyone has read.** If you
 send a record with `status: "unread"`, that value is *your own default* — it is evidence of

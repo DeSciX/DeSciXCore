@@ -39,6 +39,10 @@
  */
 
 import { mediaParamSchema } from './chatMedia.js';
+// RESIDUAL 16 — the filter contract sentence is GENERATED from the operator vocabulary,
+// never typed here. A description that names operators by hand drifts off the evaluator
+// the first time one is added; records-query-counts-contract.test.js makes that a CI failure.
+import { filterOperatorClause, SCALAR_FILTER_OPERATORS, ARRAY_FILTER_OPERATORS } from './recordFilter.js';
 // The coordination fabric's vocabulary, from its ONE owner. Every fabric_* enum and every numeric
 // default below is INTERPOLATED from these exports rather than retyped: the enum a caller is shown
 // here and the enum DeSciX_Cloud's fabricStore.js accepts must be the same list, or a caller is
@@ -234,7 +238,7 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
     },
     {
         name: 'app_records_put',
-        description: 'Use your app like a database: store/replace structured records with custom metadata in the app data plane (Firestore-backed, strongly consistent — NOT the Pinecone KB). Supply a human-meaningful file_id (grouping key) + optional chunk_idx (default 0); the composite id is built for you. Custom string/number/boolean/string[] fields become filterable metadata for app_records_query. Pass mode:"create" for an atomic first-claim-wins conditional create (answers claimed:true / claimed:false + current_holder_hint instead of overwriting). Records under a "lease-" key are holder-verified server-side. TIME: every record is stamped with a server-authoritative received_at — the store\'s own UTC clock at the moment it accepted the write, re-stamped on EVERY write including a merge-upsert of an existing key. It is server-owned: a client-supplied received_at is stripped and replaced, so do not send one. Any created_at you send is ordinary client-asserted metadata with no more authority than text — the store neither validates nor corrects it.',
+        description: 'Use your app like a database: store/replace structured records with custom metadata in the app data plane (Firestore-backed, strongly consistent — NOT the Pinecone KB). Supply a human-meaningful file_id (grouping key) + optional chunk_idx (default 0); the composite id is built for you. Custom string/number/boolean/string[] fields become filterable metadata for app_records_query (a string[] field is filtered with ' + ARRAY_FILTER_OPERATORS[0] + ', not with equality). Pass mode:"create" for an atomic first-claim-wins conditional create (answers claimed:true / claimed:false + current_holder_hint instead of overwriting). Records under a "lease-" key are holder-verified server-side. TIME: every record is stamped with a server-authoritative received_at — the store\'s own UTC clock at the moment it accepted the write, re-stamped on EVERY write including a merge-upsert of an existing key. It is server-owned: a client-supplied received_at is stripped and replaced, so do not send one. Any created_at you send is ordinary client-asserted metadata with no more authority than text — the store neither validates nor corrects it.',
         mutating: true,
         inputSchema: {
             type: 'object',
@@ -253,7 +257,7 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
     },
     {
         name: 'app_records_query',
-        description: 'Query your app like a database: a STRUCTURED, metadata-filtered scan (NOT ANN/semantic) over the app data plane returning ALL records matching a predicate (e.g. type=episode AND show=X). Supports $eq/$in/$ne + field projection. STRONGLY CONSISTENT (read-after-write). Use ask_question_to_app for fuzzy semantic KB search. RESPONSE COUNTS are three DIFFERENT facts, so count <= matched <= scanned always: `scanned` = how many records the collection holds in total, BEFORE your filter (the denominator); `matched` = how many satisfied your filter, before `limit`; `count` = how many are in `records` (matched, capped by `limit`); `truncated` = boolean, true exactly when `count` < `matched`, i.e. `limit` CUT the match set and this reply does NOT carry every record that matched — raise `limit` (or narrow the filter) to see the rest. This lets you tell the two zero cases apart: matched:0 with scanned:0 means the COLLECTION IS EMPTY, while matched:0 with scanned:40 means YOUR PREDICATE MATCHED NOTHING (check the field name) — do not read a zero as evidence of an empty collection. TIME: returned records carry received_at, stamped by the store\'s own UTC clock when it accepted the write and therefore unforgeable by the record\'s author. Decide STALENESS and ORDERING on received_at. A created_at field, where present, is a claim made by whoever wrote the record — it is never validated, so it may be wrong or even in the future.',
+        description: 'Query your app like a database: a STRUCTURED, metadata-filtered scan (NOT ANN/semantic) over the app data plane returning ALL records matching a predicate (e.g. type=episode AND show=X). ' + filterOperatorClause() + ' STRONGLY CONSISTENT (read-after-write). Use ask_question_to_app for fuzzy semantic KB search. RESPONSE COUNTS are three DIFFERENT facts, so count <= matched <= scanned always: `scanned` = how many records the collection holds in total, BEFORE your filter (the denominator); `matched` = how many satisfied your filter, before `limit`; `count` = how many are in `records` (matched, capped by `limit`); `truncated` = boolean, true exactly when `count` < `matched`, i.e. `limit` CUT the match set and this reply does NOT carry every record that matched — raise `limit` (or narrow the filter) to see the rest. This lets you tell the two zero cases apart: matched:0 with scanned:0 means the COLLECTION IS EMPTY, while matched:0 with scanned:40 means YOUR PREDICATE MATCHED NOTHING (check the field name) — do not read a zero as evidence of an empty collection. TIME: returned records carry received_at, stamped by the store\'s own UTC clock when it accepted the write and therefore unforgeable by the record\'s author. Decide STALENESS and ORDERING on received_at. A created_at field, where present, is a claim made by whoever wrote the record — it is never validated, so it may be wrong or even in the future.',
         mutating: false,
         // WS-MCP-SURFACE-SPLIT-EXEC §6.7 D6: this tool is NOT in the enforced
         // OAUTH_READONLY_TOOLS allow-list (oauthAsHandlers.js) — the oauthReadonly:true
@@ -264,7 +268,7 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
             properties: {
                 app_id: { type: 'string', description: 'App ID' },
                 kb_id: { type: 'string', description: 'Record collection ID' },
-                filter: { type: 'object', description: 'Metadata predicate, e.g. { "type": "episode", "show": { "$eq": "X" } }' },
+                filter: { type: 'object', description: `Metadata predicate. Scalar fields: ${SCALAR_FILTER_OPERATORS.join('/')} or a bare value; ARRAY fields: ${ARRAY_FILTER_OPERATORS[0]} (membership). e.g. { "type": "episode", "show": { "$eq": "X" }, "tags": { "${ARRAY_FILTER_OPERATORS[0]}": "handoff" } }` },
                 fields: { type: 'array', items: { type: 'string' }, description: 'Projection of metadata fields (omit or ["*"] for all)' },
                 limit: { type: 'number', description: 'Max records (post-filter)' },
             },

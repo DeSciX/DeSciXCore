@@ -2375,7 +2375,7 @@ function attachRecordsSubcommands(parent, cmdPrefix) {
     .description('STRUCTURED metadata-filtered scan (non-ANN) returning full records: "all records where type=episode AND show=X"')
     .requiredOption('-a, --app <app_id>', 'App ID')
     .requiredOption('-k, --kb <kb_id>', 'Record collection ID')
-    .option('-f, --filter <json>', 'Metadata predicate JSON, e.g. \'{"type":"episode","show":{"$eq":"X"}}\'', '{}')
+    .option('-f, --filter <json>', 'Metadata predicate JSON. Scalar fields: $eq/$ne/$in or a bare value; ARRAY fields: $contains. e.g. \'{"type":"episode","tags":{"$contains":"handoff"}}\'', '{}')
     .option('--fields <csv>', 'Comma-separated metadata projection (omit or "*" for all metadata)')
     .option('--limit <n>', 'Cap on returned records', (v) => parseInt(v, 10))
     .action(async (options) => {
