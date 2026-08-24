@@ -69,7 +69,14 @@ export {
     buildManifestFromStatic,
     validateManifest,
     manifestMiddleware,
-    computeManifestHash
+    computeManifestHash,
+    // The command contract (design §13.2/§13.3) — the ONE table both the builder and the
+    // validator drive off, and the tier vocabulary the manifest declares about itself.
+    COMMAND_CONTRACT_FIELDS,
+    ERROR_ENTRY_FIELDS,
+    CONTRACT_TIERS,
+    DEFAULT_CONTRACT_TIER,
+    V1_MIGRATION_OWNERS
 } from './manifest/index.js';
 
 // Coordination-fabric vocabulary (a pure, dependency-free leaf; also at

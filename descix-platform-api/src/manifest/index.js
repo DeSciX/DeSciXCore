@@ -16,6 +16,96 @@ import fs from 'fs';
 import path from 'path';
 import { createHash } from 'crypto';
 
+import { validateParamsAgainstSchema } from '../mcp-tools/paramValidation.js';
+
+// ─── The command contract ────────────────────────────────────────────────────
+
+/**
+ * CONTRACT TIERS (design §13.3, CEO-D-25 2026-08-24).
+ *
+ * Strictness travels with the MANIFEST, not with the door. `manifest.service.contract` declares
+ * the tier; validateManifest keeps ONE call shape at every door and branches on the declared
+ * token. That is what lets BEAST ship a strict contract on the same day Cloud's boot
+ * self-registration, powch, daita-ssgpod and egpt-godsworld keep registering unchanged —
+ * without a per-call-site `strict` flag to leak, a door asymmetry to document, or a second
+ * validator to drift.
+ *
+ * An UNKNOWN token is refused. A tier is a promise the artifact makes about itself, so an
+ * unrecognised promise is a refusal, never a fallback to leniency.
+ */
+export const CONTRACT_TIERS = Object.freeze(['v1', 'v2']);
+
+/** A manifest that declares no tier is v1 — the pre-contract population. */
+export const DEFAULT_CONTRACT_TIER = 'v1';
+
+/**
+ * The v1 branch is a MIGRATION STAGE, not a fence. §13.3: "Each v1 service gets a named
+ * migration owner in the same change — a board row per service, or the tier is a fence rather
+ * than a stage. The v1 branch is DELETED by the last migration."
+ *
+ * Keyed by `manifest.service.name`. When this map empties, the v1 branch below goes with it;
+ * tests/manifest-contract.test.js::B0 is the gate that keeps the two facts tied together.
+ */
+export const V1_MIGRATION_OWNERS = Object.freeze({
+    cloud: 'design §13.3 E5 — the 41-command Cloud commandMeta migration',
+    powch: 'design §13.7 — the hand-rolled /manifest sweep (DeSciX_Powch/microservice/src/index.js:234)',
+    ssgpod: 'design §13.7 — the hand-rolled /manifest sweep (apps/daita-ssgpod/microservice/app.js:86-88)',
+    godsworld: 'design §13.7 — the hand-rolled /manifest sweep + the CLI scaffold that reproduces it',
+});
+
+/**
+ * The ONE table describing what a command entry carries. Both readers drive off it:
+ * `buildManifestFromHandlers` (which overlay-owned fields to ferry) and `validateManifest`
+ * (which fields a v2 contract must declare). Two hand-kept lists would be the schema-mirror
+ * drift class this whole row exists to close.
+ *
+ *   required — must be DECLARED under the v2 contract.
+ *   overlay  — the handler's `commandMeta` export owns it, so the builder ferries it through.
+ *              `overlay: false` means some other module owns the fact and the overlay must not
+ *              become a second derivation of it.
+ */
+export const COMMAND_CONTRACT_FIELDS = Object.freeze({
+    description:         { type: 'string',  required: true,  overlay: true },
+    summary:             { type: 'string',  required: true,  overlay: true },
+    inputSchema:         { type: 'object',  required: true,  overlay: true },
+    errors:              { type: 'array',   required: true,  overlay: true },
+    example:             { type: 'object',  required: true,  overlay: true },
+    // REQUIRED, and `[]` must be written explicitly (§13.2). This is the authoritative EXTERNAL
+    // permission gate — DeSciX_Cloud/microservice/services/apiFront.js:298-314 enforces it at call
+    // time from the REGISTERED manifest, and :391-410 mirrors it at advertisement. If absence
+    // meant "no gate", forgetting the field and opening the command would be the same bit.
+    requiredPermissions: { type: 'array',   required: true,  overlay: true },
+    visibility:          { type: 'string',  required: false, overlay: true },
+    // Opaque to Core: declared by the service, ferried verbatim, never interpreted here.
+    requires_seat:       { type: 'any',     required: false, overlay: true },
+    scope:               { type: 'any',     required: false, overlay: true },
+    mcp:                 { type: 'boolean', required: false, overlay: true },
+    mutating:            { type: 'boolean', required: false, overlay: true },
+    serviceAccountOnly:  { type: 'boolean', required: false, overlay: true },
+    isProxy:             { type: 'boolean', required: false, overlay: true },
+    // Builder-owned: the `guestCommands` set the service passes in is the single owner.
+    guestAllowed:        { type: 'boolean', required: false, overlay: false },
+    // JSDoc-owned: parsed from the @deprecated tag.
+    deprecatedBy:        { type: 'string',  required: false, overlay: false },
+});
+
+/**
+ * The keys of one published error entry.
+ *
+ * `statusCode`, NOT `http` (§13.2): the platform has exactly ONE structured-error contract,
+ * `{code, statusCode, data}` (apiFront.js:244,251,334,340). Publishing the same fact under a
+ * second name would be mirror drift introduced at the fix.
+ */
+export const ERROR_ENTRY_FIELDS = Object.freeze(['code', 'statusCode', 'when', 'fix']);
+
+/** Fields a published `example` may never carry — the mesh injects them; a caller never does. */
+const RESERVED_EXAMPLE_KEYS = Object.freeze(['_descix']);
+
+/** Derived once from the table — the fields the overlay owns and the builder therefore ferries. */
+const OVERLAY_OWNED_FIELDS = Object.freeze(
+    Object.entries(COMMAND_CONTRACT_FIELDS).filter(([, spec]) => spec.overlay).map(([k]) => k)
+);
+
 // ─── JSDoc Parsing ───────────────────────────────────────────────────────────
 
 /**
@@ -158,6 +248,9 @@ export async function buildManifestFromHandlers(config) {
         name, version, description, domain,
         healthEndpoint = '/health',
         debugPort, community_id, app_id,
+        // §13.3 — the tier the artifact promises. Emitted into service so the strictness is
+        // visible in the reviewed manifest rather than in whichever caller happened to validate it.
+        contract,
         handlers, handlerDir,
         guestCommands = new Set(),
         // WS-MCP-SSOT-TIER2: per-command meta from each handler's commandMeta export
@@ -227,12 +320,15 @@ export async function buildManifestFromHandlers(config) {
             }
 
             // WS-MCP-SSOT-TIER2: meta wins over JSDoc where a command self-describes.
+            // Driven off COMMAND_CONTRACT_FIELDS so a new contract field cannot be added without
+            // the builder carrying it. `!== undefined`, not truthiness: an explicit
+            // `requiredPermissions: []` MUST survive the build, because under §13.2 it is the
+            // difference between "declared open" and "forgot to declare".
             const meta = metaOverlay[cmd];
             if (meta) {
-                if (meta.description) entry.description = meta.description;
-                if (meta.inputSchema) entry.inputSchema = meta.inputSchema;
-                if (typeof meta.mcp === 'boolean') entry.mcp = meta.mcp;
-                if (typeof meta.mutating === 'boolean') entry.mutating = meta.mutating;
+                for (const field of OVERLAY_OWNED_FIELDS) {
+                    if (meta[field] !== undefined) entry[field] = meta[field];
+                }
             }
 
             commands[cmd] = entry;
@@ -248,7 +344,8 @@ export async function buildManifestFromHandlers(config) {
             healthEndpoint,
             ...(debugPort != null && { debugPort }),
             ...(community_id && { community_id }),
-            ...(app_id && { app_id })
+            ...(app_id && { app_id }),
+            ...(contract && { contract })
         },
         commands
     };
@@ -277,16 +374,35 @@ export function buildManifestFromStatic(manifestPath) {
 /**
  * Validate a manifest object for completeness.
  *
- * Rules:
- *   - service.name is required
- *   - service.domain is required (or debugPort in dev)
- *   - Every command must have a non-empty description
+ * ONE function, ONE call shape, at every door (register_service, the CLI). It branches on the
+ * tier the MANIFEST declares — `manifest.service.contract` — never on a caller-supplied flag
+ * (§13.3). A door therefore cannot validate leniently by accident, and the returned `contract`
+ * lets it say which tier it applied.
+ *
+ *   v1 (or absent) — the four historical checks. The migration population; see V1_MIGRATION_OWNERS.
+ *   v2             — the full COMMAND_CONTRACT_FIELDS set, per command, LISTED not counted.
+ *   anything else  — REFUSED.
  *
  * @param {Object} manifest
- * @returns {{ valid: boolean, errors: string[] }}
+ * @returns {{ valid: boolean, errors: string[], contract: string }}
  */
 export function validateManifest(manifest) {
     const errors = [];
+    const declared = manifest?.service?.contract;
+    const contract = declared === undefined || declared === null ? DEFAULT_CONTRACT_TIER : declared;
+
+    if (!CONTRACT_TIERS.includes(contract)) {
+        // Fail before anything else: an unrecognised promise is not a promise we can check.
+        return {
+            valid: false,
+            contract,
+            errors: [
+                `Unknown service.contract '${contract}'. Declare one of: ${CONTRACT_TIERS.join(', ')}. ` +
+                `The manifest declares its own strictness; an unrecognised tier is refused rather ` +
+                `than validated leniently.`
+            ],
+        };
+    }
 
     if (!manifest?.service?.name) {
         errors.push('Missing service.name');
@@ -300,18 +416,113 @@ export function validateManifest(manifest) {
         errors.push('No commands defined');
     }
 
-    let missingDescriptions = 0;
-    for (const [cmd, config] of Object.entries(commands)) {
-        if (!config.description || config.description.trim() === '') {
-            missingDescriptions++;
-            // Don't list every one — just count
+    if (contract === 'v1') {
+        let missingDescriptions = 0;
+        for (const config of Object.values(commands)) {
+            if (!config.description || config.description.trim() === '') missingDescriptions++;
         }
-    }
-    if (missingDescriptions > 0) {
-        errors.push(`${missingDescriptions} command(s) missing description`);
+        if (missingDescriptions > 0) {
+            errors.push(`${missingDescriptions} command(s) missing description`);
+        }
+        return { valid: errors.length === 0, errors, contract };
     }
 
-    return { valid: errors.length === 0, errors };
+    for (const [cmd, config] of Object.entries(commands)) {
+        errors.push(...validateCommandV2(cmd, config || {}));
+    }
+
+    return { valid: errors.length === 0, errors, contract };
+}
+
+/**
+ * The v2 per-command checks. Every failure is LISTED and names the command AND the field —
+ * a count cannot be acted on by the developer who has to fix it.
+ *
+ * @param {string} cmd
+ * @param {Object} config
+ * @returns {string[]}
+ */
+function validateCommandV2(cmd, config) {
+    const out = [];
+    const fail = (msg) => out.push(`${cmd}: ${msg}`);
+
+    for (const [field, spec] of Object.entries(COMMAND_CONTRACT_FIELDS)) {
+        if (!spec.required) continue;
+        const value = config[field];
+        if (value === undefined || value === null) {
+            fail(`missing '${field}'` + (spec.type === 'array'
+                ? ` — declare it explicitly; an empty array [] is a declaration, absence is not`
+                : ''));
+            continue;
+        }
+        if (spec.type === 'string' && (typeof value !== 'string' || value.trim() === '')) {
+            fail(`'${field}' must be a non-empty string`);
+        }
+        if (spec.type === 'array' && !Array.isArray(value)) {
+            fail(`'${field}' must be an array`);
+        }
+        if (spec.type === 'object' && (typeof value !== 'object' || Array.isArray(value))) {
+            fail(`'${field}' must be an object`);
+        }
+    }
+
+    // errors[] — every command has at least one refusal mode, and each entry carries the whole
+    // structured-error contract {code, statusCode, when, fix}.
+    if (Array.isArray(config.errors)) {
+        if (config.errors.length === 0) {
+            fail(`'errors' is empty — declare at least one refusal mode with its ${ERROR_ENTRY_FIELDS.join('/')}`);
+        }
+        config.errors.forEach((e, i) => {
+            for (const key of ERROR_ENTRY_FIELDS) {
+                if (e == null || e[key] === undefined || e[key] === null) {
+                    fail(`errors[${i}] is missing '${key}'` +
+                        (key === 'statusCode' && e && e.http !== undefined
+                            ? ` — the platform's one structured-error contract spells it 'statusCode', not 'http'`
+                            : ''));
+                }
+            }
+        });
+    }
+
+    // inputSchema — properties and required are both declarations, and an EMPTY properties bag
+    // must say so explicitly (VISION 2026-08-24 22:53Z).
+    const schema = config.inputSchema;
+    if (schema && typeof schema === 'object' && !Array.isArray(schema)) {
+        const props = schema.properties;
+        if (!props || typeof props !== 'object' || Array.isArray(props)) {
+            fail(`'inputSchema.properties' must be an object (use {} with the parameterless declaration for a command that takes no parameters)`);
+        } else if (!Array.isArray(schema.required)) {
+            fail(`'inputSchema.required' must be an array (use [] when no parameter is mandatory)`);
+        } else if (Object.keys(props).length === 0 &&
+                   !(schema.additionalProperties === false && schema.required.length === 0)) {
+            fail(`'inputSchema.properties' is empty but the command does not DECLARE itself parameterless — ` +
+                 `a genuinely parameterless command declares that explicitly ` +
+                 `(properties:{} + additionalProperties:false + required:[]). An empty properties bag ` +
+                 `on a command that accepts parameters is refused as loudly as an absent one.`);
+        }
+    }
+
+    // The published example must be a bag the boundary would actually accept. One owner of that
+    // question: validateParamsAgainstSchema. A documented call the gateway would reject is a lie.
+    if (config.example !== undefined && config.example !== null) {
+        const params = (config.example && typeof config.example === 'object' && 'params' in config.example)
+            ? config.example.params
+            : config.example;
+        for (const reserved of RESERVED_EXAMPLE_KEYS) {
+            if (params && typeof params === 'object' && reserved in params) {
+                fail(`example carries the reserved key '${reserved}' — it is injected by the mesh, never supplied by a caller`);
+            }
+        }
+        if (schema && typeof schema === 'object') {
+            try {
+                validateParamsAgainstSchema(schema, params || {}, { commandName: cmd, surface: 'manifest example' });
+            } catch (err) {
+                fail(`example does not satisfy this command's own inputSchema — ${err.message}`);
+            }
+        }
+    }
+
+    return out;
 }
 
 // ─── Middleware ───────────────────────────────────────────────────────────────

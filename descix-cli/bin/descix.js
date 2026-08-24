@@ -3516,11 +3516,6 @@ microserviceCommand
         throw new Error(`Failed to parse manifest.json: ${error.message}`);
       }
       
-      // Validate required fields
-      if (!manifest.service?.name) {
-        throw new Error('manifest.service.name is required');
-      }
-      
       // Use detected context if manifest fields are missing
       if (!manifest.service?.app_id && ctx.appId) {
         if (!manifest.service) manifest.service = {};
@@ -3537,12 +3532,26 @@ microserviceCommand
       if (!manifest.service?.community_id) {
         throw new Error('manifest.service.community_id is required (or use -c flag)');
       }
-      
-      const serviceName = manifest.service?.name;
-      
-      if (!serviceName) {
-        throw new Error('manifest.service.name is required');
+
+      // THE CONTRACT GATE — the SAME Core validator the register_service door calls, so the
+      // manifest cannot pass one door and fail the other. Strictness travels with the MANIFEST
+      // (design §13.3): `service.contract` declares the tier and validateManifest branches on it.
+      // This block used to hand-roll its own `service.name` check, which is how the CLI and the
+      // platform came to disagree about what a manifest must carry — a second derivation of one
+      // fact. app_id/community_id above stay here because they are the CLI's own requirement
+      // (context resolution), not part of the published command contract.
+      const { validateManifest } = await import('@descix/platform-api/manifest');
+      const contractCheck = validateManifest(manifest);
+      if (!contractCheck.valid) {
+        console.error(chalk.red(`\n❌ Manifest rejected under the '${contractCheck.contract}' service contract:\n`));
+        for (const e of contractCheck.errors) console.error(chalk.red(`   - ${e}`));
+        console.error(chalk.gray(`\nThe platform applies the same check at register_service; fixing these here is`));
+        console.error(chalk.gray(`the whole fix. Declared tiers: see service.contract in your manifest.\n`));
+        process.exit(1);
       }
+      console.log(chalk.gray(`   Manifest validated under the '${contractCheck.contract}' service contract`));
+
+      const serviceName = manifest.service.name;
       
       const appId = manifest.service?.app_id;
       const communityId = manifest.service?.community_id;
