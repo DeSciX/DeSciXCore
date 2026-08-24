@@ -183,10 +183,17 @@ export const TYPE_WATERMARK = 'watermark';
 export const TYPE_SEAT_NAME = 'seat-name';
 export const TYPE_LEASE = 'lease';
 
+/** A dated note in a seat's handoff ledger. One record per note (CEO ruling D-24) — the seat-state
+ *  record itself holds only scalars, and the notes are found by this classifier plus `seat_label`. */
+export const TYPE_SEAT_NOTE = 'seat-note';
+
 // ── Key prefixes ─────────────────────────────────────────────────────────────────────────────
 export const KEY_HEARTBEAT = 'heartbeat-';
 export const KEY_MESSAGE = 'msg-';
 export const KEY_SEAT_STATE = 'seat-state-';
+/** `seat-note-<LABEL>-<stamp>-<slug(title)>` — composed by `fabric_seat_note_put`, never by a
+ *  caller. Lexicographic order is time order, exactly as for a message key. */
+export const KEY_SEAT_NOTE = 'seat-note-';
 export const KEY_WATERMARK = 'watermark-';
 export const KEY_LEASE = 'lease-';
 /** `envelope-<workstream_id>` — composed by `fabric_envelope_put`, never by a caller. */
@@ -209,6 +216,60 @@ export const KEY_SEAT_NAME = 'seat-name-';
 //   replace — this record IS the record. Every field the prior version carried and this one does
 //             not is explicitly CLEARED, in one atomic put.
 export const WRITE_MODES = Object.freeze(['replace', 'patch']);
+
+/**
+ * What each mode MEANS, in one line, owned once.
+ *
+ * The refusal a caller gets when it omits `mode` and the description it reads in the tool schema
+ * are composed from this map rather than each hand-typing the explanation. They had already
+ * drifted once in spirit: the schema said "patch = merge these fields only" while the incident
+ * that made the mode mandatory was a merge that destroyed a field.
+ */
+export const WRITE_MODE_MEANINGS = Object.freeze({
+    replace: 'this call IS the record — every field it omits is CLEARED',
+    patch: 'merge the fields you send; the rest of the record is left alone',
+});
+
+// ── Seat state: the narrative is a LEDGER OF NOTE RECORDS, not a string on the state record ────
+//
+// MEASURED 2026-08-24T21:58:50Z. `fabric_seat_state_put` with mode:"patch" and a 511-byte `text`
+// REPLACED a 51 KB seat state, and answered "fields not sent were left as they were". That
+// sentence is true about FIELDS and false about the thing the caller was writing, and it is why
+// the loss went unnoticed for four minutes: the receipt described a conservative write.
+// Restoration was possible only because a client happened to hold a local copy; the store keeps no
+// history.
+//
+// CEO ruling D-24 (2026-08-24 ~22:25Z): "notes are records: one record per dated note, the
+// seat-state is a server-ordered query". So the narrative is NEVER a value a caller hands over —
+// not as a whole string, and not as a fragment the server concatenates. Each note is its own
+// record with its own server clock, and `fabric_seat_state_get` returns them in that clock's
+// order. A caller that never sends the prior text cannot truncate it, and a model asked to ferry
+// 12 KB of text back elides or invents parts of it (redteam 2026-08-24) — so not asking is the
+// only design that holds.
+//
+// THE PARTITION IS TOTAL AND IT IS CHECKED. Every writable seat-state field is in exactly one of
+// these two lists; the server asserts that at load against the PUBLISHED schema, so a field added
+// to the schema and classified in neither fails the boot instead of quietly inheriting whichever
+// behaviour the code falls through to.
+
+/**
+ * Text-bearing fields on the seat-state record that a caller may NEVER write through
+ * `fabric_seat_state_put` — in any mode. They are the narrative, and the narrative is notes.
+ *
+ * The field stays PUBLISHED in the tool schema so the refusal can NAME it and point at
+ * `fabric_seat_note_put`; an unpublished parameter would come back as a generic unknown-param
+ * error that teaches the caller nothing.
+ */
+export const SEAT_STATE_NARRATIVE_FIELDS = Object.freeze(['text']);
+
+/** Fields that are single values a caller may legitimately overwrite: ids, labels, a status. */
+export const SEAT_STATE_SCALAR_FIELDS = Object.freeze([
+    'status', 'workstream_id', 'branch', 'holder_session', 'from_agent',
+]);
+
+/** How many notes `fabric_seat_state_get` returns, newest-first-then-oldest-first like the inbox.
+ *  Server-owned and REPORTED on the response, so no client keeps its own copy of the number. */
+export const DEFAULT_SEAT_NOTES_LIMIT = 200;
 
 // ── Numeric defaults — the SERVER owns every one ─────────────────────────────────────────────
 //
@@ -547,6 +608,12 @@ export function fabricVocabulary() {
         retired_sentinels: [...RETIRED_SENTINELS],
         forbidden_role_addresses: [...FORBIDDEN_ROLE_ADDRESSES],
         write_modes: [...WRITE_MODES],
+        write_mode_meanings: { ...WRITE_MODE_MEANINGS },
+        seat_state: {
+            narrative_fields: [...SEAT_STATE_NARRATIVE_FIELDS],
+            scalar_fields: [...SEAT_STATE_SCALAR_FIELDS],
+            narrative_written_by: 'fabric_seat_note_put',
+        },
         watermark_fields: [...WATERMARK_FIELDS],
         wake_fields: [...WAKE_FIELDS],
         // The beat-clock contract, so the plugin reader GENERATES its copy of "which field is the
@@ -557,11 +624,13 @@ export function fabricVocabulary() {
         beat_clock_age_fields: [...BEAT_CLOCK_AGE_FIELDS],
         record_types: {
             heartbeat: TYPE_HEARTBEAT, message: TYPE_MESSAGE, envelope: TYPE_ENVELOPE,
-            seat_state: TYPE_SEAT_STATE, watermark: TYPE_WATERMARK, seat_name: TYPE_SEAT_NAME,
+            seat_state: TYPE_SEAT_STATE, seat_note: TYPE_SEAT_NOTE,
+            watermark: TYPE_WATERMARK, seat_name: TYPE_SEAT_NAME,
             lease: TYPE_LEASE,
         },
         key_prefixes: {
             heartbeat: KEY_HEARTBEAT, message: KEY_MESSAGE, seat_state: KEY_SEAT_STATE,
+            seat_note: KEY_SEAT_NOTE,
             watermark: KEY_WATERMARK, lease: KEY_LEASE, envelope: KEY_ENVELOPE,
             seat_name: KEY_SEAT_NAME,
         },
@@ -571,6 +640,7 @@ export function fabricVocabulary() {
             inbox_limit: DEFAULT_INBOX_LIMIT,
             lease_ttl_s: DEFAULT_LEASE_TTL_S,
             heartbeat_census_limit: HEARTBEAT_CENSUS_LIMIT,
+            seat_notes_limit: DEFAULT_SEAT_NOTES_LIMIT,
         },
     };
 }

@@ -51,7 +51,8 @@ import { filterOperatorClause, SCALAR_FILTER_OPERATORS, ARRAY_FILTER_OPERATORS }
 // zero-import leaf, so this import respects the infrastructure-free rule above.
 import {
     BEAT_STATUSES, LEGACY_WORKING_STATUSES, LEGACY_STOP_STATUSES, LIVENESS_VALUES,
-    WRITE_MODES, WATERMARK_FIELDS, ENVELOPE_STATUSES, ENVELOPE_STATUS_DEFAULT, TO_AGENT_SENTINELS,
+    WRITE_MODES, WRITE_MODE_MEANINGS, WATERMARK_FIELDS, ENVELOPE_STATUSES, ENVELOPE_STATUS_DEFAULT, TO_AGENT_SENTINELS,
+    SEAT_STATE_NARRATIVE_FIELDS, SEAT_STATE_SCALAR_FIELDS, DEFAULT_SEAT_NOTES_LIMIT, KEY_SEAT_NOTE,
     RETIRED_SENTINELS, BEAT_CLOCK_FIELDS, beatClockFieldFor, beatClockAgeField,
     LIVENESS_MODEL, LIVENESS_PROCESS,
 } from '../fabric/vocab.js';
@@ -476,7 +477,7 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
     },
     {
         name: 'fabric_seat_state_get',
-        description: 'Read the seat-state record "seat-state-<LABEL>" — the ONE owner of a seat\'s handoff state (there is no repo handoff path). Always returns the server-stamped received_at; there is no projection parameter.',
+        description: 'Read a seat\'s handoff state — the ONE owner of it (there is no repo handoff path). Returns the scalar record "seat-state-<LABEL>" AND `notes[]`: the seat\'s dated notes in SERVER-CLOCK order (received_at ascending), each with title, text and received_at. The order is the store\'s, never the caller\'s, and the response states notes_matched / notes_limit_applied / notes_truncated so "N notes" is never inferred from the length of the array. Always returns the server-stamped received_at; there is no projection parameter.',
         mutating: false,
         oauthReadonly: true,
         inputSchema: {
@@ -487,22 +488,50 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
     },
     {
         name: 'fabric_seat_state_put',
-        description: 'Write the seat-state record "seat-state-<LABEL>". `mode` is REQUIRED and has NO DEFAULT — a call without it is refused. mode:"patch" merges the fields you send and leaves the rest alone; mode:"replace" makes this call the whole record and CLEARS every field it omits (reported in cleared_fields). The choice is forced because a silent partial merge is the most expensive behaviour on this store: a put of one field kept a stale text and version from an earlier write under a fresh received_at, all looking current, and get-after-put is structurally blind to it — you read back the fields you SENT and never examine the ones you failed to send.',
+        // EVERY MODE AND EVERY REFUSAL IN THIS TEXT IS INTERPOLATED FROM THE VOCABULARY the server
+        // enforces — the mode list, their meanings, the narrative field names. A hand-typed
+        // description is a second derivation of the contract that agrees with the server only until
+        // one of them is edited, and the reader who believes it is the caller about to write.
+        description: 'Write the SCALAR fields of the seat-state record "seat-state-<LABEL>". `mode` is REQUIRED and has NO DEFAULT — a call without it is refused. '
+            + WRITE_MODES.map((m) => `mode:"${m}" — ${WRITE_MODE_MEANINGS[m]}`).join('. ') + '. '
+            + `THE NARRATIVE FIELD${SEAT_STATE_NARRATIVE_FIELDS.length > 1 ? 'S' : ''} (${SEAT_STATE_NARRATIVE_FIELDS.join(', ')}) CANNOT BE WRITTEN THROUGH THIS VERB AT ALL. `
+            + 'Sending it with mode:"patch" is refused with FABRIC_SEAT_STATE_TEXT_NOT_PATCHABLE; with mode:"replace" it is refused with FABRIC_SEAT_STATE_FULL_TEXT_REFUSED. '
+            + 'Both paths are DELETED, not deprecated: on 2026-08-24 a patch carrying a 511-byte text replaced a 51 KB seat state and answered "fields not sent were left as they were", and a client never holds an authoritative copy of the stored text to send back safely. '
+            + 'A seat\'s narrative is a LEDGER OF DATED NOTES — write one with fabric_seat_note_put {seat_label, session_id, title, text} and read them back, in server-clock order, from fabric_seat_state_get. '
+            + `The receipt names preserved_fields — the fields this call did not touch — rather than reassuring you that "fields not sent were left as they were". mode:"replace" clears vestigial SCALARS (${SEAT_STATE_SCALAR_FIELDS.join(', ')}) and NEVER the narrative, which a scalar-only replace would otherwise null.`,
         mutating: true,
         inputSchema: {
             type: 'object',
             properties: {
                 seat_label: { type: 'string', description: 'The seat LABEL.' },
-                mode: { type: 'string', enum: [...WRITE_MODES], description: 'REQUIRED, no default. "replace" = this is the whole record, omitted fields are cleared. "patch" = merge these fields only.' },
-                text: { type: 'string', description: 'The seat state itself: the thread-specific gotchas, dead ends and learnings a cold-start reader needs in order not to re-derive them.' },
+                mode: { type: 'string', enum: [...WRITE_MODES], description: 'REQUIRED, no default. ' + WRITE_MODES.map((m) => `"${m}" = ${WRITE_MODE_MEANINGS[m]}`).join('; ') + '.' },
+                text: { type: 'string', description: 'REFUSED IN EVERY MODE — this is the seat\'s narrative, and this parameter exists only so the refusal can name it and point you at the right verb. A patch of it REPLACES it (measured: 51 KB -> 511 bytes on 2026-08-24). Use fabric_seat_note_put.' },
                 status: { type: 'string', description: 'Optional seat status.' },
                 workstream_id: { type: 'string', description: 'Optional workstream this seat holds.' },
                 branch: { type: 'string', description: 'Optional branch the work lives on.' },
                 holder_session: { type: 'string', description: 'Optional session id holding the seat.' },
                 from_agent: { type: 'string', description: 'Optional author label.' },
-                extra: { type: 'object', description: 'Optional additional flat metadata.' },
+                extra: { type: 'object', description: 'Optional additional flat metadata. It may NOT carry a field this verb owns — including the narrative, which through `extra` would be a full-text put under another name.' },
             },
             required: ['seat_label', 'mode'],
+        },
+    },
+    {
+        name: 'fabric_seat_note_put',
+        description: 'File ONE dated note in a seat\'s handoff ledger. This is how a seat\'s narrative is written — there is no whole-text put and no server-side string append (CEO ruling D-24: notes are records). The server composes the key "'
+            + KEY_SEAT_NOTE + '<LABEL>-<stamp>-<slug(title)>" so lexicographic order is time order, stamps both clocks itself, and refuses an empty title or text by name. You send ONLY the new note: the store already holds every note before it, so nothing you send can truncate them. Two DIFFERENT notes that collide on the one-second key are both kept under a discriminated key; an IDENTICAL re-send is refused by name rather than duplicated in the ledger. Read the ledger back, in server order, with fabric_seat_state_get.',
+        mutating: true,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                seat_label: { type: 'string', description: 'The seat whose ledger this note belongs to.' },
+                session_id: { type: 'string', description: 'The session filing the note — its provenance. A note whose author cannot be established is a note a cold-start reader cannot weigh.' },
+                title: { type: 'string', description: 'A short heading. It becomes the last segment of the derived key, so it must contain at least one letter or digit.' },
+                text: { type: 'string', description: 'The note itself: the thread-specific gotchas, dead ends and learnings a cold-start reader needs in order not to re-derive them.' },
+                workstream_id: { type: 'string', description: 'Optional workstream this note belongs to.' },
+                extra: { type: 'object', description: 'Optional additional flat metadata.' },
+            },
+            required: ['seat_label', 'session_id', 'title', 'text'],
         },
     },
     {
