@@ -39,6 +39,17 @@
  */
 
 import { mediaParamSchema } from './chatMedia.js';
+// The coordination fabric's vocabulary, from its ONE owner. Every fabric_* enum and every numeric
+// default below is INTERPOLATED from these exports rather than retyped: the enum a caller is shown
+// here and the enum DeSciX_Cloud's fabricStore.js accepts must be the same list, or a caller is
+// refused against a contract it was never given. `fabric-vocabulary-conformance.test.js` fails CI
+// if any schema enum below stops deep-equalling its source. ../fabric/vocab.js is a pure,
+// zero-import leaf, so this import respects the infrastructure-free rule above.
+import {
+    BEAT_STATUSES, LEGACY_WORKING_STATUSES, LEGACY_STOP_STATUSES, LIVENESS_VALUES,
+    WRITE_MODES, WATERMARK_FIELDS, ENVELOPE_STATUSES, TO_AGENT_SENTINELS, RETIRED_SENTINELS,
+    ORG_MASTER_SEAT_LABEL,
+} from '../fabric/vocab.js';
 
 export const NATIVE_MCP_TOOLS = Object.freeze([
     {
@@ -294,7 +305,7 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
     // the unkamon-beast plugin's PreToolUse guard: the CLI bypassed it entirely, and it was a
     // second derivation of the store's semantics. The rules are now server-side and hold on every
     // transport. Server implementation: DeSciX_Cloud microservice/services/fabricStore.js;
-    // vocabulary: services/fabricVocab.js. Contract: docs/asbuilt/coordination-fabric-contract.md.
+    // vocabulary: descix-platform-api/src/fabric/vocab.js. Contract: docs/design/coordination-fabric-contract-2026-08-24.md.
     //
     // THREE TRAPS EVERY DESCRIPTION BELOW RESTATES, because a caller who does not know them
     // writes something that succeeds and is never read:
@@ -306,14 +317,19 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
     // ─────────────────────────────────────────────────────────────────────────────────────────
     {
         name: 'fabric_beat',
-        description: 'Write this seat\'s coordination heartbeat — liveness as ONE fact with ONE write. The key is DERIVED by the server as "heartbeat-<seat_label>-<session8>"; a client-supplied file_id/key is REFUSED, because three key shapes coexist on the live fabric from callers choosing their own and one session was measured publishing two labels with contradictory statuses. The clock is the SERVER\'s (`occurred_at`): a caller-supplied created_at/occurred_at/received_at is REFUSED, not ignored — beats were measured stale by 44 and 658 minutes and one 41 minutes in the FUTURE, all stamped fresh by the store. `status` is a CLOSED ENUM: working, blocked, handing-back, quiesced, good-night, done. "unread" and "broadcast" are refused BY NAME for the inbox collision they cause (a live heartbeat has sat unread in its master\'s inbox for 35 hours and its seat is dead, so nothing will ever clear it). `wake` is MANDATORY on a working beat as much as a resting one — without it "I am still going" is unfalsifiable and a seat goes dark while looking busy; wake_overdue:true comes back when your own next_fire_at has already passed. Returns unchanged:true when the beat is identical to the stored one. Does NOT renew a BEAST seat and takes no seat_token: renewal binds to the authenticated caller under ws-seat-session-bound-auth.',
+        description: 'Write this seat\'s coordination heartbeat — liveness as ONE fact with ONE write. The key is DERIVED by the server as "heartbeat-<seat_label>-<session8>"; a client-supplied file_id/key is REFUSED, because three key shapes coexist on the live fabric from callers choosing their own and one session was measured publishing two labels with contradictory statuses. The clock is the SERVER\'s (`occurred_at`): a caller-supplied created_at/occurred_at/received_at is REFUSED, not ignored — beats were measured stale by 44 and 658 minutes and one 41 minutes in the FUTURE, all stamped fresh by the store. `status` is a CLOSED ENUM: '
+            + BEAT_STATUSES.join(', ')
+            + '. "unread" and "broadcast" are refused BY NAME for the inbox collision they cause (a live heartbeat has sat unread in its master\'s inbox for 35 hours and its seat is dead, so nothing will ever clear it). `liveness` is REQUIRED and says WHO wrote this beat — an agent ("'
+            + LIVENESS_VALUES[0] + '") or a hook ("' + LIVENESS_VALUES[1]
+            + '"). It is written on every beat and never inherited: a hook beating on a dead model is a mask that reports health while nobody is home. `wake` is MANDATORY on a working beat as much as a resting one — without it "I am still going" is unfalsifiable and a seat goes dark while looking busy; wake_overdue:true comes back when your own next_fire_at has already passed. Returns unchanged:true when the beat is identical to the stored one. Does NOT renew a BEAST seat and takes no seat_token: renewal binds to the authenticated caller under ws-seat-session-bound-auth.',
         mutating: true,
         inputSchema: {
             type: 'object',
             properties: {
                 seat_label: { type: 'string', description: 'The seat LABEL this session answers to (the CEO-given name it beats under).' },
                 session_id: { type: 'string', description: 'This session id. Normalized to its bare first 8 characters; a "seat-" prefix is stripped and the response reports the normalization.' },
-                status: { type: 'string', enum: ['working', 'blocked', 'handing-back', 'quiesced', 'good-night', 'done'], description: 'Closed liveness enum. Legacy values (active, alive, idle, in-progress, complete, superseded) are still READABLE on old records but are no longer writable.' },
+                status: { type: 'string', enum: [...BEAT_STATUSES], description: 'Closed liveness enum. Legacy values (' + [...LEGACY_WORKING_STATUSES, ...LEGACY_STOP_STATUSES].join(', ') + ') are still READABLE on old records but are no longer writable.' },
+                liveness: { type: 'string', enum: [...LIVENESS_VALUES], description: 'REQUIRED, no default and never inherited. "' + LIVENESS_VALUES[0] + '" = an AGENT wrote this beat (proves the model is alive). "' + LIVENESS_VALUES[1] + '" = a HOOK wrote it (proves the process is alive and says NOTHING about the model). Omitting it is refused rather than defaulted, because a merge-upsert would silently keep the previous writer\'s value.' },
                 wake: {
                     type: 'object',
                     description: 'REQUIRED on EVERY beat, working or resting. What will wake this seat, whether that survives the process dying, and when it next fires.',
@@ -326,15 +342,15 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
                 },
                 text: { type: 'string', description: 'Optional one-line note about what this seat is doing.' },
                 workstream_id: { type: 'string', description: 'Optional workstream this seat is working. This is where a workstream id belongs — never in to_agent.' },
-                to_agent: { type: 'string', description: 'Optional master to address the beat to. Must be a seat LABEL or a sentinel (all, ALL, CEO, master).' },
+                to_agent: { type: 'string', description: 'Optional master to address the beat to. Must be a seat LABEL or a sentinel (' + TO_AGENT_SENTINELS.join(', ') + '). ' + RETIRED_SENTINELS.join(' and ') + ' are REFUSED: no sweep has ever composed either, so a beat addressed to one was written and read by nobody — address the master\'s seat label (' + ORG_MASTER_SEAT_LABEL + ' for the org).' },
                 extra: { type: 'object', description: 'Optional additional flat metadata. A key this verb owns is refused rather than silently overwritten.' },
             },
-            required: ['seat_label', 'session_id', 'status', 'wake'],
+            required: ['seat_label', 'session_id', 'status', 'liveness', 'wake'],
         },
     },
     {
         name: 'fabric_liveness',
-        description: 'Read a seat\'s liveness, judged on the SERVER clock. This is the repo-less liveness read: no checkout, no shell and no CLI, so it works from claude.ai / Cowork where a hook-based check has none of those. Returns verdict alive | stale | declared-stop | none, plus age_seconds computed from the server-stamped received_at — NEVER from the caller-asserted created_at, which is unvalidated and is exactly what blinds a staleness sweep to the worst-maintained seats. A seat with no beat returns verdict "none", NOT an error. Runs three probes (the composed key, holder_session, and a key-prefix census) and reports every disagreement between them in `defects[]` rather than silently picking a winner — that is how key sprawl and a missing holder_session are surfaced instead of hidden. threshold_s defaults to the platform value returned in the response.',
+        description: 'Read a seat\'s liveness, judged on the SERVER clock. This is the repo-less liveness read: no checkout, no shell and no CLI, so it works from claude.ai / Cowork where a hook-based check has none of those. Returns verdict alive | stale | declared-stop | none, plus age_seconds computed from the server-stamped received_at — NEVER from the caller-asserted created_at, which is unvalidated and is exactly what blinds a staleness sweep to the worst-maintained seats. A seat with no beat returns verdict "none", NOT an error. Runs three probes (the composed key, holder_session, and a bounded key-prefix census) and reports every disagreement between them in `defects[]` rather than silently picking a winner — that is how key sprawl and a missing holder_session are surfaced instead of hidden. Also answers the WAKE WATCHDOG without a second call: `wake_next_fire_at` and `wake_overdue` come back on every read, so "this seat says it is alive while its wake chain is already dead" is one question with one answer. `liveness` reports WHO wrote the freshest beat — an agent or a hook — and is null on a pre-contract record that carried none, which is UNKNOWN and never assumed to be an agent. threshold_s defaults to the platform value returned in the response.',
         mutating: false,
         oauthReadonly: true,
         inputSchema: {
@@ -358,7 +374,7 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
                 session_id: { type: 'string', description: 'Optional session id, so mail addressed to "seat-<session8>" is included.' },
                 include_broadcasts: { type: 'boolean', description: 'Include org-wide broadcasts (default true). Set false for 1:1 mail only.' },
                 since_received_at: { type: 'string', description: 'ISO-8601 floor on the SERVER-stamped received_at. Only records the store accepted after this instant are returned — the way to stop re-reading the whole broadcast set on every sweep.' },
-                limit: { type: 'number', description: 'Maximum records to return (default 200). `matched` is the true pre-limit size.' },
+                limit: { type: 'number', description: 'Maximum records to return; must be >= 1. Omit for the server default, which is returned as `limit_applied`. `matched` is the true pre-limit size. 0 is REFUSED — it read as "no cap", which is the opposite of what a caller asking for zero records means.' },
             },
             required: ['seat_label'],
         },
@@ -444,7 +460,7 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
             type: 'object',
             properties: {
                 seat_label: { type: 'string', description: 'The seat LABEL.' },
-                mode: { type: 'string', enum: ['replace', 'patch'], description: 'REQUIRED, no default. "replace" = this is the whole record, omitted fields are cleared. "patch" = merge these fields only.' },
+                mode: { type: 'string', enum: [...WRITE_MODES], description: 'REQUIRED, no default. "replace" = this is the whole record, omitted fields are cleared. "patch" = merge these fields only.' },
                 text: { type: 'string', description: 'The seat state itself: the thread-specific gotchas, dead ends and learnings a cold-start reader needs in order not to re-derive them.' },
                 status: { type: 'string', description: 'Optional seat status.' },
                 workstream_id: { type: 'string', description: 'Optional workstream this seat holds.' },
@@ -469,13 +485,15 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
     },
     {
         name: 'fabric_watermark_put',
-        description: 'Write the delivery ledger "watermark-<LABEL>". `mode` is REQUIRED and has NO DEFAULT (patch = merge these fields, replace = these fields ARE the ledger and the rest are cleared) — see fabric_seat_state_put for why a silent merge is refused here. The ledger has exactly five fields: broadcast_seen, delivered, resolved, held, awaiting. Any other field is REJECTED rather than stored, because a ledger field no reader consults is a delivery record that silently does nothing. broadcast_seen is the correct place to record that this seat has processed a broadcast — never flip the broadcast itself.',
+        description: 'Write the delivery ledger "watermark-<LABEL>". `mode` is REQUIRED and has NO DEFAULT (patch = merge these fields, replace = these fields ARE the ledger and the rest are cleared) — see fabric_seat_state_put for why a silent merge is refused here. The ledger has exactly '
+            + WATERMARK_FIELDS.length + ' fields: ' + WATERMARK_FIELDS.join(', ')
+            + '. Any other field is REJECTED rather than stored, because a ledger field no reader consults is a delivery record that silently does nothing. broadcast_seen is the correct place to record that this seat has processed a broadcast — never flip the broadcast itself.',
         mutating: true,
         inputSchema: {
             type: 'object',
             properties: {
                 seat_label: { type: 'string', description: 'The seat LABEL.' },
-                mode: { type: 'string', enum: ['replace', 'patch'], description: 'REQUIRED, no default.' },
+                mode: { type: 'string', enum: [...WRITE_MODES], description: 'REQUIRED, no default.' },
                 broadcast_seen: { type: 'string', description: 'High-water mark for broadcasts this seat has processed.' },
                 delivered: { type: 'array', items: { type: 'string' }, description: 'Record keys already handed up to the executive.' },
                 resolved: { type: 'array', items: { type: 'string' }, description: 'Record keys acted on and closed.' },
@@ -494,7 +512,7 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
             type: 'object',
             properties: {
                 seat_label: { type: 'string', description: 'The seat LABEL.' },
-                status: { type: 'array', items: { type: 'string' }, description: 'Optional envelope statuses to include: assigned, dispatched, preallocated, unassigned, recalled-unassigned, accepted, rejected. Omit for all. A status outside the vocabulary is refused rather than matching nothing.' },
+                status: { type: 'array', items: { type: 'string', enum: [...ENVELOPE_STATUSES] }, description: 'Optional ARRAY of envelope statuses to include: ' + ENVELOPE_STATUSES.join(', ') + '. Omit for all. A bare string is refused (one shape, so a caller cannot half-learn the parameter), and a status outside the vocabulary is refused rather than matching nothing.' },
             },
             required: ['seat_label'],
         },
@@ -509,7 +527,7 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
                 resource: { type: 'string', description: 'The singleton being claimed, e.g. "backend-4000". Normalized to lowercase alphanumerics and dashes.' },
                 holder_label: { type: 'string', description: 'The claiming seat\'s LABEL.' },
                 session_id: { type: 'string', description: 'The claiming session id.' },
-                ttl_s: { type: 'number', description: 'Lease lifetime in seconds (default 3600). Readers treat expires_at in the past as stale and may take over; the store enforces no TTL of its own.' },
+                ttl_s: { type: 'number', description: 'Lease lifetime in seconds. Omit for the server default, which is echoed back as `ttl_s` alongside `expires_at`. Readers treat expires_at in the past as stale and may take over; the store enforces no TTL of its own.' },
             },
             required: ['resource', 'holder_label', 'session_id'],
         },
@@ -527,6 +545,13 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
             },
             required: ['resource', 'holder_label', 'session_id'],
         },
+    },
+    {
+        name: 'fabric_vocabulary',
+        description: 'Return the coordination fabric\'s SERVER vocabulary — every closed set the fabric_* verbs validate against: writable beat statuses, declared stops, legacy read-only statuses, liveness values (who wrote a beat: agent or hook), to_agent sentinels and the retired ones that are refused by name, refused role addresses, write modes, envelope statuses, delivery statuses, watermark ledger fields, wake fields, record types, key prefixes, verdicts and the server-owned numeric defaults. Takes no parameters and reads no records — it is the vocabulary itself, not a query over the fabric. GENERATE a client-side copy from this; do not hand-keep one. A hand-kept mirror was measured writing four statuses the server refuses and defining a liveness model the server did not know, so a caller was validating against a contract that did not exist and being refused by one it had never seen.',
+        mutating: false,
+        oauthReadonly: true,
+        inputSchema: { type: 'object', properties: {} },
     },
     {
         // WS-HEADLESS-MVP-A2 (CEO-D-2026-07-01 D2): platform-wide USD AI-credits balance.
