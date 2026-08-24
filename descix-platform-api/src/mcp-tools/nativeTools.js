@@ -287,6 +287,247 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
             required: ['app_id', 'kb_id'],
         },
     },
+    // ─────────────────────────────────────────────────────────────────────────────────────────
+    // COORDINATION FABRIC — typed verbs over the app-records collection egpt-frqtl/coordination.
+    //
+    // These exist because every rule that keeps the fabric coherent used to live CLIENT-side in
+    // the unkamon-beast plugin's PreToolUse guard: the CLI bypassed it entirely, and it was a
+    // second derivation of the store's semantics. The rules are now server-side and hold on every
+    // transport. Server implementation: DeSciX_Cloud microservice/services/fabricStore.js;
+    // vocabulary: services/fabricVocab.js. Contract: docs/asbuilt/coordination-fabric-contract.md.
+    //
+    // THREE TRAPS EVERY DESCRIPTION BELOW RESTATES, because a caller who does not know them
+    // writes something that succeeds and is never read:
+    //   · `received_at` is SERVER-stamped and unforgeable; `created_at` on an ordinary record is
+    //     caller-asserted and never validated. Every liveness and ordering decision uses received_at.
+    //   · No fabric_* verb accepts app_id/kb_id (the fabric is ONE collection by contract) or
+    //     `fields` (a projection silently drops received_at).
+    //   · A BROADCAST IS NEVER FLIPPED to read — its status is shared across every seat.
+    // ─────────────────────────────────────────────────────────────────────────────────────────
+    {
+        name: 'fabric_beat',
+        description: 'Write this seat\'s coordination heartbeat — liveness as ONE fact with ONE write. The key is DERIVED by the server as "heartbeat-<seat_label>-<session8>"; a client-supplied file_id/key is REFUSED, because three key shapes coexist on the live fabric from callers choosing their own and one session was measured publishing two labels with contradictory statuses. The clock is the SERVER\'s (`occurred_at`): a caller-supplied created_at/occurred_at/received_at is REFUSED, not ignored — beats were measured stale by 44 and 658 minutes and one 41 minutes in the FUTURE, all stamped fresh by the store. `status` is a CLOSED ENUM: working, blocked, handing-back, quiesced, good-night, done. "unread" and "broadcast" are refused BY NAME for the inbox collision they cause (a live heartbeat has sat unread in its master\'s inbox for 35 hours and its seat is dead, so nothing will ever clear it). `wake` is MANDATORY on a working beat as much as a resting one — without it "I am still going" is unfalsifiable and a seat goes dark while looking busy; wake_overdue:true comes back when your own next_fire_at has already passed. Returns unchanged:true when the beat is identical to the stored one. Does NOT renew a BEAST seat and takes no seat_token: renewal binds to the authenticated caller under ws-seat-session-bound-auth.',
+        mutating: true,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                seat_label: { type: 'string', description: 'The seat LABEL this session answers to (the CEO-given name it beats under).' },
+                session_id: { type: 'string', description: 'This session id. Normalized to its bare first 8 characters; a "seat-" prefix is stripped and the response reports the normalization.' },
+                status: { type: 'string', enum: ['working', 'blocked', 'handing-back', 'quiesced', 'good-night', 'done'], description: 'Closed liveness enum. Legacy values (active, alive, idle, in-progress, complete, superseded) are still READABLE on old records but are no longer writable.' },
+                wake: {
+                    type: 'object',
+                    description: 'REQUIRED on EVERY beat, working or resting. What will wake this seat, whether that survives the process dying, and when it next fires.',
+                    properties: {
+                        mechanism: { type: 'string', description: 'What will wake this seat (e.g. "ScheduleWakeup", "Monitor ticker", "cron").' },
+                        survives_death: { type: 'boolean', description: 'Does the wake mechanism outlive this process? A boolean, not a string.' },
+                        next_fire_at: { type: 'string', description: 'ISO-8601 instant the wake next fires. A past value returns wake_overdue:true — the seat is alive while its wake chain is dead.' },
+                    },
+                    required: ['mechanism', 'survives_death', 'next_fire_at'],
+                },
+                text: { type: 'string', description: 'Optional one-line note about what this seat is doing.' },
+                workstream_id: { type: 'string', description: 'Optional workstream this seat is working. This is where a workstream id belongs — never in to_agent.' },
+                to_agent: { type: 'string', description: 'Optional master to address the beat to. Must be a seat LABEL or a sentinel (all, ALL, CEO, master).' },
+                extra: { type: 'object', description: 'Optional additional flat metadata. A key this verb owns is refused rather than silently overwritten.' },
+            },
+            required: ['seat_label', 'session_id', 'status', 'wake'],
+        },
+    },
+    {
+        name: 'fabric_liveness',
+        description: 'Read a seat\'s liveness, judged on the SERVER clock. This is the repo-less liveness read: no checkout, no shell and no CLI, so it works from claude.ai / Cowork where a hook-based check has none of those. Returns verdict alive | stale | declared-stop | none, plus age_seconds computed from the server-stamped received_at — NEVER from the caller-asserted created_at, which is unvalidated and is exactly what blinds a staleness sweep to the worst-maintained seats. A seat with no beat returns verdict "none", NOT an error. Runs three probes (the composed key, holder_session, and a key-prefix census) and reports every disagreement between them in `defects[]` rather than silently picking a winner — that is how key sprawl and a missing holder_session are surfaced instead of hidden. threshold_s defaults to the platform value returned in the response.',
+        mutating: false,
+        oauthReadonly: true,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                session_id: { type: 'string', description: 'The session to read. Supply this and/or label.' },
+                seat_label: { type: 'string', description: 'The seat label to read. Supply this and/or session_id.' },
+                threshold_s: { type: 'number', description: 'Seconds after which a beat counts as stale. Omit for the platform default (returned as threshold_s).' },
+            },
+        },
+    },
+    {
+        name: 'fabric_inbox_sweep',
+        description: 'THE canonical inbox sweep — what is waiting for this seat. Takes a SEAT, not a filter: the server composes to_agent IN [label, seat-<session8>, all, ALL] and status IN [unread, broadcast], and NEVER a type predicate. A caller-supplied `type` or `filter` is REFUSED — there is no parameter in which to express one, so the type-pinned sweep is structurally unreachable (measured: a hand-back filed as type "handback" was correctly addressed, correctly unread, and invisible for four days; sixteen type values are in live use and one record carries none at all, so no allow-list can be correct). `selector_applied` echoes what the server ACTUALLY used, so you never have to trust the query you believe you sent. Returns `matched` only — no bare `count`, because under limit:1 a dropped filter still reports count:1 and looks like a filtered result. When matched is 0 an `empty_reason` is ALWAYS present: "no_unread" means the seat resolves and its inbox is genuinely empty. An unresolvable label is a REFUSAL (unknown_seat), never an empty list — "no mail" and "no such seat" are different answers. Every record comes back WITH received_at; there is no projection parameter, because a projection silently drops the only clock a sender cannot forge. The seat\'s watermark ledger is returned alongside so a secretary can subtract what it already handed up without a second call.',
+        mutating: false,
+        oauthReadonly: true,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                seat_label: { type: 'string', description: 'This seat\'s LABEL. Must resolve against the live seat-name roster or the call is refused.' },
+                session_id: { type: 'string', description: 'Optional session id, so mail addressed to "seat-<session8>" is included.' },
+                include_broadcasts: { type: 'boolean', description: 'Include org-wide broadcasts (default true). Set false for 1:1 mail only.' },
+                since_received_at: { type: 'string', description: 'ISO-8601 floor on the SERVER-stamped received_at. Only records the store accepted after this instant are returned — the way to stop re-reading the whole broadcast set on every sweep.' },
+                limit: { type: 'number', description: 'Maximum records to return (default 200). `matched` is the true pre-limit size.' },
+            },
+            required: ['seat_label'],
+        },
+    },
+    {
+        name: 'fabric_msg_send',
+        description: 'Send an addressed 1:1 message on the coordination fabric. `to` is RESOLVED AGAINST THE LIVE SEAT ROSTER before the write: an unresolvable recipient is REFUSED and the roster is returned, because today a message to a misspelled or retired label is accepted and read by nobody — the sender sees success and no party downstream can detect the miss. The key and clock are server-derived ("msg-<TO>-<stamp>-<FROM>-<subject>"), so the filename-safe-vs-ISO split stops being your problem; a client-supplied key, status, created_at or received_at is REFUSED. BROADCAST IS A DIFFERENT VERB: to:"all" is refused by name pointing at fabric_broadcast_send, rather than silently becoming org-wide state that no reader may ever clear. Takes no app_id/kb_id — which is the point: app_records_put and beast_rag_ingest both accept those and a name like "unk-beast/Org" addresses a real store in EACH, so a wrong-plane write returns success and is never read.',
+        mutating: true,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                from_seat: { type: 'string', description: 'The sending seat\'s LABEL.' },
+                to: { type: 'string', description: 'Recipient seat LABEL. Resolved against live seats; "all"/"ALL" is refused (use fabric_broadcast_send), as is a "ws-*" workstream id or a bare role name.' },
+                subject: { type: 'string', description: 'Short subject; also the human-readable tail of the key. Normalized to lowercase alphanumerics and dashes.' },
+                body: { type: 'string', description: 'The message body. A message is a signal, not an archive — one carrying a decision should point at the record or doc that holds it.' },
+                workstream_id: { type: 'string', description: 'Optional workstream this message concerns.' },
+                thread_id: { type: 'string', description: 'Optional thread to attach this message to. Defaults to the message\'s own key, so every message belongs to exactly one closable thread.' },
+                type: { type: 'string', description: 'Optional payload classifier (default "message"). NEVER used for delivery — the recipient\'s sweep does not filter on it.' },
+                extra: { type: 'object', description: 'Optional additional flat metadata.' },
+            },
+            required: ['from_seat', 'to', 'subject', 'body'],
+        },
+    },
+    {
+        name: 'fabric_msg_ack',
+        description: 'Acknowledge a 1:1 fabric message — flips unread to read ON THE RECORD, which is where 1:1 delivery state belongs so both sender and recipient read one fact, consistent across machines. REFUSES a BROADCAST by name: a broadcast\'s status is SHARED and immutable, so flipping it would silence that record for every other seat on the fabric (measured 2026-08-09) — the refusal names fabric_broadcast_ack instead. Also refuses a record addressed to a different seat: acking another seat\'s mail is a delivery it never received and cannot detect. Reports what CHANGED, not what was asked: `flipped` is true only when this call actually moved the record, and an already-read record returns flipped:false with a reason rather than a success shaped like a delivery.',
+        mutating: true,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                key: { type: 'string', description: 'The record key to ack (from fabric_inbox_sweep).' },
+                seat_label: { type: 'string', description: 'The LABEL of the seat acking it. Must match the record\'s to_agent.' },
+                session_id: { type: 'string', description: 'Optional session id, so mail addressed to "seat-<session8>" can be acked by its holder.' },
+            },
+            required: ['key', 'seat_label'],
+        },
+    },
+    {
+        name: 'fabric_broadcast_send',
+        description: 'Send an org-wide broadcast. A separate verb from fabric_msg_send on purpose: a broadcast\'s status is IMMUTABLE once written — no reader may ever flip it — so org-wide state that nobody can retire must be created deliberately, never as a side effect of an address string. The key, clock, address ("all") and status ("broadcast") are all server-derived; supplying any of them is refused. Each recipient records its own processing with fabric_broadcast_ack, because "has the doorbell rung" and "has THIS seat processed it" are two facts with two owners.',
+        mutating: true,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                from_seat: { type: 'string', description: 'The broadcasting seat\'s LABEL.' },
+                subject: { type: 'string', description: 'Short subject; also the human-readable tail of the key.' },
+                body: { type: 'string', description: 'The broadcast body.' },
+                workstream_id: { type: 'string', description: 'Optional workstream this broadcast concerns.' },
+                extra: { type: 'object', description: 'Optional additional flat metadata.' },
+            },
+            required: ['from_seat', 'subject', 'body'],
+        },
+    },
+    {
+        name: 'fabric_broadcast_ack',
+        description: 'Record that THIS seat has processed one or more broadcasts, in this seat\'s own watermark ledger. The broadcast records themselves are never touched — that is the whole point: a broadcast\'s status is shared, so one reader flipping it deletes the message from every other seat\'s inbox. Returns `watermarked` (newly recorded) separately from `already_seen`, and issues NO write when nothing is new, so a re-ack cannot re-stamp a ledger that did not move.',
+        mutating: true,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                seat_label: { type: 'string', description: 'The acknowledging seat\'s LABEL.' },
+                keys: { type: 'array', items: { type: 'string' }, description: 'Broadcast record keys this seat has processed. Must be non-empty.' },
+            },
+            required: ['seat_label', 'keys'],
+        },
+    },
+    {
+        name: 'fabric_seat_state_get',
+        description: 'Read the seat-state record "seat-state-<LABEL>" — the ONE owner of a seat\'s handoff state (there is no repo handoff path). Always returns the server-stamped received_at; there is no projection parameter.',
+        mutating: false,
+        oauthReadonly: true,
+        inputSchema: {
+            type: 'object',
+            properties: { seat_label: { type: 'string', description: 'The seat LABEL.' } },
+            required: ['seat_label'],
+        },
+    },
+    {
+        name: 'fabric_seat_state_put',
+        description: 'Write the seat-state record "seat-state-<LABEL>". `mode` is REQUIRED and has NO DEFAULT — a call without it is refused. mode:"patch" merges the fields you send and leaves the rest alone; mode:"replace" makes this call the whole record and CLEARS every field it omits (reported in cleared_fields). The choice is forced because a silent partial merge is the most expensive behaviour on this store: a put of one field kept a stale text and version from an earlier write under a fresh received_at, all looking current, and get-after-put is structurally blind to it — you read back the fields you SENT and never examine the ones you failed to send.',
+        mutating: true,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                seat_label: { type: 'string', description: 'The seat LABEL.' },
+                mode: { type: 'string', enum: ['replace', 'patch'], description: 'REQUIRED, no default. "replace" = this is the whole record, omitted fields are cleared. "patch" = merge these fields only.' },
+                text: { type: 'string', description: 'The seat state itself: the thread-specific gotchas, dead ends and learnings a cold-start reader needs in order not to re-derive them.' },
+                status: { type: 'string', description: 'Optional seat status.' },
+                workstream_id: { type: 'string', description: 'Optional workstream this seat holds.' },
+                branch: { type: 'string', description: 'Optional branch the work lives on.' },
+                holder_session: { type: 'string', description: 'Optional session id holding the seat.' },
+                from_agent: { type: 'string', description: 'Optional author label.' },
+                extra: { type: 'object', description: 'Optional additional flat metadata.' },
+            },
+            required: ['seat_label', 'mode'],
+        },
+    },
+    {
+        name: 'fabric_watermark_get',
+        description: 'Read the delivery ledger "watermark-<LABEL>" — the per-seat record of what this seat has already seen, handed up or resolved. This is where BROADCAST processed-state lives, because a broadcast\'s own status may never be flipped. Always returns the server-stamped received_at.',
+        mutating: false,
+        oauthReadonly: true,
+        inputSchema: {
+            type: 'object',
+            properties: { seat_label: { type: 'string', description: 'The seat LABEL.' } },
+            required: ['seat_label'],
+        },
+    },
+    {
+        name: 'fabric_watermark_put',
+        description: 'Write the delivery ledger "watermark-<LABEL>". `mode` is REQUIRED and has NO DEFAULT (patch = merge these fields, replace = these fields ARE the ledger and the rest are cleared) — see fabric_seat_state_put for why a silent merge is refused here. The ledger has exactly five fields: broadcast_seen, delivered, resolved, held, awaiting. Any other field is REJECTED rather than stored, because a ledger field no reader consults is a delivery record that silently does nothing. broadcast_seen is the correct place to record that this seat has processed a broadcast — never flip the broadcast itself.',
+        mutating: true,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                seat_label: { type: 'string', description: 'The seat LABEL.' },
+                mode: { type: 'string', enum: ['replace', 'patch'], description: 'REQUIRED, no default.' },
+                broadcast_seen: { type: 'string', description: 'High-water mark for broadcasts this seat has processed.' },
+                delivered: { type: 'array', items: { type: 'string' }, description: 'Record keys already handed up to the executive.' },
+                resolved: { type: 'array', items: { type: 'string' }, description: 'Record keys acted on and closed.' },
+                held: { type: 'array', items: { type: 'string' }, description: 'Record keys deliberately held back.' },
+                awaiting: { type: 'array', items: { type: 'string' }, description: 'Record keys this seat is waiting on.' },
+            },
+            required: ['seat_label', 'mode'],
+        },
+    },
+    {
+        name: 'fabric_envelope',
+        description: 'The envelope(s) assigned to a seat label. Runs TWO queries and unions them, because an envelope names its assignee as `seat_label` on some records and `to_agent` on others and the store\'s filter is a conjunction with no $or — a single predicate can only ever see half the fabric. A label with NO envelope returns envelopes:[] and success, NOT an error: a master seat has none by design, and its identity comes from the seat surface (beast_seat_read), not from an assignment.',
+        mutating: false,
+        oauthReadonly: true,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                seat_label: { type: 'string', description: 'The seat LABEL.' },
+                status: { type: 'array', items: { type: 'string' }, description: 'Optional envelope statuses to include: assigned, dispatched, preallocated, unassigned, recalled-unassigned, accepted, rejected. Omit for all. A status outside the vocabulary is refused rather than matching nothing.' },
+            },
+            required: ['seat_label'],
+        },
+    },
+    {
+        name: 'fabric_lease_claim',
+        description: 'Claim a lease on a PHYSICAL SINGLETON — a dev port, a local backend. Composes the "lease-<resource>" key and delegates to the platform\'s atomic conditional create, so first claim wins inside one Firestore transaction: a losing claimant is ANSWERED with claimed:false and who holds it, never silently turned into an overwrite. Holder verification is the platform\'s, not re-implemented here. NOTE: orchestrator SEATS are NOT leases — they live on the BEAST authority plane and obey different rules (expiry never frees a seat).',
+        mutating: true,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                resource: { type: 'string', description: 'The singleton being claimed, e.g. "backend-4000". Normalized to lowercase alphanumerics and dashes.' },
+                holder_label: { type: 'string', description: 'The claiming seat\'s LABEL.' },
+                session_id: { type: 'string', description: 'The claiming session id.' },
+                ttl_s: { type: 'number', description: 'Lease lifetime in seconds (default 3600). Readers treat expires_at in the past as stale and may take over; the store enforces no TTL of its own.' },
+            },
+            required: ['resource', 'holder_label', 'session_id'],
+        },
+    },
+    {
+        name: 'fabric_lease_release',
+        description: 'Release a lease claimed with fabric_lease_claim. Deletes the record rather than flipping a status, so "released" and "claimable" cannot become two different facts about one resource — a lingering released document is a key the next claimant\'s conditional create still collides with. Reports what CHANGED: released:false genuinely means there was no lease to release, not that the call was ignored.',
+        mutating: true,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                resource: { type: 'string', description: 'The singleton being released.' },
+                holder_label: { type: 'string', description: 'The releasing seat\'s LABEL. Delete is holder-verified by the same policy that gates the write.' },
+                session_id: { type: 'string', description: 'The releasing session id.' },
+            },
+            required: ['resource', 'holder_label', 'session_id'],
+        },
+    },
     {
         // WS-HEADLESS-MVP-A2 (CEO-D-2026-07-01 D2): platform-wide USD AI-credits balance.
         // Read-only; the METERED RAG/agent surface (WS-A3) debits this balance per call.
