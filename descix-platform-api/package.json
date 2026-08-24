@@ -11,6 +11,7 @@
     "./email": "./src/email/index.js",
     "./permissions": "./src/permissions/index.js",
     "./entitlements": "./src/entitlements/index.js",
+    "./fabric": "./src/fabric/index.js",
     "./manifest": "./src/manifest/index.js",
     "./mcp-tools": "./src/mcp-tools/index.js",
     "./naming": "./src/naming/index.js"
