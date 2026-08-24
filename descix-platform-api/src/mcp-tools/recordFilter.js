@@ -66,6 +66,15 @@ export function remedyOperatorFor(valueKind) {
 /**
  * The operator clause for a tool description, GENERATED from the lists above.
  *
+ * It ends with the BLIND CASE — the one shape the store's type gate cannot see. The gate refuses
+ * a scalar operator on an array field by asking the database the complementary question ("would
+ * $contains have matched THIS value?"), because Firestore exposes no predicate for "is this field
+ * an array". When the sought value appears in no record under EITHER operator, nothing is hidden
+ * and matched:0 is the true answer — so the call is answered, not refused. CEO/VISION ruled
+ * 2026-08-24 that this is acceptable and MUST be stated rather than closed with a sampled read:
+ * a gate that fires probabilistically trains callers to ignore it. A declared-schema field-type
+ * registry is boarded as the follow-up that would close it deterministically.
+ *
  * Every advertised description composes this rather than typing operator names, so an operator
  * added to (or removed from) the vocabulary cannot leave the published contract behind. The
  * conformance test `records-query-counts-contract.test.js` drives its assertions off the same
@@ -83,6 +92,10 @@ export function filterOperatorClause() {
         `field that holds an ARRAY, or ${array} against a field that holds a SCALAR, is REFUSED ` +
         `with FILTER_UNSUPPORTED naming the field and the operator to use instead — it is never ` +
         `answered as a zero-match success, because a predicate that CANNOT match must not be ` +
-        `reported as one that simply did not.`
+        `reported as one that simply did not. ` +
+        `BLIND CASE: a scalar operator on a field that holds an array in SOME records but whose ` +
+        `sought value appears in NONE of them under either operator returns matched:0 rather than ` +
+        `a refusal, because Firestore cannot be asked whether a field is an array, only whether ` +
+        `${ARRAY_FILTER_OPERATORS[0]} would have matched THIS value.`
     );
 }
