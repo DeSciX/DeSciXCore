@@ -1494,10 +1494,38 @@ export class Community {
         return await this.db.update_doc_fields(FirestoreCollections.COMMUNITY(), this.community_id, { airdrop_config: newConfig });
     }
 
+    /**
+     * The apps of one community.
+     *
+     * THROWS on an unreadable collection; returns `[]` only for a community that genuinely has no
+     * apps. `CacheFirestore.get_docs` signals the two outcomes differently — `[]` for an empty
+     * collection, `null` for a read that FAILED (it logs and swallows the Firestore error, see
+     * `@descix/cloud-core` storageUtils.js) — and this method used to collapse both to `[]`. That
+     * made "the read broke" indistinguishable from "there is nothing here" at every call site: a
+     * caller deriving a permission scope, a listing, or a count from the result would report a
+     * FABRICATED ZERO as fact, with no error anywhere. Failing loud here is the only place the
+     * distinction still exists.
+     *
+     * @param {string} community_id
+     * @param {Array|null} [where_clause]
+     * @returns {Promise<App[]>} the community's apps; `[]` means MEASURED-empty
+     * @throws {Error} code `COMMUNITY_APPS_UNREADABLE` when the underlying read failed
+     */
     static async get_apps(community_id, where_clause = null) {
         const db = new CacheFirestore();
         const appDocs = await db.get_docs(FirestoreCollections.APPS(community_id), null, where_clause);
-        if (!appDocs) return [];
+        if (appDocs === null) {
+            const err = new Error(
+                `Community.get_apps("${community_id}") could not read ${FirestoreCollections.APPS(community_id)}: ` +
+                `the underlying CacheFirestore.get_docs returned null, which means the read FAILED (an empty ` +
+                `collection returns []). Refusing to report an empty app list for a community whose apps are ` +
+                `unknown — a fabricated zero read as fact is worse than an error.`
+            );
+            err.code = 'COMMUNITY_APPS_UNREADABLE';
+            err.statusCode = 503;
+            err.data = { code: 'COMMUNITY_APPS_UNREADABLE', community_id };
+            throw err;
+        }
         return appDocs.map(doc => App.from_dict(doc)).filter(app => app !== null);
     }
 }
