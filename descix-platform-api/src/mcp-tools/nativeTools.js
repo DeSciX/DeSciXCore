@@ -48,8 +48,20 @@ import { mediaParamSchema } from './chatMedia.js';
 import {
     BEAT_STATUSES, LEGACY_WORKING_STATUSES, LEGACY_STOP_STATUSES, LIVENESS_VALUES,
     WRITE_MODES, WATERMARK_FIELDS, ENVELOPE_STATUSES, TO_AGENT_SENTINELS, RETIRED_SENTINELS,
-    ORG_MASTER_SEAT_LABEL,
 } from '../fabric/vocab.js';
+
+/**
+ * The three-probe seat-existence rule, in ONE string, because three tool descriptions state it and
+ * three hand-typed copies of a rule drift the moment the rule does. The rule itself lives in
+ * `fabricStore.resolveSeat`; this is the prose the caller is shown, and it must not describe a
+ * narrower test than the server actually runs. It DID: two descriptions said "must resolve against
+ * the live seat-name roster", which is only probe A — and probe A alone was measured refusing a
+ * live, working, addressed seat (heartbeat-JARVIS-FRAQTL-4fa842fb) its own mail.
+ */
+const SEAT_RESOLUTION_RULE =
+    'Resolved by THREE probes and refused only when all three miss: a seat-name roster record, OR a '
+    + 'heartbeat under the label, OR any record already addressed to it. The roster alone is NOT the '
+    + 'test — a live, working, addressed seat with no roster record resolves.';
 
 export const NATIVE_MCP_TOOLS = Object.freeze([
     {
@@ -342,7 +354,7 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
                 },
                 text: { type: 'string', description: 'Optional one-line note about what this seat is doing.' },
                 workstream_id: { type: 'string', description: 'Optional workstream this seat is working. This is where a workstream id belongs — never in to_agent.' },
-                to_agent: { type: 'string', description: 'Optional master to address the beat to. Must be a seat LABEL or a sentinel (' + TO_AGENT_SENTINELS.join(', ') + '). ' + RETIRED_SENTINELS.join(' and ') + ' are REFUSED: no sweep has ever composed either, so a beat addressed to one was written and read by nobody — address the master\'s seat label (' + ORG_MASTER_SEAT_LABEL + ' for the org).' },
+                to_agent: { type: 'string', description: 'Optional master to address the beat to. Must be a seat LABEL or a sentinel (' + TO_AGENT_SENTINELS.join(', ') + '). ' + RETIRED_SENTINELS.join(' and ') + ' are REFUSED: no sweep has ever composed either, so a beat addressed to one was written and read by nobody. Address the master by its seat LABEL — read the current holder with beast_seat_read {seat_id:"org"}; a label names a holder and holders change, so no label is hard-coded here.' },
                 extra: { type: 'object', description: 'Optional additional flat metadata. A key this verb owns is refused rather than silently overwritten.' },
             },
             required: ['seat_label', 'session_id', 'status', 'liveness', 'wake'],
@@ -370,7 +382,7 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
         inputSchema: {
             type: 'object',
             properties: {
-                seat_label: { type: 'string', description: 'This seat\'s LABEL. Must resolve against the live seat-name roster or the call is refused.' },
+                seat_label: { type: 'string', description: 'This seat\'s LABEL. ' + SEAT_RESOLUTION_RULE + ' An unresolvable label is refused (unknown_seat) rather than answered with an empty inbox.' },
                 session_id: { type: 'string', description: 'Optional session id, so mail addressed to "seat-<session8>" is included.' },
                 include_broadcasts: { type: 'boolean', description: 'Include org-wide broadcasts (default true). Set false for 1:1 mail only.' },
                 since_received_at: { type: 'string', description: 'ISO-8601 floor on the SERVER-stamped received_at. Only records the store accepted after this instant are returned — the way to stop re-reading the whole broadcast set on every sweep.' },
@@ -381,13 +393,13 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
     },
     {
         name: 'fabric_msg_send',
-        description: 'Send an addressed 1:1 message on the coordination fabric. `to` is RESOLVED AGAINST THE LIVE SEAT ROSTER before the write: an unresolvable recipient is REFUSED and the roster is returned, because today a message to a misspelled or retired label is accepted and read by nobody — the sender sees success and no party downstream can detect the miss. The key and clock are server-derived ("msg-<TO>-<stamp>-<FROM>-<subject>"), so the filename-safe-vs-ISO split stops being your problem; a client-supplied key, status, created_at or received_at is REFUSED. BROADCAST IS A DIFFERENT VERB: to:"all" is refused by name pointing at fabric_broadcast_send, rather than silently becoming org-wide state that no reader may ever clear. Takes no app_id/kb_id — which is the point: app_records_put and beast_rag_ingest both accept those and a name like "unk-beast/Org" addresses a real store in EACH, so a wrong-plane write returns success and is never read.',
+        description: 'Send an addressed 1:1 message on the coordination fabric. `to` is RESOLVED BEFORE THE WRITE by three probes — a seat-name roster record, a heartbeat under the label, or any record already addressed to it — and refused only when all three miss: an unresolvable recipient is REFUSED and the roster is returned, because today a message to a misspelled or retired label is accepted and read by nobody — the sender sees success and no party downstream can detect the miss. The key and clock are server-derived ("msg-<TO>-<stamp>-<FROM>-<subject>"), so the filename-safe-vs-ISO split stops being your problem; a client-supplied key, status, created_at or received_at is REFUSED. BROADCAST IS A DIFFERENT VERB: to:"all" is refused by name pointing at fabric_broadcast_send, rather than silently becoming org-wide state that no reader may ever clear. Takes no app_id/kb_id — which is the point: app_records_put and beast_rag_ingest both accept those and a name like "unk-beast/Org" addresses a real store in EACH, so a wrong-plane write returns success and is never read.',
         mutating: true,
         inputSchema: {
             type: 'object',
             properties: {
                 from_seat: { type: 'string', description: 'The sending seat\'s LABEL.' },
-                to: { type: 'string', description: 'Recipient seat LABEL. Resolved against live seats; "all"/"ALL" is refused (use fabric_broadcast_send), as is a "ws-*" workstream id or a bare role name.' },
+                to: { type: 'string', description: 'Recipient seat LABEL. ' + SEAT_RESOLUTION_RULE + ' An unresolvable recipient is refused WITH the roster. "all"/"ALL" is refused (use fabric_broadcast_send), as is a "ws-*" workstream id or a bare role name.' },
                 subject: { type: 'string', description: 'Short subject; also the human-readable tail of the key. Normalized to lowercase alphanumerics and dashes.' },
                 body: { type: 'string', description: 'The message body. A message is a signal, not an archive — one carrying a decision should point at the record or doc that holds it.' },
                 workstream_id: { type: 'string', description: 'Optional workstream this message concerns.' },
@@ -494,7 +506,13 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
             properties: {
                 seat_label: { type: 'string', description: 'The seat LABEL.' },
                 mode: { type: 'string', enum: [...WRITE_MODES], description: 'REQUIRED, no default.' },
-                broadcast_seen: { type: 'string', description: 'High-water mark for broadcasts this seat has processed.' },
+                // AN ARRAY, because that is what the writer writes. fabric_broadcast_ack merges the
+                // acknowledged KEYS into this field as a list and re-reads it as a list; publishing
+                // it as a `string` "high-water mark" advertised a shape no code on either side ever
+                // held, and a caller that believed the schema would REPLACE the whole ledger with one
+                // string — silently destroying every key the seat had ever acknowledged, on a field
+                // whose entire job is to stop a broadcast being re-read forever.
+                broadcast_seen: { type: 'array', items: { type: 'string' }, description: 'Broadcast record KEYS this seat has processed. A LIST, not a high-water mark: fabric_broadcast_ack merges keys into it and reads it back as a list, so a single string here would replace the whole ledger. Prefer fabric_broadcast_ack, which resolves the keys first and never overwrites.' },
                 delivered: { type: 'array', items: { type: 'string' }, description: 'Record keys already handed up to the executive.' },
                 resolved: { type: 'array', items: { type: 'string' }, description: 'Record keys acted on and closed.' },
                 held: { type: 'array', items: { type: 'string' }, description: 'Record keys deliberately held back.' },
