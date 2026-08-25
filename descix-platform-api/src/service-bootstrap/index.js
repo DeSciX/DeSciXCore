@@ -33,9 +33,12 @@
  * config key — never by a missing value, an unset env var, or a caught error.
  */
 
-import { createHash } from 'crypto';
 import { GoogleAuth } from 'google-auth-library';
-import { computeManifestHash, validateManifest } from '../manifest/index.js';
+import {
+    computeManifestHash,
+    computeManifestObjectHash,
+    validateManifest,
+} from '../manifest/index.js';
 
 /**
  * Mint an `Authorization: Bearer <id_token>` header for `audienceUrl` from Application Default
@@ -51,46 +54,41 @@ import { computeManifestHash, validateManifest } from '../manifest/index.js';
  */
 export async function mintServiceIdentityHeaders(audienceUrl) {
     const client = await new GoogleAuth().getIdTokenClient(audienceUrl);
-    const minted = await client.getRequestHeaders();
-    // google-auth-library v10 returns a WHATWG `Headers` INSTANCE; v9 returned a plain object.
-    // `Object.assign({}, headersInstance)` copies NOTHING (no enumerable own properties) — that
-    // shape change once made a service POST with no Authorization header while logging success.
-    // Read by shape, and refuse an unusable result rather than returning it.
+    return { Authorization: authorizationFrom(await client.getRequestHeaders()) };
+}
+
+/**
+ * Read the Authorization value out of whatever shape google-auth-library handed back.
+ *
+ * This is the guard, extracted so it can be TESTED. google-auth-library v10 changed
+ * `getRequestHeaders()` to return a WHATWG `Headers` INSTANCE where v9 returned a plain object.
+ * A `Headers` instance has no enumerable own properties, so `Object.assign({}, minted)` copies
+ * NOTHING — a service once POSTed with no Authorization header at all while logging success,
+ * across five deployed revisions. That is the failure this function exists to prevent, and a
+ * guard that is never exercised is not a guard.
+ *
+ * Read by SHAPE (does it have a `get` method?), never by version number, and never by assuming a
+ * plain object. Refuse an unusable result rather than returning a header bag that silently
+ * authenticates nothing.
+ *
+ * @param {Headers|Object} minted — the value returned by `client.getRequestHeaders()`
+ * @returns {string} the Authorization header value
+ * @throws {Error} when no Authorization value can be read, naming the shape that was seen
+ */
+export function authorizationFrom(minted) {
     const authorization = typeof minted?.get === 'function'
         ? minted.get('authorization')
         : (minted?.Authorization || minted?.authorization);
     if (!authorization) {
+        const shape = typeof minted?.get === 'function'
+            ? 'a Headers instance'
+            : `a ${minted === null ? 'null' : typeof minted}`;
         throw new Error(
-            'minted identity headers carried no Authorization value (google-auth-library shape change?)'
+            `minted identity headers carried no Authorization value (saw ${shape}; ` +
+            'google-auth-library shape change?)'
         );
     }
-    return { Authorization: authorization };
-}
-
-/**
- * SHA-256 over the whole manifest object, key-order-independent. Distinct from
- * `computeManifestHash`, which hashes ONLY `manifest.commands` (change detection for the command
- * set). This one answers "is the object served at /manifest the object /health reports from".
- *
- * @param {Object} manifest
- * @returns {string} hex digest
- */
-export function computeManifestObjectHash(manifest) {
-    const canonical = JSON.stringify(manifest, Object.keys(flatten(manifest)).sort());
-    return createHash('sha256').update(canonical).digest('hex');
-}
-
-/** Collect every key name appearing anywhere in the object, for a stable JSON.stringify replacer. */
-function flatten(value, acc = {}) {
-    if (Array.isArray(value)) {
-        for (const v of value) flatten(v, acc);
-    } else if (value && typeof value === 'object') {
-        for (const [k, v] of Object.entries(value)) {
-            acc[k] = true;
-            flatten(v, acc);
-        }
-    }
-    return acc;
+    return authorization;
 }
 
 /**
@@ -159,6 +157,15 @@ export function createServiceBootstrap(options = {}) {
     }
 
     const version = manifest.service.version;
+    // A SNAPSHOT of the manifest as it is right now. `serveManifest` serves the LIVE object by
+    // reference, so this hash is only true for as long as nobody mutates that object. It is NOT
+    // frozen here: a one-line `Object.freeze` is SHALLOW, and would block `manifest.commands = {}`
+    // — the mutation nobody makes — while leaving `manifest.service.version = 'x'` and
+    // `manifest.commands.foo = {}` untouched, which are the only mutations that would actually
+    // invalidate this hash. A guard that cannot fail on the real failure mode is worse than none,
+    // because it reads as protection. The real protection is that there is ONE object: the
+    // adoption test pins served === registered by identity, not by immutability. If deep-freezing
+    // the caller's manifest is wanted, that is a deliberate deep walk, not a one-liner.
     const manifestHash = computeManifestObjectHash(manifest);
     const commandsHash = computeManifestHash(manifest);
 

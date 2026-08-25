@@ -10,8 +10,11 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import {
     createServiceBootstrap,
-    computeManifestObjectHash,
+    authorizationFrom,
 } from '../src/service-bootstrap/index.js';
+// The hash is owned by the manifest module, beside computeManifestHash — one place to look for
+// "hash a manifest". service-bootstrap consumes it; it does not implement it.
+import { computeManifestObjectHash } from '../src/manifest/index.js';
 
 const MANIFEST = () => ({
     service: { name: 'testsvc', version: '3.11.0', domain: 'testsvc.dev.descix.net', debugPort: 3011 },
@@ -214,7 +217,7 @@ describe('createServiceBootstrap — registration outcome is never swallowed', (
     });
 });
 
-describe('computeManifestObjectHash', () => {
+describe('computeManifestObjectHash (owned by ../src/manifest/index.js)', () => {
     test('is key-order independent', () => {
         const a = { service: { name: 'x', version: '1' }, commands: { c: { d: 1, e: 2 } } };
         const b = { commands: { c: { e: 2, d: 1 } }, service: { version: '1', name: 'x' } };
@@ -225,5 +228,67 @@ describe('computeManifestObjectHash', () => {
         const a = { service: { name: 'x', version: '1' }, commands: {} };
         const b = { service: { name: 'x', version: '2' }, commands: {} };
         assert.notEqual(computeManifestObjectHash(a), computeManifestObjectHash(b));
+    });
+});
+
+
+describe('authorizationFrom — the v9/v10 shape guard, exercised', () => {
+    /**
+     * The pre-v10 reader, preserved as a FIXTURE. This is the code that shipped, and the code
+     * that POSTed unauthenticated across five deployed revisions once google-auth-library v10
+     * started returning a Headers instance. The battery below is run against it to prove the
+     * battery can actually catch the bug — a test that passes on the broken implementation is
+     * measuring nothing.
+     */
+    function plainObjectOnly(minted) {
+        const authorization = minted?.Authorization || minted?.authorization;
+        if (!authorization) throw new Error('no Authorization value');
+        return authorization;
+    }
+
+    test('a real WHATWG Headers instance yields the value', () => {
+        const h = new Headers({ authorization: 'Bearer from-headers-instance' });
+        assert.equal(authorizationFrom(h), 'Bearer from-headers-instance');
+    });
+
+    test('NEGATIVE CONTROL — the pre-v10 reader FAILS that exact case', () => {
+        const h = new Headers({ authorization: 'Bearer from-headers-instance' });
+        // This is the measured defect: no enumerable own properties, so the plain-object read
+        // finds nothing. If this ever stops throwing, the fixture no longer exhibits the failure
+        // and the test above has stopped proving anything.
+        assert.throws(() => plainObjectOnly(h), /no Authorization value/);
+        assert.equal(Object.keys(h).length, 0, 'a Headers instance must have no enumerable own keys');
+    });
+
+    test('a v9 plain object with capitalised Authorization yields the value', () => {
+        assert.equal(authorizationFrom({ Authorization: 'Bearer v9-caps' }), 'Bearer v9-caps');
+    });
+
+    test('a plain object with lowercase authorization yields the value', () => {
+        assert.equal(authorizationFrom({ authorization: 'Bearer v9-lower' }), 'Bearer v9-lower');
+    });
+
+    test('an EMPTY Headers instance throws, naming the shape it saw', () => {
+        assert.throws(() => authorizationFrom(new Headers()),
+            /carried no Authorization value \(saw a Headers instance/);
+    });
+
+    test('an empty plain object throws, naming the shape it saw', () => {
+        assert.throws(() => authorizationFrom({}), /carried no Authorization value \(saw a object/);
+    });
+
+    test('an object carrying only other headers throws — it does not return a wrong value', () => {
+        assert.throws(() => authorizationFrom({ 'content-type': 'application/json' }),
+            /carried no Authorization value/);
+    });
+
+    test('null and undefined throw rather than yielding undefined', () => {
+        assert.throws(() => authorizationFrom(null), /saw a null/);
+        assert.throws(() => authorizationFrom(undefined), /saw a undefined/);
+    });
+
+    test('a Headers instance carrying only other headers throws', () => {
+        assert.throws(() => authorizationFrom(new Headers({ 'content-type': 'application/json' })),
+            /saw a Headers instance/);
     });
 });
