@@ -59,6 +59,11 @@ export {
 export {
     PARAM_ALIASES,
     PLATFORM_INJECTED_PARAMS,
+    SCHEMA_TYPE_PREDICATES,
+    SUPPORTED_SCHEMA_TYPES,
+    runtimeTypeOf,
+    declaredTypesOf,
+    valueMatchesDeclaredType,
     suggestParam,
     validateParamsAgainstSchema,
     validateToolParams,
