@@ -91,7 +91,7 @@ const SEAT_RESOLUTION_RULE =
  *
  * The Cloud-side owner is geminiInteractions.js::resolveModelThinkingPair.
  */
-const MODEL_THINKING_CHAIN =
+export const MODEL_THINKING_CHAIN =
     'PRECEDENCE — the model and the thinking setting are ONE pair and always come from the SAME '
     + 'tier; the first tier that states a model supplies both: (1) intelligence_level named on THIS '
     + 'request, (2) the KB model override, (3) the app default model, (4) the platform default — the '
