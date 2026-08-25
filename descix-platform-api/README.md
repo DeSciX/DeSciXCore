@@ -30,6 +30,7 @@ the rest.
 | `@descix/platform-api/entitlements` | ownership and access queries |
 | `@descix/platform-api/email` | transactional email |
 | `@descix/platform-api/manifest` | service manifest shapes |
+| `@descix/platform-api/service-bootstrap` | a microservice serves its manifest and registers it at boot — the one owner |
 | `@descix/platform-api/mcp-tools` | MCP tool definitions and param validation |
 | `@descix/platform-api/naming` | id and name normalisation |
 

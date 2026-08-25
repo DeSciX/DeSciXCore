@@ -14,7 +14,8 @@
     "./fabric": "./src/fabric/index.js",
     "./manifest": "./src/manifest/index.js",
     "./mcp-tools": "./src/mcp-tools/index.js",
-    "./naming": "./src/naming/index.js"
+    "./naming": "./src/naming/index.js",
+    "./service-bootstrap": "./src/service-bootstrap/index.js"
   },
   "files": [
     "src"
@@ -32,6 +33,7 @@
   },
   "dependencies": {
     "@descix/cloud-core": "file:../descix-cloud-core",
+    "google-auth-library": "^10.5.0",
     "googleapis": "^169.0.0"
   }
 }
