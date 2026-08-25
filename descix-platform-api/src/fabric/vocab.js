@@ -539,10 +539,21 @@ export const isDeliveryStatus = (v) => has(DELIVERY_STATUSES, v);
 export const isEnvelopeStatus = (v) => has(ENVELOPE_STATUSES, v);
 export const isEnvelopePhase = (v) => has(ENVELOPE_PHASES, v);
 export const isFabricRecordKind = (v) => has(FABRIC_RECORD_KINDS, v);
-/** The transition rule itself, read from its ONE owner. `from` absent (a record written before
- *  phases existed) is read as the default phase — a contract with no signature is in design. */
+/**
+ * How a STORED phase is READ — WRITE-STRICT, READ-TOLERANT, the same split the beat statuses hold.
+ *
+ * A record whose `phase` is absent (every envelope written before this contract existed) or outside
+ * the enum (nothing this verb can produce — a raw `app_records_put` can) is READ as the default. A
+ * reader that treated it as uninterpretable would answer "no transition is legal from here" and
+ * leave that contract permanently unmovable with a refusal naming an empty set, which is a dead end
+ * a caller cannot act on. Tolerated on READ, never accepted on WRITE, and the verb REPORTS the
+ * substitution instead of performing it silently.
+ */
+export const readEnvelopePhase = (v) => (isEnvelopePhase(v) ? v : ENVELOPE_PHASE_DEFAULT);
+
+/** The transition rule itself, read from its ONE owner, through the one reader above. */
 export const isLegalPhaseTransition = (from, to) =>
-    (ENVELOPE_PHASE_TRANSITIONS[from || ENVELOPE_PHASE_DEFAULT] || []).includes(to);
+    (ENVELOPE_PHASE_TRANSITIONS[readEnvelopePhase(from)] || []).includes(to);
 export const isForbiddenRoleAddress = (v) => has(FORBIDDEN_ROLE_ADDRESSES, v);
 export const isWriteMode = (v) => WRITE_MODES.includes(v);
 
