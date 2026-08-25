@@ -151,6 +151,10 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
                 // vocabulary, byte caps) rather than restated here — one owner for the
                 // advertised contract and the enforced policy, so the two cannot drift.
                 media: mediaParamSchema(),
+                // ws-c3-librarian: a WORKSTREAM is a conversational room (the Discord room model
+                // generalised), so its thread owner is SERVER-derived from the id the caller
+                // names — never from a caller-supplied owner, which apiFront still strips.
+                workstream_id: { type: 'string', description: "The workstream this question belongs to. When present, the answer runs on a thread OWNED BY THAT WORKSTREAM rather than by the calling user: the server derives the thread owner as roomThreadKey({surface:'workstream', room_id:workstream_id, app_id}) - e.g. 'unk-beast:workstream-ws-c3-librarian' - and stores continuity server-side in the InteractionRooms collection. Send the SAME workstream_id every turn and omit previous_interaction_id; the response's interaction_id is an ECHO for observability, not a handle to resend. A workstream thread is SHARED BY DESIGN: every caller naming the same workstream on the same app continues the same conversation. It is NOT a private per-user conversation and carries no per-user privacy property. A client-supplied interaction_owner_id remains stripped at the door and is not a substitute for this param." },
             },
             required: ['app_id', 'user_input'],
         },
