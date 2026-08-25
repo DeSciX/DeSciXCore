@@ -2,7 +2,6 @@
   "service": {
     "name": "sample-service",
     "version": "1.0.0",
-    "domain": "sample-service.descix.net",
     "description": "Sample DeSciX Add-on Service",
     "healthEndpoint": "/health",
     "debugPort": 3003,

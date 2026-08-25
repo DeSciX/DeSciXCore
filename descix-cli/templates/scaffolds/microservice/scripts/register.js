@@ -41,7 +41,6 @@ async function register() {
         });
 
         console.log(`[Register] SUCCESS: Registered ${manifest.service.name}`);
-        console.log(`[Register] Domain: ${manifest.service.domain}`);
         console.log(`[Register] Commands: ${Object.keys(manifest.commands).join(', ')}`);
 
     } catch (error) {
