@@ -4,6 +4,10 @@
  */
 export {
     NATIVE_MCP_TOOLS,
+    // The (model, thinking) precedence chain, in words. ONE owner for the sentence: the served
+    // tool docstrings interpolate it and DeSciX_Cloud's get_model_config serves it back as its
+    // `chain` field instead of keeping a second hand-typed copy that drifts.
+    MODEL_THINKING_CHAIN,
     toMcpToolList,
     mutatingNativeToolNames,
     recommendedOAuthReadonlyToolNames,

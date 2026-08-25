@@ -47,8 +47,8 @@ test('identifiers.extract({env, cliPaths}) returns code-grounded markdown + non-
   assert.match(result.markdown, /const pathPrefix = `\/\$\{env\}\/\$\{app\}\/site`/);
   // The agentic-app invariant must appear.
   assert.match(result.markdown, /Apps are the central unit/);
-  // The model resolver must appear.
-  assert.match(result.markdown, /resolveModelName/);
+  // The (model, thinking) pair owner must appear.
+  assert.match(result.markdown, /resolveModelThinkingPair/);
   // Every citation must have a non-null 12-char SHA.
   assert.ok(result.citations.length >= 4, 'identifiers should emit ≥4 citations');
   for (const c of result.citations) {

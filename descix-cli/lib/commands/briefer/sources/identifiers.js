@@ -7,7 +7,7 @@
  *   - product_id === app_id invariant from hydrateUtils.js
  *   - Agentic-app / communities-as-apps invariant from the BEAST CEO record
  *     `apps/unk-beast/kb/Org/agentic-app-invariant-2026-05-26.jsonl`
- *   - AI model inheritance order from geminiInteractions.js::resolveModelName()
+ *   - the AI (model, thinking) precedence chain from geminiInteractions.js::resolveModelThinkingPair()
  *
  * Extraction method: regex+checksum-of-surrounding-lines (NOT AST).
  * Per scope §9.1 third-order question, decision documented 2026-05-26: regex
@@ -27,6 +27,10 @@ import {
   sliceRange
 } from '../util/source-reader.js';
 import { BrieferExtractorError, BRIEFER_ERROR_CODES } from '../errors.js';
+// The (model, thinking) precedence chain in words, from its ONE owner. The briefer
+// QUOTES the served contract rather than paraphrasing it — a briefer paraphrase of a
+// chain is exactly how the old five-step list outlived the code it described.
+import { MODEL_THINKING_CHAIN } from '@descix/platform-api/mcp-tools';
 
 export const SECTION = {
   number: 1,
@@ -117,7 +121,7 @@ export async function extract({ env, cliPaths } = {}) {
     recovery: `Verify hydrateCommunityIdFromProducts is still exported from ${HYDRATE_FILE}.`
   });
 
-  // ── Source 3: geminiInteractions.js — resolveModelName + inheritance order ──
+  // ── Source 3: geminiInteractions.js — the (model, thinking) pair owner ──
   const gemini = await readSourceFile({
     cliPaths,
     relPath: GEMINI_FILE,
@@ -126,11 +130,11 @@ export async function extract({ env, cliPaths } = {}) {
 
   const resolverMatch = findInLines({
     lines: gemini.lines,
-    regex: /export\s+function\s+resolveModelName\b/,
+    regex: /export\s+function\s+resolveModelThinkingPair\b/,
     section: `§${SECTION.number} ${SECTION.heading}`,
-    source: `${GEMINI_FILE} (resolveModelName)`,
-    expected: 'export function resolveModelName(...)',
-    recovery: `resolveModelName has been moved or renamed. Re-locate and update the extractor.`
+    source: `${GEMINI_FILE} (resolveModelThinkingPair)`,
+    expected: 'export function resolveModelThinkingPair(...)',
+    recovery: `resolveModelThinkingPair has been moved or renamed. Re-locate and update the extractor.`
   });
   // Capture the resolver body — from the export to the next closing brace at
   // column 0. We'll scan forward a bounded window and slice for the briefer.
@@ -172,7 +176,7 @@ export async function extract({ env, cliPaths } = {}) {
     `  ${gcsLine}`,
     '  ```',
     `- Wildcard TLS cert: \`*.descix.net\` plus per-env wildcards. ONE cert. No per-app cert provisioning.`,
-    `- **AI model inheritance order: per-request \`options.model\` → \`kb.kb_model_override\` (opt-in) → \`app.default_app_model\` (opt-in) → \`levelConfig.model\` (platform per-level) → \`utils.DEFAULT_AI_MODEL\` (platform-wide fallback).** Resolver: \`resolveModelName()\` in \`${GEMINI_FILE}:${resolverMatch.lineNumber}\`. KB override and app default are opt-in — null means platform per-level applies.`,
+    `- **AI (model, thinking) precedence.** ${MODEL_THINKING_CHAIN} Owner: \`resolveModelThinkingPair()\` in \`${GEMINI_FILE}:${resolverMatch.lineNumber}\` — the ONE resolver; the model chain and the thinking chain used to be separate and could assemble a pair no config declared.`,
     '  ```js',
     indentBlock(resolverBody, '  '),
     '  ```'
@@ -182,7 +186,7 @@ export async function extract({ env, cliPaths } = {}) {
     makeCitation({ file: MESH_FILE, lines: String(hostMatch.lineNumber), anchor: 'host pattern', fileLines: mesh.lines }),
     makeCitation({ file: MESH_FILE, lines: String(gcsMatch.lineNumber), anchor: 'gcsPath pattern', fileLines: mesh.lines }),
     makeCitation({ file: HYDRATE_FILE, lines: String(hydrateMatch.lineNumber), anchor: 'hydrateCommunityIdFromProducts', fileLines: hydrate.lines }),
-    makeCitation({ file: GEMINI_FILE, lines: `${resolverMatch.lineNumber}-${resolverEnd}`, anchor: 'resolveModelName', fileLines: gemini.lines }),
+    makeCitation({ file: GEMINI_FILE, lines: `${resolverMatch.lineNumber}-${resolverEnd}`, anchor: 'resolveModelThinkingPair', fileLines: gemini.lines }),
     { file: AGENTIC_RECORD, lines: `1-${beast.lines.length}`, anchor: 'AGENTIC-APP-INHERITANCE-INVARIANT-2026-05-26', sha: beastSha }
   ];
 
@@ -190,7 +194,7 @@ export async function extract({ env, cliPaths } = {}) {
 }
 
 /**
- * Walk forward from the `export function resolveModelName` line until we hit
+ * Walk forward from the `export function resolveModelThinkingPair` line until we hit
  * a closing brace at column 0. Bounded scan window of 80 lines so a runaway
  * regex on a refactored file doesn't drag the whole file into the briefer.
  */
