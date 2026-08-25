@@ -166,6 +166,32 @@ export const ENVELOPE_SECTIONS = Object.freeze([
 ]);
 
 /**
+ * WHAT `text` IS — stated ONCE, quoted by every surface that describes or enforces it.
+ *
+ * THE DEFECT THIS REPLACES (ws-c3-live-leg / D-22, measured on the served DEV surface 2026-08-25):
+ * `fabric_envelope_put` stated this fact in THREE places — its tool `description`, its
+ * `properties.text.description`, and the server's refusal in fabricStore's assertSectionedText —
+ * and they had drifted. The tool description said "`text` is a JSON OBJECT whose keys are the
+ * contract's SECTIONS"; the property description said "a JSON OBJECT serialized to a string"; the
+ * schema declares `type: 'string'`. A caller who followed the TOOL description exactly and sent an
+ * actual object was refused with FABRIC_ENVELOPE_TEXT_NOT_SECTIONED and the words "it did not
+ * parse as a JSON object" — told the opposite of what was wrong, because `String(anObject)` is
+ * "[object Object]" and the JSON never survived the wire at all.
+ *
+ * Two derivations of one fact is the general form of mirror drift, and a docstring is not exempt:
+ * the copy that is wrong is the one the caller reads. One owner, three consumers.
+ *
+ * QUOTED KEY FORM ON PURPOSE. The sections are rendered as `"objective": ...` rather than a bare
+ * comma list so this one sentence is directly usable as the refusal's "here is the shape you
+ * wanted" — a refusal that names the required set without showing it makes the caller go and
+ * find a design doc.
+ */
+export const ENVELOPE_TEXT_SHAPE = '`text` is a STRING carrying the JSON of an object keyed by SECTION — '
+    + 'send JSON.stringify(body), never the object itself (an object arrives as "[object Object]" and its '
+    + 'JSON never reaches the server). Every section is REQUIRED and must be non-empty: { '
+    + ENVELOPE_SECTIONS.map((k) => `"${k}": ...`).join(', ') + ' }.';
+
+/**
  * The contract lifecycle, as a closed enum. Design → signed → build → accept → closed.
  *
  * A CLOSED SET BECAUSE A PHASE IS READ AS PROGRESS. An unbounded phase vocabulary is the heartbeat
