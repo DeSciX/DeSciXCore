@@ -19,7 +19,9 @@ import {
     validateToolParams,
     toolAcceptsParam,
 } from '../src/mcp-tools/index.js';
-import { BEAT_CLOCK_FIELD_NAMES, BEAT_CLOCK_AGE_FIELDS } from '../src/fabric/index.js';
+import {
+    BEAT_CLOCK_FIELD_NAMES, BEAT_CLOCK_AGE_FIELDS, ENVELOPE_SECTIONS, fabricVocabulary,
+} from '../src/fabric/index.js';
 
 const askSchema = NATIVE_MCP_TOOLS.find(t => t.name === 'ask_question_to_app').inputSchema;
 
@@ -253,9 +255,22 @@ const NON_PARAM_IDENTIFIERS = new Set([
     'received_at_age_seconds', ...BEAT_CLOCK_AGE_FIELDS,
     'selector_applied', 'census_truncated', 'empty_reason', 'no_unread', 'unknown_seat',
     'key_discriminated', 'already_seen', 'cleared_fields',
+    // EVERY KEY OF THE fabric_vocabulary PAYLOAD is a response field BY CONSTRUCTION — that verb
+    // takes no parameters at all, so anything it publishes is something the caller receives.
+    // Derived from the payload rather than listed, so a set added to the vocabulary can never
+    // arrive here as a stale literal (which is the drift the vocabulary itself exists to close).
+    ...Object.keys(fabricVocabulary()),
+    // The CONTRACT SECTIONS. These are keys INSIDE fabric_envelope_put's `text` body, named by its
+    // description so a caller knows what to compose — never parameters of the tool. Derived from
+    // ENVELOPE_SECTIONS for the same reason: the description interpolates that list, so a
+    // hand-copy here would drift from the prose it is registering.
+    ...ENVELOPE_SECTIONS,
     // REFUSED parameters, named by the refusals so a caller knows what not to send. Declaring one
     // would make it look accepted, which is the opposite of what the description says.
     'seat_token',
+    // `phase_at` is BOTH: server-stamped and echoed on the response, and refused by name when a
+    // caller sends it.
+    'phase_at',
     // commands reached through execute_remote_command / the BEAST surface, not native tools
     'beast_rag_ingest', 'beast_seat_read',
     // commands reached through execute_remote_command, not native tools
