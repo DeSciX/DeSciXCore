@@ -141,7 +141,9 @@ function escapeRegExp(str) {
  * @param {string} config.name          — service name (e.g., 'cloud')
  * @param {string} config.version       — semver version
  * @param {string} config.description   — human-readable service description
- * @param {string} config.domain        — production domain (e.g., 'api.descix.net')
+ * @param {string} [config.domain]      — explicit domain for a PLATFORM service registered
+ *        through the Admin branch (e.g., 'api.descix.net'). An APP-BOUND service does not
+ *        declare a domain: the platform derives it (naming/resolveServiceDomain).
  * @param {string} [config.healthEndpoint='/health'] — health check path
  * @param {number} [config.debugPort]   — local dev port
  * @param {string} [config.community_id] — owning community
@@ -279,8 +281,11 @@ export function buildManifestFromStatic(manifestPath) {
  *
  * Rules:
  *   - service.name is required
- *   - service.domain is required (or debugPort in dev)
  *   - Every command must have a non-empty description
+ *
+ * service.domain is NOT checked here. A service does not declare its own domain — the platform
+ * derives it from app_id + env (naming/resolveServiceDomain, the ONE owner, called by both
+ * registration doors). Re-checking it here would be a second place that decides the same fact.
  *
  * @param {Object} manifest
  * @returns {{ valid: boolean, errors: string[] }}
@@ -291,10 +296,6 @@ export function validateManifest(manifest) {
     if (!manifest?.service?.name) {
         errors.push('Missing service.name');
     }
-    if (!manifest?.service?.domain && !manifest?.service?.debugPort) {
-        errors.push('Missing service.domain (or service.debugPort for local dev)');
-    }
-
     const commands = manifest?.commands || {};
     if (Object.keys(commands).length === 0) {
         errors.push('No commands defined');

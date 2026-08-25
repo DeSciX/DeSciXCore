@@ -95,5 +95,10 @@ export {
     composeUserAppId,
     composeUserDocServeUrl,
     TOKEN_SYMBOL_RE,
-    APP_SHORT_NAME_RE
+    APP_SHORT_NAME_RE,
+    // Service domain — the platform derives it; a service never declares one.
+    SERVICE_DOMAIN_IS_DERIVED,
+    composeServiceDomain,
+    isAppBoundService,
+    resolveServiceDomain
 } from './naming/index.js';
