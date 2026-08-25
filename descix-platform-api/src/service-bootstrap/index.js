@@ -39,6 +39,7 @@ import {
     computeManifestObjectHash,
     validateManifest,
 } from '../manifest/index.js';
+import { resolveServiceDomain } from '../naming/index.js';
 
 /**
  * Mint an `Authorization: Bearer <id_token>` header for `audienceUrl` from Application Default
@@ -106,10 +107,17 @@ export function authorizationFrom(minted) {
  *                                         and in refusals so an operator knows which key to set.
  * @param {string} [options.coreApiUrl]    The env-correct Cloud apifront URL. REQUIRED when
  *                                         `selfRegister` is true; no hardcoded default exists.
+ * @param {string} [options.siteDomain]    The env-owned SITE_DOMAIN (e.g. 'dev.descix.net'). Used
+ *                                         ONLY to NAME the derived domain — the authoritative
+ *                                         derivation happens at registration, in the platform. When
+ *                                         omitted, `handle.serviceDomain` is null and a refusal
+ *                                         names the env half by its config key rather than guessing
+ *                                         a host. It is deliberately NOT required: the platform,
+ *                                         not the service, owns the domain.
  * @param {Function} [options.fetchImpl=fetch]                     Injectable for tests.
  * @param {Function} [options.identityHeaderProvider=mintServiceIdentityHeaders] Injectable for tests.
  * @param {Object} [options.logger=console]                        Injectable for tests.
- * @returns {{manifest: Object, manifestHash: string, commandsHash: string,
+ * @returns {{manifest: Object, serviceDomain: string|null, manifestHash: string, commandsHash: string,
  *            serveManifest: Function, registration: Object, register: Function,
  *            installOn: Function}}
  */
@@ -119,6 +127,7 @@ export function createServiceBootstrap(options = {}) {
         selfRegister,
         selfRegisterConfigKey = 'SERVICE_SELF_REGISTER',
         coreApiUrl = null,
+        siteDomain = null,
         fetchImpl = fetch,
         identityHeaderProvider = mintServiceIdentityHeaders,
         logger = console,
@@ -137,6 +146,17 @@ export function createServiceBootstrap(options = {}) {
             `[service-bootstrap] manifest for '${manifest.service.name}' is invalid: ` +
             validation.errors.join('; ')
         );
+    }
+
+    // A SERVICE DOES NOT DECLARE ITS OWN DOMAIN. The platform derives it from app_id + env at
+    // registration. This door refuses a manifest that still declares one, loud, with
+    // code SERVICE_DOMAIN_IS_DERIVED — the refusal and the derivation have ONE owner
+    // (naming/resolveServiceDomain), which Cloud's register_service calls too, so the two
+    // registration doors cannot drift. An app-bound manifest with no domain and no siteDomain
+    // resolves to null here: that is correct, not a gap — the platform supplies the value.
+    let serviceDomain = null;
+    if (siteDomain || manifest.service.domain != null) {
+        serviceDomain = resolveServiceDomain({ manifest, site_domain: siteDomain }).domain;
     }
 
     if (typeof selfRegister !== 'boolean') {
@@ -271,6 +291,7 @@ export function createServiceBootstrap(options = {}) {
 
     const handle = {
         manifest,
+        serviceDomain,
         manifestHash,
         commandsHash,
         registration,
