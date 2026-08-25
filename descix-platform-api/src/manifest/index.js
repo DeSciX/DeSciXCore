@@ -370,3 +370,44 @@ export function computeManifestHash(manifest) {
         .update(JSON.stringify(manifest.commands || {}))
         .digest('hex');
 }
+
+/**
+ * Compute a SHA-256 hash of the WHOLE manifest object, key-order independent.
+ *
+ * Distinct from `computeManifestHash`, which hashes ONLY `manifest.commands`. Two different
+ * questions live here deliberately: `computeManifestHash` answers "has the command set changed"
+ * (change detection for registration); this one answers "is the object being served the object
+ * being reported/registered" (identity across call sites).
+ *
+ * CAVEAT — this is a SNAPSHOT, not a guarantee. A hash taken at one moment describes the object
+ * as it was at that moment. `manifestMiddleware` and `service-bootstrap`'s `serveManifest` both
+ * serve the LIVE object by reference, so a later mutation of that object changes what is served
+ * without changing a hash computed earlier. The protection against drift is that there is ONE
+ * object, not that the hash is immutable: a caller that mutates its manifest after hashing it has
+ * invalidated the hash, not the object. `service-bootstrap` deliberately does NOT freeze the
+ * caller's manifest — see the note at its `manifestHash`.
+ *
+ * @param {Object} manifest
+ * @returns {string} hex digest
+ */
+export function computeManifestObjectHash(manifest) {
+    const canonical = JSON.stringify(manifest, Object.keys(collectKeys(manifest)).sort());
+    return createHash('sha256').update(canonical).digest('hex');
+}
+
+/**
+ * Collect every key name appearing anywhere in the object, for a stable JSON.stringify replacer.
+ * An array replacer emits keys in ARRAY order at every level, so a sorted list of all keys makes
+ * the serialization canonical without dropping anything.
+ */
+function collectKeys(value, acc = {}) {
+    if (Array.isArray(value)) {
+        for (const v of value) collectKeys(v, acc);
+    } else if (value && typeof value === 'object') {
+        for (const [k, v] of Object.entries(value)) {
+            acc[k] = true;
+            collectKeys(v, acc);
+        }
+    }
+    return acc;
+}

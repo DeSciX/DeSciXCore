@@ -69,7 +69,8 @@ export {
     buildManifestFromStatic,
     validateManifest,
     manifestMiddleware,
-    computeManifestHash
+    computeManifestHash,
+    computeManifestObjectHash
 } from './manifest/index.js';
 
 // Coordination-fabric vocabulary (a pure, dependency-free leaf; also at
