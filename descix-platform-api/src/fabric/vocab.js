@@ -144,6 +144,88 @@ export const ENVELOPE_FIELDS = Object.freeze([
     'text', 'branch', 'initiative_id', 'kbs_consult', 'kbs_maintain', 'rulings', 'status',
 ]);
 
+/**
+ * The REQUIRED sections of a contract envelope's `text` — the closed set every envelope body is
+ * checked against, from docs/design/workstream-contract-system-2026-08-25.md §4.1.
+ *
+ * WHY IT IS A CLOSED SET AND NOT A SUGGESTION. A workstream is a CONTRACT between parties, and a
+ * contract missing its Acceptance section is not a terse contract, it is an unenforceable one: the
+ * builder has nothing to hand back against and the verifier has nothing to verify. Prose envelopes
+ * omitted sections silently and nobody could tell which — "does this envelope state its budget"
+ * had no computable answer. As a closed set the question is decidable, and the refusal names
+ * EXACTLY which sections are absent instead of asking the caller to re-read a design doc.
+ *
+ * THE NINTH ROW OF §4.1 — "Phase · Signature" — IS DELIBERATELY NOT HERE. It is lifecycle STATE,
+ * not prose the parties author: the server owns it, writes it as the `phase` field and stamps
+ * `phase_at` itself. A lifecycle state carried inside the body would be a second derivation of
+ * "what phase is this contract in", and the copy that is wrong is always the one in the prose.
+ */
+export const ENVELOPE_SECTIONS = Object.freeze([
+    'objective', 'parties', 'interfaces', 'constraints',
+    'knowledge', 'principles_carried', 'acceptance', 'budget',
+]);
+
+/**
+ * The contract lifecycle, as a closed enum. Design → signed → build → accept → closed.
+ *
+ * A CLOSED SET BECAUSE A PHASE IS READ AS PROGRESS. An unbounded phase vocabulary is the heartbeat
+ * failure on the record that says whether a contract may be built against: eleven spellings of
+ * "in progress" mean "has this been signed" cannot be answered by a query.
+ */
+export const ENVELOPE_PHASES = Object.freeze(['design', 'signed', 'build', 'accept', 'closed']);
+
+/** The phase an envelope carries when nobody has named one. NAMED, never `ENVELOPE_PHASES[0]` —
+ *  a position is not a meaning, and a reordering of the list would silently change the default.
+ *  A contract that has not been signed is in `design`, which is the honest reading of a record
+ *  that has never been through the architect. */
+export const ENVELOPE_PHASE_DEFAULT = 'design';
+
+/**
+ * The LEGAL next-phases per phase — the whole transition rule, in one owner, so no verb hand-lists
+ * it. `ENVELOPE_PHASE_TRANSITIONS[prior].includes(next)` is the complete answer to "may this write
+ * move the contract from prior to next"; there is no additional same-phase or terminal special
+ * case anywhere else, because a rule split between a table and an `if` is two derivations of one
+ * fact and the `if` is the copy that drifts.
+ *
+ * A PHASE IS IN ITS OWN LEGAL SET, AND THAT IS THE LOAD-BEARING ENTRY. Re-writing an envelope that
+ * is already in `build` without moving it must SUCCEED — otherwise a contract becomes unpatchable
+ * the moment work starts on it, and the parties go back to editing prose out of band. Every phase
+ * therefore permits itself.
+ *
+ * BACKWARD IS REFUSED. A contract that silently regressed from `build` to `design` would make the
+ * phase unreadable as progress, and re-opening a signed contract is not a field edit — design §4.3
+ * routes it: "Anything else is a contract change and goes through the architect", who authors a
+ * NEW contract rather than rewinding the record its parties already signed.
+ *
+ * `closed` IS TERMINAL — it permits only itself, so a closed contract can still be patched but can
+ * never be re-opened by a write.
+ */
+export const ENVELOPE_PHASE_TRANSITIONS = Object.freeze({
+    design: Object.freeze(['design', 'signed']),
+    signed: Object.freeze(['signed', 'build']),
+    build: Object.freeze(['build', 'accept']),
+    accept: Object.freeze(['accept', 'closed']),
+    closed: Object.freeze(['closed']),
+});
+
+/**
+ * The inter-party record kinds the contract system permits on the fabric.
+ *
+ * The first three are design §4.3's three messages after signature: a HAND-BACK carries evidence
+ * against a named acceptance row, a BLOCKER names the clause it cannot satisfy, a CONTRACT-DEFECT
+ * reports an ambiguity or a served surface that does not match its description and goes to the
+ * architect. `identity` and `roster` are the contract's own record types — an identity hired from
+ * a role (§5) and the roster of identities a contract's Parties section points at.
+ *
+ * A RECORD WITHOUT A `type` IS A VIOLATION, not a lax record. "Seats do not chat": anything that is
+ * none of these kinds is a contract change and belongs to the architect, and a type-less record is
+ * precisely the chat that routes to nobody — it matches no kind-filtered sweep, so it is written
+ * successfully and read by whoever happens to be looking.
+ */
+export const FABRIC_RECORD_KINDS = Object.freeze([
+    'handback', 'blocker', 'contract-defect', 'identity', 'roster',
+]);
+
 // ── to_agent: the ONLY delivery selector ─────────────────────────────────────────────────────
 //
 // ONE LIST. A record is delivered by `to_agent` + `status`, and the addresses a seat actually
@@ -455,6 +537,12 @@ export const isReadableStatus = (v) => has(READABLE_STATUSES, v);
 export const isLegacyStatus = (v) => has(LEGACY_WORKING_STATUSES, v) || has(LEGACY_STOP_STATUSES, v);
 export const isDeliveryStatus = (v) => has(DELIVERY_STATUSES, v);
 export const isEnvelopeStatus = (v) => has(ENVELOPE_STATUSES, v);
+export const isEnvelopePhase = (v) => has(ENVELOPE_PHASES, v);
+export const isFabricRecordKind = (v) => has(FABRIC_RECORD_KINDS, v);
+/** The transition rule itself, read from its ONE owner. `from` absent (a record written before
+ *  phases existed) is read as the default phase — a contract with no signature is in design. */
+export const isLegalPhaseTransition = (from, to) =>
+    (ENVELOPE_PHASE_TRANSITIONS[from || ENVELOPE_PHASE_DEFAULT] || []).includes(to);
 export const isForbiddenRoleAddress = (v) => has(FORBIDDEN_ROLE_ADDRESSES, v);
 export const isWriteMode = (v) => WRITE_MODES.includes(v);
 
@@ -543,6 +631,15 @@ export function fabricVocabulary() {
         envelope_statuses: [...ENVELOPE_STATUSES],
         envelope_status_default: ENVELOPE_STATUS_DEFAULT,
         envelope_fields: [...ENVELOPE_FIELDS],
+        envelope_sections: [...ENVELOPE_SECTIONS],
+        envelope_phases: [...ENVELOPE_PHASES],
+        envelope_phase_default: ENVELOPE_PHASE_DEFAULT,
+        // Deep-copied, not handed out by reference: the payload is a plain object a client
+        // serialises, and a frozen nested list published by reference invites a consumer to
+        // read it as mutable state.
+        envelope_phase_transitions: Object.fromEntries(
+            Object.entries(ENVELOPE_PHASE_TRANSITIONS).map(([k, v]) => [k, [...v]])),
+        record_kinds: [...FABRIC_RECORD_KINDS],
         to_agent_sentinels: [...TO_AGENT_SENTINELS],
         retired_sentinels: [...RETIRED_SENTINELS],
         forbidden_role_addresses: [...FORBIDDEN_ROLE_ADDRESSES],
