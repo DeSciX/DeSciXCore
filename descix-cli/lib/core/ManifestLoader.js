@@ -14,6 +14,7 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { execFileSync } from 'child_process';
 // Canonical doc_class taxonomy lives in CorpusDenyLint — import it, never re-list.
 import { PUBLISHABLE_DOC_CLASSES, DENY_DOC_CLASSES } from './CorpusDenyLint.js';
 
@@ -35,9 +36,139 @@ const PUBLISH_TIERS = new Set(['P', 'I', 'U']);
 // legacy formats keep syncing. `src_path` is normalized to its canonical name `raw_path` at load.
 // The schema doc lives at V2_docs/architecture/corpus-manifest-schema.md.
 export const CANONICAL_SOURCE_FIELDS = new Set([
-  'path', 'ref', 'tier', 'doc_type', 'syncignore',
+  'path', 'repo', 'ref', 'tier', 'doc_type', 'syncignore',
   'doc_class', 'license_basis', 'lint_exempt', 'exempt_reason', 'raw_path',
 ]);
+
+/**
+ * The agreed shape of a manifest source (interface-ws-c4-I2-manifest-source), stated ONCE.
+ * Refusal messages quote from it, so the contract and its enforcement cannot drift apart.
+ */
+export const SOURCE_SHAPE_CONTRACT =
+  "A manifest source names WHERE its content comes from, and is synced by fetching that ref - " +
+  "never by reading an adjacent working tree. A source is exactly one of two shapes. IN-REPO: " +
+  "omit `repo`; `path` is repo-root-relative within the manifest's OWN repository, fetched at " +
+  "`ref`. CROSS-REPO: `repo` is REQUIRED and is an owner/name slug (e.g. 'eabadir/unk'), never a " +
+  "URL; `path` is repo-root-relative within that repository, fetched at `ref`. Naming your OWN " +
+  "repository explicitly in `repo` is REFUSED - omission is the single spelling of 'here', an " +
+  "explicit slug the single spelling of 'elsewhere'. A `path` beginning with '../' is REFUSED " +
+  "naming the migration: adjacency reads a working tree, so the source's `ref` is not honored and " +
+  "the provenance it claims is false. `ref` may be a branch, tag or sha; a mutable branch ref is " +
+  "legal, and sync-state records the RESOLVED COMMIT SHA actually synced, so provenance is exact " +
+  "even when the ref moves. `path` is a literal - no globs; `syncignore` already owns exclusion.";
+
+// Glob metacharacters. `path` is a LITERAL — `syncignore` already owns exclusion, so a glob in
+// `path` is a second, silently-diverging spelling of the same intent.
+const GLOB_CHARS = /[*?[\]{}]/;
+
+/**
+ * Normalize any git remote URL spelling to ONE canonical `owner/name` slug.
+ *
+ * The single owner of "which repository is this". Every caller derives from here — deriving the
+ * slug a second way is how the self-naming refusal would silently start disagreeing with itself.
+ *
+ * Handles: https://host/owner/name(.git), git@host:owner/name(.git), ssh://git@host/owner/name(.git)
+ *
+ * @param {string|null|undefined} url - a git remote URL
+ * @returns {string|null} `owner/name`, or null when no slug can be read
+ */
+export function repoSlugFromRemoteUrl(url) {
+  if (!url || typeof url !== 'string') return null;
+  let s = url.trim();
+  if (!s) return null;
+  s = s.replace(/\.git$/, '');
+  // scp-style: git@host:owner/name
+  const scp = s.match(/^[^/]+@[^:/]+:(.+)$/);
+  if (scp) s = scp[1];
+  else {
+    // URL-style: scheme://[user@]host/owner/name
+    const u = s.match(/^[a-z][a-z0-9+.-]*:\/\/[^/]*\/(.+)$/i);
+    if (u) s = u[1];
+  }
+  const parts = s.split('/').filter(Boolean);
+  if (parts.length < 2) return null;
+  return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`;
+}
+
+/**
+ * Read the `owner/name` slug of the repository that physically CONTAINS a directory.
+ *
+ * @param {string} dir - a directory inside the repository
+ * @returns {string|null} the slug, or null when there is no repo / no `origin` remote
+ */
+export function detectRepoSlug(dir) {
+  try {
+    const url = execFileSync('git', ['remote', 'get-url', 'origin'], {
+      cwd: dir, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+    return repoSlugFromRemoteUrl(url);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Enforce the two-shape source contract on ONE source entry.
+ *
+ * @param {Object} src - raw source entry
+ * @param {number} i - index (for message context)
+ * @param {string} filePath - manifest path (for message context)
+ * @param {string|null} ownRepoSlug - slug of the repository containing the manifest
+ * @throws {Error} naming the offending value and the canonical spelling
+ */
+function assertSourceShape(src, i, filePath, ownRepoSlug) {
+  const at = `Invalid manifest at ${filePath}: sources[${i}] (${src.path})`;
+
+  // ── `path` must be a literal, repo-root-relative path — never adjacency, never a glob.
+  const segments = String(src.path).split('/');
+  if (String(src.path).startsWith('../') || segments.includes('..')) {
+    throw new Error(
+      `${at}: a path beginning with '../' is REFUSED. Adjacency reads a working tree, so the ` +
+      `source's ref "${src.ref ?? 'main'}" is NOT honored and the provenance it claims is false. ` +
+      `MIGRATE to the cross-repo shape: set \`repo\` to the owner/name slug of the repository that ` +
+      `owns this content and make \`path\` repo-root-relative within it ` +
+      `(e.g. { "repo": "eabadir/unk", "path": "unkamon-beast/README.md", "ref": "main" }).`
+    );
+  }
+  if (GLOB_CHARS.test(String(src.path))) {
+    throw new Error(
+      `${at}: \`path\` is a literal — globs are REFUSED. \`syncignore\` already owns exclusion; ` +
+      `name the directory literally and express the filter in \`syncignore\`.`
+    );
+  }
+
+  if (src.repo === undefined) return; // IN-REPO shape: omission is the single spelling of "here".
+
+  // ── CROSS-REPO shape.
+  if (typeof src.repo !== 'string' || !src.repo.trim()) {
+    throw new Error(`${at}: \`repo\` must be an owner/name slug string.`);
+  }
+  const repo = src.repo.trim();
+  const looksLikeUrl = /:\/\//.test(repo) || /^[^/]+@/.test(repo) || /\.git$/.test(repo);
+  if (looksLikeUrl || repo.split('/').filter(Boolean).length !== 2 || repo.startsWith('/') || repo.endsWith('/')) {
+    const suggestion = repoSlugFromRemoteUrl(repo);
+    throw new Error(
+      `${at}: \`repo\` must be an owner/name slug (e.g. 'eabadir/unk'), never a URL — got "${repo}"` +
+      `${suggestion ? `. Did you mean "${suggestion}"?` : '.'}`
+    );
+  }
+  if (ownRepoSlug && repo.toLowerCase() === ownRepoSlug.toLowerCase()) {
+    throw new Error(
+      `${at}: \`repo\` names this manifest's OWN repository ("${repo}") — REFUSED. Omission is the ` +
+      `single spelling of 'here' and an explicit slug the single spelling of 'elsewhere'; two ` +
+      `spellings of 'here' is exactly the drift this field exists to prevent. Remove \`repo\` and ` +
+      `keep \`path\` relative to this repository.`
+    );
+  }
+  if (!ownRepoSlug) {
+    throw new Error(
+      `${at}: \`repo\` is set ("${repo}") but this manifest's OWN repository slug could not be ` +
+      `determined (no git repository or no 'origin' remote at ${path.dirname(filePath)}), so the ` +
+      `"names its own repository" check CANNOT run. Refusing rather than accepting an unverifiable ` +
+      `cross-repo source.`
+    );
+  }
+}
 
 // Deprecated per-source field -> canonical replacement. Normalized at load (canonical wins if both
 // are present); a deprecation warning is emitted during the migration window.
@@ -106,7 +237,7 @@ export function collectManifestSchemaWarnings(manifest, filePath) {
  * @param {string} filePath - Path to manifest file (for error messages)
  * @throws {Error} If validation fails
  */
-function validateManifest(manifest, filePath) {
+function validateManifest(manifest, filePath, ownRepoSlug = null) {
   if (!manifest || typeof manifest !== 'object') {
     throw new Error(`Invalid manifest at ${filePath}: not a JSON object`);
   }
@@ -161,6 +292,10 @@ function validateManifest(manifest, filePath) {
       throw new Error(`Invalid manifest at ${filePath}: sources[${i}].raw_path must be a string`);
     }
 
+    // Two-shape source contract (interface-ws-c4-I2-manifest-source): adjacency/glob paths and
+    // self-naming or URL-shaped `repo` values are REFUSED here, loudly, naming the migration.
+    assertSourceShape(src, i, filePath, ownRepoSlug);
+
     // Tier-P: every source MUST carry a publishable doc_class (no default allowed).
     if (isTierP) {
       if (!src.doc_class) {
@@ -199,11 +334,17 @@ function validateManifest(manifest, filePath) {
  * @param {string} workspaceRoot - Workspace root for resolving relative paths
  * @returns {Promise<Object>} Validated manifest with resolved paths
  */
-export async function loadManifest(manifestPath, workspaceRoot) {
+export async function loadManifest(manifestPath, workspaceRoot, options = {}) {
   const raw = await fs.readFile(manifestPath, 'utf-8');
   const manifest = JSON.parse(raw);
 
-  validateManifest(manifest, manifestPath);
+  // The repository that physically contains this manifest — the thing `repo` may never name.
+  // Injectable so tests drive the check without depending on the ambient checkout.
+  const ownRepoSlug = options.ownRepoSlug !== undefined
+    ? options.ownRepoSlug
+    : detectRepoSlug(path.dirname(manifestPath));
+
+  validateManifest(manifest, manifestPath, ownRepoSlug);
 
   // Canonical-schema warnings (WS-EVP-DESCIX-KB-CLEANUP item 5): surface deprecated aliases and
   // unknown/misspelled fields during the deprecation window — warn, never throw, so both legacy
@@ -223,6 +364,9 @@ export async function loadManifest(manifestPath, workspaceRoot) {
     }
     return {
       ...s,
+      // `repo` stays UNDEFINED when omitted — omission is the single spelling of "here" and must
+      // survive the load, so an in-repo source is never silently rewritten into a cross-repo one.
+      repo: s.repo === undefined ? undefined : String(s.repo).trim(),
       absolutePath: path.resolve(workspaceRoot, s.path),
       ref: s.ref || 'main',
       tier: s.tier || 3,
