@@ -27,7 +27,7 @@ import * as path from 'path';
 // This stdio server imports them and CONCATENATES its CLI-LOCAL diagnostics (descix_doctor,
 // platform_health) which are NOT /apifront commands and are intentionally stdio-only.
 // The previously hand-duplicated curated literal in this file is GONE.
-import { toMcpToolList, NATIVE_MCP_TOOLS as SHARED_NATIVE_TOOLS, MCP_HANDSHAKE_INSTRUCTIONS, validateToolParams, toolAcceptsParam } from '@descix/platform-api/mcp-tools';
+import { toMcpToolList, NATIVE_MCP_TOOLS as SHARED_NATIVE_TOOLS, MCP_HANDSHAKE_INSTRUCTIONS, validateToolParams, toolAcceptsParam, VALIDATION_PHASE } from '@descix/platform-api/mcp-tools';
 
 // ---------------------------------------------------------------------------
 // Tool definitions for the stdio MCP transport.
@@ -402,7 +402,16 @@ try {
       // Fail loud LOCALLY on an unknown/missing param, before spending a round trip. The
       // backend re-validates at its own boundary — this is a fast mirror of the same SSOT
       // validator, never a second contract.
-      validateToolParams(knownTools, name, params, { surface: 'CLI stdio MCP tools/call' });
+      //
+      // PRE-INJECTION, measured: `args` is authored by the local MCP client and the only keys this
+      // block adds are ones the TARGET TOOL DECLARES (toolAcceptsParam). Nothing platform-injected
+      // has been written yet — apiFront's envelope/identity/context writes all happen server-side,
+      // after apiClient.invoke leaves this process — so the strict view is the honest one and a
+      // client-authored `_descix` is refused here, one round trip early.
+      validateToolParams(knownTools, name, params, {
+        surface: 'CLI stdio MCP tools/call',
+        phase: VALIDATION_PHASE.PRE_INJECTION,
+      });
 
       const result = await apiClient.invoke(name, params);
       return {
