@@ -442,6 +442,105 @@ class CloudConfig {
         return this.DEPLOY_ENV.toUpperCase();
     }
 
+    /**
+     * The signer private key gets its OWN per-environment secret.
+     *
+     * WALLET_PK used to be one of ~23 keys inside the per-env config blob
+     * (descix_config_dev / _demo / _prod, and the shared-alias descix_config for
+     * preview). A key living inside a blob cannot be granted, rotated or audited
+     * independently of the other 22 keys, and in practice the same key travelled to
+     * every environment while holding MINTER_ROLE on live mainnet tokens.
+     *
+     * No hardcoded env fallback: an unknown DEPLOY_ENV must never silently resolve to
+     * some other environment's key.
+     */
+    _walletPkSecretName() {
+        if (!this.DEPLOY_ENV) {
+            throw new CloudConfigFatalError(
+                '[CloudConfig] FATAL: cannot resolve the WALLET_PK secret name — DEPLOY_ENV is unset. ' +
+                'The signer key is per-environment (descix_wallet_pk_<env>); guessing an environment ' +
+                'could reach another environment\'s key. Set DEPLOY_ENV before initialize().'
+            );
+        }
+        return `descix_wallet_pk_${this.DEPLOY_ENV}`;
+    }
+
+    /**
+     * The ONE owner of "WALLET_PK may not arrive from this config layer".
+     *
+     * Called from every layer that can supply config values — the Secret Manager blob
+     * and both defaults files. Closing only the blob would leave the git-tracked
+     * defaults files as the obvious workaround, which is a strictly WORSE exposure than
+     * the one being closed: a key in a defaults file is in version control. WALLET_PK is
+     * neither a bootstrap key nor a dev_override key, so with these three layers refused
+     * the dedicated secret is the only remaining source.
+     *
+     * A `null` value is a schema placeholder, not a key source, and is not refused —
+     * defaults-config.json legitimately declares `"WALLET_PK": null`.
+     */
+    _refuseWalletPkFrom(source, sourceLabel) {
+        if (!source || !Object.prototype.hasOwnProperty.call(source, 'WALLET_PK')) return;
+        if (source.WALLET_PK === null || source.WALLET_PK === undefined) return;
+        // The base defaults file loads in the constructor, before DEPLOY_ENV may be
+        // known. Name the secret PATTERN rather than failing to describe the fix.
+        const target = this.DEPLOY_ENV ? `'${this._walletPkSecretName()}'` : 'descix_wallet_pk_<env>';
+        // Name the key and the destination secret. NEVER echo the value.
+        throw new CloudConfigFatalError(
+            `[CloudConfig] FATAL: WALLET_PK is present in ${sourceLabel}. The signer private key ` +
+            `is no longer sourced from config — it has its own per-environment secret, ` +
+            `${target}. Remove the WALLET_PK key from ${sourceLabel} and populate ${target} with ` +
+            `this environment's own key. Each environment has a DISTINCT key: do not copy one ` +
+            `environment's key into another. Runbook: ` +
+            `DeSciX_Cloud/microservice/admin/scripts/deploy/wallet-pk-per-env-runbook.md`
+        );
+    }
+
+    /**
+     * Ingest a parsed config-secret payload.
+     *
+     * This is the ONLY path by which a Secret Manager config blob enters the config
+     * object, and it REFUSES a blob that still carries WALLET_PK. The blob path is not
+     * fenced, deprecated or accepted-with-lower-precedence — it is gone, and using it
+     * is a loud boot failure naming the secret the operator must populate instead.
+     * Silently preferring the dedicated secret would leave the shared key sitting in
+     * the blob, readable by everything holding blob access, with nothing to force its
+     * removal.
+     */
+    _ingestConfigSecretPayload(parsed) {
+        this._refuseWalletPkFrom(parsed, `the config secret '${this.CONFIG_SECRET_NAME}'`);
+        this._mergeConfig(parsed);
+    }
+
+    /**
+     * Load WALLET_PK from its dedicated per-env secret.
+     *
+     * Scoped to services that DECLARE they need a signer, via the existing
+     * createCloudConfig({ additionalRequiredKeys }) contract — the canonical owner of
+     * "this service requires this key". Services that never sign (Powch, BEAST, SDK
+     * services) neither read the secret nor need access to it, which is the whole point
+     * of taking the key out of the shared blob.
+     *
+     * A declaring service that cannot read the secret fails loudly here rather than at
+     * some later signing call, where the failure would look like a chain fault.
+     */
+    async _loadWalletPkSecret() {
+        if (!this.__additionalRequiredKeys.includes('WALLET_PK')) return;
+        const secretName = this._walletPkSecretName();
+        try {
+            const pk = await this.accessSecretVersion(secretName, this.CONFIG_SECRET_VERSION);
+            this.WALLET_PK = pk.trim();
+            console.log(`[Config] Loaded WALLET_PK from dedicated secret: ${secretName}`);
+        } catch (error) {
+            throw new CloudConfigFatalError(
+                `[CloudConfig] FATAL: this service declares WALLET_PK required but could not read ` +
+                `its dedicated secret '${secretName}': ${error.message}. Create and populate ` +
+                `'${secretName}' with THIS environment's own signer key and grant the runtime service ` +
+                `account secretAccessor on it. Runbook: ` +
+                `DeSciX_Cloud/microservice/admin/scripts/deploy/wallet-pk-per-env-runbook.md`
+            );
+        }
+    }
+
     _autoDetectPort(workspace) {
         // Match current directory to an app in workspace (v2.1 format: env.platform + env.products[])
         try {
@@ -524,10 +623,15 @@ class CloudConfig {
         try {
             const raw = fs.readFileSync(envDefaultsPath, 'utf8');
             const parsed = JSON.parse(raw);
+            this._refuseWalletPkFrom(parsed, `defaults-config-${this.DEPLOY_ENV}.json`);
             this._mergeConfig(parsed);
             const sha = crypto.createHash('sha256').update(raw).digest('hex');
             console.log(`[Config] Loaded defaults-config-${this.DEPLOY_ENV}.json (sha256=${sha.slice(0, 12)}…) — env layer wins over base defaults.`);
         } catch (e) {
+            // A WALLET_PK refusal is a security verdict, not a file-read problem. This
+            // catch exists to tolerate a malformed/absent defaults file; letting it
+            // swallow the refusal would turn a loud failure into a silent one.
+            if (e instanceof CloudConfigFatalError) throw e;
             console.error(`[Config] Error loading defaults-config-${this.DEPLOY_ENV}.json:`, e.message);
         }
     }
@@ -541,6 +645,7 @@ class CloudConfig {
                 // would normalize whitespace/key order and detect spurious "drift".
                 const raw = fs.readFileSync(defaultsPath, 'utf8');
                 const parsed = JSON.parse(raw);
+                this._refuseWalletPkFrom(parsed, 'defaults-config.json');
                 this._mergeConfig(parsed);
                 this.__defaults_config_sha = crypto.createHash('sha256').update(raw).digest('hex');
                 // Boot snapshot of the parsed disk defaults — used by _reloadDefaults
@@ -550,6 +655,8 @@ class CloudConfig {
                 this.__defaults_config_snapshot = parsed;
                 console.log(`[Config] Loaded defaults-config.json (sha256=${this.__defaults_config_sha.slice(0, 12)}…)`);
             } catch (e) {
+                // See _loadEnvDefaults: a WALLET_PK refusal must never be swallowed here.
+                if (e instanceof CloudConfigFatalError) throw e;
                 console.error('[Config] Error loading defaults-config.json:', e.message);
             }
         }
@@ -819,16 +926,24 @@ class CloudConfig {
         console.error("***** INITIALIZING Project ID: ", this.GOOGLE_PROJECT_ID);
 
         if (!this.GEMINI_API_KEY && this.CONFIG_SECRET_NAME) {
+            let parsedConfigSecret;
             try {
                 const secretPayload = await this.accessSecretVersion(
                     this.CONFIG_SECRET_NAME,
                     this.CONFIG_SECRET_VERSION
                 );
-                this._mergeConfig(JSON.parse(secretPayload));
-                console.log(`[Config] Loaded from Secret Manager: ${this.CONFIG_SECRET_NAME}`);
+                parsedConfigSecret = JSON.parse(secretPayload);
             } catch (error) {
                 throw new Error(`[CloudConfig] Secret Manager failed for ${this.CONFIG_SECRET_NAME}/${this.CONFIG_SECRET_VERSION}: ${error.message}`);
             }
+            // Ingest OUTSIDE the fetch try/catch: a WALLET_PK-in-blob refusal is a
+            // configuration verdict, not a Secret Manager transport failure, and must
+            // not be rewrapped as one.
+            this._ingestConfigSecretPayload(parsedConfigSecret);
+            console.log(`[Config] Loaded from Secret Manager: ${this.CONFIG_SECRET_NAME}`);
+
+            // The signer key comes from its own per-env secret, never from the blob above.
+            await this._loadWalletPkSecret();
 
             this._loadDevOverrides();
 
