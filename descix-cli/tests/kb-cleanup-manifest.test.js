@@ -51,7 +51,13 @@ function resolvedSource(root, rel, tier, extra = {}) {
 test('item4: nested child source files are collected ONCE, owned by the deepest source', async () => {
     const root = await mkTmp('kbcleanup-walk-');
     try {
-        execSync('git init -q', { cwd: root });
+        // A corpus source always lives in a repo with commits: `ref` must resolve to a real
+        // commit or the walk has no honest provenance to record. An empty initial commit is
+        // the minimum realistic fixture; it does not affect what this test measures (which
+        // source OWNS each walked file — the files below stay untracked either way).
+        execSync('git init -q -b main', { cwd: root });
+        execSync('git config user.email t@t.t && git config user.name t', { cwd: root, shell: '/bin/bash' });
+        execSync('git commit -q --allow-empty -m base', { cwd: root });
         await fs.mkdir(path.join(root, 'svc', 'handlers'), { recursive: true });
         await fs.writeFile(path.join(root, 'svc', 'a.js'), 'export const a = 1;\n');
         await fs.writeFile(path.join(root, 'svc', 'b.js'), 'export const b = 2;\n');
@@ -94,7 +100,13 @@ test('item4: nested child source files are collected ONCE, owned by the deepest 
 test('item4: an explicit single-file source out-specifies its enclosing directory source', async () => {
     const root = await mkTmp('kbcleanup-walk2-');
     try {
-        execSync('git init -q', { cwd: root });
+        // A corpus source always lives in a repo with commits: `ref` must resolve to a real
+        // commit or the walk has no honest provenance to record. An empty initial commit is
+        // the minimum realistic fixture; it does not affect what this test measures (which
+        // source OWNS each walked file — the files below stay untracked either way).
+        execSync('git init -q -b main', { cwd: root });
+        execSync('git config user.email t@t.t && git config user.name t', { cwd: root, shell: '/bin/bash' });
+        execSync('git commit -q --allow-empty -m base', { cwd: root });
         await fs.mkdir(path.join(root, 'svc'), { recursive: true });
         await fs.writeFile(path.join(root, 'svc', 'app.js'), 'export const app = 1;\n');
         await fs.writeFile(path.join(root, 'svc', 'other.js'), 'export const o = 2;\n');

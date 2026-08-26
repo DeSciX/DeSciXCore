@@ -156,7 +156,7 @@ async function chunkCorpusFile(fileEntry, context) {
  *
  * @param {string} appRoot - App root directory
  * @param {string} kbName - Knowledge base name
- * @param {Object} state - { last_sync_commit, synced_files_count, total_chunks, timestamp }
+ * @param {Object} state - { last_sync_commit, sources_provenance, synced_files_count, total_chunks, timestamp }
  */
 async function saveSyncState(appRoot, kbName, state) {
   const stateDir = path.join(appRoot, '.descix', 'sync-state');
@@ -452,7 +452,7 @@ export async function runCorpusSync(apiClient, options) {
 
       // 3a. Walk corpus
       const walkSpinner = ora('  Walking source directories...').start();
-      const { files, commitSha } = await walkCorpus(manifest, workspaceRoot);
+      const { files, commitSha, provenance } = await walkCorpus(manifest, workspaceRoot);
       walkSpinner.succeed(`  Found ${files.length} files (commit: ${commitSha.substring(0, 8)})`);
 
       // ── Deliverable A: --show-walk prints the resolved ref + first 50 files
@@ -759,6 +759,10 @@ export async function runCorpusSync(apiClient, options) {
       const allSyncedBlobShas = [...localBlobShas]; // All current files
       await saveSyncState(appRoot, kbName, {
         last_sync_commit: commitSha,
+        // Per-source provenance: WHICH repo, at WHICH ref, and the RESOLVED COMMIT SHA actually
+        // synced. `ref` may be a mutable branch, so the ref alone is not a record of what was
+        // synced — the resolved sha is, and it stays exact after the branch moves.
+        sources_provenance: provenance,
         synced_files_count: files.length,
         total_chunks: previousChunkCount + upserted - deleted,
         timestamp: new Date().toISOString(),
