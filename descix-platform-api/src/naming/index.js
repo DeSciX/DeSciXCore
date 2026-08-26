@@ -307,3 +307,41 @@ export function resolveServiceDomain({ manifest, site_domain = null } = {}) {
         derived: true,
     };
 }
+
+/** A stored manifest carries no domain: there is nothing to route to. */
+export const SERVICE_NOT_ROUTABLE = 'SERVICE_NOT_ROUTABLE';
+
+/**
+ * THE one owner of "is this REGISTERED service routable, and where?".
+ *
+ * `resolveServiceDomain` answers the REGISTRATION question (what domain should this manifest get).
+ * This answers the READ question every consumer of a STORED manifest asks: the origin to send a
+ * request to. Both live here because "where a service lives" is one fact with one home.
+ *
+ * REFUSES rather than composing a URL out of a missing value. `https://${service.domain}/api` on a
+ * domain-less manifest yields the literal string `https://undefined/api` — a syntactically valid
+ * URL that resolves to a host named "undefined", so nothing throws, the registry happily routes
+ * there, and the failure surfaces as an unexplained network error at request time. That is the
+ * silence this refusal exists to break: a manifest reaches this state only by BYPASSING
+ * `register_service` (a direct Firestore write), so the message names that as the cause.
+ *
+ * @param {Object} service — a stored manifest's `service` block
+ * @returns {string} the routable origin, e.g. `https://daita-ssgpod.dev.descix.net`
+ * @throws {Error & {code: string}} code `SERVICE_NOT_ROUTABLE`
+ */
+export function requireServiceOrigin(service) {
+    const name = service?.name || '(unnamed)';
+    if (!service?.domain || typeof service.domain !== 'string') {
+        const err = new Error(
+            `${SERVICE_NOT_ROUTABLE}: registered service '${name}' carries no service.domain, so ` +
+            `there is no host to route to. The platform DERIVES the domain at registration — a ` +
+            `stored manifest without one was written by a path that bypassed the register_service ` +
+            `door (a direct Firestore write). Re-register '${name}' through register_service. ` +
+            `Refusing to compose 'https://undefined/api'.`
+        );
+        err.code = SERVICE_NOT_ROUTABLE;
+        err.service_name = name;
+        throw err;
+    }
+    return `https://${service.domain}`;
+}

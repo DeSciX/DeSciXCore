@@ -30,6 +30,8 @@ import {
     composeServiceDomain,
     isAppBoundService,
     resolveServiceDomain,
+    SERVICE_NOT_ROUTABLE,
+    requireServiceOrigin,
 } from '../src/naming/index.js';
 
 import { createServiceBootstrap } from '../src/service-bootstrap/index.js';
@@ -208,5 +210,105 @@ describe('createServiceBootstrap — the SDK door refuses a declared domain', ()
             logger: quietLogger,
         });
         assert.equal(b.serviceDomain, 'api.descix.net');
+    });
+});
+
+describe('requireServiceOrigin — the ONE owner of "is this stored manifest routable"', () => {
+    it('returns the origin for a stored manifest that carries a domain', () => {
+        assert.equal(
+            requireServiceOrigin({ name: 'daita-ssgpod', domain: 'daita-ssgpod.dev.descix.net' }),
+            'https://daita-ssgpod.dev.descix.net'
+        );
+    });
+
+    it('REFUSES a domain-less stored manifest instead of composing https://undefined/api', () => {
+        let err;
+        try {
+            requireServiceOrigin({ name: 'daita-ssgpod', app_id: 'daita-ssgpod', community_id: 'daita' });
+        } catch (e) {
+            err = e;
+        }
+        assert.ok(err, 'expected a refusal');
+        assert.equal(err.code, SERVICE_NOT_ROUTABLE);
+        assert.equal(err.service_name, 'daita-ssgpod');
+        assert.match(err.message, /carries no service\.domain/);
+        assert.match(err.message, /bypassed the register_service door/);
+        assert.match(err.message, /Refusing to compose 'https:\/\/undefined\/api'/);
+    });
+
+    it('refuses a non-string domain — the shape is the test, not truthiness alone', () => {
+        assert.throws(() => requireServiceOrigin({ name: 's', domain: 123 }), { code: SERVICE_NOT_ROUTABLE });
+        assert.throws(() => requireServiceOrigin({ name: 's', domain: '' }), { code: SERVICE_NOT_ROUTABLE });
+        assert.throws(() => requireServiceOrigin(undefined), { code: SERVICE_NOT_ROUTABLE });
+    });
+});
+
+describe('P1-R (3) what a NEWLY SCAFFOLDED service now generates at `npm run register`', () => {
+    /** The manifest `descix app scaffold` writes: context injected, NO domain. */
+    function scaffoldedManifest() {
+        return {
+            service: {
+                name: 'my-new-service',
+                version: '1.0.0',
+                description: 'scaffolded',
+                healthEndpoint: '/health',
+                debugPort: 3099,
+                app_id: 'my-new-service',
+                community_id: 'daita',
+            },
+            commands: { my_new_service_ping: { handler: 'sampleCommands.ping', description: 'ping', mutating: false } },
+        };
+    }
+
+    it('POSTs register_service to CORE_API_URL with the manifest — no Firestore, no declared domain', async () => {
+        const calls = [];
+        const bootstrap = createServiceBootstrap({
+            manifest: scaffoldedManifest(),
+            selfRegister: true,
+            selfRegisterConfigKey: 'npm run register',
+            coreApiUrl: 'https://dev.descix.net/apifront',
+            siteDomain: 'dev.descix.net',
+            logger: quietLogger,
+            identityHeaderProvider: async (aud) => ({ Authorization: `Bearer id-token-for:${aud}` }),
+            fetchImpl: async (url, init) => {
+                calls.push({ url, init });
+                return { status: 200, json: async () => ({ status: 'OK', message: 'registered' }) };
+            },
+        });
+
+        const result = await bootstrap.register();
+        assert.equal(result.status, 'ok', result.error || '');
+        assert.equal(calls.length, 1);
+        assert.equal(calls[0].url, 'https://dev.descix.net/apifront');
+        assert.equal(calls[0].init.headers.Authorization, 'Bearer id-token-for:https://dev.descix.net/apifront');
+
+        const body = JSON.parse(calls[0].init.body);
+        assert.equal(body.command, 'register_service');
+        assert.equal(body.params.manifest.service.name, 'my-new-service');
+        assert.equal(
+            body.params.manifest.service.domain,
+            undefined,
+            'the scaffolded service sends NO domain — register_service derives and stamps it'
+        );
+    });
+
+    it('the scaffold NAMES the domain the platform will derive, without declaring it', () => {
+        const bootstrap = createServiceBootstrap({
+            manifest: scaffoldedManifest(),
+            selfRegister: false,
+            siteDomain: 'dev.descix.net',
+            logger: quietLogger,
+        });
+        assert.equal(bootstrap.serviceDomain, 'my-new-service.dev.descix.net');
+        assert.equal(bootstrap.manifest.service.domain, undefined, 'naming it must not write it onto the manifest');
+    });
+
+    it('NEGATIVE CONTROL: a scaffold that reintroduced a declared domain is REFUSED at this door', () => {
+        const m = scaffoldedManifest();
+        m.service.domain = 'my-new-service.descix.net';
+        assert.throws(
+            () => createServiceBootstrap({ manifest: m, selfRegister: false, siteDomain: 'dev.descix.net', logger: quietLogger }),
+            (e) => e.message.includes(SERVICE_DOMAIN_IS_DERIVED) || /SERVICE_DOMAIN_IS_DERIVED/.test(e.message)
+        );
     });
 });

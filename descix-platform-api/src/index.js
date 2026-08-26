@@ -100,5 +100,8 @@ export {
     SERVICE_DOMAIN_IS_DERIVED,
     composeServiceDomain,
     isAppBoundService,
-    resolveServiceDomain
+    resolveServiceDomain,
+    // Reading a STORED manifest: the routable origin, or a loud refusal.
+    SERVICE_NOT_ROUTABLE,
+    requireServiceOrigin
 } from './naming/index.js';
