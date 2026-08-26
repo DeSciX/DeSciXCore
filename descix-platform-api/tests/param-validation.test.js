@@ -14,10 +14,12 @@ import {
     NATIVE_MCP_TOOLS,
     PARAM_ALIASES,
     PLATFORM_INJECTED_PARAMS,
+    declaredTypesOf,
     suggestParam,
     validateParamsAgainstSchema,
     validateToolParams,
     toolAcceptsParam,
+    VALIDATION_PHASE,
 } from '../src/mcp-tools/index.js';
 import {
     BEAT_CLOCK_FIELD_NAMES, BEAT_CLOCK_AGE_FIELDS, ENVELOPE_SECTIONS, fabricVocabulary,
@@ -69,10 +71,32 @@ test('missing required params fail loud', () => {
     );
 });
 
-test('platform-injected params are never treated as unknown', () => {
+/**
+ * A value that SATISFIES a property's declared type, chosen from the owner's type vocabulary so
+ * an unknown type word fails loud instead of silently sampling `undefined`.
+ *
+ * WHY THE FIXTURE NEEDS THIS: the allow-list waves an injected key past the UNKNOWN check, never
+ * past the TYPE check — and some injected keys ARE declared on some commands (`streaming` is
+ * `boolean` on ask_question_to_app). A fixture that stamped the string 'injected' onto every key
+ * was therefore testing the type gate, not the unknown gate, and would fail for a reason that has
+ * nothing to do with what the test claims to measure.
+ */
+const TYPE_SAMPLES = { string: 's', number: 1, integer: 1, boolean: true, array: [], object: {}, null: null };
+function conformingSample(propertySchema) {
+    const [declared] = declaredTypesOf(propertySchema || {});
+    if (!declared) return 'injected';
+    assert.ok(declared in TYPE_SAMPLES, `no sample value for declared type '${declared}'`);
+    return TYPE_SAMPLES[declared];
+}
+
+test('platform-injected params are never treated as unknown IN THE POST-INJECTION VIEW', () => {
+    // The view a door DOWNSTREAM of the injector gets. Upstream of it the same keys are
+    // caller-authored and are refused by name — see platform-injected-params-owner.test.js, which
+    // iterates both views off the exported phase table.
     const bag = { app_id: 'x', user_input: 'q' };
-    for (const p of PLATFORM_INJECTED_PARAMS) bag[p] = 'injected';
-    assert.doesNotThrow(() => validateParamsAgainstSchema(askSchema, bag, { commandName: 'ask_question_to_app' }));
+    for (const p of PLATFORM_INJECTED_PARAMS) bag[p] = conformingSample(askSchema.properties[p]);
+    assert.doesNotThrow(() => validateParamsAgainstSchema(askSchema, bag,
+        { commandName: 'ask_question_to_app', phase: VALIDATION_PHASE.POST_INJECTION }));
 });
 
 test('no declared schema => no claim (we do not invent a contract)', () => {
