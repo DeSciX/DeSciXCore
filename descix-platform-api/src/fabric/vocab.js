@@ -898,21 +898,24 @@ export function fabricVocabulary() {
             contract: `${KEY_CONTRACT}<contract_key>`,
             grounding: `${KEY_GROUNDING}<contract_key>-<identity>`,
         },
-        // THE GROUNDING CONTRACT, PUBLISHED. `ok` predicates are deliberately NOT serialised — they
-        // are functions, and a client cannot execute the server's check anyway. What crosses the
-        // wire is the NAME, the TYPE, whether it is REQUIRED and what it MEANS, which is exactly
-        // what a consumer needs to build a conforming call.
-        contract_read_fields: CONTRACT_READ_FIELDS.map(
-            ({ field, type, description }) => ({ field, type, description })),
+        // THE GROUNDING CONTRACT, PUBLISHED. Spread row-by-row exactly like `beat_clock_fields`:
+        // the `ok` predicates are functions and JSON drops them on the way out, so what crosses the
+        // wire is the NAME, TYPE, EXPECTATION and MEANING — everything a consumer needs to build a
+        // conforming call, and nothing it could not execute anyway. Spreading rather than picking
+        // named keys also keeps these rows deep-equal to their exports, which is what makes the
+        // conformance test able to notice a list that stopped being published.
+        contract_read_fields: CONTRACT_READ_FIELDS.map((f) => ({ ...f })),
+        contract_read_field_names: [...CONTRACT_READ_FIELD_NAMES],
         grounding_fields: GROUNDING_FIELDS.map((f) => ({ ...f })),
-        grounding_read_fields: GROUNDING_READ_FIELDS.map(
-            ({ field, type, description }) => ({ field, type, description })),
-        grounding_verification_fields: GROUNDING_VERIFICATION_FIELDS.map(
-            ({ field, type, description }) => ({ field, type, description })),
-        refusal_codes: {
-            contract: [...FABRIC_CONTRACT_REFUSAL_CODES],
-            grounding: [...FABRIC_GROUNDING_REFUSAL_CODES],
-        },
+        grounding_read_fields: GROUNDING_READ_FIELDS.map((f) => ({ ...f })),
+        grounding_read_field_names: [...GROUNDING_READ_FIELD_NAMES],
+        grounding_verification_fields: GROUNDING_VERIFICATION_FIELDS.map((f) => ({ ...f })),
+        grounding_verification_field_names: [...GROUNDING_VERIFICATION_FIELD_NAMES],
+        // TOP-LEVEL, not nested under a `refusal_codes` object: a client generating its mirror
+        // walks the payload's arrays, and a list hidden inside an object is a list it would
+        // hand-type — the exact drift this verb exists to close.
+        contract_refusal_codes: [...FABRIC_CONTRACT_REFUSAL_CODES],
+        grounding_refusal_codes: [...FABRIC_GROUNDING_REFUSAL_CODES],
         verdicts: { ...VERDICT },
         defaults: {
             liveness_threshold_s: DEFAULT_LIVENESS_THRESHOLD_S,
