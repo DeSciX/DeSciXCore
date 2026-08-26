@@ -57,6 +57,9 @@ export const SOURCE_SHAPE_CONTRACT =
   "legal, and sync-state records the RESOLVED COMMIT SHA actually synced, so provenance is exact " +
   "even when the ref moves. `path` is a literal - no globs; `syncignore` already owns exclusion.";
 
+/** The ref a source is walked at when it names none. ONE owner — consumers import it. */
+export const DEFAULT_SOURCE_REF = 'main';
+
 // Glob metacharacters. `path` is a LITERAL — `syncignore` already owns exclusion, so a glob in
 // `path` is a second, silently-diverging spelling of the same intent.
 const GLOB_CHARS = /[*?[\]{}]/;
@@ -124,7 +127,7 @@ function assertSourceShape(src, i, filePath, ownRepoSlug) {
   if (String(src.path).startsWith('../') || segments.includes('..')) {
     throw new Error(
       `${at}: a path beginning with '../' is REFUSED. Adjacency reads a working tree, so the ` +
-      `source's ref "${src.ref ?? 'main'}" is NOT honored and the provenance it claims is false. ` +
+      `source's ref "${src.ref ?? DEFAULT_SOURCE_REF}" is NOT honored and the provenance it claims is false. ` +
       `MIGRATE to the cross-repo shape: set \`repo\` to the owner/name slug of the repository that ` +
       `owns this content and make \`path\` repo-root-relative within it ` +
       `(e.g. { "repo": "eabadir/unk", "path": "unkamon-beast/README.md", "ref": "main" }).`
@@ -368,7 +371,7 @@ export async function loadManifest(manifestPath, workspaceRoot, options = {}) {
       // survive the load, so an in-repo source is never silently rewritten into a cross-repo one.
       repo: s.repo === undefined ? undefined : String(s.repo).trim(),
       absolutePath: path.resolve(workspaceRoot, s.path),
-      ref: s.ref || 'main',
+      ref: s.ref || DEFAULT_SOURCE_REF,
       tier: s.tier || 3,
       doc_type: s.doc_type || 'generic',
       syncignore: s.syncignore || [],
