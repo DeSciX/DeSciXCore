@@ -56,6 +56,8 @@ import {
     FABRIC_RECORD_KINDS,
     RETIRED_SENTINELS, BEAT_CLOCK_FIELDS, beatClockFieldFor, beatClockAgeField,
     LIVENESS_MODEL, LIVENESS_PROCESS,
+    KEY_CONTRACT, KEY_GROUNDING,
+    CONTRACT_READ_FIELD_NAMES, GROUNDING_READ_FIELD_NAMES, GROUNDING_VERIFICATION_FIELD_NAMES,
 } from '../fabric/vocab.js';
 
 /**
@@ -604,6 +606,53 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
                 phase: { type: 'string', enum: [...ENVELOPE_PHASES], description: `The contract's LIFECYCLE state. Defaults to "${ENVELOPE_PHASE_DEFAULT}" on a record that carries none, and is otherwise LEFT WHERE IT IS when omitted — lifecycle is not payload, so even mode:"replace" never rewinds it. A move is checked against envelope_phase_transitions (see fabric_vocabulary): each phase permits itself, backward is refused, "${ENVELOPE_PHASES[ENVELOPE_PHASES.length - 1]}" is terminal. The server stamps phase_at; a caller-supplied phase_at is refused.` },
             },
             required: ['workstream_id', 'to_agent', 'mode'],
+        },
+    },
+    {
+        name: 'fabric_contract_put',
+        description: 'Write a CONTRACT — the agreement its parties sign, and the record a doer works under. The key is DERIVED as "' + KEY_CONTRACT + '<contract_key>" (slugified through the same normalizer every key segment on this surface uses), so a caller cannot compose a second record for one contract; a client-supplied file_id/key is REFUSED. A CONTRACT IS NOT AN ENVELOPE: an envelope is the 1:1 assignment of a workstream to a seat and there is exactly one per workstream, while a workstream carries as many contracts as it has parties — a parent and a sub-contract per doer. Before this verb existed every contract on the fabric was written by raw app_records_put with no key derivation and no validation at all (measured 2026-08-26); that path is refused now, by name, pointing here. `mode` is REQUIRED and has NO DEFAULT, like every keyed write on this surface. The clocks are the server\'s — a caller-supplied created_at/occurred_at/received_at is refused. CONTRACT SHAPE: ' + ENVELOPE_TEXT_SHAPE + ' Prose is REFUSED (FABRIC_ENVELOPE_TEXT_NOT_SECTIONED) and a sectioned body missing rows is refused naming EXACTLY which (FABRIC_ENVELOPE_SECTIONS_MISSING) — the SAME validator fabric_envelope_put runs, not a second copy of it. TWO FURTHER RULES APPLY ONLY TO CONTRACTS, because a contract is what a doer grounds against: `knowledge.reads` must be a NON-EMPTY ARRAY whose entries each carry ' + CONTRACT_READ_FIELD_NAMES.join(', ') + ' (FABRIC_CONTRACT_KNOWLEDGE_READS_MISSING, naming the offending index and field), and `principles_carried` must be a NON-EMPTY ARRAY of non-empty strings (FABRIC_CONTRACT_PRINCIPLES_EMPTY). A contract whose knowledge section DESCRIBES how to read instead of LISTING what to read gives the doer nothing to execute and the verifier nothing to check a grounding record against — "read" (singular, a string) is the measured near-miss and is refused as one. Both rules fire ONLY on a write of `text`, so contracts written before they existed stay patchable and are re-cut by their authors rather than becoming unreachable.',
+        mutating: true,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                contract_key: { type: 'string', description: 'The contract\'s identifier. It is the KEY\'s subject ("' + KEY_CONTRACT + '<contract_key>"), so one contract has exactly one record.' },
+                mode: { type: 'string', enum: [...WRITE_MODES], description: 'REQUIRED, no default. "replace" = this call IS the contract and omitted fields are cleared. "patch" = merge these fields only.' },
+                text: { type: 'string', description: 'The contract body. ' + ENVELOPE_TEXT_SHAPE + ' Prose is refused by name. REQUIRED when mode is "replace"; on "patch" it is validated only if sent.' },
+                workstream_id: { type: 'string', description: 'The workstream this contract governs. A workstream may carry several contracts, so this is a FIELD and not the key.' },
+                to_agent: { type: 'string', description: 'Optional: the party this contract is addressed to. ' + SEAT_RESOLUTION_RULE },
+                phase: { type: 'string', enum: [...ENVELOPE_PHASES], description: `The contract's LIFECYCLE state — ${ENVELOPE_PHASES.join(' → ')}, defaulting to "${ENVELOPE_PHASE_DEFAULT}". Held to the same transition machine as an envelope's: each phase permits itself, backward is refused, "${ENVELOPE_PHASES[ENVELOPE_PHASES.length - 1]}" is terminal.` },
+                status: { type: 'string', enum: [...ENVELOPE_STATUSES], description: `Contract status. Defaults to "${ENVELOPE_STATUS_DEFAULT}" when omitted.` },
+            },
+            required: ['contract_key', 'mode'],
+        },
+    },
+    {
+        name: 'fabric_grounding_put',
+        description: 'Write the GROUNDING RECEIPT for a contract and an identity — the served proof that this identity performed the contract\'s declared KB reads and checked the answers against the code. It is what a guard reads before it will let a doer edit a file, which is the whole point: grounding becomes a record written on an observed event rather than an obligation an agent has to remember. The key is DERIVED as "' + KEY_GROUNDING + '<contract_key>-<identity>", both segments slugified through the one normalizer; a client-supplied file_id/key is REFUSED, as is any clock (occurred_at/received_at/created_at) — a caller-stamped grounding could claim it happened at a time no write did, which is precisely the audit trail this record exists to be. `reads` is REQUIRED and NON-EMPTY, each entry carrying ' + GROUNDING_READ_FIELD_NAMES.join(', ') + '. A READ WITH sources_count 0 IS REFUSED BY NAME (FABRIC_GROUNDING_READ_UNSOURCED): an answer that cited no sources is the model speaking from its own weights, which is the ungrounded answer the gate exists to catch — recording it faithfully would still produce a receipt a guard lets through. `verification` is REQUIRED and NON-EMPTY, each entry carrying ' + GROUNDING_VERIFICATION_FIELD_NAMES.join(', ') + ' — a grounding with no verified claim is not a grounding, and `file_symbol` (path::symbol) is required so the verifier can re-run the check instead of taking the doer\'s word. `flags` is REQUIRED and MAY BE EMPTY: "I found no flags" is a claim a doer must make explicitly, and an absent array is indistinguishable from a doer who never looked. The `contract_key` must RESOLVE to an existing contract record (FABRIC_GROUNDING_CONTRACT_UNKNOWN) and that contract must itself pass the contract-body rules (FABRIC_GROUNDING_CONTRACT_MALFORMED, raised by running the SAME validator fabric_contract_put runs) — a doer cannot ground against a contract that never stated what to read. Call fabric_vocabulary for the published field tables and refusal codes rather than hand-keeping a copy.',
+        mutating: true,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                contract_key: { type: 'string', description: 'The contract being grounded against. Must resolve to an existing contract record, and that contract must carry knowledge.reads[] and principles_carried.' },
+                identity: { type: 'string', description: 'The identity (party label) that performed the reads. One grounding per (contract, identity) — a key naming only the contract would answer "has this identity grounded" for whoever grounded first.' },
+                reads: {
+                    type: 'array',
+                    description: 'REQUIRED, non-empty. One entry per KB read the contract declared. Fields: ' + GROUNDING_READ_FIELD_NAMES.join(', ') + '. `question` is passed verbatim as ask_question_to_app.user_input. sources_count 0 is REFUSED.',
+                    items: { type: 'object' },
+                },
+                verification: {
+                    type: 'array',
+                    description: 'REQUIRED, non-empty. One entry per KB claim checked against the code. Fields: ' + GROUNDING_VERIFICATION_FIELD_NAMES.join(', ') + '.',
+                    items: { type: 'object' },
+                },
+                flags: {
+                    type: 'array',
+                    description: 'REQUIRED, MAY BE EMPTY. The flags raised to the hiring party before work began. Empty means "I looked and found none" — an explicit claim, not an omission.',
+                    items: { type: 'string' },
+                },
+                mode: { type: 'string', enum: [...WRITE_MODES], description: 'REQUIRED, no default. "replace" = this call IS the grounding record. "patch" = merge these fields only.' },
+            },
+            required: ['contract_key', 'identity', 'reads', 'verification', 'flags', 'mode'],
         },
     },
     {
