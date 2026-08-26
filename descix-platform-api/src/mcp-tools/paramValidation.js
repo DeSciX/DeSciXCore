@@ -215,6 +215,39 @@ export const VALIDATION_PHASES = Object.freeze([...PHASE_WAIVERS.keys()]);
 export const DEFAULT_VALIDATION_PHASE = VALIDATION_PHASE.PRE_INJECTION;
 
 /**
+ * Refuse a call site that STATES NO PHASE, by name.
+ *
+ * Distinct from `paramWaiverForPhase`, which defaults an omitted phase to the strict view. That
+ * default is right for a PUBLISHED library entry point (a third-party consumer that forgets the
+ * argument over-refuses rather than under-refuses). It is wrong for an INTERNAL choke point with a
+ * known, small set of callers — there an unstated phase means a door was added without anybody
+ * measuring which side of the injector it stands on, and inheriting "strict" would hide that.
+ *
+ * Owned here rather than written at each choke point: two copies of this refusal is the same
+ * mirror-drift the phase contract exists to remove, one layer up.
+ *
+ * @param {string|undefined} phase
+ * @param {object} [opts] { commandName, surface, guidance }
+ * @throws {Error} `code:'INVALID_VALIDATION_PHASE'` (statusCode 500) when `phase` is undefined
+ */
+export function requireValidationPhase(phase, opts = {}) {
+    if (phase !== undefined) return;
+    const { commandName = 'command', surface = null, guidance = '' } = opts;
+    const err = new Error(
+        `${commandName}: called${surface ? ` from '${surface}'` : ''} without a validation phase. `
+        + `Pass one of: ${VALIDATION_PHASES.join(', ')}. A door holding a CALLER-AUTHORED bag is `
+        + `'${VALIDATION_PHASE.PRE_INJECTION}' (nothing waved; platform keys refused by name); a door `
+        + `downstream of the platform's parameter injector is '${VALIDATION_PHASE.POST_INJECTION}'. `
+        + `Refusing rather than guessing — the phase decides whether a caller-authored '_descix' is `
+        + `waved past this command's published contract.${guidance ? ' ' + guidance : ''}`
+    );
+    err.code = 'INVALID_VALIDATION_PHASE';
+    err.statusCode = 500;
+    err.data = { command: commandName, phase, accepted_phases: [...VALIDATION_PHASES], ...(surface ? { surface } : {}) };
+    throw err;
+}
+
+/**
  * Resolve a phase word to its waiver predicate. Consumers that do their own unknown-key loop
  * (DeSciX_Cloud `assertKnownParams`) ask HERE rather than branching on the phase themselves —
  * a hand-written `phase === 'post-injection' ? isPlatformInjectedParam : ...` at a consumer is the
