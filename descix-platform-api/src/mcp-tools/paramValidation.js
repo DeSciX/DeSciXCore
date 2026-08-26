@@ -75,12 +75,20 @@ export const PARAM_ALIASES = Object.freeze({
  *
  * WHAT DOES NOT QUALIFY — and this is the rule that keeps the list honest. It is NOT a parking
  * space for caller-facing params. Anything listed here is waved past the published contract on
- * EVERY command, so a key that a caller can legitimately send is exactly the wrong thing to add:
- * it converts a named refusal ("unknown parameter 'kb_id'") back into the silent drop this
- * module exists to kill. A key the platform injects but ALSO deliberately refuses from callers
- * (`interaction_owner_id`, stripped by interactionSession.stripClientRoomOwner precisely so the
- * boundary can refuse it by name) is likewise excluded — allow-listing it would pre-empt that
- * refusal.
+ * EVERY command IN THE POST-INJECTION VIEW, so a key that a caller can legitimately send is
+ * exactly the wrong thing to add: it converts a named refusal ("unknown parameter 'kb_id'") back
+ * into the silent drop this module exists to kill. A key the platform injects but ALSO
+ * deliberately refuses from callers (`interaction_owner_id`, stripped by
+ * interactionSession.stripClientRoomOwner precisely so the boundary can refuse it by name) is
+ * likewise excluded — allow-listing it would pre-empt that refusal.
+ *
+ * THE 24 -> 21 NARROWING. The superseded second derivation (DeSciX_Cloud commandParamGuard's
+ * deleted RESERVED_PARAM_KEYS) carried 24 names. Three of them are NOT platform writes and are
+ * dropped here: `target_community_id`, `target_user_id` and `reactor_id` are CALLER-SENT fallback
+ * READS on the Discord bot's own bag (apiFront.js:1150 `params.user_id || params.target_user_id ||
+ * params.reactor_id`; apiFront.js:1234 `params.community_id || params.target_community_id`) — the
+ * platform reads them, it never writes them, so listing them would wave three caller-authored keys
+ * past every command's contract. The remaining 21 each have a named injector site below.
  *
  * THE GROUPS, and why each exists. Injector sites are DeSciX_Cloud/microservice/services/.
  */
@@ -152,6 +160,89 @@ const PLATFORM_INJECTED_PARAM_SET = new Set(PLATFORM_INJECTED_PARAMS);
  */
 export function isPlatformInjectedParam(key) {
     return PLATFORM_INJECTED_PARAM_SET.has(key);
+}
+
+/**
+ * THE TWO VIEWS OF THE OWNER, and the PHASE that selects one (CEO ruling 2026-08-26, option B).
+ *
+ * ONE SOURCE (the list above), TWO DERIVED VIEWS. The list answers "did the PLATFORM write this
+ * key?". That is a DIFFERENT question from "may this caller send this key HERE?", and the answer
+ * to the second depends entirely on where the validator is standing relative to the injector:
+ *
+ *   'pre-injection'  — the bag is CALLER-AUTHORED and nothing has been written into it yet, so
+ *                      NOTHING is waved. Every key the published schema does not declare is
+ *                      refused BY NAME, the owner's own keys INCLUDED. The strict view.
+ *   'post-injection' — the bag has already passed the injector, so the owner's keys are the
+ *                      PLATFORM's own writes and are waved; everything else is still refused by
+ *                      name.
+ *
+ * WHY THE PHASE IS PART OF THE CALL AND IS NEVER INFERRED (measured 2026-08-26). BOTH MCP doors
+ * validate BEFORE injection — apiFront.js tools/call against the caller's `arguments`, and
+ * serviceCommands.js `execute_remote_command` against the caller's inner bag. Waving the owner's
+ * keys THERE let a caller-authored `_descix: { user: { id: 'VICTIM' } }` ride a schema that
+ * declares no such property straight through the boundary, and `_descix.user` is read AS IDENTITY
+ * downstream (leaseAuthority.js `params?.user || params?._descix?.user`). One view cannot be
+ * correct at both places, and a validator that GUESSES which side of the injector it is on guesses
+ * wrong exactly where guessing is most expensive.
+ *
+ * SO: OMITTED MEANS STRICT — a forgotten phase over-refuses (loudly, at the call site's own door)
+ * and can never under-refuse — and an UNKNOWN phase word is REFUSED BY NAME rather than quietly
+ * resolved to either view. There is no third view and no per-command exception list; a surface
+ * that needs a key waved DECLARES it in its schema.
+ */
+export const VALIDATION_PHASE = Object.freeze({
+    PRE_INJECTION: 'pre-injection',
+    POST_INJECTION: 'post-injection',
+});
+
+/**
+ * phase word -> the predicate that decides whether a key is WAVED past the unknown-parameter gate.
+ * THE one owner of that mapping; nobody builds a second waiver.
+ *
+ * A Map, not an object literal: `PHASE_WAIVERS['constructor']` on a plain object returns a truthy
+ * INHERITED function, which would make a prototype key name a "valid" phase and silently wave the
+ * whole owner through — a gate that cannot fail on the one input class designed to attack it.
+ */
+const PHASE_WAIVERS = new Map([
+    [VALIDATION_PHASE.PRE_INJECTION, () => false],
+    [VALIDATION_PHASE.POST_INJECTION, isPlatformInjectedParam],
+]);
+
+/** The phase words this validator accepts. Derived from the table; never hand-listed. */
+export const VALIDATION_PHASES = Object.freeze([...PHASE_WAIVERS.keys()]);
+
+/** The view a call gets when it names no phase. Strict, on purpose. */
+export const DEFAULT_VALIDATION_PHASE = VALIDATION_PHASE.PRE_INJECTION;
+
+/**
+ * Resolve a phase word to its waiver predicate. Consumers that do their own unknown-key loop
+ * (DeSciX_Cloud `assertKnownParams`) ask HERE rather than branching on the phase themselves —
+ * a hand-written `phase === 'post-injection' ? isPlatformInjectedParam : ...` at a consumer is the
+ * second derivation this whole module exists to prevent.
+ *
+ * @param {string} [phase] one of VALIDATION_PHASES; `undefined` => DEFAULT_VALIDATION_PHASE
+ * @param {object} [opts]  { commandName, surface } for the refusal message
+ * @returns {(key:string)=>boolean} true when the key is waved past the unknown-parameter gate
+ * @throws {Error} `code:'INVALID_VALIDATION_PHASE'` (statusCode 500) on any other value
+ */
+export function paramWaiverForPhase(phase, opts = {}) {
+    const resolved = phase === undefined ? DEFAULT_VALIDATION_PHASE : phase;
+    const waiver = PHASE_WAIVERS.get(resolved);
+    if (!waiver) {
+        const { commandName = 'command', surface = 'MCP' } = opts;
+        const err = new Error(
+            `${commandName}: unknown validation phase ${JSON.stringify(phase)} at the ${surface} boundary. `
+            + `Accepted phases: ${VALIDATION_PHASES.join(', ')}. Omit the phase to get the STRICT `
+            + `('${DEFAULT_VALIDATION_PHASE}') view. This is a WIRING defect at the CALL SITE, not a caller `
+            + `error: the phase states which side of the platform's parameter injector this validator is `
+            + `standing on, and guessing it is how a caller-authored '_descix' reaches an identity read.`
+        );
+        err.code = 'INVALID_VALIDATION_PHASE';
+        err.statusCode = 500;
+        err.data = { command: commandName, phase, accepted_phases: [...VALIDATION_PHASES], surface };
+        throw err;
+    }
+    return waiver;
 }
 
 /**
@@ -310,33 +401,63 @@ export function suggestParam(unknownKey, validNames) {
  * valid, so we validate nothing rather than fabricate a contract (a hardcoded guess here would
  * be the same anti-pattern in a new place). Commands are onboarded by DECLARING a schema.
  *
+ * PHASE IS PART OF THE CALL. `opts.phase` names which side of the platform's parameter injector
+ * this door stands on; see VALIDATION_PHASE above. It is resolved BEFORE the no-schema early
+ * return, so a mis-wired phase is refused on every command rather than only on the ones that
+ * happen to publish a schema — a gate that can be skipped by the shape of its input is not a gate.
+ *
  * @param {object} schema        plain JSON-Schema object ({ properties, required })
  * @param {object} params        the caller-supplied arguments
  * @param {object} [opts]
  * @param {string} [opts.commandName]  name used in the error message
  * @param {string} [opts.surface]      e.g. 'MCP tools/call' — where the rejection happened
- * @throws {Error} with `code = 'INVALID_PARAMS'` on any violation
+ * @param {string} [opts.phase]        VALIDATION_PHASE value; omitted => strict (pre-injection)
+ * @throws {Error} `code='INVALID_PARAMS'` on any violation; `code='INVALID_VALIDATION_PHASE'`
+ *                 when `opts.phase` is not a known phase word
  */
 export function validateParamsAgainstSchema(schema, params, opts = {}) {
-    const { commandName = 'command', surface = 'MCP' } = opts;
+    const { commandName = 'command', surface = 'MCP', phase } = opts;
+    // FIRST, and deliberately ahead of the no-schema early return: an unknown phase is a wiring
+    // defect and must not be reachable-but-silent on the commands that declare no schema.
+    const isWaived = paramWaiverForPhase(phase, { commandName, surface });
+
     const properties = schema && typeof schema === 'object' ? schema.properties : null;
     if (!properties || typeof properties !== 'object') return; // undeclared => nothing to check
 
     const validNames = Object.keys(properties);
     const supplied = params && typeof params === 'object' ? params : {};
-    const unknown = Object.keys(supplied).filter(k => !(k in properties) && !isPlatformInjectedParam(k));
+    const unknown = Object.keys(supplied).filter(k => !(k in properties) && !isWaived(k));
     if (unknown.length > 0) {
+        // A refused key that the PLATFORM injects is a different mistake from a typo, and saying so
+        // is the difference between a caller hunting their own spelling and a caller learning they
+        // may not author that key AT ALL. Said ONCE, as a trailing clause naming the offenders:
+        // repeating it per key turns an 18-key refusal into a wall nobody reads. The annotation
+        // consumes the same membership predicate — it is not a second list.
+        const injectedOffenders = unknown.filter(isPlatformInjectedParam);
         const details = unknown.map(k => {
+            if (isPlatformInjectedParam(k)) return `'${k}'`;
             const hint = suggestParam(k, validNames);
             return hint ? `'${k}' (did you mean '${hint}'?)` : `'${k}'`;
         });
+        const injectedNote = injectedOffenders.length
+            ? ` ${injectedOffenders.map(k => `'${k}'`).join(', ')} ${injectedOffenders.length > 1 ? 'are' : 'is'} `
+              + `PLATFORM-INJECTED: the platform writes ${injectedOffenders.length > 1 ? 'them' : 'it'} itself, `
+              + `DOWNSTREAM of this boundary — a caller may not supply ${injectedOffenders.length > 1 ? 'them' : 'it'}.`
+            : '';
         const err = new Error(
             `${commandName}: unknown parameter${unknown.length > 1 ? 's' : ''} ${details.join(', ')}. ` +
             `Accepted parameters: ${validNames.join(', ')}. ` +
-            `Rejected at the ${surface} boundary — the parameter was NOT applied, and no default was substituted.`
+            `Rejected at the ${surface} boundary — the parameter was NOT applied, and no default was substituted.` +
+            injectedNote
         );
         err.code = 'INVALID_PARAMS';
-        err.data = { command: commandName, unknown_parameters: unknown, accepted_parameters: validNames };
+        err.data = {
+            command: commandName,
+            unknown_parameters: unknown,
+            accepted_parameters: validNames,
+            validation_phase: phase === undefined ? DEFAULT_VALIDATION_PHASE : phase,
+            ...(injectedOffenders.length ? { platform_injected_parameters: injectedOffenders } : {}),
+        };
         throw err;
     }
 
@@ -393,9 +514,16 @@ export function toolAcceptsParam(tools, toolName, paramName) {
     return !!(properties && Object.prototype.hasOwnProperty.call(properties, paramName));
 }
 
-/** Convenience: validate against a tool definition list (name -> inputSchema). */
+/**
+ * Convenience: validate against a tool definition list (name -> inputSchema).
+ * `opts.phase` is ferried to the validator unchanged, and is resolved even when the tool is
+ * unknown so a mis-wired phase cannot hide behind a typo'd tool name.
+ */
 export function validateToolParams(tools, toolName, params, opts = {}) {
     const tool = Array.isArray(tools) ? tools.find(t => t && t.name === toolName) : null;
-    if (!tool || !tool.inputSchema) return; // unknown tool is the dispatcher's error, not ours
+    if (!tool || !tool.inputSchema) {
+        paramWaiverForPhase(opts.phase, { commandName: toolName, surface: opts.surface });
+        return; // unknown tool is the dispatcher's error, not ours
+    }
     validateParamsAgainstSchema(tool.inputSchema, params, { commandName: toolName, ...opts });
 }

@@ -19,6 +19,7 @@ import {
     validateParamsAgainstSchema,
     validateToolParams,
     toolAcceptsParam,
+    VALIDATION_PHASE,
 } from '../src/mcp-tools/index.js';
 import {
     BEAT_CLOCK_FIELD_NAMES, BEAT_CLOCK_AGE_FIELDS, ENVELOPE_SECTIONS, fabricVocabulary,
@@ -88,10 +89,14 @@ function conformingSample(propertySchema) {
     return TYPE_SAMPLES[declared];
 }
 
-test('platform-injected params are never treated as unknown', () => {
+test('platform-injected params are never treated as unknown IN THE POST-INJECTION VIEW', () => {
+    // The view a door DOWNSTREAM of the injector gets. Upstream of it the same keys are
+    // caller-authored and are refused by name — see platform-injected-params-owner.test.js, which
+    // iterates both views off the exported phase table.
     const bag = { app_id: 'x', user_input: 'q' };
     for (const p of PLATFORM_INJECTED_PARAMS) bag[p] = conformingSample(askSchema.properties[p]);
-    assert.doesNotThrow(() => validateParamsAgainstSchema(askSchema, bag, { commandName: 'ask_question_to_app' }));
+    assert.doesNotThrow(() => validateParamsAgainstSchema(askSchema, bag,
+        { commandName: 'ask_question_to_app', phase: VALIDATION_PHASE.POST_INJECTION }));
 });
 
 test('no declared schema => no claim (we do not invent a contract)', () => {
