@@ -55,14 +55,104 @@ export const PARAM_ALIASES = Object.freeze({
 });
 
 /**
- * Params the PLATFORM itself injects onto a command's params after the MCP boundary
- * (apiFront auth middleware / the gateway's auth-context forwarding). A caller never sends
- * these; validation runs BEFORE injection, but they are allow-listed so a re-validation on an
- * already-decorated bag can never fail. NOT a place to park caller-facing params.
+ * THE ONE OWNER of "which keys does the PLATFORM ITSELF put into a params bag?".
+ *
+ * WHY ONE OWNER. Two derivations of this fact disagreed silently, and the Powch microservice
+ * built its closed per-command schemas against one of them — so the platform's own signed
+ * `_descix` envelope, injected downstream of every boundary check by serviceManifestManager.js
+ * proxyToExternalService, was refused at Powch's door and DEV login went down. Every surface that
+ * needs the answer reads it here; nobody re-derives it.
+ *
+ * WHAT QUALIFIES. A key belongs here iff PLATFORM code WRITES it into a params bag after the
+ * caller's bag has been taken, i.e. there is an INJECTOR. Two consumers read this list and they
+ * sit on opposite sides of that write:
+ *   - the BOUNDARY validators (`validateParamsAgainstSchema`, reached from MCP tools/call and the
+ *     execute_remote_command gateway) run BEFORE injection, so the list is what keeps a
+ *     RE-validation of an already-decorated bag from failing;
+ *   - the HANDLER-level guard (Cloud `assertKnownParams`) and every downstream mesh service run
+ *     AFTER injection, so the list is what stops a framework key being reported as an unknown
+ *     parameter the caller never sent.
+ *
+ * WHAT DOES NOT QUALIFY — and this is the rule that keeps the list honest. It is NOT a parking
+ * space for caller-facing params. Anything listed here is waved past the published contract on
+ * EVERY command, so a key that a caller can legitimately send is exactly the wrong thing to add:
+ * it converts a named refusal ("unknown parameter 'kb_id'") back into the silent drop this
+ * module exists to kill. A key the platform injects but ALSO deliberately refuses from callers
+ * (`interaction_owner_id`, stripped by interactionSession.stripClientRoomOwner precisely so the
+ * boundary can refuse it by name) is likewise excluded — allow-listing it would pre-empt that
+ * refusal.
+ *
+ * THE GROUPS, and why each exists. Injector sites are DeSciX_Cloud/microservice/services/.
  */
+
+/**
+ * (A) REQUEST ENVELOPE — spread into EVERY params bag at construction on the /apifront door
+ * (apiFront.js `const params = { ...requestJSON.params, user_id_from_req, wallet_address_from_req,
+ * signature_from_req, guild_id }`). Present on every call, which is why omitting them once
+ * refused every live call on the platform.
+ */
+const ENVELOPE_KEYS = ['user_id_from_req', 'wallet_address_from_req', 'signature_from_req', 'guild_id'];
+
+/**
+ * (B) RESOLVED IDENTITY / AUTH — what the auth middleware decided the caller IS, written over
+ * anything the client sent (apiFront.js: `params.user`, `params.user_id`, `params.wallet_address`,
+ * `params.signature`, `params.delegate`, `params.service_account`, `params.master_wallet_address`;
+ * commandHandlers/serviceCommands.js `execute_remote_command` re-forwards `user`, `community_id`,
+ * `access_token`, `service_account` onto the inner bag so the inner command runs as the SAME
+ * caller). These are the platform's answer to "who is calling", never the caller's.
+ */
+const IDENTITY_KEYS = [
+    'user', 'user_id', 'community_id', 'access_token', 'wallet_address', 'signature',
+    'delegate', 'service_account', 'master_wallet_address',
+];
+
+/**
+ * (C) SERVER-DERIVED REQUEST CONTEXT — read from headers/session and written onto params
+ * (apiFront.js `params.currentLoginStatus`, `params.source_guild_id`, `params.server_origin` from
+ * the Origin/Referer headers). Deliberately server-derived: `server_origin` exists BECAUSE a
+ * client-supplied origin would be a redirect-URI injection, and the same line deletes any
+ * `client_origin` the caller sent.
+ */
+const REQUEST_CONTEXT_KEYS = ['currentLoginStatus', 'source_guild_id', 'server_origin'];
+
+/**
+ * (D) DISCORD COMMAND ADAPTER — apiFront rewrites `replyToDiscordUserCloudFunction` into a RAG
+ * call and writes the resolved routing onto params (apiFront.js `params.user_input`,
+ * `params.app_id`, `params.streaming`, `params.messageData`). The bot never sends these under
+ * these names; the adapter manufactures them.
+ */
+const DISCORD_ADAPTER_KEYS = ['user_input', 'app_id', 'streaming', 'messageData'];
+
+/**
+ * (E) MESH CALLER-AUTH ENVELOPE — the signed caller context apifront attaches to every outbound
+ * mesh call (serviceManifestManager.js: `enrichedParams._descix = { user, entitlements, serviceId,
+ * timestamp }`, then `enrichedParams._descix = signedContext`). It is added AFTER both boundary
+ * validators have run and travels as a sibling of the caller's own params in the proxied body, so
+ * a downstream service that validates its body sees it. This is the key whose absence from this
+ * list took DEV login down.
+ */
+const MESH_CONTEXT_KEYS = ['_descix'];
+
 export const PLATFORM_INJECTED_PARAMS = Object.freeze([
-    'user', 'community_id', 'access_token', 'service_account',
+    ...ENVELOPE_KEYS,
+    ...IDENTITY_KEYS,
+    ...REQUEST_CONTEXT_KEYS,
+    ...DISCORD_ADAPTER_KEYS,
+    ...MESH_CONTEXT_KEYS,
 ]);
+
+/** Membership set, derived once from the list. Nothing else may build a second one. */
+const PLATFORM_INJECTED_PARAM_SET = new Set(PLATFORM_INJECTED_PARAMS);
+
+/**
+ * THE membership contract. Consumers ask this instead of constructing their own Set from the
+ * array — a hand-built Set beside the list is the same mirror this module exists to remove.
+ * @param {string} key
+ * @returns {boolean}
+ */
+export function isPlatformInjectedParam(key) {
+    return PLATFORM_INJECTED_PARAM_SET.has(key);
+}
 
 /**
  * JSON-Schema `type` word -> the predicate that decides whether a runtime value IS that type.
@@ -234,9 +324,7 @@ export function validateParamsAgainstSchema(schema, params, opts = {}) {
 
     const validNames = Object.keys(properties);
     const supplied = params && typeof params === 'object' ? params : {};
-    const injected = new Set(PLATFORM_INJECTED_PARAMS);
-
-    const unknown = Object.keys(supplied).filter(k => !(k in properties) && !injected.has(k));
+    const unknown = Object.keys(supplied).filter(k => !(k in properties) && !isPlatformInjectedParam(k));
     if (unknown.length > 0) {
         const details = unknown.map(k => {
             const hint = suggestParam(k, validNames);

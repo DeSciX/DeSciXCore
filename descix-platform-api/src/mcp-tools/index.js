@@ -64,6 +64,7 @@ export {
 export {
     PARAM_ALIASES,
     PLATFORM_INJECTED_PARAMS,
+    isPlatformInjectedParam,
     SCHEMA_TYPE_PREDICATES,
     SUPPORTED_SCHEMA_TYPES,
     runtimeTypeOf,

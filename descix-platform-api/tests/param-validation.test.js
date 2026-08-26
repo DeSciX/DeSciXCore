@@ -14,6 +14,7 @@ import {
     NATIVE_MCP_TOOLS,
     PARAM_ALIASES,
     PLATFORM_INJECTED_PARAMS,
+    declaredTypesOf,
     suggestParam,
     validateParamsAgainstSchema,
     validateToolParams,
@@ -69,9 +70,27 @@ test('missing required params fail loud', () => {
     );
 });
 
+/**
+ * A value that SATISFIES a property's declared type, chosen from the owner's type vocabulary so
+ * an unknown type word fails loud instead of silently sampling `undefined`.
+ *
+ * WHY THE FIXTURE NEEDS THIS: the allow-list waves an injected key past the UNKNOWN check, never
+ * past the TYPE check — and some injected keys ARE declared on some commands (`streaming` is
+ * `boolean` on ask_question_to_app). A fixture that stamped the string 'injected' onto every key
+ * was therefore testing the type gate, not the unknown gate, and would fail for a reason that has
+ * nothing to do with what the test claims to measure.
+ */
+const TYPE_SAMPLES = { string: 's', number: 1, integer: 1, boolean: true, array: [], object: {}, null: null };
+function conformingSample(propertySchema) {
+    const [declared] = declaredTypesOf(propertySchema || {});
+    if (!declared) return 'injected';
+    assert.ok(declared in TYPE_SAMPLES, `no sample value for declared type '${declared}'`);
+    return TYPE_SAMPLES[declared];
+}
+
 test('platform-injected params are never treated as unknown', () => {
     const bag = { app_id: 'x', user_input: 'q' };
-    for (const p of PLATFORM_INJECTED_PARAMS) bag[p] = 'injected';
+    for (const p of PLATFORM_INJECTED_PARAMS) bag[p] = conformingSample(askSchema.properties[p]);
     assert.doesNotThrow(() => validateParamsAgainstSchema(askSchema, bag, { commandName: 'ask_question_to_app' }));
 });
 
