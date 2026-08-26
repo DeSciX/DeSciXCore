@@ -69,6 +69,7 @@ export {
     VALIDATION_PHASES,
     DEFAULT_VALIDATION_PHASE,
     paramWaiverForPhase,
+    requireValidationPhase,
     SCHEMA_TYPE_PREDICATES,
     SUPPORTED_SCHEMA_TYPES,
     runtimeTypeOf,
