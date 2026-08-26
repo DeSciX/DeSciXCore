@@ -378,8 +378,29 @@ export const CONTRACT_READ_FIELDS = Object.freeze([
 export const CONTRACT_READ_FIELD_NAMES = Object.freeze(CONTRACT_READ_FIELDS.map((f) => f.field));
 
 /**
- * The fields every entry of a grounding record's `reads` must carry — the declaration, repeated,
- * plus what only the execution knows.
+ * The KINDS of read a grounding receipt can report.
+ *
+ * A DOER GROUNDS ON TWO DIFFERENT THINGS and they are not the same act. A `kb` read asks a question
+ * of a corpus and is answerable only if sources came back. A `role` read fetches the doer's SERVED
+ * ROLE RECORD — a keyed document, not a retrieval — and has no sources to count: demanding one
+ * would force a doer to report a number that does not exist, and the honest report (zero) would be
+ * refused as ungrounded. So the kinds carry DIFFERENT FIELD TABLES and the unsourced rule is scoped
+ * to `kb`.
+ */
+export const GROUNDING_READ_KINDS = Object.freeze(['kb', 'role']);
+
+/** The discriminator itself — one row, shared by both tables, so the two can never disagree. */
+const READ_KIND_FIELD = Object.freeze({
+    field: 'kind', type: 'string',
+    expected: `one of ${GROUNDING_READ_KINDS.join(', ')}`,
+    description: 'Which kind of read this entry reports. `kb` = a corpus question (sources required); '
+        + '`role` = the served role record (role_id + updated_at instead).',
+    ok: (v) => typeof v === 'string' && GROUNDING_READ_KINDS.includes(v),
+});
+
+/**
+ * The fields every `kind: "kb"` entry of a grounding record's `reads` must carry — the declaration,
+ * repeated, plus what only the execution knows.
  *
  * `sources_count` IS THE LOAD-BEARING ONE. A read that returned no sources is not a read: the model
  * answered from its own weights, which is precisely the ungrounded answer the whole gate exists to
@@ -387,7 +408,8 @@ export const CONTRACT_READ_FIELD_NAMES = Object.freeze(CONTRACT_READ_FIELDS.map(
  * result, and it is REFUSED at zero rather than merely recorded, because a receipt that faithfully
  * records a failure is still a receipt a guard would let through.
  */
-export const GROUNDING_READ_FIELDS = Object.freeze([
+export const GROUNDING_KB_READ_FIELDS = Object.freeze([
+    READ_KIND_FIELD,
     ...CONTRACT_READ_FIELDS,
     Object.freeze({
         field: 'sources_count', type: 'integer',
@@ -409,7 +431,61 @@ export const GROUNDING_READ_FIELDS = Object.freeze([
     }),
 ]);
 
-export const GROUNDING_READ_FIELD_NAMES = Object.freeze(GROUNDING_READ_FIELDS.map((f) => f.field));
+export const GROUNDING_KB_READ_FIELD_NAMES = Object.freeze(GROUNDING_KB_READ_FIELDS.map((f) => f.field));
+
+/**
+ * The fields every `kind: "role"` entry must carry.
+ *
+ * `updated_at` IS THE POINT OF THE ROW. A role record read six weeks ago is not grounding — it is a
+ * memory of grounding — and the only way a verifier can tell the difference is the version the doer
+ * actually held. A role read is otherwise unlike a KB read in every respect, which is why it gets
+ * its own table rather than optional columns on the other one: optional columns make "which fields
+ * apply here" a thing the reader has to infer.
+ */
+export const GROUNDING_ROLE_READ_FIELDS = Object.freeze([
+    READ_KIND_FIELD,
+    Object.freeze({
+        field: 'role_id', type: 'string',
+        expected: 'a non-empty string — the role whose served record was read',
+        description: 'The role_id passed to the served role read, e.g. `orchestrate-platform`.',
+        ok: (v) => typeof v === 'string' && v.trim() !== '',
+    }),
+    Object.freeze({
+        field: 'updated_at', type: 'string',
+        expected: 'a non-empty string — the role record\'s own updated_at, as served',
+        description: 'The `updated_at` the role record carried when it was read. Reported verbatim: a stale '
+            + 'role read is a real defect and it is invisible without the version.',
+        ok: (v) => typeof v === 'string' && v.trim() !== '',
+    }),
+]);
+
+export const GROUNDING_ROLE_READ_FIELD_NAMES = Object.freeze(GROUNDING_ROLE_READ_FIELDS.map((f) => f.field));
+
+/**
+ * The tables, keyed by their discriminator, so a validator DISPATCHES on the kind instead of
+ * branching on it. A third kind is added here and nowhere else.
+ */
+export const GROUNDING_READ_FIELDS_BY_KIND = Object.freeze({
+    kb: GROUNDING_KB_READ_FIELDS,
+    role: GROUNDING_ROLE_READ_FIELDS,
+});
+
+/**
+ * The kind that must appear AT LEAST ONCE in every grounding record.
+ *
+ * A receipt made entirely of role reads proves the doer looked up its own job description. It does
+ * not prove it read the contract's corpus, which is the claim the gate exists to make.
+ */
+export const GROUNDING_REQUIRED_READ_KIND = 'kb';
+
+/**
+ * The verdicts a verification row may carry — CLOSED, because a guard branches on this value.
+ *
+ * Declared before the table that reads it, the same way `GROUNDING_FIELDS` is declared after
+ * `WRITE_MODES`: a set named in a row's `expected` string is interpolated from the one owner, never
+ * hand-typed beside it.
+ */
+export const GROUNDING_VERDICTS = Object.freeze(['CONFIRMED', 'FALSIFIED', 'UNDETERMINED']);
 
 /**
  * The fields every entry of a grounding record's `verification` must carry.
@@ -433,13 +509,16 @@ export const GROUNDING_VERIFICATION_FIELDS = Object.freeze([
     }),
     Object.freeze({
         field: 'verdict', type: 'string',
-        expected: 'a non-empty string — CONFIRMED, REFUTED, or the doer\'s own wording',
-        // A CLOSED ENUM WAS CONSIDERED AND REJECTED. The useful verdicts in practice are neither
-        // binary nor knowable in advance ("confirmed for envelope- keys, absent for contract-"),
-        // and a closed set here would push that nuance into prose nobody queries. The FIELD is
-        // required; its vocabulary is not the server's to fix.
-        description: 'The outcome of checking the claim against the artifact.',
-        ok: (v) => typeof v === 'string' && v.trim() !== '',
+        expected: `one of ${GROUNDING_VERDICTS.join(', ')}`,
+        // A CLOSED ENUM, because the reader of this field is a MACHINE. A verifier and a guard have
+        // to answer "did the code agree with the KB" without parsing English, and free text made
+        // that a string-match against wording no two doers chose the same way. UNDETERMINED is in
+        // the set precisely so nuance has somewhere to go that is not prose: a claim the doer could
+        // not settle is a real, reportable outcome, and forcing it into CONFIRMED is the failure.
+        description: 'The outcome of checking the claim against the artifact: CONFIRMED (the code agrees), '
+            + 'FALSIFIED (the code contradicts it), UNDETERMINED (the check could not settle it). '
+            + 'The detail belongs in `claim`; this field is read by machines.',
+        ok: (v) => typeof v === 'string' && GROUNDING_VERDICTS.includes(v),
     }),
 ]);
 
@@ -458,6 +537,7 @@ export const FABRIC_CONTRACT_REFUSAL_CODES = Object.freeze([
     'FABRIC_ENVELOPE_SECTIONS_MISSING',
     'FABRIC_CONTRACT_KNOWLEDGE_READS_MISSING',
     'FABRIC_CONTRACT_PRINCIPLES_EMPTY',
+    'FABRIC_CONTRACT_KEY_INVALID',
     'FABRIC_SERVER_OWNED_FIELD',
 ]);
 
@@ -484,6 +564,70 @@ export const FABRIC_GROUNDING_REFUSAL_CODES = Object.freeze([
 export const WRITE_MODES = Object.freeze(['replace', 'patch']);
 
 /**
+ * What a flag's DISPOSITION may be — CLOSED, and read by the same machines that read a verdict.
+ *
+ *   open     — raised to the hiring party; no answer yet. The doer is working around it or waiting.
+ *   ruled    — the hiring party ANSWERED it, and `resolution` carries the ruling.
+ *   resolved — it turned out not to be a defect, or the doer settled it itself; `resolution` says how.
+ */
+export const GROUNDING_FLAG_DISPOSITIONS = Object.freeze(['open', 'ruled', 'resolved']);
+
+/**
+ * The dispositions that REQUIRE a non-empty `resolution`.
+ *
+ * "Ruled" and "resolved" are both claims that something was SETTLED, and a settlement nobody wrote
+ * down is indistinguishable from one that never happened — the same rule as `flags` being required
+ * but permitted empty. `open` is exempt because there is genuinely nothing to record yet.
+ */
+export const GROUNDING_FLAG_RESOLUTION_REQUIRED_FOR = Object.freeze(['ruled', 'resolved']);
+
+/**
+ * The fields every entry of a grounding record's `flags` must carry.
+ *
+ * A FLAG IS A RECORD, NOT A SENTENCE. A flags array of bare strings could be counted and nothing
+ * else: a verifier could not tell an answered flag from an abandoned one, and a guard could not
+ * refuse a doer that raised a blocker and worked through it anyway. `disposition` is the field that
+ * makes that answerable, and it is why a string entry is REFUSED BY INDEX rather than wrapped —
+ * wrapping would silently invent a disposition the doer never claimed.
+ */
+export const GROUNDING_FLAG_FIELDS = Object.freeze([
+    Object.freeze({
+        field: 'id', type: 'string',
+        expected: 'a non-empty string — a stable handle for this flag',
+        description: 'A short id the parties can quote back, e.g. FLAG-4. It is how a ruling names its subject.',
+        ok: (v) => typeof v === 'string' && v.trim() !== '',
+    }),
+    Object.freeze({
+        field: 'kind', type: 'string',
+        expected: 'a non-empty string — what class of problem this is',
+        description: 'The doer\'s own classification, e.g. contract-defect, platform-defect, ambiguity.',
+        ok: (v) => typeof v === 'string' && v.trim() !== '',
+    }),
+    Object.freeze({
+        field: 'detail', type: 'string',
+        expected: 'a non-empty string — what was actually observed',
+        description: 'What the doer found, in enough detail that the hiring party can rule on it without asking.',
+        ok: (v) => typeof v === 'string' && v.trim() !== '',
+    }),
+    Object.freeze({
+        field: 'disposition', type: 'string',
+        expected: `one of ${GROUNDING_FLAG_DISPOSITIONS.join(', ')}`,
+        description: `Where the flag stands. ${GROUNDING_FLAG_RESOLUTION_REQUIRED_FOR.join(' and ')} REQUIRE a `
+            + 'non-empty `resolution`; `open` does not.',
+        ok: (v) => typeof v === 'string' && GROUNDING_FLAG_DISPOSITIONS.includes(v),
+    }),
+    Object.freeze({
+        field: 'resolution', type: 'string',
+        expected: 'a string — the ruling or the reason it was settled (may be empty ONLY while `open`)',
+        description: 'How it was settled, quoted from the ruling where there is one. Required non-empty when '
+            + `disposition is ${GROUNDING_FLAG_RESOLUTION_REQUIRED_FOR.join(' or ')}.`,
+        ok: (v) => typeof v === 'string',
+    }),
+]);
+
+export const GROUNDING_FLAG_FIELD_NAMES = Object.freeze(GROUNDING_FLAG_FIELDS.map((f) => f.field));
+
+/**
  * The top-level shape of `fabric_grounding_put`, PUBLISHED so the plugin's `/ground` skill and its
  * guards GENERATE their copy instead of hand-keeping one.
  *
@@ -497,15 +641,26 @@ export const WRITE_MODES = Object.freeze(['replace', 'patch']);
  */
 export const GROUNDING_FIELDS = Object.freeze([
     Object.freeze({ name: 'contract_key', type: 'string', required: true,
-        description: 'The contract this grounding is for. Must resolve to an existing contract record.' }),
+        description: 'The FULL stored key of the contract this grounding is for — exactly as the contract '
+            + `record's own contract_key field carries it, prefix included ("${KEY_CONTRACT}..."). Nothing is `
+            + 'stripped and nothing is prepended.' }),
     Object.freeze({ name: 'identity', type: 'string', required: true,
         description: 'The identity (party label) that performed the reads.' }),
     Object.freeze({ name: 'reads', type: 'object[]', required: true,
-        description: `Non-empty. Each entry carries ${GROUNDING_READ_FIELD_NAMES.join(', ')}.` }),
+        description: `Non-empty, and at least one entry of kind '${GROUNDING_REQUIRED_READ_KIND}'. Each entry `
+            + `carries \`kind\` (${GROUNDING_READ_KINDS.join(' | ')}) and the fields of that kind's table: `
+            + `kb → ${GROUNDING_KB_READ_FIELD_NAMES.join(', ')}; role → ${GROUNDING_ROLE_READ_FIELD_NAMES.join(', ')}.` }),
     Object.freeze({ name: 'verification', type: 'object[]', required: true,
-        description: `Non-empty. Each entry carries ${GROUNDING_VERIFICATION_FIELD_NAMES.join(', ')}.` }),
-    Object.freeze({ name: 'flags', type: 'string[]', required: true,
-        description: 'Flags raised before work. REQUIRED but may be empty — "no flags" is an explicit claim, not an omission.' }),
+        description: `Non-empty. Each entry carries ${GROUNDING_VERIFICATION_FIELD_NAMES.join(', ')}; `
+            + `verdict is one of ${GROUNDING_VERDICTS.join(', ')}.` }),
+    Object.freeze({ name: 'flags', type: 'object[]', required: true,
+        description: `Flags raised before work, as OBJECTS carrying ${GROUNDING_FLAG_FIELD_NAMES.join(', ')} — a `
+            + 'bare string is refused by index. REQUIRED but may be empty: "no flags" is an explicit claim, '
+            + 'not an omission.' }),
+    Object.freeze({ name: 'phase', type: 'string', required: false,
+        description: 'OPTIONAL. A slug for the phase of work this receipt covers, appended as a THIRD key '
+            + 'segment. One contract can be grounded more than once by one identity when the work has '
+            + 'phases; without it, the second grounding would overwrite the first.' }),
     Object.freeze({ name: 'mode', type: 'string', required: true,
         description: `One of ${WRITE_MODES.join(', ')}. No default, like every keyed write on this surface.` }),
 ]);
@@ -895,8 +1050,13 @@ export function fabricVocabulary() {
         // server-derived — a caller supplying `file_id` or `key` is refused — and they are published
         // so a READER can find a record it did not write.
         key_templates: {
-            contract: `${KEY_CONTRACT}<contract_key>`,
-            grounding: `${KEY_GROUNDING}<contract_key>-<identity>`,
+            // THE CONTRACT KEY IS THE KEY. `contract_key` is passed as the full stored key, prefix
+            // and all, and the server never prepends — see `fabric_contract_put`'s refusal
+            // FABRIC_CONTRACT_KEY_INVALID. Published as a literal because a shape written
+            // `${KEY_CONTRACT}<contract_key>` is exactly the derive-by-prepend reading this rule
+            // exists to close.
+            contract: '<contract_key>, which already starts with ' + KEY_CONTRACT,
+            grounding: `${KEY_GROUNDING}<contract_key>-<identity>[-<phase>]`,
         },
         // THE GROUNDING CONTRACT, PUBLISHED. Spread row-by-row exactly like `beat_clock_fields`:
         // the `ok` predicates are functions and JSON drops them on the way out, so what crosses the
@@ -907,10 +1067,19 @@ export function fabricVocabulary() {
         contract_read_fields: CONTRACT_READ_FIELDS.map((f) => ({ ...f })),
         contract_read_field_names: [...CONTRACT_READ_FIELD_NAMES],
         grounding_fields: GROUNDING_FIELDS.map((f) => ({ ...f })),
-        grounding_read_fields: GROUNDING_READ_FIELDS.map((f) => ({ ...f })),
-        grounding_read_field_names: [...GROUNDING_READ_FIELD_NAMES],
+        grounding_read_kinds: [...GROUNDING_READ_KINDS],
+        grounding_required_read_kind: GROUNDING_REQUIRED_READ_KIND,
+        grounding_kb_read_fields: GROUNDING_KB_READ_FIELDS.map((f) => ({ ...f })),
+        grounding_kb_read_field_names: [...GROUNDING_KB_READ_FIELD_NAMES],
+        grounding_role_read_fields: GROUNDING_ROLE_READ_FIELDS.map((f) => ({ ...f })),
+        grounding_role_read_field_names: [...GROUNDING_ROLE_READ_FIELD_NAMES],
         grounding_verification_fields: GROUNDING_VERIFICATION_FIELDS.map((f) => ({ ...f })),
         grounding_verification_field_names: [...GROUNDING_VERIFICATION_FIELD_NAMES],
+        grounding_verdicts: [...GROUNDING_VERDICTS],
+        grounding_flag_fields: GROUNDING_FLAG_FIELDS.map((f) => ({ ...f })),
+        grounding_flag_field_names: [...GROUNDING_FLAG_FIELD_NAMES],
+        grounding_flag_dispositions: [...GROUNDING_FLAG_DISPOSITIONS],
+        grounding_flag_resolution_required_for: [...GROUNDING_FLAG_RESOLUTION_REQUIRED_FOR],
         // TOP-LEVEL, not nested under a `refusal_codes` object: a client generating its mirror
         // walks the payload's arrays, and a list hidden inside an object is a list it would
         // hand-type — the exact drift this verb exists to close.
