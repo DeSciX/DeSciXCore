@@ -15,6 +15,8 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { execSync } from 'child_process';
 import { minimatch } from 'minimatch';
+// The source-ref default is owned by ManifestLoader — consume it, never re-default.
+import { DEFAULT_SOURCE_REF } from './ManifestLoader.js';
 
 /**
  * File extensions that are processable for RAG chunking.
@@ -113,7 +115,7 @@ const SHA40 = /^[0-9a-f]{40}$/i;
  * @throws {Error} naming the repo/ref that could not be resolved
  */
 export async function resolveSourceProvenance(source, workspaceRoot) {
-  const ref = source.ref || 'main';
+  const ref = source.ref || DEFAULT_SOURCE_REF;
   const repo = source.repo ?? null;
   // ONE derivation of "which repo this content belongs to": the explicit slug when the source is
   // cross-repo, else the leading path segment (the historical in-repo value, preserved verbatim so
