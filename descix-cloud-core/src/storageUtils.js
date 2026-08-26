@@ -174,6 +174,12 @@ class FirestoreCollections {
     // carries this subcollection — it enforces the POOL daily cap independently of pool
     // balance. See V2_docs/services/ai-credits.md §5a.
     static USER_SPONSORED_DAYS(user_id) { return new BaseStoragePath("UserCache/{user_id}/SponsoredDays", "dict").getPath({ user_id }); }
+    // Per-caller MCP tool-visibility grant (one doc, id 'grant'). Owner module:
+    // DeSciX_Cloud microservice services/toolVisibilityService.js — no other module reads or
+    // writes this subtree (CEO-D-2026-07-09-USER-DOMAIN-OWNER-MODULES). The grant is a
+    // SNAPSHOT {subject, commands[], expires_at} that widens which already-permitted tools
+    // tools/list ADVERTISES; it is never an authorization grant.
+    static USER_TOOL_VISIBILITY(user_id) { return new BaseStoragePath("UserCache/{user_id}/ToolVisibility", "dict").getPath({ user_id }); }
 }
 
 // --- FirestoreDocumentPath ---

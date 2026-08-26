@@ -743,6 +743,35 @@ export function isDiscoveryCoreTool(name) {
 }
 
 /**
+ * SELF-DESCRIPTION of the DISCOVERY-CORE fence (D-22: every verb/param/refusal — and every
+ * fence — states its own contract where a reader and a test can both reach it).
+ *
+ * The fence is a FLOOR, not a ceiling: tools/list serves this set UNION the calling identity's
+ * granted command names (see the Cloud owner module services/toolVisibilityService.js). With no
+ * grant, an empty grant, or an expired grant the union degrades to exactly this set — which is
+ * the behavior that existed before per-caller grants, so the mechanism is INERT by default.
+ *
+ * A grant NEVER widens authorization: the permission filter runs BEFORE the fence, so a granted
+ * name that the caller may not call was already dropped and cannot be re-admitted here.
+ *
+ * The text DERIVES from DISCOVERY_CORE_TOOL_NAMES — the count and the member list can never
+ * drift from the constant they describe, because they are read off it rather than retyped.
+ *
+ * @returns {string} a human- and machine-readable statement of the fence contract
+ */
+export function describeDiscoveryCoreFence() {
+    return [
+        `DISCOVERY-CORE is the ${DISCOVERY_CORE_TOOL_NAMES.length}-tool FLOOR advertised at the MCP`,
+        `handshake to every caller: ${DISCOVERY_CORE_TOOL_NAMES.join(', ')}.`,
+        'tools/list serves this floor UNION the calling identity\'s granted command names.',
+        'An absent, empty, or expired grant is INERT — the union is exactly this floor.',
+        'A grant widens VISIBILITY only; the permission gate runs first and still bounds what',
+        'any caller may invoke. Everything outside this floor stays registered and callable via',
+        'tell_me_how + execute_remote_command.',
+    ].join(' ');
+}
+
+/**
  * MESH-INVOKE GATEWAY tools (WS-FREEMIUM-ONRAMP FO-2, doc c §2.4/§2.5). These are mutating:true
  * tools that dispatch a DISCOVERED target command by re-entering CommandHandler.invoke (currently
  * only execute_remote_command). They are the ONE class admitted to the read-only OAuth surface
