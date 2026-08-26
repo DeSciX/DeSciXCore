@@ -3313,7 +3313,10 @@ microserviceCommand
         manifest.service.app_id = ctx.appId;
         manifest.service.community_id = ctx.communityId;
         manifest.service.name = ctx.appId;
-        manifest.service.domain = `${ctx.appId}.descix.net`;
+        // No domain is injected. A service does not declare its own domain — the platform derives
+        // it ({app_id}.{SITE_DOMAIN}) at registration, and refuses a manifest that declares one.
+        // The literal this replaced was `${ctx.appId}.descix.net`: the PROD host, scaffolded into
+        // every service regardless of the env it would be registered against.
         manifest.service.debugPort = microservicePort;
         await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2));
         console.log(chalk.gray(`  ✓ Injected context + port into manifest.json`));

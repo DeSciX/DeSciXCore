@@ -180,3 +180,168 @@ export function composeUserDocServeUrl({ community_id, site_domain, app_id, file
     if (!file_id || typeof file_id !== 'string') throw new Error('file_id is required for a user doc serve URL');
     return `https://${community_id}.${site_domain}/assets/userdocs/${app_id}/${file_id}`;
 }
+
+// ─── Service domain (ws-c4-platform P1) ──────────────────────────────────────
+
+/**
+ * Error code carried by every refusal of a manifest that declares its own service domain.
+ * ONE constant, imported by both doors (the SDK bootstrap and Cloud's register_service) so the
+ * code cannot drift between them.
+ */
+export const SERVICE_DOMAIN_IS_DERIVED = 'SERVICE_DOMAIN_IS_DERIVED';
+
+// A service domain's first label must be a real DNS label: lowercase alphanumerics and '-',
+// starting and ending alphanumeric, <= 63 octets. This is what stops an OPAQUE identity-derived
+// id (composeUserAppId's `{community}-{uid}` tail, which legitimately carries '@', '.', '_' and
+// uppercase) from ever being composed into a host that cannot resolve.
+const DNS_LABEL_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
+
+/**
+ * Compose the canonical service domain: `{app_id}.{site_domain}`.
+ *
+ * THE ENV IS NOT RE-DERIVED HERE. The platform owns exactly one env->host fact — SITE_DOMAIN
+ * (`dev.descix.net`, `demo.descix.net`, `descix.net` for prod) — and it is passed in, exactly as
+ * composeUserDocServeUrl takes it, so this module stays dependency-free. Re-deriving a host from
+ * an env token (`env === 'prod' ? 'descix.net' : env + '.descix.net'`) is a hand-mirror of
+ * SITE_DOMAIN; it was already removed once from GCSPaths.appPublicUrl for that reason, and it is
+ * the reason a per-service copy had to special-case 'prod' at every call site.
+ *
+ * @param {{ app_id: string, site_domain: string }} args
+ * @returns {string} e.g. `daita-ssgpod.dev.descix.net`
+ * @throws when either input is missing, or app_id is not a usable DNS label. No fallback.
+ */
+export function composeServiceDomain({ app_id, site_domain } = {}) {
+    if (!app_id || typeof app_id !== 'string') {
+        throw new Error('app_id is required to derive a service domain');
+    }
+    if (!site_domain || typeof site_domain !== 'string') {
+        throw new Error(
+            'site_domain is required to derive a service domain — it is the env-owned SITE_DOMAIN ' +
+            'config value (dev.descix.net / demo.descix.net / descix.net). There is no fallback.'
+        );
+    }
+    const label = app_id.toLowerCase();
+    if (!DNS_LABEL_RE.test(label)) {
+        throw new Error(
+            `Cannot derive a service domain from app_id '${app_id}': it is not a valid DNS label ` +
+            `(lowercase alphanumerics and '-', starting and ending alphanumeric, <= 63 chars). ` +
+            `A per-user app id is deliberately not DNS-able and can never host a service.`
+        );
+    }
+    return `${label}.${site_domain}`;
+}
+
+/**
+ * Is this manifest's service APP-BOUND? The scope test is the manifest's SHAPE — it declares both
+ * `app_id` and `community_id` — which is the same predicate `register_service` uses to pick the
+ * App-Owner registration branch over the Admin branch. It is deliberately not a name list.
+ *
+ * @param {Object} service — a manifest's `service` block
+ * @returns {boolean}
+ */
+export function isAppBoundService(service) {
+    return !!(service?.app_id && service?.community_id);
+}
+
+/**
+ * THE resolver both registration doors consume. A service does NOT declare its own domain; the
+ * platform derives it from `app_id` + env.
+ *
+ * APP-BOUND (declares app_id + community_id, the App-Owner branch): the domain is DERIVED. A
+ * manifest that still declares `service.domain` is REFUSED with `code = SERVICE_DOMAIN_IS_DERIVED`,
+ * naming the value that would have been derived. The refusal fires on the DECLARATION itself, so
+ * it does not need `site_domain` — a service that declares a domain is wrong whether or not this
+ * call site knows the env. It is refused even when the declared value happens to EQUAL the derived
+ * one: the defect is the declaration, and a manifest that is right today drifts the moment it is
+ * deployed to another env (that is exactly how a dev service came to advertise its PROD domain and
+ * proxy dev traffic into the prod database).
+ *
+ * ADMIN BRANCH (no app binding): a PLATFORM service keeps its explicitly configured domain and is
+ * outside the derivation.
+ *
+ * @param {{ manifest: Object, site_domain?: string }} args
+ * @returns {{ domain: string, app_bound: boolean, derived: boolean }}
+ * @throws {Error & {code?: string, declared_domain?: string, derived_domain?: string}}
+ */
+export function resolveServiceDomain({ manifest, site_domain = null } = {}) {
+    const service = manifest?.service;
+    if (!service?.name) {
+        throw new Error('resolveServiceDomain: manifest.service.name is required');
+    }
+
+    if (!isAppBoundService(service)) {
+        if (!service.domain) {
+            throw new Error(
+                `Service '${service.name}' declares neither an app binding (service.app_id + ` +
+                `service.community_id) nor service.domain. An app-bound service has its domain ` +
+                `DERIVED; a platform service registered through the Admin branch must declare ` +
+                `service.domain explicitly. There is nothing to route to.`
+            );
+        }
+        return { domain: service.domain, app_bound: false, derived: false };
+    }
+
+    const declared = service.domain;
+    if (declared !== undefined && declared !== null) {
+        // Name the value that WOULD have been derived. When this call site has no site_domain the
+        // env half is named by its config key rather than guessed — the refusal is about the
+        // declaration, and it must not invent a host to make its message look complete.
+        const derived = site_domain
+            ? composeServiceDomain({ app_id: service.app_id, site_domain })
+            : `${String(service.app_id).toLowerCase()}.{SITE_DOMAIN}`;
+        const err = new Error(
+            `${SERVICE_DOMAIN_IS_DERIVED}: service '${service.name}' declares ` +
+            `service.domain='${declared}'. A service does not declare its own domain — the platform ` +
+            `derives it from app_id + env at registration. Delete "domain" from the manifest's ` +
+            `service block. Derived value: '${derived}'.`
+        );
+        err.code = SERVICE_DOMAIN_IS_DERIVED;
+        err.declared_domain = declared;
+        err.derived_domain = derived;
+        throw err;
+    }
+
+    return {
+        domain: composeServiceDomain({ app_id: service.app_id, site_domain }),
+        app_bound: true,
+        derived: true,
+    };
+}
+
+/** A stored manifest carries no domain: there is nothing to route to. */
+export const SERVICE_NOT_ROUTABLE = 'SERVICE_NOT_ROUTABLE';
+
+/**
+ * THE one owner of "is this REGISTERED service routable, and where?".
+ *
+ * `resolveServiceDomain` answers the REGISTRATION question (what domain should this manifest get).
+ * This answers the READ question every consumer of a STORED manifest asks: the origin to send a
+ * request to. Both live here because "where a service lives" is one fact with one home.
+ *
+ * REFUSES rather than composing a URL out of a missing value. `https://${service.domain}/api` on a
+ * domain-less manifest yields the literal string `https://undefined/api` — a syntactically valid
+ * URL that resolves to a host named "undefined", so nothing throws, the registry happily routes
+ * there, and the failure surfaces as an unexplained network error at request time. That is the
+ * silence this refusal exists to break: a manifest reaches this state only by BYPASSING
+ * `register_service` (a direct Firestore write), so the message names that as the cause.
+ *
+ * @param {Object} service — a stored manifest's `service` block
+ * @returns {string} the routable origin, e.g. `https://daita-ssgpod.dev.descix.net`
+ * @throws {Error & {code: string}} code `SERVICE_NOT_ROUTABLE`
+ */
+export function requireServiceOrigin(service) {
+    const name = service?.name || '(unnamed)';
+    if (!service?.domain || typeof service.domain !== 'string') {
+        const err = new Error(
+            `${SERVICE_NOT_ROUTABLE}: registered service '${name}' carries no service.domain, so ` +
+            `there is no host to route to. The platform DERIVES the domain at registration — a ` +
+            `stored manifest without one was written by a path that bypassed the register_service ` +
+            `door (a direct Firestore write). Re-register '${name}' through register_service. ` +
+            `Refusing to compose 'https://undefined/api'.`
+        );
+        err.code = SERVICE_NOT_ROUTABLE;
+        err.service_name = name;
+        throw err;
+    }
+    return `https://${service.domain}`;
+}
