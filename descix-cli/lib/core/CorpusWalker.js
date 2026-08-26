@@ -93,22 +93,79 @@ function computeBlobSha(absolutePath, workspaceRelativePath, ref, workspaceRoot)
   }
 }
 
+const SHA40 = /^[0-9a-f]{40}$/i;
+
 /**
- * Get the current HEAD commit SHA for a ref.
+ * Resolve ONE source's provenance: which repository, which ref, and the exact commit synced.
  *
- * @param {string} ref - Git ref (branch/tag)
- * @param {string} workspaceRoot - Workspace root directory
- * @returns {string} Commit SHA
+ * This is the single owner of "where did this content come from". `ref` may be a mutable branch,
+ * so the RESOLVED COMMIT SHA is what sync-state records — provenance stays exact after the branch
+ * moves. It FAILS LOUD rather than recording a placeholder: a source whose commit cannot be
+ * resolved has no honest provenance, and `"unknown"` in sync-state is a false record, not a gap.
+ *
+ * A CROSS-REPO source (`repo` set) is resolved against the REMOTE. It never falls back to a local
+ * read — that fallback is precisely the adjacency defect this contract exists to kill, and it would
+ * stamp a foreign repo's content with this repo's commit.
+ *
+ * @param {Object} source - a `_resolvedSources` entry from ManifestLoader
+ * @param {string} workspaceRoot - workspace root (the in-repo resolution context)
+ * @returns {Promise<{repo: string|null, ref: string, resolved_commit_sha: string, source_repo: string}>}
+ * @throws {Error} naming the repo/ref that could not be resolved
  */
-function getHeadCommit(ref, workspaceRoot) {
-  try {
-    return execSync(
-      `git rev-parse "${ref}"`,
-      { cwd: workspaceRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
-    ).trim();
-  } catch {
-    return 'unknown';
+export async function resolveSourceProvenance(source, workspaceRoot) {
+  const ref = source.ref || 'main';
+  const repo = source.repo ?? null;
+  // ONE derivation of "which repo this content belongs to": the explicit slug when the source is
+  // cross-repo, else the leading path segment (the historical in-repo value, preserved verbatim so
+  // existing chunk metadata does not churn).
+  const source_repo = repo ?? (String(source.path || '').split('/')[0] || 'unknown');
+
+  if (!repo) {
+    let sha;
+    try {
+      sha = execSync(`git rev-parse "${ref}^{commit}"`, {
+        cwd: workspaceRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+      }).trim();
+    } catch {
+      throw new Error(
+        `Cannot resolve ref "${ref}" to a commit in ${workspaceRoot} for source "${source.path}". ` +
+        `Refusing to record provenance — a sync-state commit of "unknown" is a FALSE record, not a ` +
+        `missing one. Check that the ref exists locally.`
+      );
+    }
+    if (!SHA40.test(sha)) {
+      throw new Error(`Ref "${ref}" resolved to "${sha}", which is not a commit sha (source "${source.path}").`);
+    }
+    return { repo: null, ref, resolved_commit_sha: sha, source_repo };
   }
+
+  // CROSS-REPO: resolve against the remote. Never a local read.
+  if (SHA40.test(ref)) {
+    return { repo, ref, resolved_commit_sha: ref.toLowerCase(), source_repo };
+  }
+  const remoteUrl = `https://github.com/${repo}.git`;
+  let out;
+  try {
+    out = execSync(`git ls-remote "${remoteUrl}" "${ref}" "refs/heads/${ref}" "refs/tags/${ref}"`, {
+      cwd: workspaceRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+    }).trim();
+  } catch (err) {
+    throw new Error(
+      `Cannot fetch cross-repo source "${source.path}" from repo "${repo}" at ref "${ref}": ` +
+      `${String(err.stderr || err.message).trim()}. REFUSING — a repo that cannot be fetched is ` +
+      `never silently skipped and never falls back to a local/adjacent working tree. Ensure git ` +
+      `credentials for ${remoteUrl} are available to this machine.`
+    );
+  }
+  const line = out.split('\n').map(l => l.trim()).filter(Boolean)[0];
+  const sha = line ? line.split(/\s+/)[0] : null;
+  if (!sha || !SHA40.test(sha)) {
+    throw new Error(
+      `Repo "${repo}" has no ref "${ref}" (source "${source.path}"). REFUSING rather than guessing.`
+    );
+  }
+  return { repo, ref, resolved_commit_sha: sha, source_repo };
 }
 
 /**
@@ -182,10 +239,12 @@ async function isFile(filePath) {
  *
  * @param {Object} manifest - Validated manifest from ManifestLoader (with _resolvedSources)
  * @param {string} workspaceRoot - Absolute workspace root path
- * @returns {Promise<Object>} { files: Array<FileEntry>, commitSha: string }
+ * @returns {Promise<Object>} { files: Array<FileEntry>, commitSha: string,
+ *                              provenance: Array<{path, repo, ref, resolved_commit_sha, source_repo}> }
  */
 export async function walkCorpus(manifest, workspaceRoot) {
   const files = [];
+  const provenance = [];
   let commitSha = 'unknown';
 
   // Nested-source dedup (WS-EVP-DESCIX-KB-CLEANUP item 4): a manifest may list both a directory
@@ -215,10 +274,29 @@ export async function walkCorpus(manifest, workspaceRoot) {
     const { absolutePath, ref, tier, doc_type, syncignore } = source;
     const thisSourceRoot = path.resolve(absolutePath);
 
-    // Get commit SHA (same for all sources using the same ref)
-    const refCommit = getHeadCommit(ref, workspaceRoot);
+    // Resolve this source's exact provenance BEFORE reading anything. A cross-repo source that
+    // cannot be fetched REFUSES here, naming the repo — it is never silently skipped and never
+    // falls back to reading an adjacent working tree.
+    const prov = await resolveSourceProvenance(source, workspaceRoot);
+    provenance.push({ path: source.path, ...prov });
+
+    // A cross-repo source's CONTENT still lives in another repository. Reading `absolutePath`
+    // would resolve inside THIS workspace — the exact adjacency defect this contract kills — so
+    // refuse loudly rather than walk the wrong tree and stamp it with a foreign repo's sha.
+    if (prov.repo) {
+      throw new Error(
+        `Cross-repo source "${source.path}" (repo "${prov.repo}", ref "${ref}" @ ` +
+        `${prov.resolved_commit_sha.substring(0, 8)}) cannot be walked: cross-repo CONTENT FETCH is ` +
+        `not implemented in this CLI. Refusing rather than reading the local working tree at ` +
+        `${absolutePath}, which would attribute this workspace's files to "${prov.repo}".`
+      );
+    }
+
+    // The sync's headline commit is the FIRST source's resolved commit — read from the one owner
+    // (resolveSourceProvenance) rather than re-deriving it, so the headline and the per-source
+    // provenance records can never disagree.
     if (commitSha === 'unknown') {
-      commitSha = refCommit;
+      commitSha = prov.resolved_commit_sha;
     }
 
     // Check if source path is a file or directory
@@ -247,8 +325,8 @@ export async function walkCorpus(manifest, workspaceRoot) {
         continue; // Skip files that can't be hashed
       }
 
-      // Derive source_repo from first path segment
-      const sourceRepo = source.path.split('/')[0] || 'unknown';
+      // "Which repo does this content belong to" has ONE owner: resolveSourceProvenance.
+      const sourceRepo = prov.source_repo;
 
       files.push({
         absolute_path: filePath,
@@ -271,7 +349,7 @@ export async function walkCorpus(manifest, workspaceRoot) {
     }
   }
 
-  return { files, commitSha };
+  return { files, commitSha, provenance };
 }
 
-export default { walkCorpus };
+export default { walkCorpus, resolveSourceProvenance };
