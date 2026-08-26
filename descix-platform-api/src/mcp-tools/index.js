@@ -9,6 +9,7 @@ export {
     recommendedOAuthReadonlyToolNames,
     DISCOVERY_CORE_TOOL_NAMES,
     isDiscoveryCoreTool,
+    describeDiscoveryCoreFence,
     MESH_INVOKE_GATEWAY_TOOLS,
     isMeshInvokeGatewayTool,
 } from './nativeTools.js';
