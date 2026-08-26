@@ -8,7 +8,7 @@
  *   - Writers — grep DeSciX_Cloud/microservice/admin/ for Products write
  *     patterns (bootstrap.js hydrate-env + confirm_site_deploy).
  *   - App-level config layer (§6.7 extension) — cite the resolver chain
- *     in geminiInteractions.js::resolveModelName: per-request → kb_model_override
+ *     in geminiInteractions.js::resolveModelThinkingPair: request level → kb_model_override
  *     → default_app_model → levelConfig → DEFAULT_AI_MODEL.
  *
  * NO direct @google-cloud/firestore or @pinecone-database/pinecone imports
@@ -23,6 +23,10 @@ import {
   probeFirestoreRest
 } from '../util/source-reader.js';
 import { BrieferExtractorError, BRIEFER_ERROR_CODES } from '../errors.js';
+// The (model, thinking) precedence chain in words, from its ONE owner. The briefer
+// QUOTES the served contract rather than paraphrasing it — a briefer paraphrase of a
+// chain is exactly how the old five-step list outlived the code it described.
+import { MODEL_THINKING_CHAIN } from '@descix/platform-api/mcp-tools';
 
 export const SECTION = {
   number: 5,
@@ -105,7 +109,7 @@ export async function extract({ env, cliPaths } = {}) {
     recovery: `Re-locate the hydrate-env writer in ${BOOTSTRAP_FILE}.`
   });
 
-  // ── Source 4: geminiInteractions.js — resolveModelName (§6.7 link) ──
+  // ── Source 4: geminiInteractions.js — the (model, thinking) pair owner (§6.7 link) ──
   const gemini = await readSourceFile({
     cliPaths,
     relPath: GEMINI_FILE,
@@ -113,11 +117,11 @@ export async function extract({ env, cliPaths } = {}) {
   });
   const resolverMatch = findInLines({
     lines: gemini.lines,
-    regex: /export\s+function\s+resolveModelName\b/,
+    regex: /export\s+function\s+resolveModelThinkingPair\b/,
     section: `§${SECTION.number} ${SECTION.heading}`,
-    source: `${GEMINI_FILE} (resolveModelName)`,
-    expected: 'export function resolveModelName(...)',
-    recovery: `Re-locate resolveModelName in ${GEMINI_FILE}.`
+    source: `${GEMINI_FILE} (resolveModelThinkingPair)`,
+    expected: 'export function resolveModelThinkingPair(...)',
+    recovery: `Re-locate resolveModelThinkingPair in ${GEMINI_FILE}.`
   });
 
   // ── Optional grep: count Products readers across services/ ──
@@ -185,15 +189,11 @@ export async function extract({ env, cliPaths } = {}) {
     ``,
     `### App-level config layer (§6.7 — added 2026-05-26)`,
     ``,
-    `App-level and KB-level config flows from Firestore (\`Community/{c}/Apps/{a}\` for \`default_app_model\`, \`Community/{c}/Apps/{a}/KnowledgeBases/{k}\` for \`kb_model_override\`) into the resolver \`resolveModelName()\` at \`${GEMINI_FILE}:${resolverMatch.lineNumber}\`. Both fields are **opt-in** — null means platform per-level applies. Per-request \`options.model\` wins above all; resolver order is:`,
+    `App-level and KB-level config flows from Firestore (\`Community/{c}/Apps/{a}\` for \`default_app_model\`, \`Community/{c}/Apps/{a}/KnowledgeBases/{k}\` for \`kb_model_override\`) into \`resolveModelThinkingPair()\` at \`${GEMINI_FILE}:${resolverMatch.lineNumber}\` — the ONE owner of the (model, thinking) pair. Both fields are **opt-in** — null means the tier below applies.`,
     ``,
-    `1. \`options.model\` (per-request)`,
-    `2. \`kb.kb_model_override\` (KB-level opt-in — specialized capability)`,
-    `3. \`app.default_app_model\` (app-level opt-in — intentional pinning, SHADOWS \`--level\`)`,
-    `4. \`levelConfig.model\` (platform per-level mapping from \`defaults-config.json\`)`,
-    `5. \`utils.DEFAULT_AI_MODEL\` (platform-wide fallback from \`defaults-config.json\`)`,
+    MODEL_THINKING_CHAIN,
     ``,
-    `Setting \`app.default_app_model\` to a non-null value SHADOWS the \`--level\` flag — intentional pinning, not "a default the level overrides." Apps that want per-level routing leave \`default_app_model = null/absent\`.`,
+    `\`app.default_app_model\` no longer shadows an intelligence_level named on the request: a level names a (model, thinking) PAIR and outranks it. It still outranks the KB's own configured level and the platform default. Apps that want per-level routing leave \`default_app_model = null/absent\`.`,
     productsLiveNote
   ].join('\n');
 
@@ -201,7 +201,7 @@ export async function extract({ env, cliPaths } = {}) {
     makeCitation({ file: ENTITLEMENTS_FILE, lines: String(hydrateMatch.lineNumber), anchor: 'hydrateCommunityIdFromProducts (canonical)', fileLines: ent.lines }),
     makeCitation({ file: CM_FILE, lines: String(reExportMatch.lineNumber), anchor: 'hydrate re-export', fileLines: cm.lines }),
     makeCitation({ file: BOOTSTRAP_FILE, lines: String(hydrateEnvMatch.lineNumber), anchor: 'hydrate-env writer', fileLines: bootstrap.lines }),
-    makeCitation({ file: GEMINI_FILE, lines: String(resolverMatch.lineNumber), anchor: 'resolveModelName (app-level config bridge)', fileLines: gemini.lines }),
+    makeCitation({ file: GEMINI_FILE, lines: String(resolverMatch.lineNumber), anchor: 'resolveModelThinkingPair (app-level config bridge)', fileLines: gemini.lines }),
     ...probeCitations
   ];
 
