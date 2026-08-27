@@ -109,6 +109,20 @@ jobs:
               ;;
           esac
 
+      # REFUSE AN ARTIFACT NOBODY CAN INSTALL. On 2026-08-27 a package published on a green run
+      # and was uninstallable: it declared an @descix range the registry could not satisfy, so
+      # `npm install` exited with ETARGET — on the `latest` tag. It shipped because "the package
+      # appeared on the registry" was the only thing standing in for "the package works", and
+      # not one gate here had ever asked the registry a question.
+      #
+      # The logic lives in a SCRIPT, deliberately. Logic written inline in YAML can only be
+      # exercised by dispatching this workflow, and a publish workflow cannot be dispatched to
+      # test a gate — so an inline gate would ship having never once run, which is the exact
+      # defect class that produced the P0 above. A script can be run, shown RED on a negative
+      # control, and shown GREEN, by anyone reviewing the change.
+      - name: Refuse to publish an artifact nobody can install
+        run: node scripts/check-prepublish-deps-cli.mjs "${{ inputs.package }}"
+
       - name: Publish
         working-directory: ${{ inputs.package }}
         env:
@@ -117,3 +131,30 @@ jobs:
           NPM_CONFIG_PROVENANCE: "false"
         run: |
           npm publish --access public --tag "${{ inputs.dist_tag }}"
+
+  # THE LAST JOB, AND THE ONE THAT WOULD HAVE CAUGHT 2026-08-27. Everything above measures a
+  # checkout; this installs what the REGISTRY is actually serving, into an empty directory, and
+  # fails the run if a developer could not install it. "It published" and "it installs" are two
+  # facts, and until now only the first was ever checked.
+  #
+  # Deliberately a SEPARATE job with no `environment:`. It must not carry the npm-publish
+  # environment: that would demand a second CEO approval to run a read-only check, and it needs
+  # no OIDC token because it publishes nothing. `needs: publish` is what makes it last.
+  #
+  # --dir resolves name@version from that package's OWN package.json in the tree that was just
+  # published, so the directory is never hand-mapped to a package name. --wait polls for registry
+  # visibility first, so CDN propagation is reported as propagation and never as a broken package.
+  verify-install:
+    needs: publish
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install the published artifact from the registry
+        run: node scripts/check-published-install-cli.mjs --dir "${{ inputs.package }}" --wait
