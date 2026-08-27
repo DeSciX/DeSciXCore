@@ -1,42 +1,50 @@
 #!/usr/bin/env node
 /**
- * Pack THIS package, install the tarball into a throwaway empty directory, and assert every
- * subpath its exports map declares actually resolves. PUBLISHED == PACKED: the working tree is
- * never the thing measured, because the working tree resolves files the tarball does not ship.
+ * Pack this package with the siblings it is CO-PUBLISHED with, install them into a throwaway
+ * empty directory, and assert every subpath its exports map declares actually resolves.
+ * PUBLISHED == PACKED: the working tree is never the thing measured, because the working tree
+ * resolves files the tarball does not ship.
+ *
+ * WHY THE SET AND NOT THE PACKAGE ALONE (measured 2026-08-27, Core main e21fce7): installing
+ * the @descix/sdk tarball by itself fails ETARGET on @descix/cloud-core@^1.1.0, which is in
+ * this repo but not yet on the registry — and it failed as an UNHANDLED throw, so the gate
+ * stack-traced instead of reporting itself RED. These packages ship on one publish, so the set
+ * is the artifact a developer receives; measuring one member against a registry state that
+ * will never exist measures nothing. installPackedSet owns that, and NAMES an install failure
+ * as an install failure rather than letting it read as a package defect.
  *
  * Usage:  node scripts/check-exports-resolve-cli.mjs [--package <name>] [--from <installed-dir>]
- * With --from, checks an ALREADY-installed package (that is how the RED control is run against
- * a published version from the registry).
+ * With --from, checks an ALREADY-installed package — that is how the RED control is run
+ * against a published version pulled from the registry.
  */
-import { execFileSync } from 'child_process';
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import fs from 'node:fs';
 import { assertExportsResolve } from './check-exports-resolve.mjs';
+import { installPackedSet } from './pack-set.mjs';
 
 const argv = process.argv.slice(2);
 const arg = (n) => { const i = argv.indexOf(n); return i === -1 ? null : argv[i + 1]; };
-const pkgRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const pkgName = arg('--package') || JSON.parse(fs.readFileSync(path.join(pkgRoot, 'package.json'), 'utf8')).name;
+const pkgName = arg('--package')
+    || JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).name;
 
 let from = arg('--from');
-let tmp = null;
+let install = null;
+
 if (!from) {
-    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'exports-gate-'));
-    const out = execFileSync('npm', ['pack', '--pack-destination', tmp, '--silent'], { cwd: pkgRoot, encoding: 'utf8' });
-    const tgz = path.join(tmp, out.trim().split('\n').pop().trim());
-    fs.writeFileSync(path.join(tmp, 'package.json'), '{"name":"gate","version":"1.0.0","private":true}');
-    execFileSync('npm', ['install', tgz, '--no-audit', '--no-fund', '--silent'], { cwd: tmp, stdio: 'ignore' });
-    from = tmp;
+    // Optional peers ARE included here: a subpath this package DECLARES must resolve, and
+    // ./app declares a target whose peer must be installable for an app developer. Leaving the
+    // peer out would let ./app "pass" purely because require.resolve stops at the re-export
+    // file — a gate passing for a reason unrelated to what it claims to check.
+    install = installPackedSet({ includeOptionalPeers: true, label: 'exports-gate' });
+    from = install.dir;
 }
 
 try {
     const r = assertExportsResolve({ packageName: pkgName, fromDir: from });
     console.log(`exports gate GREEN — ${pkgName}@${r.version}: all ${r.checked} declared subpath(s) resolve.`);
+    console.log(`  ${r.subpaths.join(' ')}`);
 } catch (err) {
     console.error(`exports gate RED\n${err.message}`);
     process.exitCode = 1;
 } finally {
-    if (tmp) fs.rmSync(tmp, { recursive: true, force: true });
+    if (install) install.cleanup();
 }

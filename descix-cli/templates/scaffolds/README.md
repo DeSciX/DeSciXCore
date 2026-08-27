@@ -16,18 +16,14 @@ Code cannot live in Drive because:
 
 ## Available Scaffolds
 
-### Site (`site/`)
+### Site — owned by `@descix/app-sdk`
 
-A hello-world static site with:
-- `index.html` - Main entry point
-- `styles.css` - Basic styling
-- `app.js` - Client-side JavaScript
-- `README.md` - Usage instructions
+The site scaffold does NOT live here. It is owned by `@descix/app-sdk` (`scaffold/site/`),
+because its `DeSciXAppSDK.js` is generated from that package's template and bridgeResolver, and
+because `@descix/sdk/app`'s `descix-app` bin scaffolds the same bytes. The CLI consumes the
+`SITE_SCAFFOLD_DIR` constant that package exports rather than keeping a copy.
 
-**Install with:**
-```bash
-descix site init
-```
+**Install with:** `descix site init`, or `descix-app init` from `@descix/sdk`.
 
 ### Microservice (`microservice/`)
 
