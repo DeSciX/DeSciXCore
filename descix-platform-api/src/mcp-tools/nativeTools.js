@@ -51,7 +51,7 @@ import { filterOperatorClause, SCALAR_FILTER_OPERATORS, ARRAY_FILTER_OPERATORS }
 // zero-import leaf, so this import respects the infrastructure-free rule above.
 import {
     BEAT_STATUSES, LEGACY_WORKING_STATUSES, LEGACY_STOP_STATUSES, LIVENESS_VALUES,
-    WRITE_MODES, WATERMARK_FIELDS, ENVELOPE_STATUSES, ENVELOPE_STATUS_DEFAULT, TO_AGENT_SENTINELS,
+    WRITE_MODES, WATERMARK_WRITE_MODES, WAKE_EXEMPT_STATUSES, WATERMARK_FIELDS, ENVELOPE_STATUSES, ENVELOPE_STATUS_DEFAULT, TO_AGENT_SENTINELS,
     ENVELOPE_SECTIONS, ENVELOPE_TEXT_SHAPE, ENVELOPE_PHASES, ENVELOPE_PHASE_DEFAULT, ENVELOPE_PHASE_TRANSITIONS,
     FABRIC_RECORD_KINDS,
     RETIRED_SENTINELS, BEAT_CLOCK_FIELDS, beatClockFieldFor, beatClockAgeField,
@@ -382,7 +382,9 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
             + BEAT_CLOCK_RULE
             + ' `wake` IS REQUIRED ONLY FROM THE "'
             + WAKE_REQUIRED_LIVENESS
-            + '" WRITER, and on a working beat as much as a resting one — without it "I am still going" is unfalsifiable and a seat goes dark while looking busy. Every OTHER writer is EXEMPT and carries none: only an agent can say what will wake this seat, so requiring one from a hook forces it to invent an answer or not beat at all, and it did not beat — an unconditional requirement left every doorbell in the fleet refused on its first tick (measured 2026-08-27). A beat that carries no wake PRESERVES the stored wake_* fields rather than clearing them, exactly as it preserves the other writer\'s clock, and the three fields come back on the response as they now stand so you can see that without a second read. wake_overdue:true comes back when the next_fire_at IN FORCE — this beat\'s, or the preserved one — has already passed, and null when no wake has ever been recorded, which is UNKNOWN and is never false. Returns unchanged:true when the beat is identical to the stored one. Does NOT renew a BEAST seat and takes no seat_token: renewal binds to the authenticated caller under ws-seat-session-bound-auth.',
+            + '" WRITER, and on a WORKING beat as much as a resting one — without it "I am still going" is unfalsifiable and a seat goes dark while looking busy. A beat whose status is TERMINAL ('
+            + WAKE_EXEMPT_STATUSES.join(', ')
+            + ') is EXEMPT: a seat that has declared a stop has nothing schedulable to declare, and demanding a next_fire_at from it would force it to assert a wake that cannot exist. The exemption is keyed on the SERVED terminal-status set and does NOT open the working case, which stays refused by name. A terminal beat CLEARS the stored wake chain rather than preserving it, so a finished seat does not read as permanently wake-overdue. `wake: null` IS EQUIVALENT TO OMITTING `wake` on every path — it is not a way to clear the wake block on a beat that still needs one. Every OTHER writer is EXEMPT and carries none: only an agent can say what will wake this seat, so requiring one from a hook forces it to invent an answer or not beat at all, and it did not beat — an unconditional requirement left every doorbell in the fleet refused on its first tick (measured 2026-08-27). A beat that carries no wake PRESERVES the stored wake_* fields rather than clearing them, exactly as it preserves the other writer\'s clock, and the three fields come back on the response as they now stand so you can see that without a second read. wake_overdue:true comes back when the next_fire_at IN FORCE — this beat\'s, or the preserved one — has already passed, and null when no wake has ever been recorded, which is UNKNOWN and is never false. Returns unchanged:true when the beat is identical to the stored one. Does NOT renew a BEAST seat and takes no seat_token: renewal binds to the authenticated caller under ws-seat-session-bound-auth.',
         mutating: true,
         inputSchema: {
             type: 'object',
@@ -393,7 +395,7 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
                 liveness: { type: 'string', enum: [...LIVENESS_VALUES], description: 'REQUIRED, no default and never inherited. "' + LIVENESS_MODEL + '" = an AGENT wrote this beat (proves the model is alive) and stamps `' + beatClockFieldFor(LIVENESS_MODEL) + '`. "' + LIVENESS_PROCESS + '" = a HOOK wrote it (proves the process is alive, says NOTHING about the model) and stamps `' + beatClockFieldFor(LIVENESS_PROCESS) + '` while PRESERVING `' + beatClockFieldFor(LIVENESS_MODEL) + '`. Omitting it is refused rather than defaulted, because a merge-upsert would silently keep the previous writer\'s value.' },
                 wake: {
                     type: 'object',
-                    description: 'REQUIRED when liveness is "' + WAKE_REQUIRED_LIVENESS + '", on a working beat as much as a resting one; OMITTED by every other writer, whose stored wake_* fields are then PRESERVED unchanged. What will wake this seat, whether that survives the process dying, and when it next fires. Supplying one is accepted from any writer — the exemption is from being REQUIRED to answer, not from being allowed to.',
+                    description: 'REQUIRED when liveness is "' + WAKE_REQUIRED_LIVENESS + '" AND the status is not terminal (' + WAKE_EXEMPT_STATUSES.join(', ') + '), on a working beat as much as a resting one; passing `null` is identical to omitting it; OMITTED by every other writer, whose stored wake_* fields are then PRESERVED unchanged. What will wake this seat, whether that survives the process dying, and when it next fires. Supplying one is accepted from any writer — the exemption is from being REQUIRED to answer, not from being allowed to.',
                     properties: {
                         mechanism: { type: 'string', description: 'What will wake this seat (e.g. "ScheduleWakeup", "Monitor ticker", "cron").' },
                         survives_death: { type: 'boolean', description: 'Does the wake mechanism outlive this process? A boolean, not a string.' },
@@ -556,8 +558,22 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
         },
     },
     {
+        name: 'fabric_watermark_migrate',
+        description: 'Migrate one seat\'s watermark onto the provenance-bearing ledger. IT REPORTS, IT NEVER DROPS: every entry gets exactly one of three NAMED fates — MOVED (a field that is not one of the five ledger fields, e.g. a `notes` paragraph that could only have arrived by a raw app_records_put; it is written onto seat-state-<LABEL> BEFORE it is cleared here), STAMPED (a pre-provenance bare entry, now attributed to you and marked as having no recorded original writer), or REFUSED (an entry that cannot be represented in the typed ledger — PROSE rather than a record key — which is LEFT EXACTLY WHERE IT IS for a human to re-file). A refusal is a BLOCK on that entry, never a warning that precedes a deletion. Run once per seat before switching that seat to mode:append.',
+        mutating: true,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                seat_label: { type: 'string', description: 'The seat LABEL whose watermark is being migrated.' },
+                writer: { type: 'string', description: 'REQUIRED — the agent id running the migration. Pre-provenance entries are stamped with it and explicitly marked as having no recorded original writer, so a migrated claim is never mistaken for one this writer actually made.' },
+            },
+            required: ['seat_label', 'writer'],
+            additionalProperties: false,
+        },
+    },
+    {
         name: 'fabric_watermark_put',
-        description: 'Write the delivery ledger "watermark-<LABEL>". `mode` is REQUIRED and has NO DEFAULT (patch = merge these fields, replace = these fields ARE the ledger and the rest are cleared) — see fabric_seat_state_put for why a silent merge is refused here. The ledger has exactly '
+        description: 'Write the delivery ledger "watermark-<LABEL>". `mode` is REQUIRED and has NO DEFAULT. USE \'append\': it SET-UNIONS the named fields SERVER-SIDE, which is what a delivery ledger wants — a client read-union-write loses every entry written between its read and its write, and one such patch was measured taking a delivered ledger from 98 entries to 1. \'patch\' merges FIELDS but REPLACES each array wholesale, and \'replace\' additionally clears the fields you omit; BOTH now REFUSE a write that would DROP an existing entry (FABRIC_WATERMARK_DESTRUCTIVE_WRITE), because a delivery claim that vanishes is indistinguishable afterwards from mail that never arrived. To withdraw entries deliberately use \'quarantine\' with `quarantine_writer`. `writer` is REQUIRED on every write that touches the ledger and every entry is stamped {key, writer, at}: a claim outlives the credibility of whoever made it, and a secretary stopped FOR CAUSE left a \'delivered\' claim its successor could neither trust nor safely discard. Entries are stored as JSON objects; a bare pre-provenance string is still READ but can no longer be WRITTEN — run fabric_watermark_migrate once per seat to stamp them. The ledger has exactly '
             + WATERMARK_FIELDS.length + ' fields: ' + WATERMARK_FIELDS.join(', ')
             + '. Any other field is REJECTED rather than stored, because a ledger field no reader consults is a delivery record that silently does nothing. broadcast_seen is the correct place to record that this seat has processed a broadcast — never flip the broadcast itself.',
         mutating: true,
@@ -565,7 +581,9 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
             type: 'object',
             properties: {
                 seat_label: { type: 'string', description: 'The seat LABEL.' },
-                mode: { type: 'string', enum: [...WRITE_MODES], description: 'REQUIRED, no default.' },
+                mode: { type: 'string', enum: [...WATERMARK_WRITE_MODES], description: 'REQUIRED, no default. append = server-side set-union (idempotent; re-appending an entry is a no-op and does not restamp it). patch/replace = wholesale array write, REFUSED if it would drop an existing entry. quarantine = withdraw one writer\'s claims across every ledger field, leaving every other writer\'s intact.' },
+                writer: { type: 'string', description: 'REQUIRED on every write that touches the ledger — the agent id making the claim. Stamped onto every entry so a successor can decide WHOSE claims to trust.' },
+                quarantine_writer: { type: 'string', description: 'Required by mode \'quarantine\' and meaningless otherwise: the writer whose claims are being withdrawn. Without it a quarantine would be an untargeted delete of the whole ledger, so it is refused.' },
                 // AN ARRAY, because that is what the writer writes. fabric_broadcast_ack merges the
                 // acknowledged KEYS into this field as a list and re-reads it as a list; publishing
                 // it as a `string` "high-water mark" advertised a shape no code on either side ever

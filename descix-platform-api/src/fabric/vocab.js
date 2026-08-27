@@ -174,6 +174,44 @@ export function isWakeRequiredFor(liveness) {
     return v === WAKE_REQUIRED_LIVENESS;
 }
 
+/**
+ * The statuses that EXEMPT a beat from carrying a wake — the TERMINAL set, and it is DECLARED_STOPS
+ * itself rather than a list beside it. One owner, consumed by the verb (fabricStore.js::validateWake)
+ * AND by the served descriptor, so the rule the server enforces and the rule callers are shown
+ * cannot become two truths.
+ *
+ * WHY A TERMINAL BEAT IS EXEMPT. `wake` answers "what will wake this seat, does it survive this
+ * process dying, when does it next fire". A seat that has declared `done`, `good-night` or
+ * `quiesced` has by definition nothing schedulable that wakes it, so the rule was demanding a claim
+ * that CANNOT be true — and a field a writer cannot honestly supply gets invented or gets the beat
+ * skipped. That is the same law the liveness axis already fixed for hooks: a beat may only assert
+ * what its own writer observed, so a writer must not be REFUSED for lacking a field it cannot
+ * honestly supply.
+ *
+ * WHAT THIS DELIBERATELY DOES NOT OPEN. A WORKING beat is not terminal and stays REQUIRED to carry
+ * a wake — that is the whole point of keying on status rather than relaxing the rule. An exemption
+ * that also opened the working case would be a hole wearing an exemption's clothes, and it would
+ * undo the fix that stopped seats going dark while looking busy.
+ */
+export const WAKE_EXEMPT_STATUSES = DECLARED_STOPS;
+
+/**
+ * Must a beat with this (liveness, status) pair carry a `wake` block?
+ *
+ * TWO AXES, ONE ANSWER. Axis 1 is the WRITER (`isWakeRequiredFor`): only an agent can say what will
+ * wake a seat, so a hook is exempt. Axis 2 is the STATUS: a seat that has declared a stop has no
+ * wake to describe. Both consumers — the store and the published descriptor — call THIS, so neither
+ * re-derives either axis.
+ *
+ * Callers validate `status` against BEAT_STATUSES first, so a legacy or unknown value never reaches
+ * here and is never silently exempted.
+ */
+export function isWakeRequiredForBeat(liveness, status) {
+    if (!isWakeRequiredFor(liveness)) return false;
+    const s = typeof status === 'string' ? status.trim().toLowerCase() : null;
+    return !WAKE_EXEMPT_STATUSES.some((x) => x.toLowerCase() === s);
+}
+
 // ── Delivery statuses: what is WAITING for a seat ────────────────────────────────────────────
 export const STATUS_UNREAD = 'unread';
 export const STATUS_BROADCAST = 'broadcast';
@@ -188,6 +226,58 @@ export const ENVELOPE_STATUSES = Object.freeze([
 /** The status `fabric_envelope_put` writes when the caller names none. Named rather than indexed,
  *  because `ENVELOPE_STATUSES[0]` is a position and a position is not a meaning. */
 export const ENVELOPE_STATUS_DEFAULT = 'assigned';
+
+/**
+ * LIFECYCLE STATE THAT SURVIVES A WRITE THAT DOES NOT MENTION IT — the ONE owner of that rule,
+ * consumed by `fabric_envelope_put` AND `fabric_contract_put`.
+ *
+ * WHY THIS EXISTS AS AN OWNER RATHER THAN AS A CORRECT COPY IN EACH VERB. It was derived twice
+ * inside a single file and the copies disagreed: `envelopePut` wrote `phase` unconditionally (with
+ * a comment explaining that a `replace` clears every field the new record omits), while
+ * `contractPut` wrote it only when the caller supplied one — so a `mode:"replace"` on a SIGNED
+ * contract that said nothing about phase NULLED the org's own signature, and the receipt then
+ * reported the phase it had just deleted. Measured on Cloud@b57bd01:
+ *   contractPut {phase:null} vs envelopePut {phase:"signed"} on the identical scenario.
+ * Correcting the divergent copy would leave two copies to drift again, so both verbs now call
+ * `resolvePreservedLifecycle` and neither decides anything itself.
+ *
+ * `status` is here for the same reason and it is the half nobody had noticed: BOTH verbs
+ * initialised `status` to the default and wrote it unconditionally, so a `mode:"patch"` that
+ * carried a branch name and said nothing about status silently reset an ACCEPTED assignment to
+ * `assigned`. That is the same law — lifecycle state must survive a write that does not mention it
+ * — and it was wrong in both copies rather than one, which is precisely what a single owner
+ * prevents from recurring.
+ */
+export const LIFECYCLE_PRESERVED_FIELDS = Object.freeze(['phase', 'status']);
+
+/**
+ * Resolve the lifecycle fields for a write, given what is STORED and what the caller REQUESTED.
+ *
+ * The rule, in one place: a field the caller named takes the caller's value; a field the caller did
+ * NOT name keeps the stored value; and only when there is no stored value at all does the default
+ * apply. The returned bag is written UNCONDITIONALLY onto the record by both verbs — never
+ * conditionally — because a `replace` clears every field the new record omits, so a value carried
+ * forward must still be PRESENT on the write that carries it.
+ *
+ * @param {object|null} prior      the stored record, or null when the key is new
+ * @param {object} requested       { phase, status } as the caller supplied them; undefined/null = not named
+ * @param {object} defaults        { phase, status } to fall back to when neither stored nor requested
+ * @returns {{phase: string, status: string, changed: string[]}}
+ */
+export function resolvePreservedLifecycle(prior, requested = {}, defaults = {}) {
+    const out = { changed: [] };
+    for (const f of LIFECYCLE_PRESERVED_FIELDS) {
+        const asked = requested[f] === undefined || requested[f] === null ? null : requested[f];
+        const stored = prior && prior[f] !== undefined && prior[f] !== null ? prior[f] : null;
+        const value = asked ?? stored ?? defaults[f] ?? null;
+        out[f] = value;
+        // "changed" is judged against what was STORED, so a re-put of the same value is not a move
+        // — a phase_at refreshed by a write that changed nothing reads as a signature event that
+        // never happened.
+        if (stored !== value) out.changed.push(f);
+    }
+    return out;
+}
 
 /**
  * The envelope's caller-writable payload fields — ONE owner, consumed by the schema and the writer.
@@ -949,6 +1039,81 @@ export const WATERMARK_FIELDS = Object.freeze([
     'broadcast_seen', 'delivered', 'resolved', 'held', 'awaiting',
 ]);
 
+/**
+ * THE LEDGER ENTRY — a delivery claim, and WHO made it.
+ *
+ * WHY PROVENANCE. A claim outlives the credibility of whoever made it. A secretary that was stopped
+ * FOR CAUSE left a `delivered` claim on its seat's watermark that its successor could neither trust
+ * nor safely discard, because nothing on the entry said who wrote it: dropping it risked re-handing
+ * mail already delivered, keeping it risked never handing up mail that never was. Stamping the
+ * writer makes that a decidable question, which is the whole point of R2 and the reason
+ * `quarantine` can exist at all.
+ *
+ * ENCODING. An entry is JSON `{"key":…,"writer":…,"at":…}` in the flat string[] the store allows —
+ * a nested object is neither filterable nor projectable here, exactly as the wake block is flat for
+ * the same reason. A BARE STRING is a PRE-PROVENANCE entry: it is READ (so the live ledgers stay
+ * legible) and it is MIGRATED, but it can no longer be WRITTEN.
+ */
+export const LEDGER_ENTRY_FIELDS = Object.freeze(['key', 'writer', 'at']);
+
+/** The record key a ledger entry refers to, whichever encoding it is in. ONE owner of "what does
+ *  this entry point at", so dedupe, union and quarantine cannot disagree about identity. */
+export function ledgerEntryKey(entry) {
+    if (typeof entry !== 'string') return null;
+    if (!entry.startsWith('{')) return entry;
+    try {
+        const p = JSON.parse(entry);
+        return typeof p?.key === 'string' ? p.key : entry;
+    } catch { return entry; }
+}
+
+/** The writer that made this claim, or null for a pre-provenance bare entry. */
+export function ledgerEntryWriter(entry) {
+    if (typeof entry !== 'string' || !entry.startsWith('{')) return null;
+    try {
+        const p = JSON.parse(entry);
+        return typeof p?.writer === 'string' ? p.writer : null;
+    } catch { return null; }
+}
+
+/** Stamp a key into a provenance-bearing entry. The clock is the SERVER's, passed in — never read
+ *  here — so a ledger entry cannot claim it was written at a time no write happened. */
+export function stampLedgerEntry(key, writer, at) {
+    return JSON.stringify({ key: String(key), writer: String(writer), at: String(at) });
+}
+
+/**
+ * SERVER-SIDE SET-UNION of a ledger field, deduplicated BY KEY, first claim winning.
+ *
+ * This GENERALISES the union `fabric_broadcast_ack` already owned for `broadcast_seen` — it is not
+ * a second owner. That verb computed a merge for exactly one of the five ledger fields and the
+ * semantics were never lifted, which is why every other field was left to a client read-union-write
+ * that a single racing patch could wipe (measured: one patch took a `delivered` ledger from 98
+ * entries to 1).
+ *
+ * FIRST CLAIM WINS on a duplicate key, so the union is IDEMPOTENT and re-appending an entry does
+ * not restamp it with a later writer's name — a delivery is a fact about when it FIRST happened.
+ */
+export function unionLedger(existing = [], incoming = []) {
+    const out = [];
+    const seen = new Set();
+    for (const e of [...(existing || []), ...(incoming || [])]) {
+        const k = ledgerEntryKey(e);
+        if (k === null || seen.has(k)) continue;
+        seen.add(k);
+        out.push(e);
+    }
+    return out;
+}
+
+/**
+ * The write modes `fabric_watermark_put` accepts — the two generic ones PLUS the two the ledger
+ * needs. It is its OWN set rather than an extension of WRITE_MODES because `append` and
+ * `quarantine` are meaningless on every other record on this surface, and widening the shared enum
+ * would advertise them on verbs that would then have to refuse them one by one.
+ */
+export const WATERMARK_WRITE_MODES = Object.freeze([...WRITE_MODES, 'append', 'quarantine']);
+
 // ── Predicates ───────────────────────────────────────────────────────────────────────────────
 
 /** Case-folded membership. The fabric is written by shells, Python hooks and models alike; a
@@ -1099,6 +1264,17 @@ export function fabricVocabulary() {
         // GENERATES its copy of the conditional instead of hand-keeping one: a hand-kept mirror of
         // "wake is required" is exactly what left every doorbell in the fleet refused.
         wake_required_for_liveness: WAKE_REQUIRED_LIVENESS,
+        // The SECOND wake axis, served beside the first so a client reads both from one
+        // place. A terminal beat has nothing schedulable to declare; a WORKING beat still
+        // must carry a wake, and that is not relaxed here.
+        wake_exempt_statuses: [...WAKE_EXEMPT_STATUSES],
+        // The lifecycle fields that SURVIVE a write that does not mention them, on both
+        // fabric_envelope_put and fabric_contract_put.
+        lifecycle_preserved_fields: [...LIFECYCLE_PRESERVED_FIELDS],
+        // The ledger's provenance contract: the modes fabric_watermark_put accepts and the
+        // fields every stamped entry carries.
+        watermark_write_modes: [...WATERMARK_WRITE_MODES],
+        ledger_entry_fields: [...LEDGER_ENTRY_FIELDS],
         wake_record_field_names: [...WAKE_RECORD_FIELD_NAMES],
         // The beat-clock contract, so the plugin reader GENERATES its copy of "which field is the
         // model's clock" instead of hand-typing it — the exact mirror that made the two-writers
