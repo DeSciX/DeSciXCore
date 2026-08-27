@@ -1,11 +1,14 @@
 {
   "name": "@descix/cloud-core",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Shared config bootstrap, Firestore, PubSub, and service manifest for DeSciX platform microservices",
   "type": "module",
   "main": "src/index.js",
   "exports": {
-    ".": "./src/index.js"
+    ".": "./src/index.js",
+    "./manifest": "./src/manifest/index.js",
+    "./naming": "./src/naming/index.js",
+    "./service-bootstrap": "./src/service-bootstrap/index.js"
   },
   "files": [
     "src",

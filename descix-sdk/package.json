@@ -1,14 +1,13 @@
 {
   "name": "@descix/sdk",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "DeSciX SDK - Shared runtime libraries for Node.js and Browser",
   "type": "module",
   "main": "./src/index.js",
   "exports": {
     ".": "./src/index.js",
+    "./microservice": "./microservice/index.js",
     "./node": "./src/index.js",
-    "./browser": "./browser/index.js",
-    "./mcp": "./mcp/mcp-server.js",
     "./mcp/transports": "./mcp/transports/index.js",
     "./mcp/transports/stdio": "./mcp/transports/stdio-transport.js",
     "./mcp/transports/http-sse": "./mcp/transports/http-sse-transport.js",
@@ -28,14 +27,20 @@
   ],
   "author": "DeSciX",
   "license": "SEE LICENSE IN LICENSE.md",
-  "files": ["src", "mcp"],
+  "files": [
+    "src",
+    "mcp",
+    "microservice"
+  ],
   "scripts": {
-    "pack": "npm pack"
+    "pack": "npm pack",
+    "check:exports": "node scripts/check-exports-resolve-cli.mjs"
   },
   "engines": {
     "node": ">=24.0.0"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.25.1"
+    "@modelcontextprotocol/sdk": "^1.25.1",
+    "@descix/cloud-core": "^1.1.0"
   }
 }
