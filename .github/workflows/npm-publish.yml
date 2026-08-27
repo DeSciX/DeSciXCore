@@ -51,12 +51,12 @@ on:
         required: true
         type: choice
         options:
-          # PUBLIC STORY IS ONE PACKAGE (CEO 2026-08-21): @descix/sdk, with cloud-core as
-          # PLUMBING that sdk re-exports at /microservice. cli, platform-api and app-sdk are
-          # deliberately NOT here — not published, not listed. Adding a name back is a product
-          # decision, not a convenience.
+          # PUBLIC STORY IS ONE PACKAGE (CEO 2026-08-21): @descix/sdk, with cloud-core and
+          # app-sdk as PLUMBING. cli and platform-api are not listed. Adding a name here is
+          # a product decision, not a convenience.
           - descix-sdk
           - descix-cloud-core
+          - descix-app-sdk
       dist_tag:
         description: "npm dist-tag"
         required: true
@@ -98,7 +98,7 @@ jobs:
       - name: Refuse to publish excluded packages
         run: |
           case "${{ inputs.package }}" in
-            cryptoapis-sdk|descix-vscode|descix-cli|descix-platform-api|descix-app-sdk|.)
+            cryptoapis-sdk|descix-vscode|descix-cli|descix-platform-api|.)
               echo "::error::'${{ inputs.package }}' is NOT publishable to npm under @descix."
               exit 1
               ;;
