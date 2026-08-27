@@ -17,6 +17,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { SITE_SCAFFOLD_BRIDGE } from '../scaffold/index.js';
 
 import { BRIDGE_READY_EVENT, publishBridgeMember, retractBridgeMember, getBridge } from '../src/util/appBridge.js';
 import { publishChatApi, retractChatApi } from '../src/util/appChat.js';
@@ -25,9 +26,7 @@ import { collectTurnMedia } from '../src/util/chatIngress.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SDK_ROOT = path.resolve(__dirname, '..');
-const SCAFFOLD_SDK = path.resolve(
-  SDK_ROOT, '..', 'descix-cli', 'templates', 'scaffolds', 'site', 'DeSciXAppSDK.js'
-);
+const SCAFFOLD_SDK = SITE_SCAFFOLD_BRIDGE;
 
 /** Minimal same-origin-ish window pair: a shell window and the app's view of it. */
 function makeShellWindow() {

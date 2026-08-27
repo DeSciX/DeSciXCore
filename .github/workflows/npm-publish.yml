@@ -10,27 +10,28 @@
 # long-lived credential to leak in the first place. That is also why the workflow file itself is
 # now a credential-equivalent: whoever can edit this path can publish. CODEOWNERS guards it.
 #
-# EVERY PUBLISH IS A DELIBERATE CEO CLICK. Trigger is workflow_dispatch only — no push, no tag.
-# CORRECTION (measured 2026-08-22): the environment does NOT add an approval prompt. Required-
-# reviewer protection on a PRIVATE repo is Enterprise-only and was refused with 422 under the Team
-# org. `environment: npm-publish` STAYS anyway and must not be removed — the npm trusted-publisher
-# binding includes the environment name in the OIDC claim, so dropping it breaks publishing.
-# The real gate is npm-side and fail-closed: a claim that does not match the binding is refused,
-# server-side, and only the CEO's npm account can change the binding.
+# EVERY PUBLISH IS A DELIBERATE CEO CLICK, gated twice. Trigger is workflow_dispatch only — no
+# push, no tag — and the `npm-publish` environment carries a required-reviewer rule naming the
+# CEO, so the run pauses for an approval before the publish step executes. `environment:
+# npm-publish` must not be removed for a second reason: the npm trusted-publisher binding
+# includes the environment name in the OIDC claim, so dropping it breaks publishing outright.
+# Behind both, the npm-side check is fail-closed: a claim that does not match the binding is
+# refused server-side, and only the CEO's npm account can change the binding.
 #
 # MEASURED FACTS THIS FILE IS BUILT ON (verified 2026-08-21, not assumed):
-#   · The repo is PRIVATE (gh repo view -> "isPrivate": true) and now lives at DeSciX/DeSciXCore
+#   · The repo is PUBLIC and lives at DeSciX/DeSciXCore
 #     (transferred to the org 2026-08-22; git redirects keep remotes working). The npm binding
 #     must name the ORG path or every OIDC claim mismatches and npm refuses the publish.
 #   · npm provenance requires a PUBLIC source repo — npm docs: "Ensure your package.json is
 #     configured with a public repository that matches (case-sensitive) where you are publishing
 #     with provenance from." Publishing with provenance from private source repos has been
 #     unsupported since 2023-07-26.
-#   · Trusted publishing generates provenance AUTOMATICALLY, with no --provenance flag. For a
-#     private repo it will not be generated, and NPM_CONFIG_PROVENANCE=false is the documented
+#   · Trusted publishing generates provenance AUTOMATICALLY, with no --provenance flag.
+#     NPM_CONFIG_PROVENANCE=false is the documented
 #     way to opt out explicitly rather than rely on that implicit behaviour.
-#   => hence NPM_CONFIG_PROVENANCE: "false" below. If this repo is ever made PUBLIC, DELETE that
-#      line so provenance turns back on — it is a real supply-chain gain we are only forgoing
+#   => NPM_CONFIG_PROVENANCE: "false" below is a DELIBERATE opt-out, not a limitation: the repo
+#      is public, so deleting that line turns provenance on. It changes what a publish emits, so
+#      the flip is the CEO's call — it is a real supply-chain gain currently forgone
 #      because of visibility.
 #   · Trusted publishing needs npm >= 11.5.1 and Node >= 22.14.0.
 #   · A trusted publisher CANNOT be configured for a package that does not exist yet — npm docs,
@@ -72,8 +73,8 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    # REQUIRED FOR THE BINDING, not for approval: npm's trusted-publisher claim includes this
-    # environment name. No approval prompt exists at the current plan/visibility (see header).
+    # Load-bearing twice: it carries the required-reviewer approval gate, and npm's
+    # trusted-publisher claim includes this environment name.
     environment: npm-publish
 
     steps:
@@ -107,7 +108,7 @@ jobs:
       - name: Publish
         working-directory: ${{ inputs.package }}
         env:
-          # See the header: private source repo => provenance cannot be generated. Explicit beats
+          # Deliberate opt-out; the repo is public so provenance is available. Explicit beats
           # implicit. DELETE this if the repository ever becomes public.
           NPM_CONFIG_PROVENANCE: "false"
         run: |

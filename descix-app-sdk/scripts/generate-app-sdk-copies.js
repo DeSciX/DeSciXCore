@@ -15,7 +15,7 @@
  * ── What is generated from what ──────────────────────────────────────────────
  *   SOURCE  templates/DeSciXAppSDK.template.js   (the app-side proxy)
  *         + src/util/bridgeResolver.js           (inlined at __BRIDGE_RESOLVER__)
- *   OUTPUT  descix-cli/templates/scaffolds/site/DeSciXAppSDK.js   [DeSciX_Core]
+ *   OUTPUT  scaffold/site/DeSciXAppSDK.js                        [this package]
  *           packages/client-core/src/DeSciXAppSDK.js              [DeSciX_Powch]
  *           apps/daita-splitviewdemo/site/DeSciXAppSDK.js         [Unkamon]
  *
@@ -37,6 +37,7 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { SITE_SCAFFOLD_BRIDGE } from '../scaffold/index.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const APP_SDK = resolve(HERE, '..');           // …/descix-app-sdk
@@ -99,8 +100,8 @@ function outputs() {
   const appsRoot = arg('apps-root') || resolve(CORE, '..', '..', 'apps');
   return [
     {
-      repo: 'DeSciX_Core',
-      path: join(CORE, 'descix-cli', 'templates', 'scaffolds', 'site', 'DeSciXAppSDK.js'),
+      repo: '@descix/app-sdk',
+      path: SITE_SCAFFOLD_BRIDGE,
     },
     {
       repo: 'DeSciX_Powch',
