@@ -1,6 +1,8 @@
 // ---------- [./DeSciX_PWA/src/util/AppData.jsx] ----------
 
 
+import { resolveAgainstCurrentOrigin } from './productUrl.js';
+
 const queryParams = new URLSearchParams(window.location.search);
 // isEmbedded is strictly for Discord embedded apps (where .proxy/ prefix is needed)
 // We check for frame_id AND ensure we are NOT in standalone app mode (internal iframe)
@@ -53,11 +55,17 @@ export class AppData {
     return AppData._workspaceProducts;
   }
 
+  /**
+   * The code-site location for a product, resolved against the CURRENT origin.
+   * The rule itself is owned by ./productUrl.js — see that file for GAP-4 and why only the
+   * stored value's PATH is meaningful. The dev workspaceProducts indirection still wins:
+   * that is the point of it, and `descix serve` routes through it.
+   */
   static getProductUrl(product) {
     if (AppData._workspaceProducts && AppData._workspaceProducts[product.app_id]) {
       return AppData._workspaceProducts[product.app_id];
     }
-    return product.ip_site_gcs_path_url;
+    return resolveAgainstCurrentOrigin(product.ip_site_gcs_path_url);
   }
 
   static reset() {
