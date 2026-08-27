@@ -1,0 +1,9 @@
+{
+  "name": "@descix/gate-fixture-satisfiable",
+  "version": "0.0.0",
+  "private": true,
+  "description": "FIXTURE, never published. Exercises check-prepublish-deps' SATISFACTION path against the real registry: @descix/cloud-core ^1.0.0 is really satisfied by a version the registry really carries. Only this manifest is synthetic; the query and the resolution are live.",
+  "dependencies": {
+    "@descix/cloud-core": "^1.0.0"
+  }
+}

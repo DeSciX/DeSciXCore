@@ -119,6 +119,18 @@ each one:
 > If what the registry has does not satisfy what `@descix/sdk` declares, publish
 > `@descix/cloud-core` first. Publishing it at *some* newer version is not enough — it has to land
 > inside the declared range.
+>
+> **This order is now enforced, not merely advised — but read the refusal you get.** The workflow
+> asks the registry these questions itself, on every run. Before it publishes anything, it refuses
+> an `@descix/*` range the registry cannot satisfy, and the refusal separates exactly the two cases
+> above: a hard dependency says *this will not install at all*, an optional peer says *it installs,
+> but the half it advertises cannot be obtained by anyone*. Both stop the run, and which one you
+> got is the difference between a stranded install and a silently missing app half. After the
+> publish, a final job installs the package from the registry into an empty directory and fails the
+> run if it does not install — the check whose absence let the broken `latest` out.
+>
+> The commands above are still worth running **before** you click. They answer the same question
+> without spending a run, and without a publish you cannot take back.
 
 **Useful thing you discovered:** npm saves the connection **with no workflow file in the repo** —
 the form warns about it but does not validate it.
@@ -175,6 +187,18 @@ and why it is not optional.
 If a version already exists, npm rejects it and the run fails loudly. That is intended — there is
 no force and no skip-if-exists, because a publish that silently does nothing is worse than one
 that stops and tells you.
+
+The two registry gates Step 1 describes are scripts under `scripts/`, so you can answer either
+question yourself, before you click, without dispatching the workflow:
+
+```bash
+node scripts/check-prepublish-deps-cli.mjs <package-directory>
+node scripts/check-published-install-cli.mjs --spec <name@version>
+```
+
+If the post-publish job goes red, the artifact is already public and already broken. **Fix forward
+with a new version** — a published version cannot be edited, and there is no unpublish worth
+reaching for.
 
 ---
 

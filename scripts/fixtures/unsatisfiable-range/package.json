@@ -1,0 +1,9 @@
+{
+  "name": "@descix/gate-fixture-unsatisfiable",
+  "version": "0.0.0",
+  "private": true,
+  "description": "FIXTURE, never published. The negative control for its satisfiable twin: without it the fixture harness would only ever have been shown GREEN, and a control shown in one direction only has not been shown to discriminate.",
+  "dependencies": {
+    "@descix/cloud-core": "^9.9.9"
+  }
+}
