@@ -83,9 +83,43 @@ export const READABLE_STATUSES = Object.freeze([
 export const BEAT_WORKING = 'working';
 export const BEAT_SESSION_END = 'good-night';
 
-/** The wake block every beat must carry. A working seat's continuity is exactly as checkable a
- *  fact as a resting seat's, and exempting it is how a seat goes dark while looking busy. */
+/** The wake block. A working seat's continuity is exactly as checkable a fact as a resting seat's,
+ *  and exempting it is how a seat goes dark while looking busy. WHICH WRITER must carry one is
+ *  WAKE_REQUIRED_LIVENESS, declared below the liveness values it is expressed in. */
 export const WAKE_FIELDS = Object.freeze(['mechanism', 'survives_death', 'next_fire_at']);
+
+/** The wake block FLATTENED onto the record, as `fabric_beat` writes it: the store's metadata is
+ *  flat string/number/boolean/string[], so a nested object is neither filterable nor projectable
+ *  and a master could not sweep for overdue wakes.
+ *
+ *  DERIVED from WAKE_FIELDS rather than listed beside it. This mapping was being re-derived BY HAND
+ *  in three places in the executing store (the beat's write, the liveness empty-record shape, the
+ *  liveness diagnostic block), and making `wake` conditional needs a FOURTH copy for its preserve
+ *  set — four hand copies of one mapping is how a field gets renamed in three of them. */
+export const WAKE_RECORD_FIELD_PREFIX = 'wake_';
+export const WAKE_RECORD_FIELD_NAMES = Object.freeze(
+    WAKE_FIELDS.map((f) => `${WAKE_RECORD_FIELD_PREFIX}${f}`));
+
+/** Which flat record field holds this wake field. Derived, so a fourth wake field added to
+ *  WAKE_FIELDS gets its record field for free, and a name that is not a wake field reads null
+ *  rather than composing a plausible-looking field that no record carries. */
+export function wakeRecordFieldFor(wakeField) {
+    return WAKE_FIELDS.includes(wakeField) ? `${WAKE_RECORD_FIELD_PREFIX}${wakeField}` : null;
+}
+
+/** The flat bag a beat writes for a wake block, or NULL when there is no wake to write.
+ *
+ *  Null is not an empty bag, and the difference is the whole point: a beat is a WHOLE-STATE write,
+ *  so a field absent from the outgoing record is CLEARED rather than inherited. A writer exempt
+ *  from carrying wake must therefore PRESERVE the stored fields explicitly — writing an empty bag
+ *  would erase the seat's wake chain while returning success, which is the same silent failure in
+ *  the opposite direction. */
+export function flattenWake(wake) {
+    if (!wake || typeof wake !== 'object' || Array.isArray(wake)) return null;
+    const out = {};
+    for (const f of WAKE_FIELDS) out[wakeRecordFieldFor(f)] = wake[f];
+    return out;
+}
 
 // ── liveness: WHO wrote this beat ────────────────────────────────────────────────────────────
 //
@@ -108,6 +142,37 @@ export const WAKE_FIELDS = Object.freeze(['mechanism', 'survives_death', 'next_f
 export const LIVENESS_MODEL = 'model';
 export const LIVENESS_PROCESS = 'process';
 export const LIVENESS_VALUES = Object.freeze([LIVENESS_MODEL, LIVENESS_PROCESS]);
+
+// ── WHICH WRITER MUST CARRY `wake` ───────────────────────────────────────────────────────────
+//
+// ONE OWNER OF THE RULE, consumed by the descriptor that PUBLISHES it (nativeTools.js
+// `fabric_beat`) and by the verb that ENFORCES it (DeSciX_Cloud fabricStore.js). Under
+// CEO-D-2026-08-22-PROTOCOL-TRUTH-IS-THE-MCP-DESCRIPTOR the served descriptor IS the protocol, so
+// a server enforcing one rule while its descriptor states another has two truths and callers build
+// against the wrong one. Both read this constant; neither restates it.
+//
+// A `wake` block answers "what will wake THIS SEAT'S AGENT, does that survive this process dying,
+// and when does it next fire". ONLY THE AGENT CAN ANSWER IT. A hook's beat proves a process is
+// alive and knows nothing about the agent's continuity, so requiring a wake from a hook forces it
+// to invent an answer or not beat at all — and it did not beat: an unconditional requirement left
+// EVERY doorbell in the fleet exiting on its first tick, because the plugin's pulse sends
+// seat_label, session_id, status, liveness and text and no wake (measured 2026-08-27T12:31Z, and
+// re-measured at the served verb before this change). A beat must never fail because something
+// ancillary TO THAT WRITER failed.
+//
+// This is the same law as the beat clocks below: a beat may only assert what its own writer
+// observed. The clocks make it a rule about what a writer may WRITE; this makes it a rule about
+// what a writer may be REQUIRED to write. A process beat carries no wake and the stored wake_*
+// fields are PRESERVED, exactly as its model clock is.
+export const WAKE_REQUIRED_LIVENESS = LIVENESS_MODEL;
+
+/** Must a beat of this `liveness` carry a `wake` block? Derived from WAKE_REQUIRED_LIVENESS so no
+ *  consumer restates the rule. Callers validate `liveness` against its closed enum FIRST, so an
+ *  unrecognised value never reaches here and is never silently exempted. */
+export function isWakeRequiredFor(liveness) {
+    const v = typeof liveness === 'string' ? liveness.trim().toLowerCase() : null;
+    return v === WAKE_REQUIRED_LIVENESS;
+}
 
 // ── Delivery statuses: what is WAITING for a seat ────────────────────────────────────────────
 export const STATUS_UNREAD = 'unread';
@@ -1030,6 +1095,11 @@ export function fabricVocabulary() {
         write_modes: [...WRITE_MODES],
         watermark_fields: [...WATERMARK_FIELDS],
         wake_fields: [...WAKE_FIELDS],
+        // WHICH WRITER must carry a wake block, and the flat fields it lands in. Served so a client
+        // GENERATES its copy of the conditional instead of hand-keeping one: a hand-kept mirror of
+        // "wake is required" is exactly what left every doorbell in the fleet refused.
+        wake_required_for_liveness: WAKE_REQUIRED_LIVENESS,
+        wake_record_field_names: [...WAKE_RECORD_FIELD_NAMES],
         // The beat-clock contract, so the plugin reader GENERATES its copy of "which field is the
         // model's clock" instead of hand-typing it — the exact mirror that made the two-writers
         // defect invisible for a day. The names are derived from the table, not listed beside it.

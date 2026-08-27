@@ -55,7 +55,7 @@ import {
     ENVELOPE_SECTIONS, ENVELOPE_TEXT_SHAPE, ENVELOPE_PHASES, ENVELOPE_PHASE_DEFAULT, ENVELOPE_PHASE_TRANSITIONS,
     FABRIC_RECORD_KINDS,
     RETIRED_SENTINELS, BEAT_CLOCK_FIELDS, beatClockFieldFor, beatClockAgeField,
-    LIVENESS_MODEL, LIVENESS_PROCESS,
+    LIVENESS_MODEL, LIVENESS_PROCESS, WAKE_REQUIRED_LIVENESS,
     KEY_CONTRACT, KEY_GROUNDING,
     CONTRACT_READ_FIELD_NAMES, GROUNDING_KB_READ_FIELD_NAMES, GROUNDING_ROLE_READ_FIELD_NAMES,
     GROUNDING_READ_KINDS, GROUNDING_REQUIRED_READ_KIND, GROUNDING_VERIFICATION_FIELD_NAMES,
@@ -380,7 +380,9 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
             + LIVENESS_VALUES[0] + '") or a hook ("' + LIVENESS_VALUES[1]
             + '"). It is written on every beat and never inherited: a hook beating on a dead model is a mask that reports health while nobody is home. It says WHO WROTE LAST and is NOT the model\'s clock. '
             + BEAT_CLOCK_RULE
-            + ' `wake` is MANDATORY on a working beat as much as a resting one — without it "I am still going" is unfalsifiable and a seat goes dark while looking busy; wake_overdue:true comes back when your own next_fire_at has already passed. Returns unchanged:true when the beat is identical to the stored one. Does NOT renew a BEAST seat and takes no seat_token: renewal binds to the authenticated caller under ws-seat-session-bound-auth.',
+            + ' `wake` IS REQUIRED ONLY FROM THE "'
+            + WAKE_REQUIRED_LIVENESS
+            + '" WRITER, and on a working beat as much as a resting one — without it "I am still going" is unfalsifiable and a seat goes dark while looking busy. Every OTHER writer is EXEMPT and carries none: only an agent can say what will wake this seat, so requiring one from a hook forces it to invent an answer or not beat at all, and it did not beat — an unconditional requirement left every doorbell in the fleet refused on its first tick (measured 2026-08-27). A beat that carries no wake PRESERVES the stored wake_* fields rather than clearing them, exactly as it preserves the other writer\'s clock, and the three fields come back on the response as they now stand so you can see that without a second read. wake_overdue:true comes back when the next_fire_at IN FORCE — this beat\'s, or the preserved one — has already passed, and null when no wake has ever been recorded, which is UNKNOWN and is never false. Returns unchanged:true when the beat is identical to the stored one. Does NOT renew a BEAST seat and takes no seat_token: renewal binds to the authenticated caller under ws-seat-session-bound-auth.',
         mutating: true,
         inputSchema: {
             type: 'object',
@@ -391,7 +393,7 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
                 liveness: { type: 'string', enum: [...LIVENESS_VALUES], description: 'REQUIRED, no default and never inherited. "' + LIVENESS_MODEL + '" = an AGENT wrote this beat (proves the model is alive) and stamps `' + beatClockFieldFor(LIVENESS_MODEL) + '`. "' + LIVENESS_PROCESS + '" = a HOOK wrote it (proves the process is alive, says NOTHING about the model) and stamps `' + beatClockFieldFor(LIVENESS_PROCESS) + '` while PRESERVING `' + beatClockFieldFor(LIVENESS_MODEL) + '`. Omitting it is refused rather than defaulted, because a merge-upsert would silently keep the previous writer\'s value.' },
                 wake: {
                     type: 'object',
-                    description: 'REQUIRED on EVERY beat, working or resting. What will wake this seat, whether that survives the process dying, and when it next fires.',
+                    description: 'REQUIRED when liveness is "' + WAKE_REQUIRED_LIVENESS + '", on a working beat as much as a resting one; OMITTED by every other writer, whose stored wake_* fields are then PRESERVED unchanged. What will wake this seat, whether that survives the process dying, and when it next fires. Supplying one is accepted from any writer — the exemption is from being REQUIRED to answer, not from being allowed to.',
                     properties: {
                         mechanism: { type: 'string', description: 'What will wake this seat (e.g. "ScheduleWakeup", "Monitor ticker", "cron").' },
                         survives_death: { type: 'boolean', description: 'Does the wake mechanism outlive this process? A boolean, not a string.' },
@@ -404,7 +406,16 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
                 to_agent: { type: 'string', description: 'Optional master to address the beat to. Must be a seat LABEL or a sentinel (' + TO_AGENT_SENTINELS.join(', ') + '). ' + RETIRED_SENTINELS.join(' and ') + ' are REFUSED: no sweep has ever composed either, so a beat addressed to one was written and read by nobody. Address the master by its seat LABEL — read the current holder with beast_seat_read {seat_id:"org"}; a label names a holder and holders change, so no label is hard-coded here.' },
                 extra: { type: 'object', description: 'Optional additional flat metadata. A key this verb owns is refused rather than silently overwritten.' },
             },
-            required: ['seat_label', 'session_id', 'status', 'liveness', 'wake'],
+            // `wake` IS DELIBERATELY ABSENT FROM THIS LIST, and the conditional is stated in the
+            // descriptions above rather than as a JSON-Schema `if`/`then`. The boundary guard that
+            // enforces this schema (paramValidation.js::validateParams) reads the FLAT `required`
+            // array and nothing else — it does not evaluate `allOf`/`if`/`then`. An `if`/`then`
+            // here would be a rule no enforcer reads: a gate that cannot fail, and a SECOND place
+            // the requirement is written, free to drift from the one that runs. So the flat list
+            // states exactly what the door enforces, the verb enforces the conditional half
+            // (fabricStore.js::validateWake, via isWakeRequiredFor), and both derive it from the
+            // one owner — vocab.js::WAKE_REQUIRED_LIVENESS.
+            required: ['seat_label', 'session_id', 'status', 'liveness'],
         },
     },
     {
