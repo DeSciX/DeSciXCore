@@ -86,19 +86,33 @@ each one:
 | — | `@descix/sdk` | nothing — bound, and already published through this workflow |
 
 > **The order is a hard constraint, not tidiness.** `@descix/cloud-core` must be on the registry at
-> a version satisfying the range `descix-sdk/package.json` declares **before** `@descix/sdk` is
+> a version satisfying the range `@descix/sdk` declares **before** `@descix/sdk` is
 > published: `@descix/sdk` declares it as a hard dependency, so it is the one that can strand the
-> install. `@descix/app-sdk` is an *optional* peer and cannot, so its own order does not matter.
+> install. `@descix/app-sdk` is an *optional* peer, so it cannot, and its order does not matter.
+> What it controls instead is whether the app half exists at all: until `@descix/app-sdk` is on the
+> registry at a version satisfying the peer range `@descix/sdk` declares, `npm install @descix/sdk`
+> still succeeds and the app half is simply absent — no error, nothing to see. That is why its
+> click is a repair and not housekeeping.
 >
 > Publishing `@descix/sdk` first *succeeds*, and then every `npm install @descix/sdk` fails with
 > `ETARGET` on the range it cannot resolve — and that broken install is what the `latest` tag
 > serves to everyone. **This is not hypothetical: it happened on 2026-08-27.** `@descix/sdk` went
 > out ahead of `@descix/cloud-core`, and the `latest` it published could not be installed at all.
 >
-> So answer it at the moment you click, from the registry rather than from this page:
+> So answer it at the moment you click, from the registry rather than from this page. These need
+> no checkout and no dev environment:
 >
 > ```bash
-> npm view @descix/cloud-core version
+> npm view @descix/sdk dependencies        # the range @descix/sdk declares
+> npm view @descix/cloud-core version      # what the registry actually has
+> npm view @descix/sdk peerDependencies    # the optional-peer range, for the app half
+> npm view @descix/app-sdk versions        # whether anything satisfies it yet
+> ```
+>
+> The registry can only answer for a package that is already published. For one that is not — a
+> brand-new package, or a range you are about to change — read it from the tree instead:
+>
+> ```bash
 > node -p "require('./descix-sdk/package.json').dependencies['@descix/cloud-core']"
 > ```
 >
