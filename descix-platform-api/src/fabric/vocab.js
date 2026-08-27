@@ -96,9 +96,37 @@ export const WAKE_FIELDS = Object.freeze(['mechanism', 'survives_death', 'next_f
  *  in three places in the executing store (the beat's write, the liveness empty-record shape, the
  *  liveness diagnostic block), and making `wake` conditional needs a FOURTH copy for its preserve
  *  set — four hand copies of one mapping is how a field gets renamed in three of them. */
-export const WAKE_RECORD_FIELD_PREFIX = 'wake_';
+export const WAKE_PARAM_NAME = 'wake';
+export const WAKE_RECORD_FIELD_PREFIX = `${WAKE_PARAM_NAME}_`;
 export const WAKE_RECORD_FIELD_NAMES = Object.freeze(
     WAKE_FIELDS.map((f) => `${WAKE_RECORD_FIELD_PREFIX}${f}`));
+
+/**
+ * THE WAKE FACT OWNS A NAMESPACE, not a list of field names — `wake` itself and every `wake_*` key,
+ * whether or not any beat writes one.
+ *
+ * WHY A NAMESPACE AND NOT A LIST. The hole this closes is a caller planting a SHADOW copy of the
+ * wake fact through the `extra` bag under a name the record does not own. `extra.wake_mechanism` is
+ * already refused, but `extra.wake` and `extra.wake_block` are accepted with no guard, and that
+ * asymmetry is how three live heartbeats acquired null `wake` / `wake_block` fossils.
+ *
+ * `wake_block` is not a field this vocabulary has ever declared, so NO derivation from WAKE_FIELDS
+ * reaches it. A list would have to HAND-TYPE it — and a hand-typed list is a second derivation of
+ * "what belongs to the wake fact", free to drift from WAKE_FIELDS, which is the mirror-drift bug
+ * class this module exists to close. The namespace rule reaches every such name at once, including
+ * names nobody has invented yet, and a fourth entry added to WAKE_FIELDS extends the refusal with
+ * NO edit to any guard, because its record name is `wake_<field>` and the prefix already owns it.
+ *
+ * It is expressed as a PREDICATE rather than an array because the set is infinite. `describe` is
+ * carried beside it so a refusal can tell the caller what it collided with, in the owner's words
+ * rather than the guard's.
+ */
+export const WAKE_NAMESPACE = Object.freeze({
+    owns: (key) => typeof key === 'string'
+        && (key === WAKE_PARAM_NAME || key.startsWith(WAKE_RECORD_FIELD_PREFIX)),
+    describe: `the wake fact's namespace — '${WAKE_PARAM_NAME}' itself and every `
+        + `'${WAKE_RECORD_FIELD_PREFIX}*' key, whether or not this beat writes one`,
+});
 
 /** Which flat record field holds this wake field. Derived, so a fourth wake field added to
  *  WAKE_FIELDS gets its record field for free, and a name that is not a wake field reads null
