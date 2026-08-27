@@ -28,7 +28,7 @@ prerequisites, verbatim:
 
 > "Package must exist: The package you're configuring must already exist on the npm registry."
 
-**The public story is ONE package** (your call, 2026-08-21): `@descix/sdk`, which will re-export
+**The public story is ONE package**: `@descix/sdk`, which will re-export
 the microservice backend at `@descix/sdk/microservice`. `@descix/cloud-core` and `@descix/app-sdk`
 also publish, but as **plumbing** — named in no docs, installed by nobody directly.
 
@@ -170,7 +170,7 @@ It is under CODEOWNERS requiring your review, and it should stay that way.
 
 ## Requirements this rests on (verified 2026-08-21, not assumed)
 
-- npm CLI **≥ 11.5.1** and Node **≥ 22.14.0** — the workflow pins Node 22.14.0 and upgrades npm.
+- npm CLI **≥ 11.5.1** and Node **≥ 22.14.0**.
 - Job permissions `id-token: write` + `contents: read` — the OIDC mint plus the checkout, nothing more.
 - Trusted publishing with OIDC has been generally available since 2025-07-31.
 
