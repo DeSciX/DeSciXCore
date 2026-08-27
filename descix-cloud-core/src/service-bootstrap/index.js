@@ -93,6 +93,34 @@ export function authorizationFrom(minted) {
 }
 
 /**
+ * Render the door's reply as text a human can act on.
+ *
+ * MEASURED 2026-08-27 booting a hello-world service on the published subpath: the previous
+ * expression `body?.message?.message || body?.message || 'registered'` fell through to the
+ * middle branch whenever `message` was an OBJECT without a `.message` string — which is the
+ * ordinary success shape — and interpolated it as the literal text "[object Object]". The
+ * registration had succeeded, so nothing was broken except the only sentence the operator reads.
+ *
+ * A success message is part of the contract (CEO 2026-08-24: a call defect is a
+ * self-description defect). A log line that cannot say what happened is a defect even when the
+ * call behind it worked, because the next person to read it learns nothing and cannot tell a
+ * real success from a malformed reply.
+ */
+function describeRegisterReply(body) {
+    const m = body?.message;
+    if (typeof m === 'string' && m.trim()) return m;
+    if (typeof m?.message === 'string' && m.message.trim()) return m.message;
+    if (m && typeof m === 'object') {
+        try {
+            return JSON.stringify(m);
+        } catch (e) {
+            return 'registered (reply not serialisable)';
+        }
+    }
+    return 'registered';
+}
+
+/**
  * Create the service's manifest-serve + self-registration handle.
  *
  * @param {Object} options
@@ -259,7 +287,7 @@ export function createServiceBootstrap(options = {}) {
 
             logger.log(
                 `[service-bootstrap] ${name} v${version}: registration OK — ` +
-                `${body?.message?.message || body?.message || 'registered'}`
+                `${describeRegisterReply(body)}`
             );
             return settle('ok');
         } catch (err) {
