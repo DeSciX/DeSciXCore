@@ -29,10 +29,9 @@
 #   · Trusted publishing generates provenance AUTOMATICALLY, with no --provenance flag.
 #     NPM_CONFIG_PROVENANCE=false is the documented
 #     way to opt out explicitly rather than rely on that implicit behaviour.
-#   => NPM_CONFIG_PROVENANCE: "false" below is a DELIBERATE opt-out, not a limitation: the repo
-#      is public, so deleting that line turns provenance on. It changes what a publish emits, so
-#      the flip is the CEO's call — it is a real supply-chain gain currently forgone
-#      because of visibility.
+#   => NPM_CONFIG_PROVENANCE: "false" below is a DELIBERATE opt-out. The repo is public, so
+#      provenance is available and deleting that line turns it on. It is a real supply-chain
+#      gain, and it changes what a publish emits, so the flip is the CEO's call.
 #   · Trusted publishing needs npm >= 11.5.1 and Node >= 22.14.0.
 #   · A trusted publisher CANNOT be configured for a package that does not exist yet — npm docs,
 #     Prerequisites: "Package must exist: The package you're configuring must already exist on
@@ -109,7 +108,7 @@ jobs:
         working-directory: ${{ inputs.package }}
         env:
           # Deliberate opt-out; the repo is public so provenance is available. Explicit beats
-          # implicit. DELETE this if the repository ever becomes public.
+          # implicit. Deleting this line turns provenance on — the CEO's call.
           NPM_CONFIG_PROVENANCE: "false"
         run: |
           npm publish --access public --tag "${{ inputs.dist_tag }}"
