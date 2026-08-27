@@ -90,3 +90,4 @@ secret
 
 # ── npm pack output (regenerated, not tracked) ──
 *.tgz
+descix-sdk/*.tgz
