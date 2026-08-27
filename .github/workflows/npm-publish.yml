@@ -81,14 +81,19 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "22.14.0"
+          node-version: "22"
           registry-url: "https://registry.npmjs.org"
 
       # setup-node bundles whatever npm shipped with the Node line; trusted publishing needs
       # >= 11.5.1, so pin the floor explicitly rather than hoping the image is current.
+      # THE ASYMMETRY IS DELIBERATE. The pin goes on the dependency that CROSSES MAJORS — npm,
+      # which narrows its engines.node range when it does — and the float goes on the one whose
+      # compatibility range is broad: any node in the line above satisfies every npm in this
+      # major. Pinning node to an exact patch while letting npm float to whatever is newest is
+      # what lets the two drift apart, and the drift surfaces as EBADENGINE in this very step.
       - name: Ensure npm supports trusted publishing
         run: |
-          npm install -g npm@latest
+          npm install -g "npm@^11.5.1"
           npm --version
           node --version
 
