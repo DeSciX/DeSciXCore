@@ -157,6 +157,29 @@ function runbookSets(text, nameToDir) {
   return { tableFound: headIdx !== -1, stated, notPublishedFound: npIdx !== -1, notPublished };
 }
 
+/**
+ * A static file must not assert mutable external state. A version number printed next to one of
+ * our package names is a snapshot of the registry taken at write time, and it is wrong the moment
+ * someone clicks publish.
+ *
+ * This catches the SUBSET of that class that carries a version literal, which is mechanical and
+ * exact. It does NOT catch a claim with no number in it — "has never been published", "already
+ * exists on the registry" — because separating those from legitimate prose needs a hand-maintained
+ * phrase list, which would be its own drifting mirror. See the boundary printed on success.
+ */
+function versionAssertions(files, tokens) {
+  const semver = /\b\d+\.\d+\.\d+\b/;
+  const hits = [];
+  for (const [path, text] of files) {
+    text.split('\n').forEach((line, i) => {
+      if (!semver.test(line)) return;
+      const named = tokens.find((t) => line.includes(t));
+      if (named) hits.push({ path, line: i + 1, named, text: line.trim() });
+    });
+  }
+  return hits;
+}
+
 const eq = (a, b) => a.length === b.length && [...a].sort().every((v, i) => v === [...b].sort()[i]);
 const show = (a) => (a.length ? [...a].sort().join(', ') : '(none)');
 
@@ -217,10 +240,35 @@ if (notActuallyRefused.length) {
   );
 }
 
+// B — a static file must not assert mutable external state.
+const pkgTokens = [...nameToDir.keys(), ...nameToDir.values()];
+const vHits = versionAssertions(
+  [
+    [WORKFLOW_PATH, readAt(WORKFLOW_PATH)],
+    [RUNBOOK_PATH, readAt(RUNBOOK_PATH)],
+  ],
+  pkgTokens
+);
+if (vHits.length) {
+  failures.push(
+    'B a version literal appears next to a package name. These files are checked in; the registry ' +
+      'is not, and a version written here is a snapshot that is wrong the moment someone publishes. ' +
+      'State the command that answers it instead of answering it at write time:\n' +
+      vHits.map((h) => `        ${h.path}:${h.line} (${h.named})  ${h.text}`).join('\n')
+  );
+}
+
 if (failures.length) {
-  console.error('RED — the runbook and the workflow disagree about the publish set:\n');
+  console.error('RED — the runbook and the workflow disagree, or assert mutable state:\n');
   for (const f of failures) console.error(`  - ${f}\n`);
   process.exit(1);
 }
 
-console.log('GREEN — the runbook states exactly the publish set the workflow implements.');
+console.log('GREEN — the runbook states exactly the publish set the workflow implements,');
+console.log('        and neither file pins a package version literal.');
+console.log('');
+console.log('        WHAT THIS DOES NOT LICENSE YOU TO BELIEVE: it compares the publish SET and');
+console.log('        catches registry claims that carry a NUMBER. It does not read prose. A');
+console.log('        sentence like "cloud-core has never been published" passes this gate, and so');
+console.log('        does a wrong-but-well-formed version in a sentence with no package name.');
+console.log('        Nothing runs this automatically; it checks only what someone runs it on.');

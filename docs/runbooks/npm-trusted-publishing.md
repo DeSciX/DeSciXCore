@@ -35,24 +35,32 @@ also publish, but as **plumbing** — named in no docs, installed by nobody dire
 Those three are exactly what the workflow offers. The `directory` column is the value you pick from
 the *Which package to publish* dropdown, and it is the same string
 `.github/workflows/npm-publish.yml` lists — that file is the single source of truth for what is
-publishable, and this table is checked against it by `scripts/check-runbook-publish-set.mjs`.
+publishable. `scripts/check-runbook-publish-set.mjs` compares this table against it and fails when
+they disagree; nothing triggers it automatically, so it catches drift only when someone runs it.
 
-Measured registry state (`npm view`, 2026-08-27):
+| package | directory | role |
+|---|---|---|
+| `@descix/sdk` | `descix-sdk` | the story |
+| `@descix/cloud-core` | `descix-cloud-core` | plumbing |
+| `@descix/app-sdk` | `descix-app-sdk` | plumbing |
 
-| package | directory | role | on npm today | version on `main` |
-|---|---|---|---|---|
-| `@descix/sdk` | `descix-sdk` | the story | 1.0.0 | 1.1.0 |
-| `@descix/cloud-core` | `descix-cloud-core` | plumbing | 1.0.1 | 1.1.0 |
-| `@descix/app-sdk` | `descix-app-sdk` | plumbing | 0.1.0 | 0.1.2 |
+Whether each one already exists on the registry — the prerequisite above — is a question only the
+registry can answer, and it answers one package at a time:
 
-All three already exist on the registry, so the prerequisite above is met for every one of them and
-no interactive first publish is needed anywhere. The sequence is **Steps 1–3, then never again.**
-Every version on `main` is higher than the one on npm, so each of the three publishes cleanly.
+```bash
+npm view @descix/sdk versions
+npm view @descix/cloud-core versions
+npm view @descix/app-sdk versions
+```
 
-*Not published, deliberately:* `@descix/cli` (stays at 1.0.1 on npm) and `@descix/platform-api`
-(not on the registry at all) — the workflow refuses both by name, along with `cryptoapis-sdk`,
-which is vendored third-party code and must never reach the registry under our scope, and
-`descix-vscode`, which ships to the VS Code Marketplace instead.
+Run them separately. Passing several names to a single `npm view` prints the versions of the first
+one and exits 0, which reads as an answer about all of them.
+
+The sequence is **Steps 1–3, then never again.**
+
+*Not published, deliberately:* `@descix/cli` and `@descix/platform-api` — the workflow refuses both
+by name, along with `cryptoapis-sdk`, which is vendored third-party code and must never reach the
+registry under our scope, and `descix-vscode`, which ships to the VS Code Marketplace instead.
 
 **`@descix/platform-api` does NOT have to be published** — checked rather than assumed:
 `@descix/cloud-core` has zero imports of it today, and its dependencies are only Google Cloud
@@ -129,6 +137,13 @@ token setting until then, by design.
 **Actions → "npm publish (trusted publishing)" → Run workflow**, choose the package and dist-tag
 (`latest` unless you mean otherwise). The run pauses for your approval; approve it and it
 publishes. Nothing else is needed and no credential is ever handled.
+
+One run publishes one package, so when you are publishing all three, take them in **dependency
+order: `@descix/app-sdk`, then `@descix/cloud-core`, then `@descix/sdk`.** `@descix/sdk` declares
+the other two — `@descix/cloud-core` as a dependency, `@descix/app-sdk` as an optional peer — so it
+goes last. Publishing it first succeeds, and then `npm i @descix/sdk` cannot resolve until the other
+two follow. This ordering is not housekeeping to be tidied away later: it is the direction the
+dependencies point.
 
 If a version already exists, npm rejects it and the run fails loudly. That is intended — there is
 no force and no skip-if-exists, because a publish that silently does nothing is worse than one
