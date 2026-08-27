@@ -202,6 +202,38 @@ export function isWakeRequiredFor(liveness) {
     return v === WAKE_REQUIRED_LIVENESS;
 }
 
+// ── WHICH WRITER OWNS `status` ───────────────────────────────────────────────────────────────
+//
+// ONE OWNER OF THE RULE, consumed by the descriptor that PUBLISHES it (nativeTools.js
+// `fabric_beat`) and by the verb that ENFORCES it (DeSciX_Cloud fabricStore.js), exactly as
+// WAKE_REQUIRED_LIVENESS is. Under CEO-D-2026-08-22-PROTOCOL-TRUTH-IS-THE-MCP-DESCRIPTOR the
+// served descriptor IS the protocol, so a server enforcing one rule while its descriptor states
+// another has two truths and callers build against the wrong one.
+//
+// `status` IS A MODEL-WRITER'S FIELD. It says WHAT THE SEAT IS DOING — working, done, good-night.
+// Only the agent knows that. A hook's beat proves a PROCESS is alive and knows nothing about what
+// the model is doing, so a hook that must supply a status has to invent one, and what it invents
+// is whatever it last read. That is not hypothetical: the doorbell reads the served status at
+// preflight and re-seeds it every tick, so a good-night declared between the read and the next
+// tick is overwritten by a stale carried "working" — the seat says goodnight and the hook says it
+// is still working, in the seat's own voice, on the seat's own record.
+//
+// This is the same law as the beat clocks and the wake block: A BEAT MAY ONLY ASSERT WHAT ITS OWN
+// WRITER OBSERVED. The clocks made it a rule about what a writer may WRITE; the wake block made it
+// a rule about what a writer may be REQUIRED to write; this makes it a rule about what a writer may
+// be PERMITTED to write. A process beat carries no status and the stored status is PRESERVED,
+// exactly as its model clock and its wake chain are.
+export const STATUS_WRITER_LIVENESS = LIVENESS_MODEL;
+
+/** Does a beat of this `liveness` OWN the `status` field — i.e. may it write one, and must it?
+ *  Derived from STATUS_WRITER_LIVENESS so no consumer restates the rule. Callers validate
+ *  `liveness` against its closed enum FIRST, so an unrecognised value never reaches here and is
+ *  never silently exempted. */
+export function isStatusWriterFor(liveness) {
+    const v = typeof liveness === 'string' ? liveness.trim().toLowerCase() : null;
+    return v === STATUS_WRITER_LIVENESS;
+}
+
 /**
  * The statuses that EXEMPT a beat from carrying a wake — the TERMINAL set, and it is DECLARED_STOPS
  * itself rather than a list beside it. One owner, consumed by the verb (fabricStore.js::validateWake)

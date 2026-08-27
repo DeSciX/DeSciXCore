@@ -55,7 +55,7 @@ import {
     ENVELOPE_SECTIONS, ENVELOPE_TEXT_SHAPE, ENVELOPE_PHASES, ENVELOPE_PHASE_DEFAULT, ENVELOPE_PHASE_TRANSITIONS,
     FABRIC_RECORD_KINDS,
     RETIRED_SENTINELS, BEAT_CLOCK_FIELDS, beatClockFieldFor, beatClockAgeField,
-    LIVENESS_MODEL, LIVENESS_PROCESS, WAKE_REQUIRED_LIVENESS,
+    LIVENESS_MODEL, LIVENESS_PROCESS, WAKE_REQUIRED_LIVENESS, STATUS_WRITER_LIVENESS,
     KEY_CONTRACT, KEY_GROUNDING,
     CONTRACT_READ_FIELD_NAMES, GROUNDING_KB_READ_FIELD_NAMES, GROUNDING_ROLE_READ_FIELD_NAMES,
     GROUNDING_READ_KINDS, GROUNDING_REQUIRED_READ_KIND, GROUNDING_VERIFICATION_FIELD_NAMES,
@@ -376,7 +376,9 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
         name: 'fabric_beat',
         description: 'Write this seat\'s coordination heartbeat — liveness as ONE fact with ONE write. The key is DERIVED by the server as "heartbeat-<seat_label>-<session8>"; a client-supplied file_id/key is REFUSED, because three key shapes coexist on the live fabric from callers choosing their own and one session was measured publishing two labels with contradictory statuses. The clock is the SERVER\'s (`occurred_at`): a caller-supplied created_at/occurred_at/received_at is REFUSED, not ignored — beats were measured stale by 44 and 658 minutes and one 41 minutes in the FUTURE, all stamped fresh by the store. `status` is a CLOSED ENUM: '
             + BEAT_STATUSES.join(', ')
-            + '. "unread" and "broadcast" are refused BY NAME for the inbox collision they cause (a live heartbeat has sat unread in its master\'s inbox for 35 hours and its seat is dead, so nothing will ever clear it). `liveness` is REQUIRED and says WHO wrote this beat — an agent ("'
+            + '. "unread" and "broadcast" are refused BY NAME for the inbox collision they cause (a live heartbeat has sat unread in its master\'s inbox for 35 hours and its seat is dead, so nothing will ever clear it). `status` IS A MODEL-WRITER\'S FIELD: it is REQUIRED from the "'
+            + STATUS_WRITER_LIVENESS
+            + '" writer and OMITTED by every other writer, whose stored status is PRESERVED. A hook proves a PROCESS is alive and cannot know what the model is doing, so requiring a status from it forces it to invent one — and what it invents is whatever it last read, which is how a seat\'s good-night gets overwritten by a stale carried "working" in the seat\'s own voice. A beat must never assert something its own writer did not observe. `liveness` is REQUIRED and says WHO wrote this beat — an agent ("'
             + LIVENESS_VALUES[0] + '") or a hook ("' + LIVENESS_VALUES[1]
             + '"). It is written on every beat and never inherited: a hook beating on a dead model is a mask that reports health while nobody is home. It says WHO WROTE LAST and is NOT the model\'s clock. '
             + BEAT_CLOCK_RULE
@@ -391,7 +393,7 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
             properties: {
                 seat_label: { type: 'string', description: 'The seat LABEL this session answers to (the CEO-given name it beats under).' },
                 session_id: { type: 'string', description: 'This session id. Normalized to its bare first 8 characters; a "seat-" prefix is stripped and the response reports the normalization.' },
-                status: { type: 'string', enum: [...BEAT_STATUSES], description: 'Closed liveness enum. Legacy values (' + [...LEGACY_WORKING_STATUSES, ...LEGACY_STOP_STATUSES].join(', ') + ') are still READABLE on old records but are no longer writable.' },
+                status: { type: 'string', enum: [...BEAT_STATUSES], description: 'What this seat is DOING. Closed enum; legacy values (' + [...LEGACY_WORKING_STATUSES, ...LEGACY_STOP_STATUSES].join(', ') + ') are still READABLE on old records but are no longer writable. REQUIRED from the "' + STATUS_WRITER_LIVENESS + '" writer and OMITTED by every other writer, whose stored status is then PRESERVED unchanged. Only an agent knows what the model is doing: a hook proves a PROCESS is alive and would have to invent a status, and what it invents is whatever it last read — which is how a good-night gets overwritten by a stale carried "working" in the seat\'s own voice. Omit it on a "' + LIVENESS_PROCESS + '" beat; the response reports the status as it now stands so you can see it was preserved without a second read.' },
                 liveness: { type: 'string', enum: [...LIVENESS_VALUES], description: 'REQUIRED, no default and never inherited. "' + LIVENESS_MODEL + '" = an AGENT wrote this beat (proves the model is alive) and stamps `' + beatClockFieldFor(LIVENESS_MODEL) + '`. "' + LIVENESS_PROCESS + '" = a HOOK wrote it (proves the process is alive, says NOTHING about the model) and stamps `' + beatClockFieldFor(LIVENESS_PROCESS) + '` while PRESERVING `' + beatClockFieldFor(LIVENESS_MODEL) + '`. Omitting it is refused rather than defaulted, because a merge-upsert would silently keep the previous writer\'s value.' },
                 wake: {
                     type: 'object',
@@ -408,16 +410,23 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
                 to_agent: { type: 'string', description: 'Optional master to address the beat to. Must be a seat LABEL or a sentinel (' + TO_AGENT_SENTINELS.join(', ') + '). ' + RETIRED_SENTINELS.join(' and ') + ' are REFUSED: no sweep has ever composed either, so a beat addressed to one was written and read by nobody. Address the master by its seat LABEL — read the current holder with beast_seat_read {seat_id:"org"}; a label names a holder and holders change, so no label is hard-coded here.' },
                 extra: { type: 'object', description: 'Optional additional flat metadata. A key this verb owns is refused rather than silently overwritten.' },
             },
-            // `wake` IS DELIBERATELY ABSENT FROM THIS LIST, and the conditional is stated in the
-            // descriptions above rather than as a JSON-Schema `if`/`then`. The boundary guard that
-            // enforces this schema (paramValidation.js::validateParams) reads the FLAT `required`
-            // array and nothing else — it does not evaluate `allOf`/`if`/`then`. An `if`/`then`
-            // here would be a rule no enforcer reads: a gate that cannot fail, and a SECOND place
-            // the requirement is written, free to drift from the one that runs. So the flat list
-            // states exactly what the door enforces, the verb enforces the conditional half
-            // (fabricStore.js::validateWake, via isWakeRequiredFor), and both derive it from the
-            // one owner — vocab.js::WAKE_REQUIRED_LIVENESS.
-            required: ['seat_label', 'session_id', 'status', 'liveness'],
+            // `wake` AND `status` ARE DELIBERATELY ABSENT FROM THIS LIST, and both conditionals are
+            // stated in the descriptions above rather than as a JSON-Schema `if`/`then`. The
+            // boundary guard that enforces this schema (paramValidation.js::validateParams) reads
+            // the FLAT `required` array and nothing else — it does not evaluate `allOf`/`if`/`then`.
+            // An `if`/`then` here would be a rule no enforcer reads: a gate that cannot fail, and a
+            // SECOND place the requirement is written, free to drift from the one that runs. So the
+            // flat list states exactly what the door enforces, the verb enforces the conditional
+            // half (fabricStore.js, via isWakeRequiredFor and isStatusWriterFor), and both derive it
+            // from one owner — vocab.js::WAKE_REQUIRED_LIVENESS and ::STATUS_WRITER_LIVENESS.
+            //
+            // `status` LEAVING THIS LIST IS LOAD-BEARING, and it is the half that is invisible from
+            // the Cloud side. The door refuses a missing required parameter BEFORE the verb is
+            // reached, so a permissive store alone would ship inert while looking shipped: the
+            // plugin still could not stop sending status, and the fleet would stay deaf. Measured
+            // on ef278b0 — a status-less process beat was refused at the door with INVALID_PARAMS
+            // "missing required parameter 'status'", never reaching fabricStore.
+            required: ['seat_label', 'session_id', 'liveness'],
         },
     },
     {
