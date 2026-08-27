@@ -70,24 +70,41 @@ libraries plus `chokidar`/`dotenv`/`google-auth-library`. Nothing forces platfor
 
 ## Step 1 — configure the trusted publisher (npmjs.com, once per package)
 
-**All three need this, and `@descix/app-sdk` is first.** npm's OIDC check is fail-closed *per
-package binding*: a package with no binding at all — or one whose binding names anything other than
-the values in the second table below — has its publish refused by npm's servers regardless of what
-the workflow allows. `@descix/app-sdk` is the first package you will publish, so a missing binding
-there stops you before you start.
+**Each package needs its own binding.** npm's OIDC check is fail-closed *per package binding*: a
+package with no binding at all — or one whose binding names anything other than the values in the
+second table below — has its publish refused by npm's servers regardless of what the workflow
+allows.
 
-Which bindings exist today is visible only inside your npm account, so work down this list and
-confirm each one:
+`@descix/sdk` is bound and its binding is proven: a publish through this workflow succeeded on the
+first attempt. Which of the others are bound is visible only inside your npm account, so confirm
+each one:
 
 | order | package | what it needs |
 |---|---|---|
-| 1 | `@descix/app-sdk` | confirm the binding, or create it |
-| 2 | `@descix/cloud-core` | confirm the binding, or create it |
-| 3 | `@descix/sdk` | **re-bind** — the binding you created names `eabadir/DeSciXCore` |
+| 1 | `@descix/cloud-core` | confirm the binding, or create it — **and publish it before `@descix/sdk`; see below** |
+| 2 | `@descix/app-sdk` | confirm the binding, or create it |
+| — | `@descix/sdk` | nothing — bound, and already published through this workflow |
 
-`@descix/sdk` was bound before the repository moved into the `DeSciX` org, so its OIDC claims now
-mismatch and npm refuses them. Git remotes keep working via redirects; this is an npm-side change
-only.
+> **The order is a hard constraint, not tidiness.** `@descix/cloud-core` must be on the registry at
+> a version satisfying the range `descix-sdk/package.json` declares **before** `@descix/sdk` is
+> published: `@descix/sdk` declares it as a hard dependency, so it is the one that can strand the
+> install. `@descix/app-sdk` is an *optional* peer and cannot, so its own order does not matter.
+>
+> Publishing `@descix/sdk` first *succeeds*, and then every `npm install @descix/sdk` fails with
+> `ETARGET` on the range it cannot resolve — and that broken install is what the `latest` tag
+> serves to everyone. **This is not hypothetical: it happened on 2026-08-27.** `@descix/sdk` went
+> out ahead of `@descix/cloud-core`, and the `latest` it published could not be installed at all.
+>
+> So answer it at the moment you click, from the registry rather than from this page:
+>
+> ```bash
+> npm view @descix/cloud-core version
+> node -p "require('./descix-sdk/package.json').dependencies['@descix/cloud-core']"
+> ```
+>
+> If what the registry has does not satisfy what `@descix/sdk` declares, publish
+> `@descix/cloud-core` first. Publishing it at *some* newer version is not enough — it has to land
+> inside the declared range.
 
 **Useful thing you discovered:** npm saves the connection **with no workflow file in the repo** —
 the form warns about it but does not validate it.
@@ -138,12 +155,8 @@ token setting until then, by design.
 (`latest` unless you mean otherwise). The run pauses for your approval; approve it and it
 publishes. Nothing else is needed and no credential is ever handled.
 
-One run publishes one package, so when you are publishing all three, take them in **dependency
-order: `@descix/app-sdk`, then `@descix/cloud-core`, then `@descix/sdk`.** `@descix/sdk` declares
-the other two — `@descix/cloud-core` as a dependency, `@descix/app-sdk` as an optional peer — so it
-goes last. Publishing it first succeeds, and then `npm i @descix/sdk` cannot resolve until the other
-two follow. This ordering is not housekeeping to be tidied away later: it is the direction the
-dependencies point.
+One run publishes one package. When more than one is going out, Step 1 states the order they go in
+and why it is not optional.
 
 If a version already exists, npm rejects it and the run fails loudly. That is intended — there is
 no force and no skip-if-exists, because a publish that silently does nothing is worse than one
