@@ -1,7 +1,7 @@
 # Runbook — npm Trusted Publishing for `@descix`
 
 **Audience: the CEO.** Everything below is clicking in two web UIs. You author nothing; the
-workflow file is already written and lands with this branch.
+workflow file is already written and merged.
 
 **Why we are doing this, in your words (2026-08-21):**
 > "npm is turning off 2FA bypass and now is moving to Trusted Publisher model through CI so we
@@ -29,22 +29,30 @@ prerequisites, verbatim:
 > "Package must exist: The package you're configuring must already exist on the npm registry."
 
 **The public story is ONE package** (your call, 2026-08-21): `@descix/sdk`, which will re-export
-the microservice backend at `@descix/sdk/microservice`. `@descix/cloud-core` still publishes, but
-as **plumbing** — named in no docs, installed by nobody directly.
+the microservice backend at `@descix/sdk/microservice`. `@descix/cloud-core` and `@descix/app-sdk`
+also publish, but as **plumbing** — named in no docs, installed by nobody directly.
 
-Measured registry state:
+Those three are exactly what the workflow offers. The `directory` column is the value you pick from
+the *Which package to publish* dropdown, and it is the same string
+`.github/workflows/npm-publish.yml` lists — that file is the single source of truth for what is
+publishable, and this table is checked against it by `scripts/check-runbook-publish-set.mjs`.
 
-| package | role | on npm today | needs a manual first publish? |
-|---|---|---|---|
-| `@descix/sdk` | the story | 1.0.0 | no |
-| `@descix/cloud-core` | plumbing | **never published** | **yes — once** |
+Measured registry state (`npm view`, 2026-08-27):
 
-So the sequence is: **Step 0 for `cloud-core` only**, then Steps 1–3, then never again.
+| package | directory | role | on npm today | version on `main` |
+|---|---|---|---|---|
+| `@descix/sdk` | `descix-sdk` | the story | 1.0.0 | 1.1.0 |
+| `@descix/cloud-core` | `descix-cloud-core` | plumbing | 1.0.1 | 1.1.0 |
+| `@descix/app-sdk` | `descix-app-sdk` | plumbing | 0.1.0 | 0.1.2 |
 
-*Not published, deliberately:* `@descix/cli` (stays at 1.0.1 as-is), `@descix/platform-api` and
-`@descix/app-sdk` — the workflow refuses all three by name. `cryptoapis-sdk` is vendored
-third-party code and must never reach the registry under our scope. `descix-vscode` ships to the
-VS Code Marketplace, not npm.
+All three already exist on the registry, so the prerequisite above is met for every one of them and
+no interactive first publish is needed anywhere. The sequence is **Steps 1–3, then never again.**
+Every version on `main` is higher than the one on npm, so each of the three publishes cleanly.
+
+*Not published, deliberately:* `@descix/cli` (stays at 1.0.1 on npm) and `@descix/platform-api`
+(not on the registry at all) — the workflow refuses both by name, along with `cryptoapis-sdk`,
+which is vendored third-party code and must never reach the registry under our scope, and
+`descix-vscode`, which ships to the VS Code Marketplace instead.
 
 **`@descix/platform-api` does NOT have to be published** — checked rather than assumed:
 `@descix/cloud-core` has zero imports of it today, and its dependencies are only Google Cloud
@@ -52,41 +60,31 @@ libraries plus `chokidar`/`dotenv`/`google-auth-library`. Nothing forces platfor
 
 ---
 
-## Step 0 — one interactive first publish (`cloud-core` only)
-
-On your machine, in the canonical `DeSciX_Core` checkout — **once, for `cloud-core` only**:
-
-```bash
-npm login                       # browser + 2FA
-cd descix-cloud-core && npm publish --access public
-```
-
-`--access public` matters: `@descix` is a scope, and scoped packages default to **restricted**,
-which a free org will refuse.
-
-Then **log out again** — `npm logout` — so no session lingers. After Step 3 the account should
-not be able to publish from a laptop at all.
-
----
-
 ## Step 1 — configure the trusted publisher (npmjs.com, once per package)
 
-⚠️ **The repository moved, so the existing binding no longer matches.** `DeSciXCore` now lives at
-**`DeSciX/DeSciXCore`** (org). The `@descix/sdk` binding you created still names `eabadir/DeSciXCore`,
-so every OIDC claim from the new path **mismatches and npm refuses the publish**. That is the
-system working: fail-closed, server-side, and only your key can change it.
+**All three need this, and `@descix/app-sdk` is first.** npm's OIDC check is fail-closed *per
+package binding*: a package with no binding at all — or one whose binding names anything other than
+the values in the second table below — has its publish refused by npm's servers regardless of what
+the workflow allows. `@descix/app-sdk` is the first package you will publish, so a missing binding
+there stops you before you start.
 
-So `@descix/sdk` needs **re-binding** (org `DeSciX`), and `@descix/cloud-core` needs binding for
-the first time after Step 0. Git remotes keep working via redirects — this is an npm-side change
+Which bindings exist today is visible only inside your npm account, so work down this list and
+confirm each one:
+
+| order | package | what it needs |
+|---|---|---|
+| 1 | `@descix/app-sdk` | confirm the binding, or create it |
+| 2 | `@descix/cloud-core` | confirm the binding, or create it |
+| 3 | `@descix/sdk` | **re-bind** — the binding you created names `eabadir/DeSciXCore` |
+
+`@descix/sdk` was bound before the repository moved into the `DeSciX` org, so its OIDC claims now
+mismatch and npm refuses them. Git remotes keep working via redirects; this is an npm-side change
 only.
 
-**Re-binding is the LAST step of whichever posture you choose, not a prerequisite for anything
-else.** The workflow can merge now; publishes simply remain impossible until you re-bind.
+**Useful thing you discovered:** npm saves the connection **with no workflow file in the repo** —
+the form warns about it but does not validate it.
 
-**Useful thing you discovered:** npm saved the connection **with no workflow file in the repo** —
-the form warns about it but does not validate it. So configuring ahead of the merge is fine.
-
-For each package: **npmjs.com → the package → Settings → Trusted Publisher → GitHub Actions**,
+For each of the three: **npmjs.com → the package → Settings → Trusted Publisher → GitHub Actions**,
 and enter exactly:
 
 | field | value |

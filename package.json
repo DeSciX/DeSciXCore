@@ -12,6 +12,7 @@
     "descix-sdk"
   ],
   "scripts": {
+    "check:runbook-publish-set": "node scripts/check-runbook-publish-set.mjs",
     "link": "npm run link:register",
     "link:register": "npm link -w cryptoapis-sdk && npm link -w descix-app-sdk && npm link -w descix-cli && npm link -w descix-cloud-core && npm link -w descix-platform-api && npm link -w descix-sdk"
   },
