@@ -6,6 +6,8 @@
   "main": "./src/index.js",
   "exports": {
     ".": "./src/index.js",
+    "./app": "./app/index.js",
+    "./app/dev": "./app/dev.js",
     "./microservice": "./microservice/index.js",
     "./node": "./src/index.js",
     "./mcp/transports": "./mcp/transports/index.js",
@@ -30,11 +32,14 @@
   "files": [
     "src",
     "mcp",
-    "microservice"
+    "microservice",
+    "app",
+    "bin"
   ],
   "scripts": {
     "pack": "npm pack",
-    "check:exports": "node scripts/check-exports-resolve-cli.mjs"
+    "check:exports": "node scripts/check-exports-resolve-cli.mjs",
+    "check:install-size": "node scripts/check-install-size-cli.mjs"
   },
   "engines": {
     "node": ">=24.0.0"
@@ -42,5 +47,24 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.1",
     "@descix/cloud-core": "^1.1.0"
+  },
+  "bin": {
+    "descix-app": "bin/descix-app.js"
+  },
+  "peerDependencies": {
+    "@descix/app-sdk": "^0.1.2",
+    "react": "^18.0.0 || ^19.0.0",
+    "react-dom": "^18.0.0 || ^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@descix/app-sdk": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    }
   }
 }

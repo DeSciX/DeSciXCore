@@ -1,18 +1,21 @@
 {
   "name": "@descix/app-sdk",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "DeSciX App Shell - init-to-READY logic, core API, Powch integration, dev proxy config",
   "type": "module",
   "main": "./src/index.js",
   "exports": {
     ".": "./src/index.js",
     "./dev": "./src/dev/index.js",
+    "./scaffold": "./scaffold/index.js",
     "./powch-client": "./src/powch/PowchClient.js",
     "./AppShell": "./src/AppShell.jsx",
     "./AppData": "./src/util/AppData.jsx"
   },
   "files": [
-    "src"
+    "src",
+    "scaffold",
+    "templates"
   ],
   "scripts": {
     "lint": "eslint src/",

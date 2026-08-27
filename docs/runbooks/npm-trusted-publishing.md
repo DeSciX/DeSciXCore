@@ -11,15 +11,13 @@ workflow file is already written and lands with this branch.
 in a password manager. Each publish authenticates with a short-lived token minted for that one
 run and bound to this repo + this workflow file + this environment.
 
-**A correction to what I first wrote here.** I said the GitHub environment's *required reviewer*
-would make every publish a click you make. **That is not available to us** — required-reviewer
-protection on a PRIVATE repository is an Enterprise-plan feature, and it was measured refusing
-with a 422 under the Team org. So the gate is NOT a GitHub approval prompt.
-
-**What actually gates a publish today, and it is stronger than a convention:**
-1. The workflow only runs when you press *Run workflow* — there is no push or tag trigger.
-2. npm refuses any publish whose OIDC claim does not match the trusted-publisher binding exactly.
-   That check is server-side, fail-closed, and only you can change it.
+**What gates a publish — three independent checks, none of them a convention:**
+1. The workflow only runs when you press *Run workflow*. There is no push or tag trigger.
+2. The run then **waits for your approval**. The `npm-publish` environment carries a
+   required-reviewer rule naming you, so the publish step does not execute until you approve it
+   in the run's page. Two deliberate actions, not one.
+3. npm refuses any publish whose OIDC claim does not match the trusted-publisher binding
+   exactly. That check is server-side, fail-closed, and only you can change the binding.
 
 ---
 
@@ -142,14 +140,14 @@ that stops and tells you.
 
 ## Two things worth knowing
 
-**No provenance, and that is a deliberate, reversible cost.** Trusted publishing normally attaches
-a cryptographic provenance attestation automatically. It requires a **public** source repository —
-npm: *"Ensure your `package.json` is configured with a public `repository`…"* — and publishing with
-provenance from private source repos has been unsupported since 2023-07-26. `DeSciXCore` is
-private (verified), so the workflow sets `NPM_CONFIG_PROVENANCE=false` explicitly rather than
-relying on npm quietly skipping it. **If this repo is ever made public, delete that one line and
-provenance turns back on.** It is a real supply-chain gain we are forgoing only because of
-visibility.
+**Provenance is available and is currently switched off.** Trusted publishing normally attaches
+a cryptographic provenance attestation automatically, which requires a **public** source
+repository — npm: *"Ensure your `package.json` is configured with a public `repository`…"*.
+`DeSciXCore` is public, so nothing blocks it. The workflow still sets
+`NPM_CONFIG_PROVENANCE=false` explicitly. **Turning it on is one line** — delete that env var —
+and it is a real supply-chain gain, but it changes what your click publishes and no agent can
+rehearse a publish, so the switch is yours to make deliberately rather than as a side effect of
+this runbook.
 
 **The workflow file is now the credential.** With no token to steal, the thing an attacker wants
 is edit access to `.github/workflows/npm-publish.yml` — change what it publishes, or from where.

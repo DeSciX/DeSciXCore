@@ -30,6 +30,9 @@
  */
 import path from 'path';
 import { gatewayProductUrl } from './workspaceProducts.js';
+// ONE owner of the bin name: two bins reach this gateway and a hardcoded one misleads half
+// the readers. See invokedBin.js.
+import { invokedBin } from './invokedBin.js';
 // ONE spelling of the path, shared with the browser-side reader. That module is
 // deliberately node-free so both sides can import the same constant.
 import { APP_BINDING_PATH } from '../util/appBinding.js';
@@ -113,10 +116,10 @@ export function resolveServeBinding(workspaceRoot, config, options = {}) {
     if (!detected || detected.isPlatform) {
       throw new Error(
         `[serve binding] cannot tell which app to serve from ${path.resolve(cwd)}.\n` +
-        `  descix serve runs ONE app standalone — there is no store view here.\n` +
+        `  ${invokedBin()} serve runs ONE app standalone — there is no store view here.\n` +
         `  Fix it either way:\n` +
         `    cd into your app's directory and re-run, or\n` +
-        `    descix serve --app <id>\n` +
+        `    ${invokedBin()} serve --app <id>\n` +
         `  Apps in this workspace: ${names.join(', ') || '(none)'}`
       );
     }

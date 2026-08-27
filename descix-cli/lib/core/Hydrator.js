@@ -17,6 +17,8 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 
+import { SITE_SCAFFOLD_DIR } from '@descix/app-sdk/scaffold';
+
 /**
  * ONE OWNER for scaffold path resolution. Hydrator.js lives at descix-cli/lib/core/, so two
  * '..' walks reach the CLI package root. Two functions used to resolve this independently and
@@ -24,9 +26,28 @@ import { fileURLToPath } from 'url';
  * hand-rolled import.meta.url.replace('file://','') instead of fileURLToPath). The four-walk
  * path does not exist, so getAvailableScaffolds returned [] on every call, and its bare catch
  * made a path bug indistinguishable from "no scaffolds are installed".
+ *
+ * The SITE scaffold is not one of ours: it is app-side browser code whose generated
+ * `DeSciXAppSDK.js` is produced from @descix/app-sdk's template + bridgeResolver, so that
+ * package OWNS the directory and exports its location. The CLI consumes the constant rather
+ * than re-spelling the path, which is what lets `@descix/sdk/app`'s bin scaffold the very same
+ * bytes without a second copy existing anywhere.
  */
 const CLI_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const SCAFFOLDS_DIR = path.join(CLI_ROOT, 'templates', 'scaffolds');
+
+/**
+ * The scaffold registry — ONE owner of BOTH "which scaffold types exist" and "where each one
+ * lives". These used to be two facts derived in two places: a hand-kept `validTypes` array
+ * inside copyScaffold, and a readdir of the templates directory inside getAvailableScaffolds.
+ * Two derivations of one fact disagree silently, and this pair was primed to: moving `site`
+ * out of the CLI would have left `validTypes` still advertising it while the readdir stopped
+ * reporting it, and the error a developer saw would have named a missing directory rather
+ * than the move.
+ */
+const SCAFFOLD_DIRS = {
+  site: SITE_SCAFFOLD_DIR,
+  microservice: path.join(CLI_ROOT, 'templates', 'scaffolds', 'microservice'),
+};
 import { google } from 'googleapis';
 import * as driveADC from '../google-storage-adc.js';
 
@@ -711,13 +732,12 @@ export async function checkStagingFiles(stagingDir) {
 export async function copyScaffold(scaffoldType, appPath, options = {}) {
   const { verbose = false, force = false } = options;
   
-  const validTypes = ['site', 'microservice'];
-  if (!validTypes.includes(scaffoldType)) {
-    throw new Error(`Invalid scaffold type: ${scaffoldType}. Valid types: ${validTypes.join(', ')}`);
+  const scaffoldDir = SCAFFOLD_DIRS[scaffoldType];
+  if (!scaffoldDir) {
+    throw new Error(
+      `Invalid scaffold type: ${scaffoldType}. Valid types: ${Object.keys(SCAFFOLD_DIRS).join(', ')}`
+    );
   }
-  
-  // Templates live inside the CLI package; SCAFFOLDS_DIR is the single owner of that path.
-  const scaffoldDir = path.join(SCAFFOLDS_DIR, scaffoldType);
   
   // Check if scaffold exists
   try {
@@ -791,19 +811,23 @@ async function copyDir(src, dest, stats, verbose) {
  * @returns {Promise<string[]>}
  */
 export async function getAvailableScaffolds() {
-  let entries;
-  try {
-    entries = await fs.readdir(SCAFFOLDS_DIR, { withFileTypes: true });
-  } catch (err) {
-    // FAIL LOUD: an unreadable scaffolds directory in a shipped CLI is a packaging failure,
-    // not "no scaffolds". Swallowing it to [] is what hid the path bug — the caller could not
-    // tell a broken install from an empty one. Name the path and the underlying error.
-    throw new Error(
-      `Scaffold templates are unreadable at ${SCAFFOLDS_DIR} (${err.code || err.message}). ` +
-      `This is a broken CLI installation, not an empty template set.`
-    );
+  // FAIL LOUD per entry: an unreadable scaffold directory in a shipped CLI is a packaging
+  // failure, not "no scaffolds". Swallowing it to [] is what hid the original path bug — the
+  // caller could not tell a broken install from an empty one. Name the type, the owning
+  // package and the underlying error, because `site` now ships from a DIFFERENT package than
+  // `microservice` and "which package is broken" is the first thing you need to know.
+  for (const [type, dir] of Object.entries(SCAFFOLD_DIRS)) {
+    try {
+      await fs.access(dir);
+    } catch (err) {
+      throw new Error(
+        `Scaffold templates for "${type}" are unreadable at ${dir} (${err.code || err.message}). ` +
+        `This is a broken installation of ` +
+        `${type === 'site' ? '@descix/app-sdk' : '@descix/cli'}, not an empty template set.`
+      );
+    }
   }
-  return entries.filter(e => e.isDirectory()).map(e => e.name);
+  return Object.keys(SCAFFOLD_DIRS);
 }
 
 // Named exports for functions not already exported inline

@@ -79,11 +79,13 @@ templates/drive/app/
 
 ### Git Scaffolds
 
-**Location:** `DeSciX_Core/descix-cli/templates/scaffolds/`
+**Location:** microservice — `DeSciX_Core/descix-cli/templates/scaffolds/`;
+site — `DeSciX_Core/descix-app-sdk/scaffold/` (owned there, and exported as `SITE_SCAFFOLD_DIR`
+from `@descix/app-sdk/scaffold`, so no caller re-derives the path).
 
 **Site Scaffold:**
 ```
-templates/scaffolds/site/
+descix-app-sdk/scaffold/site/
 ├── index.html        # Entry point
 ├── styles.css        # Basic styling
 ├── app.js            # Client-side JavaScript
