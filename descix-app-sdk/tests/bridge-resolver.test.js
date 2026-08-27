@@ -110,10 +110,14 @@ test('the FIRST bus wins — an inner shell shadows an outer one, where `window.
 
 // ─────────────────────────────────────────────────────────────── no shell
 
-test('no shell anywhere — standalone, resolving to SELF rather than hanging or throwing', () => {
+test('no shell anywhere — embedded-no-bridge, resolving to SELF rather than hanging or throwing', () => {
+  // CONTRACT CHANGE (GAP-5, 2026-08-27): this fixture is an app FRAMED inside another frame
+  // with no bus anywhere, and it used to report `standalone` — the collapse that let a
+  // wrong-host code site look identical to correctly running with no shell. It is framed, so
+  // it now reports `embedded-no-bridge`. The expectation moved because the CONTRACT moved.
   const app = nest(frameWindow(), frameWindow());
   const found = resolveBridge(app);
-  assert.equal(found.mode, 'standalone');
+  assert.equal(found.mode, 'embedded-no-bridge');
   assert.equal(found.bus, null);
   assert.equal(found.hops, -1);
   assert.equal(found.window, app, 'standalone resolves to the starting window');
@@ -141,15 +145,18 @@ test('the ambient window is used when no start is given', () => {
 // ───────────────────────────────────────────────────────────── cross-origin
 
 test('a cross-origin ancestor does NOT throw — it reads as "not the shell"', () => {
-  // Powch's iframe is cross-origin BY DESIGN. Walking up out of it must be a quiet
-  // "standalone", never a SecurityError that takes the app down with it.
+  // Powch's iframe is cross-origin BY DESIGN. The load-bearing requirement is that walking up
+  // out of it NEVER throws a SecurityError that takes the app down — that is the assertion
+  // below and it is unchanged. The MODE is now `embedded-no-bridge` rather than `standalone`,
+  // which is strictly more accurate for Powch: its frame IS embedded and its ancestor IS
+  // unreadable, and those are the two facts the mode now reports separately (GAP-5).
   const outer = frameWindow();
   const hostile = crossOriginWindow(outer);
   const app = nest(frameWindow(), hostile);
 
   let found;
   assert.doesNotThrow(() => { found = resolveBridge(app); });
-  assert.equal(found.mode, 'standalone');
+  assert.equal(found.mode, 'embedded-no-bridge');
   assert.equal(found.bus, null);
 });
 
@@ -202,7 +209,10 @@ test('a pathological frame chain terminates instead of spinning', () => {
 
   let found;
   assert.doesNotThrow(() => { found = resolveBridge(endless); });
-  assert.equal(found.mode, 'standalone');
+  // The load-bearing assertion is that it TERMINATES rather than spinning, above. The endless
+  // chain is framed by construction (every `parent` is a fresh frame), so the mode is
+  // `embedded-no-bridge` under the GAP-5 contract.
+  assert.equal(found.mode, 'embedded-no-bridge');
   assert.ok(BRIDGE_RESOLUTION_MAX_HOPS > 0);
 });
 

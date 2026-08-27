@@ -35,9 +35,31 @@
  *               bus IS the shell; it resolves to itself, distance zero.
  *   2. hop 1  — `parent` (the ordinary embedded-app case).
  *   3. hop 2… — successive ancestors, up to and including `top` (nested embedding).
- *   4. none   — no ancestor carries the marker: STANDALONE. Resolves to the
- *               starting window with `bus: null`, so a no-shell app takes the
- *               standalone path instead of hanging on a bridge that is never coming.
+ *   4. none   — no ancestor carries the marker. Which of TWO states that is depends
+ *               on whether this window is framed at all, and they are NOT the same
+ *               fact (GAP-5, measured 2026-08-27):
+ *                 `standalone`          — `window.top === window`. This page is the
+ *                                          top window. There is no shell because there
+ *                                          is no frame above; that is normal and final.
+ *                 `embedded-no-bridge`  — `window.top !== window`. This page IS framed,
+ *                                          but nothing above it carried a readable bus.
+ *
+ *               Collapsing these into one `standalone` is what let GAP-4 survive
+ *               undetected: an app pinned to the wrong host loads inside the shell,
+ *               finds no readable bus because the ancestor is cross-origin, reports
+ *               `standalone`, and silently degrades to scripting-window-CLOSED — which
+ *               is indistinguishable from correctly running with no shell at all. The
+ *               failure detonates toward silence.
+ *
+ *               `window.top !== window` is readable CROSS-ORIGIN, so this distinction
+ *               costs nothing the resolver does not already hold.
+ *
+ *               NOTE the mode does NOT name a CAUSE. `embedded-no-bridge` covers both
+ *               "the shell above is cross-origin and unreadable" and "this page is
+ *               framed by something that is not a DeSciX shell at all". The walk exits
+ *               identically in both cases, so the resolver cannot tell them apart, and
+ *               naming a cause it never established would be the same over-claiming
+ *               that hand-rolled host detection was guilty of.
  *
  * The marker is `DeSciX.bridge.version`, published by appBridge.js `ensureBus()`.
  * The marker — not the mere presence of a `DeSciX` property — is the discriminator,
@@ -96,15 +118,20 @@ function busOn(w) {
  * ask for the bus, never for a window level.
  *
  * @param {Window} [startWindow] - defaults to the ambient `window`.
- * @returns {{window: Window|null, bus: object|null, hops: number, mode: 'shell'|'standalone'}}
- *   `mode: 'shell'` with `hops` = frames traversed (0 = this page owns the bus);
- *   `mode: 'standalone'` with `bus: null` and `hops: -1` when nothing carries it.
+ * @returns {{window: Window|null, bus: object|null, hops: number, mode: 'shell'|'standalone'|'embedded-no-bridge'}}
+ *   `mode: 'shell'`              — `hops` = frames traversed (0 = this page owns the bus).
+ *   `mode: 'standalone'`         — `bus: null`, `hops: -1`; this window is `top`, no shell exists.
+ *   `mode: 'embedded-no-bridge'` — `bus: null`, `hops: -1`; this window IS framed but no
+ *                                   ancestor carried a readable bus. A shell may be above and
+ *                                   unreadable (cross-origin), or there may be no shell above.
+ *                                   The resolver cannot distinguish those and does not claim to.
  */
 export function resolveBridge(startWindow) {
   const start =
     startWindow || (typeof window === 'undefined' ? null : window);
 
-  // No DOM at all (SSR / node): honestly standalone, and never throws.
+  // No DOM at all (SSR / node): there is no frame chain, so this is standalone in the
+  // strict sense the mode now carries. Never throws.
   if (!start) return { window: null, bus: null, hops: -1, mode: 'standalone' };
 
   let w = start;
@@ -125,7 +152,41 @@ export function resolveBridge(startWindow) {
     w = next;
   }
 
-  return { window: start, bus: null, hops: -1, mode: 'standalone' };
+  // No ancestor carried the bus. WHICH no-bus state this is turns on one question the
+  // resolver can always answer, even across origins: is this window framed at all?
+  return { window: start, bus: null, hops: -1, mode: noBusMode(start) };
+}
+
+/**
+ * `standalone` when this window is the TOP of its chain; `embedded-no-bridge` when it is framed
+ * but nothing above carried a readable bus.
+ *
+ * "Am I the top?" has TWO equivalent answers in a real browser — `top === self` and
+ * `parent === self` — and this asks both, preferring `top`, because they are not equally
+ * available. `window.top` is a direct reference and comparing it to `self` is an identity check,
+ * not a property read, so it does not throw across origins: that is what makes the distinction
+ * free. But `top` is not guaranteed to EXIST on every window-like object the resolver is handed
+ * (measured 2026-08-27: this module's own test fixtures model a window as `{ parent: self }`
+ * with no `top` at all, and an implementation that read only `top` called those genuine top
+ * windows "framed"). `parent === self` is the same fact and is how the walk above already
+ * terminates, so it is the honest fallback rather than a second derivation.
+ *
+ * A window so sandboxed that BOTH reads throw is reported `embedded-no-bridge`: a window that
+ * cannot see its own top or parent is certainly not demonstrably the top, and claiming
+ * `standalone` there would assert something never established.
+ */
+function noBusMode(w) {
+  try {
+    if (w.top !== undefined && w.top !== null) return w.top === w ? 'standalone' : 'embedded-no-bridge';
+  } catch (e) {
+    return 'embedded-no-bridge';
+  }
+  try {
+    const p = w.parent;
+    return !p || p === w ? 'standalone' : 'embedded-no-bridge';
+  } catch (e) {
+    return 'embedded-no-bridge';
+  }
 }
 
 /* ---8<--- INLINE END */
