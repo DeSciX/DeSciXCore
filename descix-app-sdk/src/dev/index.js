@@ -33,3 +33,4 @@ export { workspaceProductsPlugin, WORKSPACE_PRODUCTS_VIRTUAL_ID, WORKSPACE_PRODU
 export { resolveServeBinding, appBindingPlugin, bindableApps, detectAppFromCwd, APP_BINDING_PATH } from './serveBinding.js';
 export { resolvePowchUrl, POWCH_APP_ID } from './powchUrl.js';
 export { resolveDevCertOptions } from './devCerts.js';
+export { invokedBin } from './invokedBin.js';

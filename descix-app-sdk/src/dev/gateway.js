@@ -135,7 +135,12 @@ export async function runGateway(options = {}) {
     : findWorkspaceRoot(process.cwd());
 
   if (!workspaceRoot || !fs.existsSync(path.join(workspaceRoot, '.descix', 'workspace.json'))) {
-    throw new Error('No .descix/workspace.json found. Run from a DeSciX workspace or pass --workspace-root.');
+    // Name the flag the CALLERS actually expose. `--workspace-root` was named here and on no
+    // bin: `descix serve` and `descix-app serve` both spell it `-w, --workspace`, so the one
+    // instruction this message existed to give sent the reader to a flag that does not parse.
+    throw new Error(
+      'No .descix/workspace.json found. Run from a DeSciX workspace, or pass -w/--workspace <path>.'
+    );
   }
 
   const config = readWorkspaceConfig(workspaceRoot);

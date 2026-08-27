@@ -19,15 +19,26 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { SITE_SCAFFOLD_BRIDGE } from '../scaffold/index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SDK_ROOT = path.resolve(__dirname, '..');
 const GENERATOR = path.join(SDK_ROOT, 'scripts', 'generate-app-sdk-copies.js');
-const SCAFFOLD = path.resolve(
-  SDK_ROOT, '..', 'descix-cli', 'templates', 'scaffolds', 'site', 'DeSciXAppSDK.js'
-);
+// The path comes from its OWNER, never re-spelled here: a test that hand-derives the
+// location it is guarding stops guarding the moment the directory moves.
+const SCAFFOLD = SITE_SCAFFOLD_BRIDGE;
 
-function runCheck(extraArgs = []) {
+/**
+ * Sibling repos are pinned OUT by default (they resolve to a path that does not exist, which
+ * the generator reports as SKIP). A test about THIS package's generated copy must not go red
+ * because someone else's checkout of DeSciX_Powch drifted — a fixture whose result depends on
+ * unrelated repositories is not measuring what the test claims, in either direction: it can
+ * fail on a correct tree, and it can only ever pass by accident on a partial checkout. Pass
+ * explicit roots to opt a sibling back in.
+ */
+const NO_SIBLINGS = path.join(os.tmpdir(), 'descix-no-such-repo-fixture');
+
+function runCheck(extraArgs = [`--powch-root=${NO_SIBLINGS}`, `--apps-root=${NO_SIBLINGS}`]) {
   try {
     return { code: 0, out: execFileSync('node', [GENERATOR, '--check', ...extraArgs], { encoding: 'utf8' }) };
   } catch (e) {
@@ -40,8 +51,8 @@ test('every generated copy this checkout can see is in sync with its source', ()
   assert.equal(code, 0,
     `generated copies have drifted from their source. Run:\n` +
     `  node descix-app-sdk/scripts/generate-app-sdk-copies.js\n\n${out}`);
-  assert.match(out, /OK\s+DeSciX_Core/,
-    'the CLI scaffold lives in this repo, so it must always be checked — never skipped');
+  assert.match(out, /OK\s+@descix\/app-sdk/,
+    'the site scaffold is owned by THIS package, so it must always be checked — never skipped');
 });
 
 test('a hand-edited copy FAILS the check, naming the file and the fix', () => {

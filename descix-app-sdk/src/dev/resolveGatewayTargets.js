@@ -20,6 +20,8 @@
 
 import { URL } from 'url';
 
+import { invokedBin } from './invokedBin.js';
+
 export { ENV_ORIGINS, DEFAULT_ENV, DEFAULT_API_URL, PROD_URL, CLOUD_DEV_URL } from './envOrigins.js';
 import { DEFAULT_API_URL, DEFAULT_ENV } from './envOrigins.js';
 
@@ -172,7 +174,7 @@ export function resolveSiteTarget(config = {}, options = {}) {
   throw new Error(
     '[Gateway] Cannot determine the site (root "/") target. The API resolved to the local ' +
     `origin ${apiUrl} (${apiSource}) and there is no shell to serve at "/".\n` +
-    `  Serve a PLATFORM shell: descix serve --site-url ${DEFAULT_API_URL}\n` +
+    `  Serve a PLATFORM shell: ${invokedBin()} serve --site-url ${DEFAULT_API_URL}\n` +
     '                          (or set env.siteUrl in .descix/workspace.json to make it permanent)\n' +
     '  Serve a LOCAL shell:    set env.platform.site.port to your platform site dev-server port'
   );
