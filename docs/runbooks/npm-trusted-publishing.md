@@ -25,7 +25,10 @@ run and bound to this repo + this workflow file + this environment.
    package declares is resolved against the live registry. An unsatisfiable range refuses the run
    and names the range and what the registry actually has.
 3. The **post-publish install check**. After a successful publish the run installs the published
-   `name@version` from the registry into an empty directory and fails if that install fails.
+   `name@version` from the registry into an empty directory and fails if that install fails. That
+   is the whole check for a routed package. The app-half leak assertion and the install-size
+   ceilings are `@descix/sdk`'s alone — the gate scopes them to it from the spec, and
+   `@descix/app-sdk` is that leak assertion's negative control rather than a package it judges.
 4. **npm's own server-side check.** It refuses any publish whose OIDC claim does not match the
    trusted-publisher binding. That check is fail-closed, and only the CEO's npm account can change
    the binding.
@@ -233,6 +236,7 @@ EVENT_NAME=release TAG=<directory>-v<version> node scripts/resolve-release-targe
 node scripts/check-prepublish-deps-cli.mjs <directory>
 node scripts/check-published-install-cli.mjs --spec <name@version>
 node scripts/tests/release-target.test.mjs
+node scripts/tests/published-install.test.mjs
 ```
 
 If the post-publish job goes red, the artifact is already public and already broken. **Fix forward
