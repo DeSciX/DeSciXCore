@@ -13,6 +13,7 @@
   ],
   "scripts": {
     "check:runbook-publish-set": "node scripts/check-runbook-publish-set.mjs",
+    "check:release-target": "node scripts/tests/release-target.test.mjs",
     "link": "npm run link:register",
     "link:register": "npm link -w cryptoapis-sdk && npm link -w descix-app-sdk && npm link -w descix-cli && npm link -w descix-cloud-core && npm link -w descix-platform-api && npm link -w descix-sdk"
   },

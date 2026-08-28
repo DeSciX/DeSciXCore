@@ -10,7 +10,7 @@
  * only thing standing in for "the package works".
  *
  * This runs BEFORE the publish step and refuses when a declared @descix/* range cannot be
- * satisfied by what is on the registry at the moment of the click.
+ * satisfied by what is on the registry at the moment the run reaches the publish step.
  *
  * ── Both classes BLOCK, and they are diagnosed DIFFERENTLY ───────────────────
  * A hard `dependencies` entry and a REQUIRED peer both make `npm install` fail outright. An

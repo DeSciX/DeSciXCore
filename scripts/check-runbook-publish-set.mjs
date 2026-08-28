@@ -2,7 +2,7 @@
 /**
  * check-runbook-publish-set.mjs
  *
- * The publish set has ONE OWNER: .github/workflows/npm-publish.yml. The CEO-facing runbook
+ * The publish set has ONE OWNER: .github/workflows/npm-publish.yml. The runbook
  * docs/runbooks/npm-trusted-publishing.md is a CONSUMER of that fact, and a consumer that
  * restates a fact drifts from it silently. This gate makes that drift a build failure.
  *
@@ -22,9 +22,9 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { workflowPublishSets, WORKFLOW_PATH } from './publish-set.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const WORKFLOW_PATH = '.github/workflows/npm-publish.yml';
 const RUNBOOK_PATH = 'docs/runbooks/npm-trusted-publishing.md';
 
 const refIndex = process.argv.indexOf('--ref');
@@ -86,39 +86,7 @@ function packageDirMap() {
   return map;
 }
 
-/** THE OWNER: what the workflow will actually let the CEO publish. */
-function workflowSets(text) {
-  const lines = text.split('\n');
-
-  const optIdx = lines.findIndex((l) => /^\s*options:\s*$/.test(l));
-  if (optIdx === -1) throw new Error(`${WORKFLOW_PATH}: no "options:" block found`);
-  const options = [];
-  for (let i = optIdx + 1; i < lines.length; i++) {
-    const line = lines[i];
-    if (/^\s*#/.test(line) || /^\s*$/.test(line)) continue;
-    const m = line.match(/^\s*-\s+(\S+)\s*$/);
-    if (!m) break;
-    options.push(m[1]);
-  }
-
-  const caseIdx = lines.findIndex((l) => /case\s+"\$\{\{\s*inputs\.package\s*\}\}"\s+in/.test(l));
-  if (caseIdx === -1) throw new Error(`${WORKFLOW_PATH}: no refusal "case" statement found`);
-  let refused = [];
-  for (let i = caseIdx + 1; i < lines.length; i++) {
-    const m = lines[i].match(/^\s*([A-Za-z0-9._|-]+)\)\s*$/);
-    if (m) {
-      refused = m[1].split('|').map((s) => s.trim()).filter((s) => s && s !== '.');
-      break;
-    }
-    if (/^\s*esac\s*$/.test(lines[i])) break;
-  }
-  if (!refused.length) throw new Error(`${WORKFLOW_PATH}: refusal case parsed as empty`);
-
-  const publishable = options.filter((o) => !refused.includes(o));
-  return { options, refused, publishable };
-}
-
-/** THE CONSUMER: what the runbook tells the CEO is publishable. */
+/** THE CONSUMER: what the runbook states is publishable. */
 function runbookSets(text, nameToDir) {
   const lines = text.split('\n');
   const toDir = (tok) => {
@@ -160,7 +128,7 @@ function runbookSets(text, nameToDir) {
 /**
  * A static file must not assert mutable external state. A version number printed next to one of
  * our package names is a snapshot of the registry taken at write time, and it is wrong the moment
- * someone clicks publish.
+ * a release goes out.
  *
  * This catches the SUBSET of that class that carries a version literal, which is mechanical and
  * exact. It does NOT catch a claim with no number in it — "has never been published", "already
@@ -184,7 +152,7 @@ const eq = (a, b) => a.length === b.length && [...a].sort().every((v, i) => v ==
 const show = (a) => (a.length ? [...a].sort().join(', ') : '(none)');
 
 const nameToDir = packageDirMap();
-const wf = workflowSets(readAt(WORKFLOW_PATH));
+const wf = workflowPublishSets(readAt(WORKFLOW_PATH));
 const rb = runbookSets(readAt(RUNBOOK_PATH), nameToDir);
 
 const where = REF ? `at ${REF}` : 'in the working tree';

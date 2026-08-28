@@ -4,8 +4,8 @@
  *
  *   node scripts/check-prepublish-deps-cli.mjs <package-directory>
  *
- * The workflow passes its own `inputs.package` here, which IS a directory name, so the gate
- * checks exactly the package the CEO's click is about to publish.
+ * The publish job passes the guard's resolved package here, which IS a directory name, so the
+ * gate checks exactly the package this run is about to publish.
  */
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
