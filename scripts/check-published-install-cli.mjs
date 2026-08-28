@@ -7,8 +7,9 @@
  *   node scripts/check-published-install-cli.mjs --spec @descix/sdk@1.1.0
  *   node scripts/check-published-install-cli.mjs --dir  descix-sdk --wait
  *
- * --dir  resolves name@version from that package's OWN package.json, so the workflow passes its
- *        `inputs.package` straight through and the job checks exactly what the click published.
+ * --dir  resolves name@version from that package's OWN package.json, so the workflow passes the
+ *        guard's resolved package straight through and the job checks exactly what this run
+ *        published.
  *        The name is never hand-mapped from the directory.
  * --spec names an explicit published version. This is what makes the gate runnable against a
  *        NEGATIVE CONTROL — a known-broken published artifact — without publishing anything.
