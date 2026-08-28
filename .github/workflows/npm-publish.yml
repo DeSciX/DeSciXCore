@@ -10,13 +10,33 @@
 # long-lived credential to leak in the first place. That is also why the workflow file itself is
 # now a credential-equivalent: whoever can edit this path can publish. CODEOWNERS guards it.
 #
-# EVERY PUBLISH IS A DELIBERATE CEO CLICK, gated twice. Trigger is workflow_dispatch only — no
-# push, no tag — and the `npm-publish` environment carries a required-reviewer rule naming the
-# CEO, so the run pauses for an approval before the publish step executes. `environment:
-# npm-publish` must not be removed for a second reason: the npm trusted-publisher binding
-# includes the environment name in the OIDC claim, so dropping it breaks publishing outright.
-# Behind both, the npm-side check is fail-closed: a claim that does not match the binding is
-# refused server-side, and only the CEO's npm account can change the binding.
+# WHAT STARTS A PUBLISH (CEO, 2026-08-28, verbatim: "(A) align with FRQTL"): a GitHub RELEASE,
+# published with a tag of the form `<package-directory>-v<version>` — the same shape eabadir/fraqtl
+# publishes on. Publishing is domain authority under a signed contract, so the release IS the
+# authorisation and no separate human approval stands in front of the publish step.
+#
+# The tag is the ONLY per-package signal a release event carries: `release:` supports no `paths:`
+# filter, and one repository publishes three packages. The `guard` job below turns that tag into a
+# routing decision and refuses the two ways it can be wrong — a tag whose version disagrees with
+# the package it names, and a tag whose prefix matches more than one package.
+#
+# `workflow_dispatch` is RETAINED as the manual path (a re-run, a dist-tag other than `latest`).
+# It has no tag to check, so its `confirm_version` input is the check: it must equal the chosen
+# package's package.json version.
+#
+# WHAT STILL FAIL-CLOSES BEHIND ALL OF THAT:
+#   · the `npm-publish` environment's deployment branch policy (`main` only) and CODEOWNERS on
+#     this file path;
+#   · the dependency-satisfiability refusal below, which asks the REGISTRY whether every @descix
+#     range this package declares can actually be resolved, and refuses the publish if not;
+#   · the post-publish install job, which installs what the registry is now serving into an empty
+#     directory and fails the run if a developer could not install it;
+#   · npm's own server-side check: a claim that does not match the trusted-publisher binding is
+#     refused, and only the CEO's npm account can change the binding.
+#
+# THE ONE HUMAN ACT THAT REMAINS is the once-per-package trusted-publisher binding on npmjs.com
+# (Organization `DeSciX` / Repository `DeSciXCore` / Workflow `npm-publish.yml` / Environment
+# `npm-publish` / `npm publish` only). It is per package, once, ever.
 #
 # MEASURED FACTS THIS FILE IS BUILT ON (verified 2026-08-21, not assumed):
 #   · The repo is PUBLIC and lives at DeSciX/DeSciXCore
@@ -44,6 +64,8 @@
 name: npm publish (trusted publishing)
 
 on:
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       package:
@@ -54,9 +76,17 @@ on:
           # PUBLIC STORY IS ONE PACKAGE (CEO 2026-08-21): @descix/sdk, with cloud-core and
           # app-sdk as PLUMBING. cli and platform-api are not listed. Adding a name here is
           # a product decision, not a convenience.
+          #
+          # THIS LIST IS THE OWNER of the publish set. The release router reads it out of this
+          # file (scripts/publish-set.mjs), so a release tag can only route to a name that
+          # appears here, and the runbook conformance gate compares the runbook against it.
           - descix-sdk
           - descix-cloud-core
           - descix-app-sdk
+      confirm_version:
+        description: "Exact version to publish (must equal that package's package.json \"version\") — a manual run has no tag to check, so this input is the check"
+        required: true
+        type: string
       dist_tag:
         description: "npm dist-tag"
         required: true
@@ -70,11 +100,58 @@ permissions:
   id-token: write
 
 jobs:
-  publish:
+  # ── WHICH PACKAGE IS THIS RUN ABOUT? ────────────────────────────────────────────────────────
+  # Deliberately a separate job with NO `environment:` and no publish rights: it decides, it never
+  # acts. Its four outputs are the only thing the publish job reads about what it is publishing,
+  # so no later step re-derives the package or the version from the event.
+  #
+  # The routing logic lives in a SCRIPT, for the same reason the dependency gate does: logic
+  # written inline in YAML can only be exercised by dispatching this workflow, and a publish
+  # workflow cannot be dispatched to test a gate — so an inline gate ships having never once run.
+  # A script can be run, shown RED on a negative control, and shown GREEN, by anyone reviewing it.
+  guard:
+    name: Route the release and verify the version
     runs-on: ubuntu-latest
-    # Load-bearing twice: it carries the required-reviewer approval gate, and npm's
-    # trusted-publisher claim includes this environment name.
+    outputs:
+      should_publish: ${{ steps.route.outputs.should_publish }}
+      package: ${{ steps.route.outputs.package }}
+      version: ${{ steps.route.outputs.version }}
+      dist_tag: ${{ steps.route.outputs.dist_tag }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # Every input arrives by ENVIRONMENT, never by `${{ }}` interpolated into the shell: a
+      # release tag is attacker-influenceable text, and an env-driven step is one anybody can run
+      # locally, character for character, without dispatching anything.
+      - name: Route the release to its package
+        id: route
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          TAG: ${{ github.event.release.tag_name }}
+          INPUT_PACKAGE: ${{ inputs.package }}
+          CONFIRM_VERSION: ${{ inputs.confirm_version }}
+          INPUT_DIST_TAG: ${{ inputs.dist_tag }}
+        run: node scripts/resolve-release-target-cli.mjs
+
+  publish:
+    name: Publish (OIDC)
+    needs: guard
+    # A release whose tag belongs to another package — or to nothing here — leaves the guard with
+    # should_publish=false and exit 0, and this job never starts. Skipping is the correct outcome
+    # of a monorepo release event, not a failure to report.
+    if: needs.guard.outputs.should_publish == 'true'
+    runs-on: ubuntu-latest
+    # Load-bearing: npm's trusted-publisher claim includes this environment name, so removing it
+    # breaks publishing outright.
     environment: npm-publish
+    env:
+      # The guard's decision, once, for every step below.
+      PKG: ${{ needs.guard.outputs.package }}
 
     steps:
       - uses: actions/checkout@v4
@@ -98,22 +175,61 @@ jobs:
           node --version
 
       # FAIL LOUD BEFORE PUBLISHING. cryptoapis-sdk is vendored THIRD-PARTY code and must never
-      # reach the registry under our scope; it is not in the input choices, but a choice list is
-      # a UI affordance, not an enforcement boundary.
+      # reach the registry under our scope; it is not in the dispatch choices, but a choice list is
+      # a UI affordance, not an enforcement boundary — and a release tag is not a choice list at
+      # all. Keyed on the GUARD'S resolved package, so it works on the release path too: a refusal
+      # keyed on `inputs.package` would be empty on every release and could never fail.
       - name: Refuse to publish excluded packages
         run: |
-          case "${{ inputs.package }}" in
+          case "$PKG" in
             cryptoapis-sdk|descix-vscode|descix-cli|descix-platform-api|.)
-              echo "::error::'${{ inputs.package }}' is NOT publishable to npm under @descix."
+              echo "::error::'$PKG' is NOT publishable to npm under @descix."
               exit 1
               ;;
           esac
 
+      # REFUSE AN ARTIFACT NOBODY CAN INSTALL. On 2026-08-27 a package published on a green run
+      # and was uninstallable: it declared an @descix range the registry could not satisfy, so
+      # `npm install` exited with ETARGET — on the `latest` tag. It shipped because "the package
+      # appeared on the registry" was the only thing standing in for "the package works", and
+      # not one gate here had ever asked the registry a question.
+      - name: Refuse to publish an artifact nobody can install
+        run: node scripts/check-prepublish-deps-cli.mjs "$PKG"
+
       - name: Publish
-        working-directory: ${{ inputs.package }}
+        working-directory: ${{ needs.guard.outputs.package }}
         env:
           # Deliberate opt-out; the repo is public so provenance is available. Explicit beats
           # implicit. Deleting this line turns provenance on — the CEO's call.
           NPM_CONFIG_PROVENANCE: "false"
         run: |
-          npm publish --access public --tag "${{ inputs.dist_tag }}"
+          npm publish --access public --tag "${{ needs.guard.outputs.dist_tag }}"
+
+  # THE LAST JOB, AND THE ONE THAT WOULD HAVE CAUGHT 2026-08-27. Everything above measures a
+  # checkout; this installs what the REGISTRY is actually serving, into an empty directory, and
+  # fails the run if a developer could not install it. "It published" and "it installs" are two
+  # facts, and until now only the first was ever checked.
+  #
+  # Deliberately a SEPARATE job with no `environment:`. It must not carry the npm-publish
+  # environment — it publishes nothing and needs no OIDC token, and an environment it does not
+  # need is a boundary it can only fail at. `needs: [guard, publish]` is what makes it last AND
+  # gives it the guard's package output.
+  #
+  # --dir resolves name@version from that package's OWN package.json in the tree that was just
+  # published, so the directory is never hand-mapped to a package name. --wait polls for registry
+  # visibility first, so CDN propagation is reported as propagation and never as a broken package.
+  verify-install:
+    name: Install what was published
+    needs: [guard, publish]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install the published artifact from the registry
+        run: node scripts/check-published-install-cli.mjs --dir "${{ needs.guard.outputs.package }}" --wait

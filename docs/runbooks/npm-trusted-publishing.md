@@ -1,23 +1,40 @@
 # Runbook — npm Trusted Publishing for `@descix`
 
-**Audience: the CEO.** Everything below is clicking in two web UIs. You author nothing; the
-workflow file is already written and merged.
+**Publishing a `@descix` package is a domain act under a signed contract, not a human approval.**
+A GitHub **release** with a package-prefixed version tag starts the workflow; the workflow routes
+the release to its package, refuses the ways the release can be wrong, publishes over OIDC, and
+then installs what it published. No token is handled and no approval is waited on.
 
-**Why we are doing this, in your words (2026-08-21):**
+**Why we are doing this at all, in the CEO's words (2026-08-21):**
 > "npm is turning off 2FA bypass and now is moving to Trusted Publisher model through CI so we
 > need to set-up GitHub actions. Let me know how you recommend we set-up the automation."
+
+**And why it is not gated on the CEO (2026-08-28):**
+> "(A) align with FRQTL"
 
 **What you get:** no publish token exists anywhere — not on a laptop, not in GitHub secrets, not
 in a password manager. Each publish authenticates with a short-lived token minted for that one
 run and bound to this repo + this workflow file + this environment.
 
-**What gates a publish — three independent checks, none of them a convention:**
-1. The workflow only runs when you press *Run workflow*. There is no push or tag trigger.
-2. The run then **waits for your approval**. The `npm-publish` environment carries a
-   required-reviewer rule naming you, so the publish step does not execute until you approve it
-   in the run's page. Two deliberate actions, not one.
-3. npm refuses any publish whose OIDC claim does not match the trusted-publisher binding
-   exactly. That check is server-side, fail-closed, and only you can change the binding.
+**What gates a publish — four mechanical checks, none of them a convention:**
+1. The **tag/version guard**. A release tag must be `<directory>-v<version>`, it must name exactly
+   one of the packages below, and its version must equal that package's `package.json` version.
+   A tag belonging to another package (or to nothing here) skips the run; a version disagreement
+   fails it loudly, naming both versions.
+2. The **dependency-satisfiability refusal**. Before publishing, every `@descix/*` range the
+   package declares is resolved against the live registry. An unsatisfiable range refuses the run
+   and names the range and what the registry actually has.
+3. The **post-publish install check**. After a successful publish the run installs the published
+   `name@version` from the registry into an empty directory and fails if that install fails.
+4. **npm's own server-side check.** It refuses any publish whose OIDC claim does not match the
+   trusted-publisher binding. That check is fail-closed, and only the CEO's npm account can change
+   the binding.
+
+Behind all four: the `npm-publish` environment's deployment branch policy is `main` only, and
+CODEOWNERS guards the workflow file path.
+
+**The one human act that remains** is Step 1 below — the once-per-package trusted-publisher
+binding on npmjs.com, which lives in the CEO's npm account and cannot be automated away.
 
 ---
 
@@ -32,17 +49,18 @@ prerequisites, verbatim:
 the microservice backend at `@descix/sdk/microservice`. `@descix/cloud-core` and `@descix/app-sdk`
 also publish, but as **plumbing** — named in no docs, installed by nobody directly.
 
-Those three are exactly what the workflow offers. The `directory` column is the value you pick from
-the *Which package to publish* dropdown, and it is the same string
-`.github/workflows/npm-publish.yml` lists — that file is the single source of truth for what is
-publishable. `scripts/check-runbook-publish-set.mjs` compares this table against it and fails when
-they disagree; nothing triggers it automatically, so it catches drift only when someone runs it.
+Those three are exactly what the workflow publishes. The `directory` column is both the release
+tag's prefix and the value in the *Which package to publish* dropdown on a manual run, and it is
+the same string `.github/workflows/npm-publish.yml` lists — that file is the single source of
+truth for what is publishable, and `scripts/publish-set.mjs` is the only code that reads it.
+`scripts/check-runbook-publish-set.mjs` compares this table against it and fails when they
+disagree; nothing triggers it automatically, so it catches drift only when someone runs it.
 
-| package | directory | role |
-|---|---|---|
-| `@descix/sdk` | `descix-sdk` | the story |
-| `@descix/cloud-core` | `descix-cloud-core` | plumbing |
-| `@descix/app-sdk` | `descix-app-sdk` | plumbing |
+| package | directory | release tag | role |
+|---|---|---|---|
+| `@descix/sdk` | `descix-sdk` | `descix-sdk-v<version>` | the story |
+| `@descix/cloud-core` | `descix-cloud-core` | `descix-cloud-core-v<version>` | plumbing |
+| `@descix/app-sdk` | `descix-app-sdk` | `descix-app-sdk-v<version>` | plumbing |
 
 Whether each one already exists on the registry — the prerequisite above — is a question only the
 registry can answer, and it answers one package at a time:
@@ -56,8 +74,6 @@ npm view @descix/app-sdk versions
 Run them separately. Passing several names to a single `npm view` prints the versions of the first
 one and exits 0, which reads as an answer about all of them.
 
-The sequence is **Steps 1–3, then never again.**
-
 *Not published, deliberately:* `@descix/cli` and `@descix/platform-api` — the workflow refuses both
 by name, along with `cryptoapis-sdk`, which is vendored third-party code and must never reach the
 registry under our scope, and `descix-vscode`, which ships to the VS Code Marketplace instead.
@@ -70,18 +86,21 @@ libraries plus `chokidar`/`dotenv`/`google-auth-library`. Nothing forces platfor
 
 ## Step 1 — configure the trusted publisher (npmjs.com, once per package)
 
+**This is the CEO's, and it is the only part of publishing that is.** It is once per package,
+ever.
+
 **Each package needs its own binding.** npm's OIDC check is fail-closed *per package binding*: a
 package with no binding at all — or one whose binding names anything other than the values in the
 second table below — has its publish refused by npm's servers regardless of what the workflow
 allows.
 
 `@descix/sdk` is bound and its binding is proven: a publish through this workflow succeeded on the
-first attempt. Which of the others are bound is visible only inside your npm account, so confirm
+first attempt. Which of the others are bound is visible only inside the npm account, so confirm
 each one:
 
 | order | package | what it needs |
 |---|---|---|
-| 1 | `@descix/cloud-core` | confirm the binding, or create it — **and publish it before `@descix/sdk`; see below** |
+| 1 | `@descix/cloud-core` | confirm the binding, or create it — **and release it before `@descix/sdk`; see below** |
 | 2 | `@descix/app-sdk` | confirm the binding, or create it |
 | — | `@descix/sdk` | nothing — bound, and already published through this workflow |
 
@@ -92,15 +111,23 @@ each one:
 > What it controls instead is whether the app half exists at all: until `@descix/app-sdk` is on the
 > registry at a version satisfying the peer range `@descix/sdk` declares, `npm install @descix/sdk`
 > still succeeds and the app half is simply absent — no error, nothing to see. That is why its
-> click is a repair and not housekeeping.
+> release is a repair and not housekeeping.
 >
-> Publishing `@descix/sdk` first *succeeds*, and then every `npm install @descix/sdk` fails with
+> Releasing `@descix/sdk` first *succeeds*, and then every `npm install @descix/sdk` fails with
 > `ETARGET` on the range it cannot resolve — and that broken install is what the `latest` tag
 > serves to everyone. **This is not hypothetical: it happened on 2026-08-27.** `@descix/sdk` went
 > out ahead of `@descix/cloud-core`, and the `latest` it published could not be installed at all.
 >
-> So answer it at the moment you click, from the registry rather than from this page. These need
-> no checkout and no dev environment:
+> **This order is now enforced, not merely advised — but read the refusal you get.** The workflow
+> asks the registry these questions itself, on every run. Before it publishes anything, it refuses
+> an `@descix/*` range the registry cannot satisfy, and the refusal separates exactly the two cases
+> above: a hard dependency says *this will not install at all*, an optional peer says *it installs,
+> but the half it advertises cannot be obtained by anyone*. Both stop the run, and which one you
+> got is the difference between a stranded install and a silently missing app half. After the
+> publish, a final job installs the package from the registry into an empty directory and fails the
+> run if it does not install — the check whose absence let the broken `latest` out.
+>
+> These answer the same question without spending a run, and need no checkout:
 >
 > ```bash
 > npm view @descix/sdk dependencies        # the range @descix/sdk declares
@@ -115,13 +142,9 @@ each one:
 > ```bash
 > node -p "require('./descix-sdk/package.json').dependencies['@descix/cloud-core']"
 > ```
->
-> If what the registry has does not satisfy what `@descix/sdk` declares, publish
-> `@descix/cloud-core` first. Publishing it at *some* newer version is not enough — it has to land
-> inside the declared range.
 
-**Useful thing you discovered:** npm saves the connection **with no workflow file in the repo** —
-the form warns about it but does not validate it.
+**Useful thing the CEO discovered:** npm saves the connection **with no workflow file in the
+repo** — the form warns about it but does not validate it.
 
 For each of the three: **npmjs.com → the package → Settings → Trusted Publisher → GitHub Actions**,
 and enter exactly:
@@ -139,14 +162,21 @@ workflow filename is why the file may never be renamed or moved without redoing 
 
 ---
 
-## Step 2 — the `npm-publish` environment (GitHub) — configured, approval prompt ON
+## Step 2 — the `npm-publish` environment (GitHub)
 
 The workflow declares `environment: npm-publish`, and it must keep doing so: **the npm binding
 includes the environment name in the OIDC claim**, so removing it would break publishing.
 
-The repository is **public** (`DeSciX/DeSciXCore`, 2026-08-22) and the environment is configured:
-**required reviewer = `eabadir`**, deployment branch policy = `main` only. Every *Run workflow*
-therefore pauses for your approval in the GitHub UI before any publish step runs. Nothing to set.
+The repository is **public** (`DeSciX/DeSciXCore`, 2026-08-22). The environment's deployment
+branch policy is `main` only, so nothing published from a branch can mint a token. No human
+reviewer stands on it — publishing is domain authority under the contract that grants it, and
+the guard, the dependency refusal and npm's own binding are the boundary.
+
+Read the environment's current state rather than trusting this page:
+
+```bash
+gh api repos/DeSciX/DeSciXCore/environments/npm-publish
+```
 
 ---
 
@@ -165,16 +195,49 @@ token setting until then, by design.
 
 ## Publishing, from then on
 
-**Actions → "npm publish (trusted publishing)" → Run workflow**, choose the package and dist-tag
-(`latest` unless you mean otherwise). The run pauses for your approval; approve it and it
-publishes. Nothing else is needed and no credential is ever handled.
+**Cut a GitHub release whose tag is `<directory>-v<version>`,** using the `directory` and tag
+columns in the table above, with the version equal to what that package's `package.json` declares.
+Publishing the release is what starts the run. One release publishes one package, on the `latest`
+dist-tag.
 
-One run publishes one package. When more than one is going out, Step 1 states the order they go in
-and why it is not optional.
+```bash
+gh release create <directory>-v<version> --title <directory>-v<version> --notes "..."
+```
+
+The guard job answers three questions before anything is published, and each has one outcome:
+
+| what the guard sees | what happens |
+|---|---|
+| the tag names no package here | the run **skips**, exits 0, and the publish job never starts |
+| the tag names one package, versions agree | the run continues to the dependency gate |
+| the tag names one package, versions disagree | the run **fails**, printing both versions |
+| the tag prefix matches more than one package | the run **fails** as ambiguous |
+
+**The manual path is retained** for a re-run or a dist-tag other than `latest`: **Actions → "npm
+publish (trusted publishing)" → Run workflow**, choose the package, and type the exact
+`package.json` version into `confirm_version`. A manual run has no tag, so that input is the
+check — a wrong value refuses the run.
+
+When more than one package is going out, Step 1 states the order they go in and why it is not
+optional.
 
 If a version already exists, npm rejects it and the run fails loudly. That is intended — there is
 no force and no skip-if-exists, because a publish that silently does nothing is worse than one
 that stops and tells you.
+
+Every gate is a script under `scripts/`, so you can answer any of these yourself before cutting
+a release, without spending a run:
+
+```bash
+EVENT_NAME=release TAG=<directory>-v<version> node scripts/resolve-release-target-cli.mjs
+node scripts/check-prepublish-deps-cli.mjs <directory>
+node scripts/check-published-install-cli.mjs --spec <name@version>
+node scripts/tests/release-target.test.mjs
+```
+
+If the post-publish job goes red, the artifact is already public and already broken. **Fix forward
+with a new version** — a published version cannot be edited, and there is no unpublish worth
+reaching for.
 
 ---
 
@@ -185,13 +248,12 @@ a cryptographic provenance attestation automatically, which requires a **public*
 repository — npm: *"Ensure your `package.json` is configured with a public `repository`…"*.
 `DeSciXCore` is public, so nothing blocks it. The workflow still sets
 `NPM_CONFIG_PROVENANCE=false` explicitly. **Turning it on is one line** — delete that env var —
-and it is a real supply-chain gain, but it changes what your click publishes and no agent can
-rehearse a publish, so the switch is yours to make deliberately rather than as a side effect of
-this runbook.
+and it is a real supply-chain gain, but it changes what a release publishes, so the switch is the
+CEO's to make deliberately rather than as a side effect of this runbook.
 
 **The workflow file is now the credential.** With no token to steal, the thing an attacker wants
 is edit access to `.github/workflows/npm-publish.yml` — change what it publishes, or from where.
-It is under CODEOWNERS requiring your review, and it should stay that way.
+It is under CODEOWNERS requiring the CEO's review, and it should stay that way.
 
 ---
 
