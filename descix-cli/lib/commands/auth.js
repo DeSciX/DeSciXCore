@@ -9,6 +9,7 @@ import chalk from 'chalk';
 import ora from 'ora';
 import { DeSciXApiClient } from '../api-client.js';
 import { WalletFileManager } from '../wallet-file.js';
+import { walletEnvironmentStamp } from '../wallet-environment.js';
 import { WorkspaceConfig } from '../workspace-config.js';
 import { requireAuth } from '../auth-guard.js';
 import { exec } from 'child_process';
@@ -232,7 +233,9 @@ export async function loginDevice(options = {}) {
       userId: credentials.user_id,
       email: credentials.email,
       sessionToken: credentials.session_token,
-      expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString()
+      expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
+      // Record WHERE this credential was obtained. Write-only: nothing refuses on it yet.
+      ...walletEnvironmentStamp(apiClient.baseUrl)
     };
 
     // WS-HEADLESS-MVP-A1: redeem the device-bridge authorization code for the long-lived
@@ -565,6 +568,8 @@ export async function adminLogin(options = {}) {
       communityId: info.community_id,
       tokenSymbol: info.token_symbol || 'DAITA',
       expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
+      // Record WHERE this credential was obtained. Write-only: nothing refuses on it yet.
+      ...walletEnvironmentStamp(apiClient.baseUrl),
     };
 
     // Save wallet.json

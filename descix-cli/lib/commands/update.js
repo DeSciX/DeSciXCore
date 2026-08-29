@@ -271,8 +271,13 @@ export async function updateApp(options = {}) {
     let baseFolderId = ctx.workspaceConfig.driveConfig?.base_folder_id;
     
     if (!baseFolderId) {
-      const userInfo = await apiClient.invoke('get_my_profile', {});
-      baseFolderId = userInfo.message?.base_folder_id;
+      // `get_my_profile` was a call to a verb NOTHING SERVES: it is absent from Cloud's command
+      // registry and had zero references anywhere in DeSciX_Cloud, DeSciX_Core or DeSciX_Powch
+      // outside this one call site (measured 2026-08-29). `get_folder_info` is the served,
+      // AUTHENTICATED verb that owns this fact — registry.js maps it to appCommands.js, and for
+      // entity_type 'user' it returns the caller's own base_folder_id as `folder_id`.
+      const folderInfo = await apiClient.invoke('get_folder_info', { entity_type: 'user' });
+      baseFolderId = folderInfo.message?.folder_id;
     }
     
     if (!baseFolderId) {

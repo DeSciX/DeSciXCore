@@ -34,7 +34,7 @@
     "googleapis": "^170.1.0",
     "inquirer": "^12.1.0",
     "ora": "^9.0.0",
-    "@descix/platform-api": "file:../descix-platform-api"
+    "@descix/platform-api": "^1.0.1"
   },
   "files": [
     "bin",
