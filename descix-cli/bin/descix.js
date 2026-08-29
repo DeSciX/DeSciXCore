@@ -402,7 +402,9 @@ creditsCommand
   .command('buy')
   .description('Buy AI credits with USD (Stripe checkout)')
   .requiredOption('--usd <amount>', 'USD amount of credits to buy')
-  .option('--return-base <url>', 'Base URL for the checkout success/cancel landing (default https://descix.net)')
+  // The default is the origin this invocation is already talking to, NOT a fixed production
+  // host — see commands/credits.js. Naming a prod origin here made --help itself the misreport.
+  .option('--return-base <url>', 'Base URL for the checkout success/cancel landing (default: the API origin in use)')
   .action(async (options) => {
     try {
       await creditsCommands.buyCredits({ usd: options.usd, returnBase: options.returnBase });
