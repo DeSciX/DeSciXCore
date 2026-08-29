@@ -12,6 +12,7 @@ import chalk from 'chalk';
 import { DeSciXApiClient } from '../lib/api-client.js';
 import { requireAuth } from '../lib/auth-guard.js';
 import { WorkspaceConfig } from '../lib/workspace-config.js';
+import { CLI_VERSION } from '../lib/cli-version.js';
 // Chat session pointer + the ONE rule for when a dead pointer may be self-healed.
 import {
   getSessionInteractionId,
@@ -71,7 +72,7 @@ const program = new Command();
 program
   .name('descix')
   .description('DeSciX CLI - Unified command-line interface')
-  .version('1.0.0')
+  .version(CLI_VERSION)
   .option('--env <name>', 'Target environment: dev, demo, prod (overrides API URL)')
   .option('--api-url <url>', 'Direct API URL override (e.g., https://demo.descix.net)');
 

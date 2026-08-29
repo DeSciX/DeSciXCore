@@ -20,6 +20,7 @@ import {
 import { WorkspaceConfig } from '../lib/workspace-config.js';
 import { DeSciXApiClient } from '../lib/api-client.js';
 import { WalletFileManager } from '../lib/wallet-file.js';
+import { CLI_VERSION } from '../lib/cli-version.js';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 // WS-MCP-SSOT-TIER2 (audit §5.B-1): the curated HTTP-valid core tools are the SINGLE SOURCE
@@ -325,7 +326,7 @@ try {
 
   // Create MCP server
   const server = new Server(
-    { name: 'DeSciX MCP Server', version: '1.0.0' },
+    { name: 'DeSciX MCP Server', version: CLI_VERSION },
     // WS-MVP-FIRSTCONTACT F1: the external-consumer operating manual rides the MCP
     // `initialize` result on BOTH transports. SSOT: @descix/platform-api/mcp-tools
     // handshake.js — do not hand-author a second copy here.
