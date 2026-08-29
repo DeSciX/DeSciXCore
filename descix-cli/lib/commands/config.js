@@ -19,7 +19,11 @@ export async function show() {
 
     console.log(chalk.cyan('\n📋 DeSciX Workspace Configuration:\n'));
     console.log(chalk.white(`   Workspace:     ${workspaceRoot}`));
-    console.log(chalk.white(`   API URL:       ${workspaceConfig.getApiUrl()}`));
+    // An unconfigured origin prints as an explicit absence with its remedy. Interpolating a
+    // null here would print the literal string "null", which reads like a value.
+    const configuredOrigin = workspaceConfig.getApiUrl();
+    console.log(chalk.white(`   API URL:       ${configuredOrigin ||
+      chalk.yellow('(not configured — run `descix config set-env dev|demo|prod`)')}`));
     console.log(chalk.white(`   Environment:   ${workspaceConfig.env?.environment || 'production'}`));
 
     // Show mapped apps (v2.1 env.products)
