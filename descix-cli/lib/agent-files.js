@@ -10,6 +10,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
+import { readIdentity, isIdentityNamed } from './workspace-identity.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -30,35 +31,46 @@ const AGENT_FILES = [
  */
 async function loadContext(workspaceRoot) {
   const wsPath = path.join(workspaceRoot, '.descix', 'workspace.json');
+
+  // A workspace.json that cannot be read or parsed is a HARD failure, not a cue to invent an
+  // identity. This used to return `{appId: <dirname>, communityId: 'daita', apiUrl: <prod>}` —
+  // three fabricated facts written into four files the developer's coding agent then treats as
+  // authoritative. 'daita' is the DeSciX root community; handing it to an unrelated developer
+  // was the worst of the three.
+  let config;
   try {
-    const raw = await fs.readFile(wsPath, 'utf-8');
-    const config = JSON.parse(raw);
-
-    // Derive from v2.1 format or legacy
-    const platform = config.env?.platform || {};
-    const appId = platform.appId || config.defaultContext?.appId || 'my-app';
-    const communityId = platform.communityId || config.defaultContext?.communityId || config.primaryCommunity;
-
-    // Derive API URL
-    let apiUrl = config.apiUrl || null;
-    if (!apiUrl && platform.microservice?.port) {
-      apiUrl = `https://localhost:${platform.microservice.port}`;
-    }
-    apiUrl = apiUrl || 'https://descix.net';
-
-    // Friendly name: capitalize app_id or use as-is
-    const appName = appId.charAt(0).toUpperCase() + appId.slice(1);
-
-    return { appId, communityId, apiUrl, appName };
-  } catch {
-    // No workspace.json — use defaults
-    return {
-      appId: path.basename(workspaceRoot),
-      communityId: 'daita',
-      apiUrl: 'https://descix.net',
-      appName: path.basename(workspaceRoot),
-    };
+    config = JSON.parse(await fs.readFile(wsPath, 'utf-8'));
+  } catch (err) {
+    throw new Error(
+      `Cannot generate agent instruction files: ${wsPath} could not be read (${err.code || err.message}). ` +
+      `Run \`descix init -c <community> -a <app>\` first — the app, community and origin these ` +
+      `files state must come from your workspace, and there is no default that would be true.`
+    );
   }
+
+  // ONE reader, over the keys registerApp() actually writes. See lib/workspace-identity.js.
+  const { appId, communityId, apiUrl, originSource } = readIdentity(config);
+
+  if (!isIdentityNamed({ appId, communityId })) {
+    const missing = [!appId && 'app id', !communityId && 'community id'].filter(Boolean).join(' and ');
+    throw new Error(
+      `Cannot generate agent instruction files: ${wsPath} names no ${missing}. ` +
+      `Run \`descix init -c <community> -a <app>\` to register it. ` +
+      `(Refusing to write files that would state an app or community you did not choose.)`
+    );
+  }
+
+  // The origin is the one fact that may legitimately be absent: a workspace can exist before an
+  // environment has been chosen. It is stated as UNCONFIGURED with the remedy — never guessed.
+  // An unconfigured origin is not an error here because the app and community are still true.
+  const originLine = apiUrl
+    ? apiUrl
+    : '(not configured — run `descix config set-env dev|demo|prod`)';
+
+  // Friendly name: capitalize app_id or use as-is
+  const appName = appId.charAt(0).toUpperCase() + appId.slice(1);
+
+  return { appId, communityId, apiUrl: originLine, appName, originSource };
 }
 
 /**

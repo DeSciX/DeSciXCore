@@ -66,27 +66,41 @@ export async function setUrl(url, options = {}) {
 /**
  * Initialize config for environment
  */
-export async function init(env = 'prod', options = {}) {
+export async function init(env, options = {}) {
   try {
-    const workspaceConfig = await WorkspaceConfig.load();
-    const workspaceRoot = workspaceConfig.getWorkspaceRoot();
-    
-    // Set API URL based on environment
-    if (env === 'dev') {
-      workspaceConfig.apiUrl = 'https://localhost:4000';
-      workspaceConfig.environment = 'development';
-    } else {
-      workspaceConfig.apiUrl = 'https://descix.net';
-      workspaceConfig.environment = 'production';
+    // NO DEFAULT ENVIRONMENT. This used to be `init(env = 'prod')` with an `if (env === 'dev')
+    // … else <production>` body, which meant a bare `descix config init` — and ANY unrecognised
+    // environment name, including a typo — silently wrote the PRODUCTION origin into the
+    // workspace. That is precisely "an origin the developer did not choose".
+    if (!env) {
+      throw new Error(
+        'descix config init requires an environment: --env dev|demo|prod.\n' +
+        'There is no default — the origin this workspace talks to is a choice, not an omission.'
+      );
     }
-    
-    const configPath = await workspaceConfig.save(workspaceRoot);
-    
+
+    const normalized = String(env).toLowerCase();
+    const known = WorkspaceConfig.ENV_MAP[normalized];
+    if (!known) {
+      throw new Error(
+        `Unknown environment "${env}". Known environments: ` +
+        `${Object.keys(WorkspaceConfig.ENV_MAP).join(', ')}.\n` +
+        'For a self-hosted or port-forwarded gateway use ' +
+        '`descix config set-env <name> --url https://...`.'
+      );
+    }
+
+    // Write through the CANONICAL writer. This function used to assign the LEGACY top-level
+    // `workspaceConfig.apiUrl`, while `config set-env` writes `env.apiUrl` — two writers of one
+    // fact, writing two different keys, one of which `getApiUrl()` only consults as a fallback.
+    const workspaceConfig = await WorkspaceConfig.load();
+    const result = await workspaceConfig.setEnvironment(normalized, options.url || null);
+
     console.log(chalk.green('\n✅ Configuration initialized!\n'));
-    console.log(chalk.white(`   Environment: ${workspaceConfig.environment}`));
-    console.log(chalk.white(`   API URL:     ${workspaceConfig.apiUrl}`));
-    console.log(chalk.gray(`   Saved to:    ${configPath}\n`));
-    
+    console.log(chalk.white(`   Environment: ${result.environment}`));
+    console.log(chalk.white(`   API URL:     ${result.apiUrl}`));
+    console.log(chalk.gray(`   Saved to:    ${result.configPath}\n`));
+
   } catch (error) {
     console.error(chalk.red('Error initializing config:', error.message));
     throw error;

@@ -22,6 +22,7 @@ import chalk from 'chalk';
 import ora from 'ora';
 import inquirer from 'inquirer';
 import { DeSciXApiClient } from '../api-client.js';
+import { ENV_ORIGINS } from '@descix/app-sdk/dev';
 import { requireAuth, isAuthenticated } from '../auth-guard.js';
 import * as authCommands from '../commands/auth.js';
 import * as fs from 'fs/promises';
@@ -225,7 +226,7 @@ export async function runSetupWizard(options = {}) {
       ]);
       
       if (environment === 'production') {
-        apiUrl = 'https://descix.net';
+        apiUrl = ENV_ORIGINS.prod;
       } else if (environment === 'local') {
         apiUrl = 'https://localhost:4000';
       } else {
