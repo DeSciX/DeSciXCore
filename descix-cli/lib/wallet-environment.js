@@ -15,11 +15,10 @@
  * `descix --env` resolves against — so this file holds no second copy of the origin table.
  */
 import { WorkspaceConfig } from './workspace-config.js';
-
-/** Compare origins without tripping on a trailing slash or case in the host. */
-function normalizeOrigin(origin) {
-    return String(origin).trim().replace(/\/+$/, '');
-}
+// Compare origins with the SAME spelling the origin owner resolves with. This was a private
+// second copy of normalizeOrigin; two spellings of "is this the same origin" is the mirror
+// drift this contract exists to end, and it would have drifted silently.
+import { normalizeOrigin } from './origin.js';
 
 /**
  * The environment stamp to persist alongside a freshly obtained credential.

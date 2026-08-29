@@ -150,7 +150,8 @@ export async function runStatus(options = {}) {
         console.log(`Local Apps:     ${allApps.join(', ')}`);
       }
 
-      console.log(`API:            ${workspaceConfig.getApiUrl()}`);
+      console.log(`API:            ${workspaceConfig.getApiUrl() ||
+        '(not configured — run `descix config set-env dev|demo|prod`)'}`);
       console.log(`Local Root:     ${workspaceRoot}`);
     } catch (error) {
       console.log(`Mode:           ${chalk.red('Unknown/Invalid')} (${error.message})`);
