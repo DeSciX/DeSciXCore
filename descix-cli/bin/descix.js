@@ -4342,13 +4342,15 @@ configCommand
 
 configCommand
   .command('init')
-  .description('Initialize configuration')
-  .option('--dev', 'Initialize for development (https://localhost:4000)')
+  .description('Initialize configuration for an environment (requires --env)')
+  // `--dev` DELETED, not deprecated: its absence meant PRODUCTION, so the most common
+  // invocation (`descix config init`) wrote a prod origin nobody named. There is no default.
+  .option('--env <name>', 'Environment to initialize: dev, demo or prod')
+  .option('--url <url>', 'Explicit origin (for a self-hosted or port-forwarded gateway)')
   .option('-g, --global', 'Save to global config (~/.descixrc)')
   .action(async (options) => {
     try {
-      const env = options.dev ? 'dev' : 'prod';
-      await configCommands.init(env, options);
+      await configCommands.init(options.env, options);
     } catch (error) {
       process.exit(1);
     }

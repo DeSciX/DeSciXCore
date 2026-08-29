@@ -9,7 +9,7 @@
 import path from 'path';
 import axios from 'axios';
 import { WorkspaceConfig } from './workspace-config.js';
-import { DEFAULT_API_URL } from '@descix/app-sdk/dev';
+import { resolveOrigin } from './origin.js';
 
 export class DeSciXApiClient {
   constructor(options = {}) {
@@ -62,32 +62,28 @@ export class DeSciXApiClient {
    * @returns {Promise<string>} API base URL
    */
   async detectApiUrl() {
-    // The shipped default lives in ONE place (@descix/app-sdk/dev envOrigins) — this
-    // used to re-declare the production URL as a local literal.
-    const PRODUCTION_URL = DEFAULT_API_URL;
-
-    // Check environment variable first (highest priority)
-    if (process.env.DESCIX_API_URL) {
-      return process.env.DESCIX_API_URL;
-    }
-
-    // Use WorkspaceConfig if loaded (only if it has an explicit URL, not the production default)
-    if (this._workspaceConfig) {
-      const apiUrl = this._workspaceConfig.getApiUrl();
-      if (apiUrl && apiUrl !== PRODUCTION_URL) {
-        return apiUrl;
-      }
-    }
-
-    // Check global config (set by `descix login --dev` or `descix config set-url`)
+    // Every branch of this function used to be able to yield the production origin without the
+    // developer having chosen it, and the `!== PRODUCTION_URL` comparisons made it WORSE than a
+    // plain fallback: a workspace that had deliberately set prod was treated as if it had set
+    // nothing and skipped, so "chosen" and "unconfigured" were provably indistinguishable. The
+    // precedence and the fail-loud now live in the one origin owner.
+    let globalApiUrl = null;
     try {
       const { GlobalConfig } = await import('./global-config.js');
       const gc = await GlobalConfig.load();
-      if (gc.api_url && gc.api_url !== PRODUCTION_URL) return gc.api_url;
+      globalApiUrl = gc.api_url || null;
     } catch {}
 
-    // Default to production
-    return PRODUCTION_URL;
+    // Throws OriginUnresolvedError, naming the remedy, when nothing is configured. That throw
+    // is the feature: a command with no server to talk to must say so, not silently reach for
+    // production.
+    const { origin } = resolveOrigin({
+      envVar: process.env.DESCIX_API_URL,
+      workspaceEnvApiUrl: this._workspaceConfig?.env?.apiUrl,
+      legacyApiUrl: this._workspaceConfig?.apiUrl,
+      globalApiUrl,
+    });
+    return origin;
   }
 
   /**

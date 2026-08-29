@@ -76,7 +76,9 @@ export async function buyCredits(options) {
         throw new Error('invalid --usd');
     }
     // success/cancel URLs: platform site (informational landing; settlement is webhook-driven).
-    const base = options.returnBase || 'https://descix.net';
+    // The landing page belongs to the SAME deployment the checkout session is created against.
+    // Hardcoding the production origin sent a DEV purchase's success/cancel links to prod.
+    const base = options.returnBase || apiClient.baseUrl;
     const result = unwrap(await apiClient.invoke('create_stripe_checkout_session', {
         amount_usd: usd,
         purchase_type: 'ai_credits',

@@ -1,6 +1,6 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { ENV_ORIGINS, DEFAULT_API_URL } from '@descix/app-sdk/dev';
+import { ENV_ORIGINS } from '@descix/app-sdk/dev';
 
 /**
  * ONE OWNER for turning a workspace-relative localPath into an absolute path.
@@ -315,11 +315,18 @@ export class WorkspaceConfig {
     if (!this.env) this.env = {};
     if (!Array.isArray(this.env.products)) this.env.products = [];
 
+    // communityId is STORED, not just validated. It was previously accepted as a parameter and
+    // silently discarded, so `descix init -c egpt` wrote no trace of `egpt` anywhere — and
+    // `workspace-identity.js` (this entry's reader) then had no community to report, which is
+    // how the generated agent files named nobody's community. Writer and reader are a pair:
+    // the key order in `readIdentity()` mirrors the shape written here.
     const entry = { appId, localPath: appConfig.localPath, kbId: appConfig.kbId || 'General' };
+    if (communityId) entry.communityId = communityId;
 
     if (this.env.platform?.appId === appId) {
       this.env.platform.localPath = appConfig.localPath;
       if (appConfig.kbId) this.env.platform.kbId = appConfig.kbId;
+      if (communityId) this.env.platform.communityId = communityId;
     } else {
       const idx = this.env.products.findIndex(p => p.appId === appId);
       if (idx >= 0) {
@@ -516,18 +523,24 @@ export class WorkspaceConfig {
   }
 
   /**
-   * Get API URL for the current workspace.
+   * Get the API origin this workspace is configured for, or NULL when none is configured.
    *
-   * Priority: env.apiUrl > legacy this.apiUrl > the shipped default (PROD).
-   * There is NO environment-name-to-localhost derivation: an environment names a
-   * cloud environment, and localhost is a URL you set explicitly
+   * Priority: env.apiUrl > legacy this.apiUrl. There is NO third branch. This used to end in
+   * `return DEFAULT_API_URL` — the shipped PROD origin — which meant an unconfigured workspace
+   * was indistinguishable from one that had deliberately chosen production, and every caller
+   * received a prod origin the developer had never picked. Resolution and the fail-loud live in
+   * `lib/origin.js`; this method only reports what THIS workspace file says.
+   *
+   * There is likewise no environment-name-to-localhost derivation: an environment names a cloud
+   * environment, and localhost is a URL you set explicitly
    * (`descix config set-env dev --url https://localhost:4000`, or env.apiUrl).
-   * @returns {string}
+   *
+   * @returns {string|null} the configured origin, or null if this workspace names none
    */
   getApiUrl() {
     if (this.env?.apiUrl) return this.env.apiUrl;
     if (this.apiUrl) return this.apiUrl;
-    return DEFAULT_API_URL;
+    return null;
   }
 
   /**

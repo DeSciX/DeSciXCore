@@ -20,7 +20,10 @@ export class GlobalConfig {
   constructor(config = {}) {
     this.user_base_folder_id = config.user_base_folder_id || null;
     this.user_base_folder_name = config.user_base_folder_name || null;
-    this.api_url = config.api_url || 'https://descix.net';
+    // NO default. An absent api_url means the global config names no origin, which is a fact
+    // the origin owner knows how to report; substituting the production literal here made
+    // ~/.descix/config.json claim an origin the user never set.
+    this.api_url = config.api_url || null;
     this.environment = config.environment || 'production';
     this.registered_at = config.registered_at || null;
   }
