@@ -123,13 +123,28 @@ const ALLOWED_HOST_MENTIONS = new Set([
     // that what it blesses is correct. Its value is prospective — it fails the NEXT unreviewed
     // line — and that value is only real if these 25 were actually read.
     //
-    // They were. Audited line by line TWICE, independently and in agreement:
-    //   verifier acb71771ea6d95417 and doer CLI-DOER-2, 2026-08-29, at commit ee62cb6.
-    //   Tally, reproduced independently by both: 8 comments, 17 non-comment, of which SIX
-    //   construct a host — health.js's five prod probe targets (which is what that command is
-    //   FOR) and workspace-config.js's custom-env builder (reached only when a developer types
-    //   a custom env name). NO entry blesses an I1 violation: none of them is a fallback on a
-    //   resolver miss, which is the only thing this contract forbids.
+    // They were. Audited line by line TWICE and in agreement, 2026-08-29 at commit ee62cb6, by
+    // the DOER and the VERIFIER of this contract. (Those two parties ran as SESSION AGENT IDS
+    // — the doer as CLI-DOER-2, the verifier as acb71771ea6d95417 — not as served platform
+    // identities: `identity-CLI-VERIFIER` returns 0 of 1 on the fabric. Read them as roles,
+    // not as registered credentials.)
+    //
+    //   Tally, agreed by both: 8 comments, 17 non-comment, of which SIX construct a host —
+    //   health.js's five prod probe targets at :51,:52,:53,:228,:231 (probing production is
+    //   what `descix health --env prod` IS) and workspace-config.js:798's custom-env builder
+    //   (reached only when a developer TYPES a custom env name, so the origin is the one they
+    //   chose). NO entry blesses an I1 violation: none is a fallback on a resolver MISS, which
+    //   is the only thing this contract forbids.
+    //
+    //   ON THE ORDER OF THE TWO AUDITS: the doer states it completed its classification before
+    //   reading the verifier's tally. THAT ORDERING IS THE DOER'S ATTESTATION, NOT A RECORD
+    //   FACT — this commit postdates the verifier's first published tally by ~4 minutes, so the
+    //   record cannot establish independence, and "two independent audits agreeing" would claim
+    //   more than it can show. What the record DOES show is two audits, by different parties,
+    //   agreeing at ee62cb6. Every substantive claim above was confirmed by the verifier on its
+    //   own measurement. This distinction is the whole point of the flag that produced this
+    //   block: it would be absurd to close a finding about a list asserting more assurance than
+    //   it can support by asserting more assurance than IT can support, one line lower.
     //
     // Adding an entry means doing that audit for the new line and writing its reason. An entry
     // without a reason is an unaudited blessing wearing an audited one's clothes.
