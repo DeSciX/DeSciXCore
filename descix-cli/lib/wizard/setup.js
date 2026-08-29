@@ -217,7 +217,7 @@ export async function runSetupWizard(options = {}) {
           name: 'environment',
           message: 'Which environment are you connecting to?',
           choices: [
-            { name: 'Production (app.descix.net)', value: 'production' },
+            { name: `Production (${ENV_ORIGINS.prod})`, value: 'production' },
             { name: 'Local Development (localhost:4000)', value: 'local' },
             { name: 'Custom URL', value: 'custom' }
           ],

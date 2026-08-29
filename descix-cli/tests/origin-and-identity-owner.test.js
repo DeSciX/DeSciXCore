@@ -102,27 +102,73 @@ test('GATE I1-miss-fails-loud: resolveOrigin() throws and names how to fix it', 
     );
 });
 
-// ── I1 GATE 3: the literal is GONE from the resolution path (contract A1's own check) ────────
-test('GATE I1-no-literal: the production origin appears in no executable line of lib/ or bin/', () => {
-    const offenders = [];
+// ── I1 GATE 3: the prod origin cannot be RECONSTRUCTED anywhere in lib/ or bin/ ─────────────
+//
+// This gate was REBUILT after verifier acb71771 defeated its first version. That version matched
+// the quoted token `'https://descix.net'` and skipped comment-looking lines, so it asserted
+// SYNTAX rather than the fixture. Three live prod origins were appended to lib/origin.js itself
+// — a backtick template, `'https://' + 'descix.net'`, and a `${host}` interpolation — and the
+// gate ran GREEN. A gate that a two-line concatenation walks past is not a gate.
+//
+// It now allowlists by exact CONTENT: every line in lib/ and bin/ that names the host token at
+// all must appear below, whatever its syntax. A concatenation, a template, or a new literal all
+// produce a line that is not in the list, so all of them fail. Adding an entry is a deliberate
+// act a reviewer can see in the diff — which is the point.
+const ALLOWED_HOST_MENTIONS = new Set([
+    "bin/descix.js::.argument('<url>', 'Powch origin (e.g. https://powch.dev.descix.net), or \"none\" to remove')",
+    "bin/descix.js::.option('--api-url <url>', 'Direct API URL override (e.g., https://demo.descix.net)');",
+    "bin/descix.js::// The literal this replaced was `${ctx.appId}.descix.net`: the PROD host, scaffolded into",
+    "bin/descix.js::`Site deploys target a cloud env \u2014 pass --env=<dev|demo|prod> or export DESCIX_API_URL=https://<env>.descix.net\\n`",
+    "bin/mcp-server.js::'3. **Environment:** \"Should this run against local dev backend (localhost:4000) or hosted API (descix.net)?\"',",
+    "lib/commands/briefer/sources/environments.js::`- LB host suffix: \\`.{env}.descix.net\\` for DEV/DEMO, \\`.descix.net\\` for PROD`,",
+    "lib/commands/briefer/sources/identifiers.js::`- Domain pattern: \\`{app_id}.{env}.descix.net\\` for DEV/DEMO; \\`{app_id}.descix.net\\` for PROD. \u2014 \\`${MESH_FILE}:${hostMatch.lineNumber}\\``,",
+    "lib/commands/briefer/sources/identifiers.js::`- Wildcard TLS cert: \\`*.descix.net\\` plus per-env wildcards. ONE cert. No per-app cert provisioning.`,",
+    "lib/commands/briefer/sources/routing.js::`- Apex singleton (\\`daita\\`): \\`demo.descix.net\\` / \\`descix.net\\` \u2192 GCS \\`/{env}/daita/site/\\` + \\`/apifront\\`, \\`/mcp\\`, \\`/api\\` \u2192 daita broker \u2014 \\`${LB_FILE}:${singletonMatcherMatch.lineNumber}\\``,",
+    "lib/commands/briefer/sources/routing.js::`- Platform peer host (\\`powch.{env}.descix.net\\`): GCS site + \\`/apifront\\`, \\`/mcp\\` \u2192 daita broker; \\`/api/*\\` \u2192 powch NEG`,",
+    "lib/commands/briefer/sources/what-is-not.js::`- **No per-app DNS provisioning.** Wildcard \\`*.{env}.descix.net\\` cert + wildcard A record cover all apps. Adding an app does NOT touch DNS.${dnsMatches.length > 0 ? ` _(${dnsMatches.length} \\`gcloud dns\\`/\\`domain-mappings\\` reference(s) detected in deploy scripts \u2014 manually verify these are wildcard-cert touches, not per-app DNS.)_` : ''}`,",
+    "lib/commands/config.js::throw new Error(`${what} must be an absolute URL (e.g. https://powch.dev.descix.net), got \"${value}\".`);",
+    "lib/commands/health.js::*             powch.descix.net)",
+    "lib/commands/health.js::*             probes against *.demo.descix.net hosts",
+    "lib/commands/health.js::*             probes against the three in-scope hosts (descix.net, egpt.descix.net,",
+    "lib/commands/health.js::daita: 'descix.net',",
+    "lib/commands/health.js::egpt:  'egpt.descix.net',",
+    "lib/commands/health.js::powch: 'powch.descix.net',",
+    "lib/commands/health.js::return PROD_HOST_BY_APP[appId] || `${appId}.descix.net`;",
+    "lib/commands/health.js::return `${appId}.${env}.descix.net`;",
+    "lib/origin.js::* `https://descix.net`): the CLI had no representation of \"nobody chose an origin\". Every",
+    "lib/wizard/setup.js:://   npm install -g https://app.descix.net/sdk/descix-cli-1.0.0.tgz",
+    "lib/workspace-config.js::* For custom envs, uses --url or defaults to https://{name}.descix.net.",
+    "lib/workspace-config.js::resolvedUrl = apiUrl || `https://${normalized}.descix.net`;",
+    "lib/workspace-identity.js::* `'my-app'` and `'https://descix.net'`. The measured result: the four generated",
+]);
+
+test('GATE I1-no-literal: every mention of the prod host in lib/ + bin/ is a reviewed one', () => {
+    const found = [];
     const walk = (dir) => {
         for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
             const p = path.join(dir, entry.name);
             if (entry.isDirectory()) { walk(p); continue; }
             if (!entry.name.endsWith('.js')) continue;
-            fs.readFileSync(p, 'utf8').split('\n').forEach((line, i) => {
-                if (!line.includes(`'${PROD_ORIGIN}'`) && !line.includes(`"${PROD_ORIGIN}"`)) return;
-                // Comments are prose ABOUT the defect, not the defect.
-                if (/^\s*(\/\/|\*|\/\*)/.test(line)) return;
-                offenders.push(`${path.relative(CLI_ROOT, p)}:${i + 1}: ${line.trim()}`);
+            const rel = path.relative(CLI_ROOT, p);
+            fs.readFileSync(p, 'utf8').split('\n').forEach((line) => {
+                if (line.includes('descix.net')) found.push(`${rel}::${line.trim()}`);
             });
         }
     };
     walk(path.join(CLI_ROOT, 'lib'));
     walk(path.join(CLI_ROOT, 'bin'));
 
-    assert.deepEqual(offenders, [],
-        `the production origin is still hardcoded as a value in:\n${offenders.join('\n')}`);
+    const unreviewed = found.filter((f) => !ALLOWED_HOST_MENTIONS.has(f));
+    assert.deepEqual(unreviewed, [],
+        'These lines name the production host and are not in the reviewed allowlist. If one is ' +
+        'legitimate (an example URL, a health probe target, prose) add it explicitly. If it ' +
+        'RESOLVES to the production origin at runtime, it is the defect this contract removes:\n' +
+        unreviewed.join('\n'));
+
+    // A fixture assertion: the allowlist must actually be exercised. If the walker stopped
+    // finding anything (wrong root, changed extension) the filter above would trivially pass.
+    assert.ok(found.length >= 20,
+        `FIXTURE INVALID: only ${found.length} host mentions scanned — the walker is not reading the tree`);
 });
 
 // ── I2 GATE 4: the writer STORES the community it was given ──────────────────────────────────
@@ -212,4 +258,51 @@ test('GATE I1-executing-cli-refuses: a real invocation with nothing configured n
     const ws = JSON.parse(fs.readFileSync(path.join(dir, '.descix/workspace.json'), 'utf8'));
     assert.ok(!JSON.stringify(ws).includes(PROD_ORIGIN),
         'a refused `config init` still wrote the PRODUCTION origin into workspace.json');
+});
+
+// ── I1 GATE 8: the PACKED ARTIFACT, not the checkout, is what ships ──────────────────────────
+//
+// Contract A1 asks for a grep of the PACKED TARBALL. My first pass verified only the checkout,
+// and verifier acb71771 found the difference mattered: `bin/descix.js` shipped an --option help
+// string reading "(default https://descix.net)" while the real default had become
+// `apiClient.baseUrl`. A comment-skipping source scan walked past it because it looked like
+// prose. The published CLI reported a production origin the developer never chose, in its own
+// --help. This gate reads the artifact.
+test('GATE I1-tarball: the packed artifact resolves the prod origin only in prose', { timeout: 120000 }, () => {
+    const out = fs.mkdtempSync(path.join(os.tmpdir(), 'gate-pack-'));
+    execFileSync('npm', ['pack', '--pack-destination', out], {
+        cwd: CLI_ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const tgz = fs.readdirSync(out).find((f) => f.endsWith('.tgz'));
+    assert.ok(tgz, 'FIXTURE INVALID: npm pack produced no tarball, so nothing here measures the artifact');
+    execFileSync('tar', ['xzf', tgz], { cwd: out, stdio: ['ignore', 'pipe', 'pipe'] });
+
+    const offenders = [];
+    let scanned = 0;
+    const walk = (dir) => {
+        if (!fs.existsSync(dir)) return;
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+            const p = path.join(dir, entry.name);
+            if (entry.isDirectory()) { walk(p); continue; }
+            if (!entry.name.endsWith('.js')) continue;
+            scanned++;
+            fs.readFileSync(p, 'utf8').split('\n').forEach((line, i) => {
+                if (!line.includes(PROD_ORIGIN)) return;
+                // Prose ABOUT the removed defect is allowed; a value is not. This is the ONLY
+                // place a comment check is legitimate, because the allowlist gate above already
+                // covers every syntax that could reconstruct the origin from parts.
+                if (/^\s*(\/\/|\*|\/\*)/.test(line.trim()) || line.trim().startsWith('*')) return;
+                offenders.push(`${path.relative(out, p)}:${i + 1}: ${line.trim()}`);
+            });
+        }
+    };
+    walk(path.join(out, 'package', 'lib'));
+    walk(path.join(out, 'package', 'bin'));
+
+    assert.ok(scanned > 50,
+        `FIXTURE INVALID: only ${scanned} packed .js files scanned — the tarball did not extract as expected`);
+    assert.deepEqual(offenders, [],
+        `the PUBLISHED artifact states the production origin as a value:\n${offenders.join('\n')}`);
+
+    fs.rmSync(out, { recursive: true, force: true });
 });
