@@ -115,30 +115,81 @@ test('GATE I1-miss-fails-loud: resolveOrigin() throws and names how to fix it', 
 // produce a line that is not in the list, so all of them fail. Adding an entry is a deliberate
 // act a reviewer can see in the diff — which is the point.
 const ALLOWED_HOST_MENTIONS = new Set([
+    // PROVENANCE — read this before trusting the 25 blessings below.
+    //
+    // This list is HAND-WRITTEN, and it is set-equal to the tree in both directions today: no
+    // stale entries, no unlisted lines. That makes it indistinguishable by inspection from a
+    // GENERATED list, and a generated allowlist passes by construction and carries no assurance
+    // that what it blesses is correct. Its value is prospective — it fails the NEXT unreviewed
+    // line — and that value is only real if these 25 were actually read.
+    //
+    // They were. Audited line by line TWICE, independently and in agreement:
+    //   verifier acb71771ea6d95417 and doer CLI-DOER-2, 2026-08-29, at commit ee62cb6.
+    //   Tally, reproduced independently by both: 8 comments, 17 non-comment, of which SIX
+    //   construct a host — health.js's five prod probe targets (which is what that command is
+    //   FOR) and workspace-config.js's custom-env builder (reached only when a developer types
+    //   a custom env name). NO entry blesses an I1 violation: none of them is a fallback on a
+    //   resolver miss, which is the only thing this contract forbids.
+    //
+    // Adding an entry means doing that audit for the new line and writing its reason. An entry
+    // without a reason is an unaudited blessing wearing an audited one's clothes.
+    //
+    // WHAT THIS GATE CANNOT SEE (measured by the verifier, recorded so no reader over-trusts it):
+    //   - a token split across concatenation ('https://desc' + 'ix.net') defeats ANY line-content
+    //     scan. It is covered instead by the BEHAVIOURAL gates: the verifier's control-B tamper
+    //     used exactly that form and GATE I1-miss-fails-loud caught it. The two layers cover each
+    //     other, which is why both must stay.
+    //   - an ALREADY-allowlisted line duplicated within its own file, because the key is
+    //     `relpath::content` and carries no line number. Relocation to a DIFFERENT file IS caught.
+    // EXAMPLE in help text, and a DEV host. Names no prod origin.
     "bin/descix.js::.argument('<url>', 'Powch origin (e.g. https://powch.dev.descix.net), or \"none\" to remove')",
+    // EXAMPLE in help text, and a DEMO host. Names no prod origin.
     "bin/descix.js::.option('--api-url <url>', 'Direct API URL override (e.g., https://demo.descix.net)');",
+    // COMMENT. Prose about a literal already removed.
     "bin/descix.js::// The literal this replaced was `${ctx.appId}.descix.net`: the PROD host, scaffolded into",
+    // Remediation hint. `<env>` is a PLACEHOLDER — the string cannot resolve to an origin.
     "bin/descix.js::`Site deploys target a cloud env \u2014 pass --env=<dev|demo|prod> or export DESCIX_API_URL=https://<env>.descix.net\\n`",
+    // Prose inside a prompt string. Bare host, no scheme, not a resolvable origin.
     "bin/mcp-server.js::'3. **Environment:** \"Should this run against local dev backend (localhost:4000) or hosted API (descix.net)?\"',",
+    // briefer DOC GENERATOR: emits prose about the LB host scheme, never an API origin.
     "lib/commands/briefer/sources/environments.js::`- LB host suffix: \\`.{env}.descix.net\\` for DEV/DEMO, \\`.descix.net\\` for PROD`,",
+    // briefer DOC GENERATOR: documents the per-app domain pattern.
     "lib/commands/briefer/sources/identifiers.js::`- Domain pattern: \\`{app_id}.{env}.descix.net\\` for DEV/DEMO; \\`{app_id}.descix.net\\` for PROD. \u2014 \\`${MESH_FILE}:${hostMatch.lineNumber}\\``,",
+    // briefer DOC GENERATOR: documents the wildcard cert.
     "lib/commands/briefer/sources/identifiers.js::`- Wildcard TLS cert: \\`*.descix.net\\` plus per-env wildcards. ONE cert. No per-app cert provisioning.`,",
+    // briefer DOC GENERATOR: documents apex routing.
     "lib/commands/briefer/sources/routing.js::`- Apex singleton (\\`daita\\`): \\`demo.descix.net\\` / \\`descix.net\\` \u2192 GCS \\`/{env}/daita/site/\\` + \\`/apifront\\`, \\`/mcp\\`, \\`/api\\` \u2192 daita broker \u2014 \\`${LB_FILE}:${singletonMatcherMatch.lineNumber}\\``,",
+    // briefer DOC GENERATOR: documents peer-host routing.
     "lib/commands/briefer/sources/routing.js::`- Platform peer host (\\`powch.{env}.descix.net\\`): GCS site + \\`/apifront\\`, \\`/mcp\\` \u2192 daita broker; \\`/api/*\\` \u2192 powch NEG`,",
+    // briefer DOC GENERATOR: documents the DNS story.
     "lib/commands/briefer/sources/what-is-not.js::`- **No per-app DNS provisioning.** Wildcard \\`*.{env}.descix.net\\` cert + wildcard A record cover all apps. Adding an app does NOT touch DNS.${dnsMatches.length > 0 ? ` _(${dnsMatches.length} \\`gcloud dns\\`/\\`domain-mappings\\` reference(s) detected in deploy scripts \u2014 manually verify these are wildcard-cert touches, not per-app DNS.)_` : ''}`,",
+    // EXAMPLE in a validation error, and a DEV host.
     "lib/commands/config.js::throw new Error(`${what} must be an absolute URL (e.g. https://powch.dev.descix.net), got \"${value}\".`);",
+    // COMMENT (file header, probe-target prose).
     "lib/commands/health.js::*             powch.descix.net)",
+    // COMMENT (file header, probe-target prose).
     "lib/commands/health.js::*             probes against *.demo.descix.net hosts",
+    // COMMENT (file header, probe-target prose).
     "lib/commands/health.js::*             probes against the three in-scope hosts (descix.net, egpt.descix.net,",
+    // CONSTRUCTS A PROD HOST — deliberate. `descix health --env prod` exists to probe production; the prod host IS the subject of the command, not a fallback for an unset origin.
     "lib/commands/health.js::daita: 'descix.net',",
+    // CONSTRUCTS A PROD HOST — deliberate, same reason.
     "lib/commands/health.js::egpt:  'egpt.descix.net',",
+    // CONSTRUCTS A PROD HOST — deliberate, same reason.
     "lib/commands/health.js::powch: 'powch.descix.net',",
+    // CONSTRUCTS A PROD HOST — deliberate. Probe target for an app not in the table.
     "lib/commands/health.js::return PROD_HOST_BY_APP[appId] || `${appId}.descix.net`;",
+    // CONSTRUCTS A HOST — parameterised BY env; yields prod only when the caller asked for prod.
     "lib/commands/health.js::return `${appId}.${env}.descix.net`;",
+    // COMMENT. The defect this contract removed, described.
     "lib/origin.js::* `https://descix.net`): the CLI had no representation of \"nobody chose an origin\". Every",
+    // COMMENT. Historical install example.
     "lib/wizard/setup.js:://   npm install -g https://app.descix.net/sdk/descix-cli-1.0.0.tgz",
+    // COMMENT documenting the line below.
     "lib/workspace-config.js::* For custom envs, uses --url or defaults to https://{name}.descix.net.",
+    // CONSTRUCTS AN ORIGIN — deliberate and NOT an I1 violation: reached only when a developer TYPES a custom env name, so the origin is the name they chose. Not a miss-path.
     "lib/workspace-config.js::resolvedUrl = apiUrl || `https://${normalized}.descix.net`;",
+    // COMMENT. The defect this contract removed, described.
     "lib/workspace-identity.js::* `'my-app'` and `'https://descix.net'`. The measured result: the four generated",
 ]);
 
