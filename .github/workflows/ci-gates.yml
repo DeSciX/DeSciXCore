@@ -1,0 +1,47 @@
+# STANDING GATES — run on every push and pull request.
+#
+# WHY THIS FILE EXISTS SEPARATELY FROM npm-publish.yml. That workflow is credential-equivalent:
+# the CEO bound npm trusted publishers against DeSciX/DeSciXCore · npm-publish.yml · environment
+# `npm-publish`, and a change to any of those four values breaks a binding already made. Gates
+# that need no credentials do not belong in a file whose every edit risks that. This workflow
+# holds NO `environment:`, NO `id-token`, and reads NO secrets — it only needs to read the code.
+#
+# WHY A GATE THAT NOTHING RUNS IS NOT A GATE. check-registry-content-drift began life as a script
+# a human ran, and its own coverage boundary said so. A check that depends on somebody
+# remembering to run it protects nothing on the day they forget — which is the defect class this
+# repo spent 2026-08-30 eliminating. VISION ruled it a standing CI gate; this is that wiring.
+name: CI gates
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+# LEAST PRIVILEGE. Reading the code is the whole job. Declared explicitly rather than omitted:
+# an absent `permissions:` block inherits the repository default, which can be far wider.
+permissions:
+  contents: read
+
+jobs:
+  registry-content-drift:
+    name: A published version must not have moved
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # No `npm ci` / `npm install`: the gate shells out to `npm pack` and `npm view`, and no
+      # package in the publish set declares a prepack/prepare/prepublish script (verified), so
+      # packing needs no dependency tree. Keeping the install out keeps the gate fast and keeps
+      # its failures attributable to the thing it measures.
+      #
+      # NOTHING SWALLOWS THIS STEP. There is no `continue-on-error`, no `|| true`, and no `if:`
+      # — the gate's exit status is the step's status is the job's status. Exit 1 (a published
+      # version whose content moved) and exit 2 (an owner or the registry could not be read) both
+      # fail the build, deliberately: "I could not measure" must never be reported as "clean".
+      - name: A repo version equal to a published version must have identical content
+        run: node scripts/check-registry-content-drift.mjs

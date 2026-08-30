@@ -50,46 +50,70 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CLI = path.join(REPO, 'descix-cli');
 const SUITE = 'tests/origin-and-identity-owner.test.js';
 
-/** [gate name, file relative to descix-cli, exact text to replace, replacement, what it breaks] */
+/**
+ * [label, file relative to the REPO ROOT, exact text to replace, replacement, what it breaks,
+ *  runner] — runner 'suite' runs the descix-cli test file filtered to that gate name; runner
+ *  'script' runs a standalone gate script and judges it on exit code.
+ *
+ * Paths are REPO-relative, not descix-cli-relative: the content-drift control has to tamper
+ * descix-platform-api/package.json, which is outside the CLI.
+ */
 const CONTROLS = [
-    ['GATE I1-prints-resolved-env', 'lib/api-client.js',
+    ['GATE I1-prints-resolved-env', 'descix-cli/lib/api-client.js',
      '    reportEnvironment({ origin: this.baseUrl, source: originSource });',
      '    // TAMPER: print removed',
      'silence: a network-bound command declares no environment'],
-    ['GATE I1-unconfigured-declares-prod', 'lib/origin.js',
+    ['GATE I1-unconfigured-declares-prod', 'descix-cli/lib/origin.js',
      '        source: DEFAULT_ORIGIN_SOURCE,',
      "        source: '.descix/workspace.json env.apiUrl',",
      'mislabel: the declared default is reported as a configured source'],
-    ['GATE I1-invalid-config-fails-loud', 'lib/origin.js',
+    ['GATE I1-invalid-config-fails-loud', 'descix-cli/lib/origin.js',
      "    return parsed.protocol === 'http:' || parsed.protocol === 'https:';",
      '    return true; // TAMPER: accept anything',
      'MODULE: the validator is neutered, so nothing throws'],
-    ['GATE I1-invalid-config-fails-loud', 'bin/descix.js',
+    ['GATE I1-invalid-config-fails-loud', 'descix-cli/bin/descix.js',
      '  console.error(chalk.red(`\\n${message}\\n`));',
      '  // TAMPER: swallow the reason, as the 27 bare catches did',
      'ARTIFACT: the error is built then discarded — exit 1 with zero bytes'],
-    ['GATE I1-no-origin-write', 'lib/origin.js',
+    ['GATE I1-no-origin-write', 'descix-cli/lib/origin.js',
      'export function normalizeOrigin(origin) {',
      "export const SNEAKY = { apiUrl: 'https://evil.example' };\nexport function normalizeOrigin(origin) {",
      'an unreviewed new line writes an origin'],
-    ['GATE I2-agent-files-name-the-developer', 'lib/workspace-identity.js',
+    ['GATE I2-agent-files-name-the-developer', 'descix-cli/lib/workspace-identity.js',
      '        apiUrl: resolved.origin,',
      "        apiUrl: 'https://descix.net',",
      'hardcode: the generator ignores the resolved origin'],
+
+    // THE SCRIPT GATE. Its tamper puts platform-api's version back to the one already on the
+    // registry, recreating EXACTLY the 2026-08-30 04:15Z state: a repo version equal to a
+    // published version whose content differs. That state is what shipped a stale SSOT to every
+    // registry consumer while "no file:/link: deps" read green.
+    ['check-registry-content-drift', 'descix-platform-api/package.json',
+     '"version": "2.0.0"', '"version": "1.0.1"',
+     'a repo version equal to a published version whose CONTENT differs',
+     'script'],
 ];
 
-const runGate = (gate) => spawnSync('node',
-    gate ? ['--test', '--test-name-pattern', gate, SUITE] : ['--test', SUITE],
-    { cwd: CLI, encoding: 'utf8' }).status === 0;
+/** How each control is run. Anything not listed runs as a filtered descix-cli test. */
+const SCRIPT_GATES = {
+    'check-registry-content-drift': ['scripts/check-registry-content-drift.mjs'],
+};
 
-const restore = (rel) =>
-    execFileSync('git', ['checkout', '--', `descix-cli/${rel}`], { cwd: REPO });
+const runGate = (gate) => {
+    const script = gate && SCRIPT_GATES[gate];
+    if (script) return spawnSync('node', script, { cwd: REPO, encoding: 'utf8' }).status === 0;
+    return spawnSync('node',
+        gate ? ['--test', '--test-name-pattern', gate, SUITE] : ['--test', SUITE],
+        { cwd: CLI, encoding: 'utf8' }).status === 0;
+};
+
+const restore = (rel) => execFileSync('git', ['checkout', '--', rel], { cwd: REPO });
 
 // ── 2. REFUSE A DIRTY TREE ───────────────────────────────────────────────────────────────────
-const dirty = execFileSync('git', ['status', '--porcelain', 'descix-cli'],
+const dirty = execFileSync('git', ['status', '--porcelain'],
     { cwd: REPO, encoding: 'utf8' }).trim();
 if (dirty) {
-    console.error('REFUSED: descix-cli has uncommitted changes, and this harness restores with');
+    console.error('REFUSED: the repo has uncommitted changes, and this harness restores with');
     console.error('`git checkout --`, which would DISCARD them. Commit first.\n');
     console.error(dirty);
     process.exit(2);
@@ -111,7 +135,7 @@ console.log('');
 
 // ── 3. TAMPER, ASSERT IT LANDED, REQUIRE RED, RESTORE, ASSERT RESTORED ───────────────────────
 for (const [gate, rel, from, to, why] of CONTROLS) {
-    const file = path.join(CLI, rel);
+    const file = path.join(REPO, rel);
     const src = fs.readFileSync(file, 'utf8');
     if (!src.includes(from)) {
         console.error(`  !! TAMPER TARGET NOT FOUND in ${rel} for ${gate} — CONTROL INVALID`);
@@ -141,8 +165,10 @@ console.log(`  ALL RESTORED -> suite: ${suiteGreen ? 'GREEN (good)' : 'RED (BAD)
 if (!suiteGreen) ok = false;
 
 console.log(
-    `\n[check-gate-negative-controls] ran ${CONTROLS.length} controls over ${SUITE}. ` +
-    'CATCHES: a gate that passes on a broken tree, and a harness that cannot read GREEN. ' +
-    'DOES NOT READ: the packed tarball, gates outside that file, or defect classes those gates ' +
-    'do not assert. RUN BY: a human — nothing runs this automatically.');
+    `\n[check-gate-negative-controls] ran ${CONTROLS.length} controls: the origin/identity gates ` +
+    `in ${SUITE}, plus the standalone content-drift gate. CATCHES: a gate that passes on a ` +
+    'broken tree, and a harness that cannot read GREEN. DOES NOT READ: the packed tarball, ' +
+    'gates outside those, or defect classes they do not assert. NEEDS THE NETWORK — the ' +
+    'content-drift control queries the npm registry, so an offline run fails it for a reason ' +
+    'that is not a gate defect. RUN BY: a human — nothing runs this automatically.');
 process.exit(ok ? 0 : 1);
