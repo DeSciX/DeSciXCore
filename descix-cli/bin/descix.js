@@ -876,7 +876,7 @@ communityCommand
       
       if (!options.community) {
         console.log(chalk.yellow('\nNext steps:'));
-        console.log(chalk.gray(`  1. Create community:    descix community create -n "Name" -t ${tokenSymbol} -p ./path --no-token-contract`));
+        console.log(chalk.gray(`  1. Create community:    descix community create -n "Name" -t ${tokenSymbol}`));
         console.log(chalk.gray(`  2. Link token:          descix community link-token -c <community-id> -a ${deployment.proxy_address}`));
       }
       console.log();

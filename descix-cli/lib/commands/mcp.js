@@ -193,7 +193,7 @@ export async function test(options = {}) {
     
     if (!status.enabled) {
       spinner.warn(chalk.yellow('RAG not enabled for this knowledge base'));
-      console.log(chalk.gray('Enable RAG with: descix rag sync -c ' + config.defaultContext.communityId + ' -a ' + config.defaultContext.appId + ' -k ' + config.defaultContext.kbId));
+      console.log(chalk.gray('Enable RAG with: descix kb corpus sync -c ' + config.defaultContext.communityId + ' -a ' + config.defaultContext.appId + ' -k ' + config.defaultContext.kbId));
       throw new Error('RAG not enabled');
     }
     
