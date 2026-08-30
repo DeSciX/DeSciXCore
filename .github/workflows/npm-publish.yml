@@ -73,16 +73,34 @@ on:
         required: true
         type: choice
         options:
-          # PUBLIC STORY IS ONE PACKAGE (CEO 2026-08-21): @descix/sdk, with cloud-core and
-          # app-sdk as PLUMBING. cli and platform-api are not listed. Adding a name here is
-          # a product decision, not a convenience.
-          #
           # THIS LIST IS THE OWNER of the publish set. The release router reads it out of this
           # file (scripts/publish-set.mjs), so a release tag can only route to a name that
           # appears here, and the runbook conformance gate compares the runbook against it.
+          # Adding a name here is a product decision, not a convenience.
+          #
+          # PUBLIC STORY IS ONE PACKAGE (CEO 2026-08-21): @descix/sdk, with cloud-core and
+          # app-sdk as PLUMBING. THAT STILL STANDS. It governs what DeSciX PRESENTS.
+          #
+          # IT DOES NOT GOVERN WHICH PACKAGES CI MAY PUBLISH — and until 2026-08-30 this one
+          # list conflated those two questions, which is why the CLI sat here unlisted AND in
+          # the refusal case below. Being CI-publishable is not being part of the public story.
+          #
+          # THE CLI AND PLATFORM-API PUBLISH FROM CI, by the CEO's decision of record:
+          #   · CEO 2026-08-29: "On the republish of 1.0.3 that should need my hands anymore
+          #     and is in DEVPLANE's domain so I shouldn't be a blocker. It can go as soon as
+          #     ready."
+          #   · CEO 2026-08-30: "Don't we want to set-up automation on the npm platform-api
+          #     publish?"
+          #   · and the CEO's own act, 2026-08-30: trusted publishers BOUND on npmjs.com for
+          #     @descix/platform-api AND @descix/cli. A binding is what makes CI able to
+          #     publish them at all; binding both was the decision in deed.
+          # (VISION rev 4, contract-ws-devplane-cli-must-not-misreport-itself. The CEO is
+          # informed with this verbatim basis and his strike reverts it.)
           - descix-sdk
           - descix-cloud-core
           - descix-app-sdk
+          - descix-cli
+          - descix-platform-api
       confirm_version:
         description: "Exact version to publish (must equal that package's package.json \"version\") — a manual run has no tag to check, so this input is the check"
         required: true
@@ -182,7 +200,7 @@ jobs:
       - name: Refuse to publish excluded packages
         run: |
           case "$PKG" in
-            cryptoapis-sdk|descix-vscode|descix-platform-api|.)
+            cryptoapis-sdk|descix-vscode|.)
               echo "::error::'$PKG' is NOT publishable to npm under @descix."
               exit 1
               ;;
