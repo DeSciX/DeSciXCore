@@ -57,184 +57,216 @@ function isolatedEnv(extra = {}) {
     return { ...rest, HOME: home, USERPROFILE: home, ...extra };
 }
 
-// ── I1 GATE 1: an unconfigured workspace must not resolve to production ──────────────────────
-test('GATE I1-unconfigured-never-prod: getApiUrl() on a workspace naming no origin is not prod', async () => {
+// ── I1 GATE 1: an unconfigured workspace resolves to the DECLARED default, and SAYS SO ──────
+//
+// REWRITTEN for (A', contract rev 2). This gate previously asserted `getApiUrl() === null` —
+// that the unconfigured case must never yield production. Rev 2 inverted that property:
+// CEO-D-2026-08-18 (the shipped default target is PROD) stands, and the defect was never the
+// PROD target but the SILENCE around it. So the gate keeps measuring a property; the property
+// changed and the assertion changed with it. It is NOT weaker: it now requires BOTH the origin
+// AND the declaration, and it goes RED if either is missing.
+test('GATE I1-unconfigured-declares-prod: nothing configured resolves to PROD carrying source=default', async () => {
     const { WorkspaceConfig } = await import('../lib/workspace-config.js');
+    const { resolveOrigin, DEFAULT_ORIGIN_SOURCE } = await import('../lib/origin.js');
     const dir = tmpdir('i1');
     fs.mkdirSync(path.join(dir, '.descix'), { recursive: true });
     const raw = { version: '2.1', type: 'workspace', env: { products: [] } };
     fs.writeFileSync(path.join(dir, '.descix/workspace.json'), JSON.stringify(raw));
 
     const cfg = new WorkspaceConfig(raw, dir);
-    const got = cfg.getApiUrl();
+    assert.equal(cfg.getApiUrl(), PROD_ORIGIN,
+        'an unconfigured workspace must resolve to the DECLARED default (CEO-D-2026-08-18)');
 
-    assert.notEqual(got, PROD_ORIGIN,
-        'an unconfigured workspace resolved to the PRODUCTION origin — the developer chose nothing');
-    assert.equal(got, null, 'an unconfigured workspace must report null, not any origin');
+    // The declaration is the half that makes the default honest. Without the source, "chose
+    // prod" and "chose nothing" are one observable state again — the original defect.
+    const resolved = resolveOrigin({});
+    assert.equal(resolved.origin, PROD_ORIGIN);
+    assert.equal(resolved.source, DEFAULT_ORIGIN_SOURCE,
+        'the resolution must carry the default SOURCE, or nothing downstream can declare it');
+    assert.equal(resolved.isDefault, true);
+    assert.match(resolved.source, /config init --env dev/,
+        'the source must name the command that changes it, in the same breath');
+
+    // And a CONFIGURED origin must not be mislabelled as the default — a gate that only ever
+    // saw the default would pass on a resolver that hardcoded `isDefault: true`.
+    const chosen = resolveOrigin({ workspaceEnvApiUrl: 'https://dev.descix.net' });
+    assert.equal(chosen.isDefault, false);
+    assert.notEqual(chosen.source, DEFAULT_ORIGIN_SOURCE);
 });
 
-// ── I1 GATE 2: the resolver's miss is LOUD and names the remedy ──────────────────────────────
-test('GATE I1-miss-fails-loud: resolveOrigin() throws and names how to fix it', async () => {
-    const { resolveOrigin, OriginUnresolvedError } = await import('../lib/origin.js');
+// ── I1 GATE 2: a CONFIGURED-but-invalid origin is LOUD and names the remedy ─────────────────
+//
+// REWRITTEN for (A', contract rev 2). This gate previously asserted that a resolver MISS throws.
+// Under rev 2 a miss is not a failure — it is the declared default. But "the developer typed
+// something unusable" still must never be silently swallowed into the default, which would be
+// the same defect from the other direction: an origin the developer did not choose. The loud
+// path MOVED from the miss to the invalid; it was not removed, and this gate is not weaker.
+test('GATE I1-invalid-config-fails-loud: an unusable configured origin throws and names how to fix it', async () => {
+    const { resolveOrigin, OriginInvalidError } = await import('../lib/origin.js');
 
     assert.throws(
-        () => resolveOrigin({}),
+        () => resolveOrigin({ workspaceEnvApiUrl: 'not-a-url' }),
         (err) => {
-            assert.ok(err instanceof OriginUnresolvedError, 'must be the typed error, not a bare Error');
-            assert.equal(err.code, 'ORIGIN_UNRESOLVED');
-            assert.match(err.message, /set-env/, 'the failure must name the command that fixes it');
+            assert.ok(err instanceof OriginInvalidError, 'must be the typed error, not a bare Error');
+            assert.equal(err.code, 'ORIGIN_INVALID');
+            assert.match(err.message, /--env/, 'the failure must name the command that fixes it');
             assert.ok(!err.message.includes(PROD_ORIGIN),
                 'the failure message must not hand the reader the production origin');
             return true;
         },
     );
 
-    // And it must still RESOLVE when a source does name an origin — a gate that only ever
+    // A non-http scheme is not an origin either — otherwise `file://` or `ftp://` would sail
+    // through the URL parser and be handed to axios.
+    assert.throws(() => resolveOrigin({ envVar: 'ftp://example.com' }), OriginInvalidError);
+
+    // And it must still RESOLVE when a source names a usable origin — a gate that only ever
     // throws would pass on a module that throws unconditionally.
     assert.deepEqual(
         resolveOrigin({ workspaceEnvApiUrl: 'https://dev.descix.net/' }),
-        { origin: 'https://dev.descix.net', source: '.descix/workspace.json env.apiUrl' },
+        { origin: 'https://dev.descix.net', source: '.descix/workspace.json env.apiUrl', isDefault: false },
     );
     // Precedence is part of the contract: the most explicit source wins.
     assert.equal(
         resolveOrigin({ envVar: 'https://a.example', workspaceEnvApiUrl: 'https://b.example' }).origin,
         'https://a.example',
     );
+    // An INVALID value in a higher-precedence source must not be skipped over in favour of a
+    // valid lower one. Skipping is how a typo silently retargets a developer's whole session.
+    assert.throws(
+        () => resolveOrigin({ envVar: 'nonsense', workspaceEnvApiUrl: 'https://dev.descix.net' }),
+        OriginInvalidError,
+    );
 });
 
-// ── I1 GATE 3: the prod origin cannot be RECONSTRUCTED anywhere in lib/ or bin/ ─────────────
+// ── I1 GATE 3: nothing in lib/ or bin/ WRITES AN ORIGIN except a reviewed site ──────────────
 //
-// This gate was REBUILT after verifier acb71771 defeated its first version. That version matched
-// the quoted token `'https://descix.net'` and skipped comment-looking lines, so it asserted
-// SYNTAX rather than the fixture. Three live prod origins were appended to lib/origin.js itself
-// — a backtick template, `'https://' + 'descix.net'`, and a `${host}` interpolation — and the
-// gate ran GREEN. A gate that a two-line concatenation walks past is not a gate.
+// REBUILT TWICE, and the second rebuild is the one that matters.
 //
-// It now allowlists by exact CONTENT: every line in lib/ and bin/ that names the host token at
-// all must appear below, whatever its syntax. A concatenation, a template, or a new literal all
-// produce a line that is not in the list, so all of them fail. Adding an entry is a deliberate
-// act a reviewer can see in the diff — which is the point.
-const ALLOWED_HOST_MENTIONS = new Set([
-    // PROVENANCE — read this before trusting the 25 blessings below.
+// V1 matched the quoted token `'https://descix.net'` and skipped comment-looking lines, so it
+// asserted SYNTAX rather than the fixture; three live prod origins appended to lib/origin.js as
+// a backtick template, a `'https://' + 'descix.net'` concatenation and a `${host}` interpolation
+// all ran GREEN. V2 fixed that by allowlisting every LINE CONTAINING THE HOST TOKEN by exact
+// content, whatever its syntax.
+//
+// V2 STILL MISSED THREE LIVE SITES, and this is the lesson: it keyed on ONE HOST STRING,
+// `descix.net`. `descix login --dev`, `admin-login --dev` and `quickstart --dev` each WROTE
+// `https://localhost:4000` into the workspace — a different literal — so a gate scoped to the
+// production host could not see them however carefully its 25 entries were audited. Measured
+// 2026-08-30 by this contract's second doer; ruled by DEVPLANE the same hour: **the gate must
+// key on "writes an origin", not on one host string. A gate that names one literal cannot see
+// a second one.**
+//
+// So the predicate is now the PROPERTY: a line that assigns an absolute http(s) URL to an
+// origin-shaped target (`apiUrl`, `api_url`, `baseUrl`, `origin`, `url`). That catches the
+// production literal, the localhost literal, a concatenation, a template and an interpolation
+// alike, because all of them have to land in an assignment to be used.
+//
+// WHAT THIS GATE CANNOT SEE (state the boundary with the verdict, not only in a report):
+//   · a write whose VALUE is a named constant (`this.apiUrl = SOME_CONST`) — there is no URL on
+//     the line. Covered instead by the BEHAVIOURAL gates above, which read what resolveOrigin
+//     actually returns, and by GATE I1-tarball on the packed artifact.
+//   · a write assembled across two statements. Same coverage as above.
+//   · anything outside lib/ and bin/ — tests and templates are not shipped code.
+//   · an ALREADY-allowlisted line duplicated within its own file; the key is `relpath::content`
+//     and carries no line number. Relocation to a DIFFERENT file IS caught.
+const ORIGIN_WRITE = /(apiUrl|api_url|baseUrl|origin|url)\s*[:=]\s*[^;]*(https?:\/\/|`https?:)/i;
+
+const ALLOWED_ORIGIN_WRITES = new Set([
+    // PROVENANCE — read this before trusting the seven entries below.
     //
-    // This list is HAND-WRITTEN, and it is set-equal to the tree in both directions today: no
-    // stale entries, no unlisted lines. That makes it indistinguishable by inspection from a
-    // GENERATED list, and a generated allowlist passes by construction and carries no assurance
-    // that what it blesses is correct. Its value is prospective — it fails the NEXT unreviewed
-    // line — and that value is only real if these 25 were actually read.
+    // WHO AUDITED THESE, AND HOW: this contract's SECOND doer (identity-DEVPLANE-CLI-DOER), on
+    // 2026-08-30, while rebuilding this gate from the host-string form to the property form.
+    // THIS IS A SINGLE-PARTY AUDIT AND IS NOT INDEPENDENT. It does NOT inherit the two-party
+    // attestation the previous allowlist carried at ee62cb6: that audit was of a DIFFERENT
+    // predicate over a DIFFERENT line set, and carrying its assurance across would claim more
+    // than the record can show. The distinct verifier for this contract has not re-audited
+    // these; when it does, that is a second audit and belongs here as one.
     //
-    // They were. Audited line by line TWICE and in agreement, 2026-08-29 at commit ee62cb6, by
-    // the DOER and the VERIFIER of this contract. (Those two parties ran as SESSION AGENT IDS
-    // — the doer as CLI-DOER-2, the verifier as acb71771ea6d95417 — not as served platform
-    // identities: `identity-CLI-VERIFIER` returns 0 of 1 on the fabric. Read them as roles,
-    // not as registered credentials.)
+    // The STRINGS below were generated from the scan, so they cannot be mistranscribed. The
+    // REASONS were written by hand, one per line, after reading each site. That split is
+    // deliberate: a fully generated list passes by construction and carries no assurance, while
+    // a hand-typed list fails on invisible whitespace. The assurance is in the reasons.
     //
-    //   Tally, agreed by both: 8 comments, 17 non-comment, of which SIX construct a host —
-    //   health.js's five prod probe targets at :51,:52,:53,:228,:231 (probing production is
-    //   what `descix health --env prod` IS) and workspace-config.js:798's custom-env builder
-    //   (reached only when a developer TYPES a custom env name, so the origin is the one they
-    //   chose). NO entry blesses an I1 violation: none is a fallback on a resolver MISS, which
-    //   is the only thing this contract forbids.
-    //
-    //   ON THE ORDER OF THE TWO AUDITS: the doer states it completed its classification before
-    //   reading the verifier's tally. THAT ORDERING IS THE DOER'S ATTESTATION, NOT A RECORD
-    //   FACT — this commit postdates the verifier's first published tally by ~4 minutes, so the
-    //   record cannot establish independence, and "two independent audits agreeing" would claim
-    //   more than it can show. What the record DOES show is two audits, by different parties,
-    //   agreeing at ee62cb6. Every substantive claim above was confirmed by the verifier on its
-    //   own measurement. This distinction is the whole point of the flag that produced this
-    //   block: it would be absurd to close a finding about a list asserting more assurance than
-    //   it can support by asserting more assurance than IT can support, one line lower.
-    //
-    // Adding an entry means doing that audit for the new line and writing its reason. An entry
-    // without a reason is an unaudited blessing wearing an audited one's clothes.
-    //
-    // WHAT THIS GATE CANNOT SEE (measured by the verifier, recorded so no reader over-trusts it):
-    //   - a token split across concatenation ('https://desc' + 'ix.net') defeats ANY line-content
-    //     scan. It is covered instead by the BEHAVIOURAL gates: the verifier's control-B tamper
-    //     used exactly that form and GATE I1-miss-fails-loud caught it. The two layers cover each
-    //     other, which is why both must stay.
-    //   - an ALREADY-allowlisted line duplicated within its own file, because the key is
-    //     `relpath::content` and carries no line number. Relocation to a DIFFERENT file IS caught.
-    // EXAMPLE in help text, and a DEV host. Names no prod origin.
-    "bin/descix.js::.argument('<url>', 'Powch origin (e.g. https://powch.dev.descix.net), or \"none\" to remove')",
-    // EXAMPLE in help text, and a DEMO host. Names no prod origin.
-    "bin/descix.js::.option('--api-url <url>', 'Direct API URL override (e.g., https://demo.descix.net)');",
-    // COMMENT. Prose about a literal already removed.
-    "bin/descix.js::// The literal this replaced was `${ctx.appId}.descix.net`: the PROD host, scaffolded into",
-    // Remediation hint. `<env>` is a PLACEHOLDER — the string cannot resolve to an origin.
-    "bin/descix.js::`Site deploys target a cloud env \u2014 pass --env=<dev|demo|prod> or export DESCIX_API_URL=https://<env>.descix.net\\n`",
-    // Prose inside a prompt string. Bare host, no scheme, not a resolvable origin.
-    "bin/mcp-server.js::'3. **Environment:** \"Should this run against local dev backend (localhost:4000) or hosted API (descix.net)?\"',",
-    // briefer DOC GENERATOR: emits prose about the LB host scheme, never an API origin.
-    "lib/commands/briefer/sources/environments.js::`- LB host suffix: \\`.{env}.descix.net\\` for DEV/DEMO, \\`.descix.net\\` for PROD`,",
-    // briefer DOC GENERATOR: documents the per-app domain pattern.
-    "lib/commands/briefer/sources/identifiers.js::`- Domain pattern: \\`{app_id}.{env}.descix.net\\` for DEV/DEMO; \\`{app_id}.descix.net\\` for PROD. \u2014 \\`${MESH_FILE}:${hostMatch.lineNumber}\\``,",
-    // briefer DOC GENERATOR: documents the wildcard cert.
-    "lib/commands/briefer/sources/identifiers.js::`- Wildcard TLS cert: \\`*.descix.net\\` plus per-env wildcards. ONE cert. No per-app cert provisioning.`,",
-    // briefer DOC GENERATOR: documents apex routing.
-    "lib/commands/briefer/sources/routing.js::`- Apex singleton (\\`daita\\`): \\`demo.descix.net\\` / \\`descix.net\\` \u2192 GCS \\`/{env}/daita/site/\\` + \\`/apifront\\`, \\`/mcp\\`, \\`/api\\` \u2192 daita broker \u2014 \\`${LB_FILE}:${singletonMatcherMatch.lineNumber}\\``,",
-    // briefer DOC GENERATOR: documents peer-host routing.
-    "lib/commands/briefer/sources/routing.js::`- Platform peer host (\\`powch.{env}.descix.net\\`): GCS site + \\`/apifront\\`, \\`/mcp\\` \u2192 daita broker; \\`/api/*\\` \u2192 powch NEG`,",
-    // briefer DOC GENERATOR: documents the DNS story.
-    "lib/commands/briefer/sources/what-is-not.js::`- **No per-app DNS provisioning.** Wildcard \\`*.{env}.descix.net\\` cert + wildcard A record cover all apps. Adding an app does NOT touch DNS.${dnsMatches.length > 0 ? ` _(${dnsMatches.length} \\`gcloud dns\\`/\\`domain-mappings\\` reference(s) detected in deploy scripts \u2014 manually verify these are wildcard-cert touches, not per-app DNS.)_` : ''}`,",
-    // EXAMPLE in a validation error, and a DEV host.
-    "lib/commands/config.js::throw new Error(`${what} must be an absolute URL (e.g. https://powch.dev.descix.net), got \"${value}\".`);",
-    // COMMENT (file header, probe-target prose).
-    "lib/commands/health.js::*             powch.descix.net)",
-    // COMMENT (file header, probe-target prose).
-    "lib/commands/health.js::*             probes against *.demo.descix.net hosts",
-    // COMMENT (file header, probe-target prose).
-    "lib/commands/health.js::*             probes against the three in-scope hosts (descix.net, egpt.descix.net,",
-    // CONSTRUCTS A PROD HOST — deliberate. `descix health --env prod` exists to probe production; the prod host IS the subject of the command, not a fallback for an unset origin.
-    "lib/commands/health.js::daita: 'descix.net',",
-    // CONSTRUCTS A PROD HOST — deliberate, same reason.
-    "lib/commands/health.js::egpt:  'egpt.descix.net',",
-    // CONSTRUCTS A PROD HOST — deliberate, same reason.
-    "lib/commands/health.js::powch: 'powch.descix.net',",
-    // CONSTRUCTS A PROD HOST — deliberate. Probe target for an app not in the table.
-    "lib/commands/health.js::return PROD_HOST_BY_APP[appId] || `${appId}.descix.net`;",
-    // CONSTRUCTS A HOST — parameterised BY env; yields prod only when the caller asked for prod.
-    "lib/commands/health.js::return `${appId}.${env}.descix.net`;",
-    // COMMENT. The defect this contract removed, described.
-    "lib/origin.js::* `https://descix.net`): the CLI had no representation of \"nobody chose an origin\". Every",
-    // COMMENT. Historical install example.
-    "lib/wizard/setup.js:://   npm install -g https://app.descix.net/sdk/descix-cli-1.0.0.tgz",
-    // COMMENT documenting the line below.
-    "lib/workspace-config.js::* For custom envs, uses --url or defaults to https://{name}.descix.net.",
-    // CONSTRUCTS AN ORIGIN — deliberate and NOT an I1 violation: reached only when a developer TYPES a custom env name, so the origin is the name they chose. Not a miss-path.
-    "lib/workspace-config.js::resolvedUrl = apiUrl || `https://${normalized}.descix.net`;",
-    // COMMENT. The defect this contract removed, described.
-    "lib/workspace-identity.js::* `'my-app'` and `'https://descix.net'`. The measured result: the four generated",
+    // Tally: 7 entries. THREE construct a non-DeSciX address (Google Firestore, GitHub, a health
+    // probe target). TWO are placeholder prose inside help/remediation text. TWO write a real
+    // DeSciX origin, and BOTH are reached only after the developer explicitly named it.
+    // NONE is a fallback on a resolver miss. NONE writes an origin nobody chose.
+
+    // Google Firestore's REST endpoint, used by the briefer's source reader. A third-party
+    // service address, not a DeSciX API origin — the developer never chooses it.
+    'lib/commands/briefer/util/source-reader.js::const url = `https://firestore.googleapis.com/v1/projects/descix/databases/${dbPath}${qs}`;',
+    // `descix health` probe target. `host` is parameterised by the --env the developer passed;
+    // probing that host IS the command, not a fallback for an unset origin.
+    'lib/commands/health.js::const url = `https://${host}/`;',
+    // A git remote for corpus sync. github.com is not an API origin.
+    'lib/core/CorpusWalker.js::const remoteUrl = `https://github.com/${repo}.git`;',
+    // PLACEHOLDER PROSE inside ORIGIN_REMEDY. The `https://...` is a literal ellipsis shown to a
+    // human; it cannot resolve to an origin.
+    "lib/origin.js::'  export DESCIX_API_URL=https://...       (this shell only)';",
+    // The interactive setup wizard, reached ONLY after the developer picks "Local Development
+    // (localhost:4000)" from a menu (lib/wizard/setup.js:221). A menu selection is the developer
+    // naming an origin — the opposite of the silent default this contract removed.
+    "lib/wizard/setup.js::apiUrl = 'https://localhost:4000';",
+    // `config set-env <custom-name>`: reached ONLY when a developer TYPES an environment name
+    // that is not dev/demo/prod, so the host derives from the name they chose. An explicit
+    // --url still wins via the `apiUrl ||`.
+    'lib/workspace-config.js::resolvedUrl = apiUrl || `https://${normalized}.descix.net`;',
+    // PLACEHOLDER PROSE in a remediation hint. `<env>` is not substituted; the string cannot
+    // resolve to an origin.
+    'bin/descix.js::`Site deploys target a cloud env — pass --env=<dev|demo|prod> or export DESCIX_API_URL=https://<env>.descix.net\\n`',
 ]);
 
-test('GATE I1-no-literal: every mention of the prod host in lib/ + bin/ is a reviewed one', () => {
+test('GATE I1-no-origin-write: every line in lib/ + bin/ that writes an origin is a reviewed one', () => {
     const found = [];
+    let scannedFiles = 0, scannedLines = 0;
     const walk = (dir) => {
         for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-            const p = path.join(dir, entry.name);
-            if (entry.isDirectory()) { walk(p); continue; }
+            const full = path.join(dir, entry.name);
+            if (entry.isDirectory()) { walk(full); continue; }
             if (!entry.name.endsWith('.js')) continue;
-            const rel = path.relative(CLI_ROOT, p);
-            fs.readFileSync(p, 'utf8').split('\n').forEach((line) => {
-                if (line.includes('descix.net')) found.push(`${rel}::${line.trim()}`);
-            });
+            scannedFiles++;
+            const rel = path.relative(CLI_ROOT, full);
+            for (const line of fs.readFileSync(full, 'utf8').split('\n')) {
+                scannedLines++;
+                const t = line.trim();
+                // Comments cannot write anything. This is safe HERE, unlike in the V1 gate,
+                // because the predicate requires an ASSIGNMENT: prose about an assignment does
+                // not assign. A comment that happens to contain `apiUrl = 'https://...'` is
+                // documentation, and the behavioural gates cover the executing path regardless.
+                if (t.startsWith('//') || t.startsWith('*') || t.startsWith('/*')) continue;
+                if (ORIGIN_WRITE.test(line)) found.push(`${rel}::${t}`);
+            }
         }
     };
     walk(path.join(CLI_ROOT, 'lib'));
     walk(path.join(CLI_ROOT, 'bin'));
 
-    const unreviewed = found.filter((f) => !ALLOWED_HOST_MENTIONS.has(f));
-    assert.deepEqual(unreviewed, [],
-        'These lines name the production host and are not in the reviewed allowlist. If one is ' +
-        'legitimate (an example URL, a health probe target, prose) add it explicitly. If it ' +
-        'RESOLVES to the production origin at runtime, it is the defect this contract removes:\n' +
-        unreviewed.join('\n'));
+    // FIXTURE PRECONDITION: if the walk read nothing, every assertion below is vacuous.
+    assert.ok(scannedFiles > 20 && scannedLines > 5000,
+        `FIXTURE INVALID: scanned only ${scannedFiles} files / ${scannedLines} lines`);
 
-    // A fixture assertion: the allowlist must actually be exercised. If the walker stopped
-    // finding anything (wrong root, changed extension) the filter above would trivially pass.
-    assert.ok(found.length >= 20,
-        `FIXTURE INVALID: only ${found.length} host mentions scanned — the walker is not reading the tree`);
+    const unreviewed = found.filter((f) => !ALLOWED_ORIGIN_WRITES.has(f));
+    assert.deepEqual(unreviewed, [],
+        'these lines WRITE an origin and are not in ALLOWED_ORIGIN_WRITES. Each is either a ' +
+        'defect (an origin the developer did not choose) or needs an entry with its own audited ' +
+        'reason:\n  ' + unreviewed.join('\n  '));
+
+    // The allowlist must not rot: an entry for a line that no longer exists is a stale blessing
+    // that would silently cover a future line with the same content.
+    const stale = [...ALLOWED_ORIGIN_WRITES].filter((a) => !found.includes(a));
+    assert.deepEqual(stale, [], `ALLOWED_ORIGIN_WRITES has entries matching nothing in the tree:\n  ${stale.join('\n  ')}`);
+
+    // COVERAGE BOUNDARY, printed on GREEN as well as RED (served doer obligation, 2026-08-27).
+    console.error(
+        `[GATE I1-no-origin-write] compared ${found.length} origin-writing line(s) across ` +
+        `${scannedFiles} files / ${scannedLines} lines in lib/ + bin/ against ` +
+        `${ALLOWED_ORIGIN_WRITES.size} reviewed entries. CATCHES: any new line assigning an ` +
+        `http(s) URL to an origin-shaped target, in any syntax, for ANY host. DOES NOT READ: ` +
+        `writes whose value is a named constant or assembled across statements, anything ` +
+        `outside lib/ + bin/, or the PACKED artifact (GATE I1-tarball reads that). RUN BY: ` +
+        `npm test in descix-cli. Single-party audit — see the provenance block.`,
+    );
 });
 
 // ── I2 GATE 4: the writer STORES the community it was given ──────────────────────────────────
@@ -254,24 +286,56 @@ test('GATE I2-writer-stores-community: init records the community id it was pass
 });
 
 // ── I2 GATE 5: the generated agent files name the DEVELOPER, not a placeholder ───────────────
-test('GATE I2-agent-files-name-the-developer: no my-app, no prod origin, real ids present', async () => {
+//
+// AMENDED for (A', rev 2). This gate used to assert the files contain NO production origin.
+// Under (A') a workspace that configured no origin legitimately resolves to PROD, so that
+// assertion inverted. What it measures instead is the property that actually matters and that
+// the old assertion was standing in for: the files name the origin the resolver ACTUALLY
+// returned — never a placeholder, and never an origin that contradicts the configuration. The
+// second fixture is what makes it discriminate: a generator that simply hardcoded the prod
+// origin would pass the first fixture and FAIL the second.
+test('GATE I2-agent-files-name-the-developer: real ids, no my-app, and the RESOLVED origin', async () => {
     const { initWorkspace } = await import('../lib/commands/init.js');
-    const dir = tmpdir('i2a');
-
-    const res = await initWorkspace({ path: dir, communityId: 'egpt', appName: 'godsworld' });
     const generated = ['CLAUDE.md', '.cursorrules', '.clinerules', '.github/copilot-instructions.md'];
-    for (const f of generated) {
-        assert.ok(res.created.includes(f), `FIXTURE INVALID: ${f} was not generated, so it measures nothing`);
-    }
 
+    // FIXTURE A — nothing configured. The resolved origin is the declared default, PROD.
+    const dirA = tmpdir('i2a');
+    const resA = await initWorkspace({ path: dirA, communityId: 'egpt', appName: 'godsworld' });
     for (const f of generated) {
-        const text = fs.readFileSync(path.join(dir, f), 'utf8');
+        assert.ok(resA.created.includes(f), `FIXTURE INVALID: ${f} was not generated, so it measures nothing`);
+    }
+    for (const f of generated) {
+        const text = fs.readFileSync(path.join(dirA, f), 'utf8');
         assert.ok(!text.includes('my-app'),
             `${f} names the placeholder app "my-app" instead of the developer's app`);
-        assert.ok(!text.includes(PROD_ORIGIN),
-            `${f} names the PRODUCTION origin, which this workspace never configured`);
         assert.match(text, /godsworld/, `${f} does not name the developer's actual app`);
         assert.match(text, /egpt/, `${f} does not name the developer's actual community`);
+        assert.ok(text.includes(PROD_ORIGIN),
+            `${f} does not name the origin this workspace actually resolves to (the declared default)`);
+    }
+
+    // FIXTURE B — an origin IS configured, and it is not production. The files must follow the
+    // configuration. Without this half the gate could not tell a correct generator from one
+    // that writes the prod origin unconditionally.
+    const dirB = tmpdir('i2b');
+    const prior = process.env.DESCIX_API_URL;
+    process.env.DESCIX_API_URL = 'https://dev.descix.net';
+    try {
+        const resB = await initWorkspace({ path: dirB, communityId: 'egpt', appName: 'godsworld' });
+        for (const f of generated) {
+            assert.ok(resB.created.includes(f), `FIXTURE INVALID: ${f} was not generated in fixture B`);
+        }
+        for (const f of generated) {
+            const text = fs.readFileSync(path.join(dirB, f), 'utf8');
+            assert.ok(text.includes('https://dev.descix.net'),
+                `${f} does not name the DEV origin this workspace was pointed at`);
+            assert.ok(!text.includes(PROD_ORIGIN),
+                `${f} names the PRODUCTION origin although this workspace was pointed at DEV — ` +
+                'the generator is not reading the resolved origin');
+        }
+    } finally {
+        if (prior === undefined) delete process.env.DESCIX_API_URL;
+        else process.env.DESCIX_API_URL = prior;
     }
 });
 
@@ -371,4 +435,94 @@ test('GATE I1-tarball: the packed artifact resolves the prod origin only in pros
         `the PUBLISHED artifact states the production origin as a value:\n${offenders.join('\n')}`);
 
     fs.rmSync(out, { recursive: true, force: true });
+});
+
+// ── I1 GATE 9: the EXECUTING CLI PRINTS the environment it resolved — SILENCE IS RED ─────────
+//
+// This is (A')'s other half and the reason the PROD default is allowed to stand. CEO-D
+// 2026-08-18 (the shipped default target is PROD) was never the defect; the defect was that
+// 1.0.1 hit production SILENTLY, so "the developer chose prod" and "the developer chose
+// nothing" were one observable state. The default is legitimate ONLY because it is declared.
+//
+// WHY THIS GATE CAN FAIL, which is the only thing that makes it a gate: it asserts the presence
+// of a line on stderr of a REAL invocation. Delete the reportEnvironment() call in
+// api-client.js::initialize() and both halves go RED — measured on a tamper, twice, 2026-08-30;
+// the tamper was asserted present in the file before the RED was read.
+//
+// It runs the SHIPPED binary rather than importing the module, because the print is only
+// correct if it survives the whole command path — the seam it hangs off (initialize(), not
+// detectApiUrl()) was chosen precisely because six construction sites bypass detectApiUrl.
+test('GATE I1-prints-resolved-env: every network-bound invocation declares env + origin + source', () => {
+    const { DEFAULT_ORIGIN_SOURCE } = { DEFAULT_ORIGIN_SOURCE: 'default' }; // substring only
+
+    // ── A: nothing configured. The line must say prod, AND say it came from the default. ──
+    const dirA = tmpdir('i1p');
+    fs.mkdirSync(path.join(dirA, '.descix'), { recursive: true });
+    fs.writeFileSync(path.join(dirA, '.descix/workspace.json'),
+        JSON.stringify({ version: '2.1', type: 'workspace', env: { products: [] } }));
+    const envA = isolatedEnv();
+    assertFixtureRuns(dirA, envA);
+
+    let errA = '';
+    try {
+        execFileSync(process.execPath, [BIN, 'credits', 'balance'], {
+            cwd: dirA, env: envA, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+        });
+    } catch (e) { errA = String(e.stderr || ''); }
+
+    assert.match(errA, /^env: /m,
+        'SILENCE. A network-bound command printed no env line at all — this is the 1.0.1 defect ' +
+        `(a silent origin), and it is what this gate exists to catch. stderr was:\n${errA}`);
+    assert.match(errA, /env: prod \(/, 'the line must name the ENVIRONMENT it resolved');
+    assert.ok(errA.includes(DEFAULT_ORIGIN_SOURCE),
+        'the line must name the SOURCE as the default — without it, "chose prod" and "chose ' +
+        'nothing" are one observable state again, which is the whole defect');
+    assert.ok(errA.includes(PROD_ORIGIN), 'the line must name the ORIGIN, not only the env name');
+    assert.match(errA, /config init --env dev/,
+        'the default line must name the command that changes it, in the same breath');
+
+    // ── B: an origin IS configured, and it is not prod. The line must follow it. ──
+    // This half is what proves the print is not a hardcoded string: a `console.error("env: prod
+    // (default...)")` would pass A and fail B.
+    const dirB = tmpdir('i1p2');
+    fs.mkdirSync(path.join(dirB, '.descix'), { recursive: true });
+    fs.writeFileSync(path.join(dirB, '.descix/workspace.json'), JSON.stringify({
+        version: '2.1', type: 'workspace', env: { products: [], apiUrl: 'https://dev.descix.net' },
+    }));
+    const envB = isolatedEnv();
+    assertFixtureRuns(dirB, envB);
+
+    let errB = '';
+    try {
+        execFileSync(process.execPath, [BIN, 'credits', 'balance'], {
+            cwd: dirB, env: envB, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+        });
+    } catch (e) { errB = String(e.stderr || ''); }
+
+    assert.match(errB, /^env: /m, `SILENCE on a configured workspace. stderr was:\n${errB}`);
+    assert.match(errB, /env: dev \(/, 'a workspace pointed at DEV must not print prod');
+    assert.ok(errB.includes('https://dev.descix.net'), 'the line must name the configured origin');
+    assert.ok(!errB.includes(DEFAULT_ORIGIN_SOURCE),
+        'a CONFIGURED origin must not be reported as the default — that mislabels the ' +
+        "developer's own choice as something they did not make");
+    assert.ok(errB.includes('workspace.json'), 'the line must name WHICH source supplied it');
+
+    // ── C: the print goes to stderr, never stdout. stdout is a data channel under --json and ──
+    // the protocol channel for the MCP stdio server; a status line there corrupts both.
+    let outC = '';
+    try {
+        outC = execFileSync(process.execPath, [BIN, 'credits', 'balance'], {
+            cwd: dirA, env: envA, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+        });
+    } catch (e) { outC = String(e.stdout || ''); }
+    assert.ok(!outC.includes('env: prod'),
+        'the env line reached STDOUT, which corrupts --json output and the MCP stdio protocol');
+
+    console.error(
+        '[GATE I1-prints-resolved-env] compared the stderr of REAL `descix credits balance` ' +
+        'invocations in 2 workspace fixtures (unconfigured, dev-configured) plus a stdout-purity ' +
+        'check. CATCHES: a missing env line, a hardcoded one, a mislabelled source, and the line ' +
+        'landing on stdout. DOES NOT READ: authenticated command paths, the packed tarball, or ' +
+        'commands that exit before touching the api-client. RUN BY: npm test in descix-cli.',
+    );
 });

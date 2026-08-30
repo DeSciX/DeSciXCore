@@ -60,12 +60,12 @@ async function loadContext(workspaceRoot) {
     );
   }
 
-  // The origin is the one fact that may legitimately be absent: a workspace can exist before an
-  // environment has been chosen. It is stated as UNCONFIGURED with the remedy — never guessed.
-  // An unconfigured origin is not an error here because the app and community are still true.
-  const originLine = apiUrl
-    ? apiUrl
-    : '(not configured — run `descix config set-env dev|demo|prod`)';
+  // Under (A', contract rev 2) the origin is NEVER absent: a workspace that named none resolves
+  // to the declared default, carrying `source: default`. The "(not configured)" branch that
+  // stood here is therefore unreachable and was DELETED rather than fenced — an unreachable
+  // branch kept "just in case" is the compat fence CEO-D-2026-07-26 forbids. Which origin this
+  // is, and who chose it, is declared by the env line every network-bound command prints.
+  const originLine = apiUrl;
 
   // Friendly name: capitalize app_id or use as-is
   const appName = appId.charAt(0).toUpperCase() + appId.slice(1);

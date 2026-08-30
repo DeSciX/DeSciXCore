@@ -114,28 +114,11 @@ program
   .command('login')
   .description('Authenticate with DeSciX via device login (opens browser)')
   .option('-u, --url <url>', 'API URL override')
-  .option('--dev', 'Use development server (https://localhost:4000)')
   .option('--wallet', 'Use direct wallet connection (advanced, not yet implemented)')
   .option('--no-oauth', 'Skip the OAuth long-lived token leg (wallet-signature login only)')
   .option('--scope <scope>', 'OAuth scope to request (default: mcp:read mcp:tools mcp:write mcp:admin)')
   .action(async (options) => {
     try {
-      // Handle --dev flag
-      if (options.dev) {
-        const workspaceConfig = await WorkspaceConfig.tryLoad(process.cwd());
-        if (workspaceConfig) {
-          workspaceConfig.apiUrl = 'https://localhost:4000';
-          workspaceConfig.environment = 'development';
-          await workspaceConfig.save(process.cwd());
-        } else {
-          const gc = await GlobalConfig.load();
-          gc.api_url = 'https://localhost:4000';
-          gc.environment = 'development';
-          await gc.save();
-        }
-        console.log(chalk.cyan('✓ Configured for development (https://localhost:4000)\n'));
-      }
-      
       if (options.wallet) {
         await authCommands.loginWallet();
       } else {
@@ -162,23 +145,8 @@ program
   .description('Bootstrap CLI credentials for platform admins (requires admin group membership)')
   .requiredOption('-e, --email <email>', 'Admin email (must be in platform admin Google Group)')
   .option('-u, --url <url>', 'API URL override')
-  .option('--dev', 'Use development server (https://localhost:4000)')
   .action(async (options) => {
     try {
-      if (options.dev) {
-        const workspaceConfig = await WorkspaceConfig.tryLoad(process.cwd());
-        if (workspaceConfig) {
-          workspaceConfig.apiUrl = 'https://localhost:4000';
-          workspaceConfig.environment = 'development';
-          await workspaceConfig.save(process.cwd());
-        } else {
-          const gc = await GlobalConfig.load();
-          gc.api_url = 'https://localhost:4000';
-          gc.environment = 'development';
-          await gc.save();
-        }
-        console.log(chalk.cyan('Configured for development (https://localhost:4000)\n'));
-      }
       await authCommands.adminLogin(options);
     } catch (error) {
       process.exit(1);
@@ -4972,7 +4940,6 @@ program
   .command('quickstart')
   .description('One-command setup: auth → workspace → agent files → MCP config')
   .option('-u, --url <url>', 'API URL override')
-  .option('--dev', 'Use development server (https://localhost:4000)')
   .action(async (options) => {
     const { generateAgentFiles, generateMcpConfig } = await import('../lib/agent-files.js');
     const { WalletFileManager } = await import('../lib/wallet-file.js');
@@ -4995,7 +4962,6 @@ program
     if (needsLogin) {
       const loginOptions = {};
       if (options.url) loginOptions.url = options.url;
-      if (options.dev) loginOptions.dev = true;
       await authCommands.loginDevice(loginOptions);
     }
 

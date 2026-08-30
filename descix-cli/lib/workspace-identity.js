@@ -19,7 +19,7 @@
  * clothes, and it shipped in every file the CLI generated.
  */
 
-import { resolveOriginOrNull } from './origin.js';
+import { resolveOrigin } from './origin.js';
 
 /**
  * Read the workspace's identity from a parsed `.descix/workspace.json`.
@@ -60,7 +60,12 @@ export function readIdentity(config = {}) {
     // The origin comes from the ONE origin owner, over the same sources every other surface
     // resolves against — including DESCIX_API_URL, because `descix --env dev init` is the
     // developer stating their choice at exactly the moment these files are written.
-    const resolved = resolveOriginOrNull({
+    // Under (A') this ALWAYS yields an origin: a workspace that named none resolves to the
+    // declared default, carrying `source: default`. The generated files therefore state the
+    // origin AND where it came from, instead of either guessing or going silent. A configured
+    // origin that is unusable still THROWS here — writing agent files against a broken origin
+    // would bake the breakage into four files the developer's agent then trusts.
+    const resolved = resolveOrigin({
         envVar: process.env.DESCIX_API_URL,
         workspaceEnvApiUrl: env.apiUrl,
         legacyApiUrl: config.apiUrl,
@@ -69,8 +74,8 @@ export function readIdentity(config = {}) {
     return {
         appId,
         communityId,
-        apiUrl: resolved ? resolved.origin : null,
-        originSource: resolved ? resolved.source : null,
+        apiUrl: resolved.origin,
+        originSource: resolved.source,
     };
 }
 

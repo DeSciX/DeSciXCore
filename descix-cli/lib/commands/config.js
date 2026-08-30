@@ -8,6 +8,7 @@
 import chalk from 'chalk';
 import * as path from 'path';
 import { WorkspaceConfig } from '../workspace-config.js';
+import { environmentNameFor } from '../environment-report.js';
 
 /**
  * Show current configuration
@@ -19,12 +20,15 @@ export async function show() {
 
     console.log(chalk.cyan('\n📋 DeSciX Workspace Configuration:\n'));
     console.log(chalk.white(`   Workspace:     ${workspaceRoot}`));
-    // An unconfigured origin prints as an explicit absence with its remedy. Interpolating a
-    // null here would print the literal string "null", which reads like a value.
+    // Under (A', contract rev 2) getApiUrl() ALWAYS yields an origin — a workspace that named
+    // none resolves to the declared default. The "(not configured)" branch is therefore
+    // unreachable and was DELETED, not fenced.
     const configuredOrigin = workspaceConfig.getApiUrl();
-    console.log(chalk.white(`   API URL:       ${configuredOrigin ||
-      chalk.yellow('(not configured — run `descix config set-env dev|demo|prod`)')}`));
-    console.log(chalk.white(`   Environment:   ${workspaceConfig.env?.environment || 'production'}`));
+    console.log(chalk.white(`   API URL:       ${configuredOrigin}`));
+    // The environment NAME comes from the ONE owner that derives it from the origin. It used to
+    // read a separate `env.environment` key and fall back to the literal 'production' — a second
+    // derivation of the same fact, which could disagree with the origin printed one line above.
+    console.log(chalk.white(`   Environment:   ${environmentNameFor(configuredOrigin)}`));
 
     // Show mapped apps (v2.1 env.products)
     const platform = workspaceConfig.env?.platform;
@@ -126,7 +130,12 @@ export async function setEnv(envName, options = {}) {
 
     console.log(chalk.green('\n✅ Environment switched!\n'));
     console.log(chalk.white(`   Environment:   ${result.environment}`));
-    console.log(chalk.white(`   API URL:       ${result.apiUrl || `https://localhost:${workspaceConfig.env?.platform?.microservice?.port || '4000'} (local)`}`));
+    // The `|| https://localhost:<microservice.port>` branch that stood here DERIVED AN ORIGIN
+    // FROM A PLATFORM PORT and printed it as the API URL — the exact construction CEO-D
+    // 2026-08-18 forbids ("an environment NAME never derives localhost from a platform port")
+    // and a misreport of an origin the developer never chose. setEnvironment() always returns a
+    // real apiUrl, so the branch was unreachable as well as wrong. DELETED.
+    console.log(chalk.white(`   API URL:       ${result.apiUrl}`));
     console.log(chalk.white(`   Secret Label:  ${result.secretLabel}`));
     console.log(chalk.gray(`   Saved to:      ${result.configPath}\n`));
 

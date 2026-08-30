@@ -11,13 +11,14 @@
  * (they are all of them, today), and shipping half an enforcement inside a publish is how a
  * guard that fires on correct code gets born. Enforcement is a separate row.
  *
- * The environment NAME is derived from WorkspaceConfig.ENV_MAP — the same canonical map
- * `descix --env` resolves against — so this file holds no second copy of the origin table.
+ * The environment NAME comes from `environment-report.js::environmentNameFor` — the one owner
+ * of that derivation, shared with the printed env line — so this file holds no second copy of
+ * either the origin table or the matching rule.
  */
-import { WorkspaceConfig } from './workspace-config.js';
-// Compare origins with the SAME spelling the origin owner resolves with. This was a private
-// second copy of normalizeOrigin; two spellings of "is this the same origin" is the mirror
-// drift this contract exists to end, and it would have drifted silently.
+// The origin -> env-name derivation used to live in this file. It now has ONE owner, consumed
+// here and by the printed env line, because two derivations of one fact is the mirror drift
+// this contract exists to end.
+import { environmentNameFor } from './environment-report.js';
 import { normalizeOrigin } from './origin.js';
 
 /**
@@ -41,11 +42,8 @@ export function walletEnvironmentStamp(apiUrl) {
         );
     }
 
-    const normalized = normalizeOrigin(apiUrl);
-    const match = Object.entries(WorkspaceConfig.ENV_MAP)
-        .find(([, entry]) => entry && normalizeOrigin(entry.url) === normalized);
-
-    // 'custom' is an HONEST answer — "a real origin, not one of the three named ones" — and is
-    // not a fallback value standing in for a missing fact. The fact is the apiUrl beside it.
-    return { apiUrl: normalized, environment: match ? match[0] : 'custom' };
+    return {
+        apiUrl: normalizeOrigin(apiUrl),
+        environment: environmentNameFor(apiUrl),
+    };
 }
