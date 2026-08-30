@@ -99,8 +99,18 @@ test('GATE I1-unconfigured-declares-prod: nothing configured resolves to PROD ca
 // REWRITTEN for (A', contract rev 2). This gate previously asserted that a resolver MISS throws.
 // Under rev 2 a miss is not a failure — it is the declared default. But "the developer typed
 // something unusable" still must never be silently swallowed into the default, which would be
-// the same defect from the other direction: an origin the developer did not choose. The loud
-// path MOVED from the miss to the invalid; it was not removed, and this gate is not weaker.
+// the same defect from the other direction: an origin the developer did not choose.
+//
+// RE-LEVELLED 2026-08-30, AND THIS IS THE LESSON OF THIS FILE. The first version of this gate
+// asserted ONLY that the MODULE throws. It did — and the CLI then discarded the error in 27 bare
+// `catch (error) { process.exit(1); }` handlers, so all three invalid-origin surfaces exited 1
+// with ZERO BYTES on stdout and stderr. The row was met in the module and unmet on the artifact,
+// and a module-level assert.throws COULD NOT EXHIBIT THAT however green it ran.
+//
+// Compare GATE I1-prints-resolved-env below, which executes the shipped binary and was correctly
+// levelled from the start. Same contract, same file, two gates: the level was right for the print
+// and wrong for the throw. A gate must be levelled at the plane where the property is CLAIMED —
+// and "FAILS LOUD" is a claim about what a developer SEES, which only the binary can answer.
 test('GATE I1-invalid-config-fails-loud: an unusable configured origin throws and names how to fix it', async () => {
     const { resolveOrigin, OriginInvalidError } = await import('../lib/origin.js');
 
@@ -136,6 +146,43 @@ test('GATE I1-invalid-config-fails-loud: an unusable configured origin throws an
     assert.throws(
         () => resolveOrigin({ envVar: 'nonsense', workspaceEnvApiUrl: 'https://dev.descix.net' }),
         OriginInvalidError,
+    );
+
+    // ── THE HALF THAT ACTUALLY MEASURES THE ROW: the SHIPPED BINARY, on all three surfaces a
+    // developer can misconfigure. A throw nobody prints is not a loud failure.
+    const surfaces = [
+        ['DESCIX_API_URL', isolatedEnv({ DESCIX_API_URL: 'not-a-url' }), { env: { products: [] } }],
+        ['DESCIX_API_URL non-http', isolatedEnv({ DESCIX_API_URL: 'ftp://x.invalid' }), { env: { products: [] } }],
+        ['workspace env.apiUrl', isolatedEnv(), { env: { products: [], apiUrl: 'not-a-url' } }],
+    ];
+    for (const [label, env, wsExtra] of surfaces) {
+        const dir = tmpdir('i1inv');
+        fs.mkdirSync(path.join(dir, '.descix'), { recursive: true });
+        fs.writeFileSync(path.join(dir, '.descix/workspace.json'),
+            JSON.stringify({ version: '2.1', type: 'workspace', ...wsExtra }));
+
+        let out = '', err = '', failed = false;
+        try {
+            out = execFileSync(process.execPath, [BIN, 'credits', 'balance'], {
+                cwd: dir, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+            });
+        } catch (e) { failed = true; out = String(e.stdout || ''); err = String(e.stderr || ''); }
+
+        assert.ok(failed, `[${label}] an unusable origin did not fail the command`);
+        const seen = out + err;
+        assert.notEqual(seen.trim(), '',
+            `[${label}] SILENCE: exited non-zero with ZERO BYTES on stdout and stderr. The module ` +
+            'threw and something discarded it — this is the defect a module-level assert.throws ' +
+            'cannot see.');
+        assert.match(seen, /not a usable origin/, `[${label}] the failure does not say what is wrong`);
+        assert.match(seen, /--env|config init/, `[${label}] the failure does not NAME THE FIX`);
+    }
+
+    console.error(
+        '[GATE I1-invalid-config-fails-loud] compared the module contract (typed error, code, ' +
+        'precedence, no-skip) AND the SHIPPED BINARY on 3 misconfiguration surfaces. CATCHES: a ' +
+        'swallowed error, a silent exit, a failure that omits the remedy. DOES NOT READ: the ' +
+        'packed tarball, or surfaces reached only after authentication. RUN BY: npm test.',
     );
 });
 

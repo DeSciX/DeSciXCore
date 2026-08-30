@@ -5,8 +5,8 @@
  * `env.products[0].appId = "godsworld"` and nothing else, while `agent-files.js` read
  * `env.platform.appId`, `defaultContext.appId` and a TOP-LEVEL `config.apiUrl` — three keys the
  * init path never writes. The reader missed on every one and fell through to the literals
- * `'my-app'` and `'https://descix.net'`. The measured result: the four generated
- * agent-instruction files named `my-app` and the production origin, and named the developer's
+ * `'my-app'` and the production origin. The measured result: the four generated
+ * agent-instruction files named `my-app` and that origin, and named the developer's
  * actual app and community ZERO times.
  *
  * That is a READER/WRITER MISMATCH, which is the mirror-drift bug class in its purest form —
