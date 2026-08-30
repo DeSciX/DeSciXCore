@@ -64,6 +64,8 @@ disagree; nothing triggers it automatically, so it catches drift only when someo
 | `@descix/sdk` | `descix-sdk` | `descix-sdk-v<version>` | the story |
 | `@descix/cloud-core` | `descix-cloud-core` | `descix-cloud-core-v<version>` | plumbing |
 | `@descix/app-sdk` | `descix-app-sdk` | `descix-app-sdk-v<version>` | plumbing |
+| `@descix/cli` | `descix-cli` | `descix-cli-v<version>` | developer surface, CI-published |
+| `@descix/platform-api` | `descix-platform-api` | `descix-platform-api-v<version>` | plumbing, CI-published |
 
 Whether each one already exists on the registry — the prerequisite above — is a question only the
 registry can answer, and it answers one package at a time:
@@ -77,22 +79,23 @@ npm view @descix/app-sdk versions
 Run them separately. Passing several names to a single `npm view` prints the versions of the first
 one and exits 0, which reads as an answer about all of them.
 
-*Not published, deliberately:* `@descix/platform-api` — the workflow refuses it
-by name, along with `cryptoapis-sdk`, which is vendored third-party code and must never reach the
-registry under our scope, and `descix-vscode`, which ships to the VS Code Marketplace instead.
+*Not published, deliberately:* `cryptoapis-sdk`, which is vendored third-party code and must
+never reach the registry under our scope, and `descix-vscode`, which ships to the VS Code
+Marketplace instead. The workflow refuses both by name.
 
-**The developer CLI is no longer refused by name.** The by-name refusal was deleted from the
-workflow's `case "$PKG" in` because the CLI is the SDK product surface (CEO scoping 2026-08-27/28;
-VISION ruling 2026-08-30 01:19Z) and it is already a published package. **It is still not
-routable**, and that is deliberate rather than an oversight: the publish set's OWNER is the
-`workflow_dispatch` `options:` list, `publishable = options - refused`, and the CLI has never
-appeared in `options`. Deleting the refusal therefore removed a stale fence without making the
-package publishable. Adding a name to `options:` is a product decision — that list records one
-(CEO 2026-08-21) — and it is not made in this runbook.
+**CI-PUBLISHED IS NOT THE PUBLIC STORY, and the two were conflated until 2026-08-30.** The
+public story remains ONE package (CEO 2026-08-21): `@descix/sdk`, with cloud-core and app-sdk as
+plumbing. That governs what DeSciX PRESENTS. It never governed which packages CI may publish —
+but the `options:` list carried both meanings at once, which is why the CLI sat unlisted there
+AND named in the refusal case. The CLI and platform-api now publish from CI on the CEO's
+decision of record (his 2026-08-29 and 2026-08-30 words, and his own act of binding trusted
+publishers for both packages on npmjs.com), without joining the public story.
 
-**`@descix/platform-api` does NOT have to be published** — checked rather than assumed:
-`@descix/cloud-core` has zero imports of it today, and its dependencies are only Google Cloud
-libraries plus `chokidar`/`dotenv`/`google-auth-library`. Nothing forces platform-api public.
+**HOW TO READ THIS SET, so it is not mis-derived again:** the OWNER is the `workflow_dispatch`
+`options:` list in the workflow, and `publishable = options - refused`. A package absent from
+`options` is UNROUTABLE no matter what the refusal case says — deleting a name from the refusal
+alone changes nothing. `scripts/check-runbook-publish-set.mjs` compares this document against
+that owner and goes RED when they disagree.
 
 ---
 
