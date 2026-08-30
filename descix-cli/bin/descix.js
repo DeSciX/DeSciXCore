@@ -28,6 +28,7 @@ import * as creditsCommands from '../lib/commands/credits.js';
 import * as airdropCommands from '../lib/commands/airdrop.js';
 import { runInit } from '../lib/commands/init.js';
 import * as updateCommands from '../lib/commands/update.js';
+import { registerRetiredKbSync, retiredKbSyncMessage, CANONICAL_KB_SYNC } from '../lib/commands/retired-kb-sync.js';
 import { runStatus } from '../lib/commands/status.js';
 import { runDoctor } from '../lib/commands/doctor.js';
 import { runHealth } from '../lib/commands/health.js';
@@ -463,104 +464,13 @@ airdropCommand
     }
   });
 
-// ============ Sync Commands ============
-
-const syncCommand = program
-  .command('sync')
-  .description('Content sync operations (context-aware)');
-
-// [WS-MCP-SURFACE-SPLIT Step 3 §5.5] `sync assets` (legacy Drive-mode) DELETED —
-// canonical is `descix app sync-assets`. The shared updateCommands.updateApp() body is
-// intentionally RETAINED here: the `update [type]` dispatcher (`update app`/`all`/auto)
-// still consumes it and is a separate Tier-3 decision.
-
-// Context-aware sync: kb
-syncCommand
-  .command('kb')
-  // [DUPLICATE:WS-MCP-STEP3] `sync kb` wraps updateKB() (runKbChunk + runKbSync via
-  // context resolution) — a DUPLICATE of `kb corpus sync` (canonical, git-manifest).
-  // Tier 3: BLOCKED from deletion because `.descix/sync-kb-sources.sh` (org KB-ingestion
-  // automation) still invokes `kb chunk`/`kb sync`. MARK only — do NOT delete until that
-  // script migrates to a corpus manifest (plan §5.4b / consolidated-triage TIER 3).
-  .description('[DUPLICATE → use `descix kb corpus sync`] Sync knowledge base files - context-aware. Slated for removal in WS-MCP Step 3 Tier 3 (blocked on sync-kb-sources.sh migration).')
-  .argument('[stage]', 'Specific stage: stage1, stage2, stage3, all (default: all)')
-  .option('--push', 'Push local to Drive (Stage 1)')
-  .option('--pull', 'Pull from Drive to local (Stage 1)')
-  .option('--status', 'Show sync status')
-  .option('-c, --community <id>', 'Community ID (uses context if not provided)')
-  .option('-a, --app <id>', 'App ID (uses context if not provided)')
-  .option('-k, --kb <name>', 'KB name (default: General)')
-  .action(async (stage, options) => {
-    try {
-      const apiClient = new DeSciXApiClient();
-      await requireAuth(apiClient);
-      
-      // Load workspace context
-      const workspaceConfig = await WorkspaceConfig.load();
-      const ctx = workspaceConfig.resolveContextWithOptions(options);
-      
-      const communityId = ctx.communityId;
-      const appId = ctx.appId;
-      const kbId = options.kb || ctx.kbId || 'General';
-      
-      if (!communityId || !appId) {
-        console.error(chalk.red('\n❌ Community and App ID required.'));
-        console.log(chalk.gray('  Either provide -c and -a flags, or cd into an app directory\n'));
-        process.exit(1);
-      }
-      
-      if (options.status) {
-        console.log(chalk.cyan(`\n📊 KB Sync Status: ${communityId}/${appId}/${kbId}\n`));
-        // Call existing status logic
-        const stages = stage === 'stage1' ? [1] : stage === 'stage2' ? [2] : stage === 'stage3' ? [3] : [1, 2, 3];
-        
-        for (const s of stages) {
-          if (s === 2) {
-            const response = await apiClient.invoke('get_drive_gcs_sync_status', {
-              community_id: communityId, app_id: appId, kb_id: kbId
-            });
-            const result = response.message || response;
-            console.log(chalk.yellow('Stage 2: Drive → GCS'));
-            console.log(chalk.gray(`  To Extract: ${result.to_extract || 0}`));
-            console.log(chalk.gray(`  In Sync: ${result.in_sync || 0}\n`));
-          }
-          if (s === 3) {
-            const response = await apiClient.invoke('get_gcs_pinecone_sync_status', {
-              community_id: communityId, app_id: appId, kb_id: kbId
-            });
-            const result = response.message || response;
-            console.log(chalk.yellow('Stage 3: GCS → Pinecone'));
-            console.log(chalk.gray(`  To Vectorize: ${result.to_vectorize || 0}`));
-            console.log(chalk.gray(`  Total Vectors: ${result.total_vectors || 0}\n`));
-          }
-        }
-        return;
-      }
-      
-      // Determine what to sync
-      const stage1Only = stage === 'stage1' || options.push;
-      const stageToRun = stage || 'all';
-      
-      console.log(chalk.cyan(`\n📤 KB Sync: ${communityId}/${appId}/${kbId} (${stageToRun})\n`));
-      
-      await updateCommands.updateKB({ 
-        ...options,
-        kb: kbId,
-        stage1Only: stage1Only,
-        skipStage1: stage === 'stage2' || stage === 'stage3'
-      });
-      
-    } catch (error) {
-      console.error(chalk.red(`\n❌ ${error.message}\n`));
-      process.exit(1);
-    }
-  });
-
-// [WS-MCP-SURFACE-SPLIT Step 3 §5.5] `sync site` DELETED — canonical is `descix site upload`
-// (manifest-aware; injects build-time GTM/base-path env vars `sync site` lacked). The shared
-// updateCommands.updateSite() body is intentionally RETAINED: the `update [type]` dispatcher
-// (`update site`/`all`/auto) still consumes it and is a separate Tier-3 decision. The SHARED
-// backend commands (get_site_deploy_token/confirm_site_deploy/get_site_manifest) are untouched.
+// ============ Sync Commands: REMOVED ============
+// `sync assets`, `sync site` and `sync kb` are all gone, so the `sync` GROUP is gone with
+// them: a registered verb with no working children is dead weight. `sync` and `sync kb` now
+// exit non-zero naming `descix kb corpus sync`. Registered from the ONE owner list in
+// lib/commands/retired-kb-sync.js so a registration and its gate cannot drift apart.
+const retiredSyncCommand = registerRetiredKbSync(program, 'sync', 'descix sync', chalk.red);
+registerRetiredKbSync(retiredSyncCommand, 'kb', 'descix sync kb', chalk.red);
 
 // ============ Community/App Commands ============
 
@@ -2273,58 +2183,13 @@ kbCommand
     }
   });
 
-// Phase 0 CLI-Centric KB Processing Commands
-
-kbCommand
-  .command('chunk')
-  // [DUPLICATE:WS-MCP-STEP3] Low-level Git-mode chunk step (local md -> chunks). Superseded
-  // for app KB sync by `kb corpus sync` (git-manifest). Tier 3: BLOCKED — `.descix/sync-kb-sources.sh`
-  // (org KB-ingestion automation) invokes `kb chunk`/`kb sync` directly. MARK only; delete only
-  // after that script migrates to a corpus manifest (plan §5.4b / consolidated-triage TIER 3).
-  .description('[DUPLICATE → use `descix kb corpus sync`] Generate chunks from local markdown files. Low-level Git-mode step; slated for removal in WS-MCP Step 3 Tier 3 (blocked on sync-kb-sources.sh migration).')
-  .option('-c, --community <id>', 'Community ID')
-  .option('-a, --app <id>', 'App ID')
-  .option('-k, --kb <id>', 'Knowledge Base ID (default: General)')
-  .option('-s, --chunk-size <size>', 'Chunk size in characters (default: 512)')
-  .option('-o, --overlap <size>', 'Overlap between chunks (default: 64)')
-  .option('-m, --metadata <json>', 'Custom metadata JSON to attach to all chunks (e.g. \'{"source":"beast","domain":"training"}\')')
-  .option('-v, --verbose', 'Show verbose output')
-  .action(async (options) => {
-    try {
-      await kbCommands.runKbChunk(options);
-    } catch (error) {
-      console.error(chalk.red(`\n❌ ${error.message}\n`));
-      process.exit(1);
-    }
-  });
-
-kbCommand
-  .command('sync')
-  // [DUPLICATE:WS-MCP-STEP3] Low-level Git-mode sync step (local chunks -> Pinecone). Superseded
-  // for app KB sync by `kb corpus sync` (git-manifest). Tier 3: BLOCKED — `.descix/sync-kb-sources.sh`
-  // (org KB-ingestion automation) invokes `kb chunk`/`kb sync` directly. MARK only; delete only
-  // after that script migrates to a corpus manifest (plan §5.4b / consolidated-triage TIER 3).
-  // NOTE: distinct from `sync kb` (top-level `sync` group) which wraps chunk+sync via context.
-  .description('[DUPLICATE → use `descix kb corpus sync`] Sync local chunks to Pinecone via service layer. Low-level Git-mode step; slated for removal in WS-MCP Step 3 Tier 3 (blocked on sync-kb-sources.sh migration).')
-  .option('-c, --community <id>', 'Community ID')
-  .option('-a, --app <id>', 'App ID')
-  .option('-k, --kb <id>', 'Knowledge Base ID (default: General)')
-  .option('-v, --verbose', 'Show verbose output')
-  .action(async (options) => {
-    try {
-      const apiClient = new DeSciXApiClient();
-      await requireAuth(apiClient);
-      
-      await kbCommands.runKbSync(apiClient, options);
-    } catch (error) {
-      console.error(chalk.red(`\n❌ ${error.message}\n`));
-      process.exit(1);
-    }
-  });
+// `kb chunk` and `kb sync` (low-level Git-mode steps) are REMOVED. Their implementations
+// runKbChunk/runKbSync are deleted from lib/commands/kb.js. Both names exit non-zero naming
+// `descix kb corpus sync`.
+registerRetiredKbSync(kbCommand, 'chunk', 'descix kb chunk', chalk.red);
+registerRetiredKbSync(kbCommand, 'sync', 'descix kb sync', chalk.red);
 
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ─────────────────────────────────────────────────────────────────────────────
 // app records — APP DATA PLANE structured record store (CEO-D-2026-06-02-APP-DATA-PLANE)
 // Treat your app like a database table: put/query/get/delete structured records
 // with custom metadata. Records live in the app data plane (Firestore document
@@ -5024,20 +4889,15 @@ program
 
 const updateCommand = program
   .command('update')
-  // [DUPLICATE:WS-MCP-STEP3] The `update [type]` dispatcher (app/kb/site/all/auto) is a
-  // DUPLICATE family: `update app` -> updateApp() (== `sync assets`), `update site` ->
-  // updateSite() (== `sync site`, == `site upload`), `update kb` -> updateKB() (runKbChunk+
-  // runKbSync, == `sync kb`, superseded by `kb corpus sync`). Tier 3: this whole family + the
-  // shared updateApp()/updateSite() bodies are the remaining home of the legacy Drive updateApp
-  // and duplicate updateSite AFTER Step-3 Tier 2 removed the `sync assets`/`sync site` blocks.
-  // `update kb` deletion is additionally blocked by `.descix/sync-kb-sources.sh`. MARK only —
-  // deletion needs the Tier-3 `update`-family design decision (consolidated-triage §5.4b).
-  .description('[DUPLICATE → app: `app sync-assets`; site: `site upload`; kb: `kb corpus sync`] Context-driven resource sync (auto-detects from workspace). Slated for removal in WS-MCP Step 3 Tier 3.')
-  .argument('[type]', 'Update type: app, kb, site, all (auto-detects if not specified)')
+  // `update kb` is REMOVED — kb sync has exactly one surface, `descix kb corpus sync`.
+  // `update app` and `update site` are NOT kb-sync surfaces and are untouched, so the
+  // `update` verb itself stays registered. `update all`/`auto` keep doing app and site and
+  // no longer touch the KB; they print where kb sync went rather than failing, because
+  // failing them would delete non-kb functionality this change never targeted.
+  .description('Context-driven resource sync for app and site (auto-detects from workspace). For knowledge bases use `descix kb corpus sync`.')
+  .argument('[type]', 'Update type: app, site, all (auto-detects if not specified)')
   .option('-c, --community <id>', 'Community ID (optional; app_id sufficient for Unified Registry)')
   .option('-a, --app <id>', 'App ID (globally unique; required if not in app directory)')
-  .option('--kb <name>', 'Specific KB to update (for kb type)')
-  .option('--stage1', 'KB: Local to Drive only (skip vectorization)')
   .option('--preview', 'Site: Deploy to preview URL')
   .option('--build <cmd>', 'Site: Run build command first')
   .option('--full', 'Force full sync (ignore delta)')
@@ -5049,7 +4909,8 @@ const updateCommand = program
           await updateCommands.updateApp(options);
           break;
         case 'kb':
-          await updateCommands.updateKB({ ...options, stage1Only: options.stage1 });
+          console.error(chalk.red(`\n❌ ${retiredKbSyncMessage('descix update kb')}\n`));
+          process.exit(1);
           break;
         case 'site':
           await updateCommands.updateSite({ 
@@ -5058,10 +4919,12 @@ const updateCommand = program
           });
           break;
         case 'all':
+          console.log(chalk.gray(`  (knowledge bases are not included: use \`${CANONICAL_KB_SYNC}\`)`));
           await updateCommands.updateAll(options);
           break;
         default:
           // Auto-detect
+          console.log(chalk.gray(`  (knowledge bases are not included: use \`${CANONICAL_KB_SYNC}\`)`));
           await updateCommands.updateAuto(options);
       }
     } catch (error) {

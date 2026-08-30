@@ -133,9 +133,11 @@ After `descix login` / bootstrap, all testing must use `node DeSciX_Core/descix-
 - **`setEnvironment(envName)`** — canonical way to persist environment to workspace.json.
 - **NEVER call `getApp(communityId, appId)`** — this method was removed in WS-CLI-V2.1-PURGE PR #7. `getAppByAppId(appId)` is the replacement. The meta-test `removed-methods-anti-regression.test.js` enforces this.
 
-### KB Mode — Git Mode only in CLI
-- `descix kb corpus sync` is the canonical KB sync path: corpus manifest → chunks → Pinecone
-- `descix kb build/chunk/sync` are lower-level Git Mode operations: local files → chunks → `kb_sync_chunks` → Pinecone
+### KB Mode — ONE sync surface
+- `descix kb corpus sync` is the ONLY KB sync surface: corpus manifest → chunks → Pinecone.
+- `descix kb create` creates the KB and is `kb corpus sync`'s dependency — `kb corpus sync` refuses and names it when the KB is not registered.
+- `descix kb chunk`, `descix kb sync`, `descix sync kb` and `descix update kb` are REMOVED. Each exits non-zero naming `descix kb corpus sync`. There is no alias and no fallback flag.
+- `descix update` covers app and site only; `update all`/`update auto` do not touch the KB.
 - Drive Mode (Drive → GCS → Pinecone) is server-side only for PWA users; never add Drive pipeline calls to CLI commands
 - `descix drive pull/push` manage the Drive source IPDoc store — they are the correct commands for Drive content authoring
 
