@@ -107,6 +107,13 @@ const CONTROLS = [
      '    serviceMode: true,\n', '',
      'loginDevice reachable from a stdio-constructed client (a silent hang the byte gate cannot see)',
      'script'],
+
+    // I3 SELF-REFERENCE — a shipped string tells a developer to run something the CLI lacks.
+    ['check-cli-self-reference', 'descix-cli/lib/commands/kb.js',
+     'Drive is not linked: set driveConfig.base_folder_id in .descix/workspace.json, or use --folder <id> for a one-time import.',
+     'Run "descix setup --dev" first to link Drive, or use --folder <id> for one-time import.',
+     'a shipped string names a command and a flag that do not exist',
+     'script'],
 ];
 
 /** How each control is run. Anything not listed runs as a filtered descix-cli test. */
@@ -114,6 +121,7 @@ const SCRIPT_GATES = {
     'check-registry-content-drift': ['scripts/check-registry-content-drift.mjs'],
     'check-mcp-stdout-purity': ['descix-cli/scripts/check-mcp-stdout-purity.mjs'],
     'check-mcp-headless-reachability': ['descix-cli/scripts/check-mcp-headless-reachability.mjs'],
+    'check-cli-self-reference': ['descix-cli/scripts/check-cli-self-reference.mjs'],
 };
 
 const runGate = (gate) => {
@@ -183,8 +191,8 @@ if (!suiteGreen) ok = false;
 
 console.log(
     `\n[check-gate-negative-controls] ran ${CONTROLS.length} controls: the origin/identity gates ` +
-    `in ${SUITE}, plus three standalone gates — registry content-drift, MCP stdout purity, and ` +
-    'MCP headless reachability. CATCHES: a gate that passes on a broken tree, and a harness that ' +
+    `in ${SUITE}, plus four standalone gates — registry content-drift, MCP stdout purity, ` +
+    'MCP headless reachability, and CLI self-reference. CATCHES: a gate that passes on a broken tree, and a harness that ' +
     'cannot read GREEN. DOES NOT READ: the packed tarball, gates outside those, or defect ' +
     'classes they do not assert. NEEDS THE NETWORK — the content-drift control queries the npm ' +
     'registry, so an offline run fails it for a reason that is not a gate defect. RUN BY: a ' +
