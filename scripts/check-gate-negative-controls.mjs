@@ -183,9 +183,11 @@ if (!suiteGreen) ok = false;
 
 console.log(
     `\n[check-gate-negative-controls] ran ${CONTROLS.length} controls: the origin/identity gates ` +
-    `in ${SUITE}, plus the standalone content-drift gate. CATCHES: a gate that passes on a ` +
-    'broken tree, and a harness that cannot read GREEN. DOES NOT READ: the packed tarball, ' +
-    'gates outside those, or defect classes they do not assert. NEEDS THE NETWORK — the ' +
-    'content-drift control queries the npm registry, so an offline run fails it for a reason ' +
-    'that is not a gate defect. RUN BY: a human — nothing runs this automatically.');
+    `in ${SUITE}, plus three standalone gates — registry content-drift, MCP stdout purity, and ` +
+    'MCP headless reachability. CATCHES: a gate that passes on a broken tree, and a harness that ' +
+    'cannot read GREEN. DOES NOT READ: the packed tarball, gates outside those, or defect ' +
+    'classes they do not assert. NEEDS THE NETWORK — the content-drift control queries the npm ' +
+    'registry, so an offline run fails it for a reason that is not a gate defect. RUN BY: a ' +
+    'human; the three standalone gates also run in .github/workflows/ci-gates.yml, but THIS ' +
+    'harness — the thing that proves they can fail — is not wired to anything.');
 process.exit(ok ? 0 : 1);
