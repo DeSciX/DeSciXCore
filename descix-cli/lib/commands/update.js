@@ -24,7 +24,7 @@ import crypto from 'crypto';
 import { DeSciXApiClient } from '../api-client.js';
 import { requireAuth } from '../auth-guard.js';
 import { WorkspaceConfig } from '../workspace-config.js';
-import { retiredKbSyncMessage } from './retired-kb-sync.js';
+import { refuseRetiredKbSync } from './retired-kb-sync.js';
 
 /**
  * Helper to load workspace context with options override
@@ -170,8 +170,13 @@ export async function updateAuto(options = {}) {
       case 'app':
         return await updateApp(options);
       case 'kb':
-        // kb sync has exactly ONE surface. Auto-detect must not silently do nothing here.
-        throw new Error(retiredKbSyncMessage('descix update kb'));
+        // kb sync has exactly ONE surface. Auto-detect lands here whenever the user is
+        // standing in the app's kb/ directory, so this path is REACHED in normal use —
+        // it is the single most likely way someone still tries to sync a KB via `update`.
+        // Refuses through the one owner so this branch and the explicit `update kb`
+        // branch cannot drift apart.
+        spinner.stop();
+        return refuseRetiredKbSync('descix update kb', chalk.red);
       case 'site':
         return await updateSite(options);
       case 'microservice':

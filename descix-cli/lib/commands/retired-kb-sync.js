@@ -58,6 +58,24 @@ export function retiredKbSyncMessage(invocation) {
 }
 
 /**
+ * Refuse a retired invocation LOUDLY and exit non-zero.
+ *
+ * MEASURED, not assumed: a `throw` from updateAuto is NOT swallowed — updateAuto's own catch
+ * prints the message before rethrowing, so both forms reach the user and exit 1. This exists
+ * for two smaller, real reasons: (1) ONE owner for the refusal, so the dispatcher branch and
+ * updateAuto's kb branch cannot drift into different wording or different exit codes; and
+ * (2) a deliberate retirement is not a crash, so it should not be framed as "✖ Update failed".
+ *
+ * @param {string} invocation - the retired invocation, e.g. 'descix update kb'
+ * @param {(s:string)=>string} red - chalk.red or equivalent
+ * @returns {never}
+ */
+export function refuseRetiredKbSync(invocation, red) {
+  console.error(red(`\n❌ ${retiredKbSyncMessage(invocation)}\n`));
+  process.exit(1);
+}
+
+/**
  * Register a retired invocation so it exits NON-ZERO naming the canonical surface.
  * Accepts and ignores any args/options the old surface took, so an old script fails with
  * this message rather than a confusing commander parse error.

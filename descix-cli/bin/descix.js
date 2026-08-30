@@ -28,7 +28,7 @@ import * as creditsCommands from '../lib/commands/credits.js';
 import * as airdropCommands from '../lib/commands/airdrop.js';
 import { runInit } from '../lib/commands/init.js';
 import * as updateCommands from '../lib/commands/update.js';
-import { registerRetiredKbSync, retiredKbSyncMessage, CANONICAL_KB_SYNC } from '../lib/commands/retired-kb-sync.js';
+import { registerRetiredKbSync, refuseRetiredKbSync, CANONICAL_KB_SYNC } from '../lib/commands/retired-kb-sync.js';
 import { runStatus } from '../lib/commands/status.js';
 import { runDoctor } from '../lib/commands/doctor.js';
 import { runHealth } from '../lib/commands/health.js';
@@ -4909,8 +4909,7 @@ const updateCommand = program
           await updateCommands.updateApp(options);
           break;
         case 'kb':
-          console.error(chalk.red(`\n❌ ${retiredKbSyncMessage('descix update kb')}\n`));
-          process.exit(1);
+          refuseRetiredKbSync('descix update kb', chalk.red);
           break;
         case 'site':
           await updateCommands.updateSite({ 
@@ -4923,8 +4922,11 @@ const updateCommand = program
           await updateCommands.updateAll(options);
           break;
         default:
-          // Auto-detect
-          console.log(chalk.gray(`  (knowledge bases are not included: use \`${CANONICAL_KB_SYNC}\`)`));
+          // Auto-detect. NO blanket "KBs are excluded" line here: auto resolves to exactly
+          // one target, and if that target is the KB the user gets the refusal by name.
+          // Printing the advisory first would announce an exclusion and then refuse for
+          // that exact reason — an advisory that fires on correct behaviour trains people
+          // to ignore advisories.
           await updateCommands.updateAuto(options);
       }
     } catch (error) {
