@@ -102,10 +102,26 @@ try {
     console.error('[MCP] No workspace config found — using defaults');
   }
 
-  // Create HTTP-only API client
+  // Create HTTP-only API client.
+  //
+  // serviceMode: true — THIS SERVER IS HEADLESS AND MUST DECLARE IT. Without it, a session
+  // whose token has expired falls through api-client.js's refresh handling into the INTERACTIVE
+  // device-login branch (:482-486): it logs to stdout and then `await`s `loginDevice`, opening a
+  // browser and blocking — inside a JSON-RPC request, on a transport with no human attached. The
+  // correct headless behaviour already existed one branch earlier at :474, which throws an error
+  // naming the fix; this server simply never opted into it. Measured 2026-08-30: the branch is
+  // reachable from here, and `serviceMode` was false because this construction site never set it.
+  //
+  // NO baseUrl HERE — and its absence is the fix, not an omission. This site used to pass
+  // `baseUrl: workspaceConfig?.apiUrl || null`, reading the LEGACY top-level workspace key. That
+  // is a second derivation of the origin, and worse than a preference: api-client.js:60 resolves
+  // through the origin owner ONLY `if (!this.baseUrl)`, so supplying one here PREVENTED the owner
+  // from ever running — no precedence, no DESCIX_API_URL, and no printed env line. Passing
+  // nothing lets the one owner resolve and announce it. (Contract rev 9: ruled a defect against
+  // I1 and folded into A1.)
   const apiClient = new DeSciXApiClient({
     projectRoot: workspaceRoot,
-    baseUrl: workspaceConfig?.apiUrl || null,
+    serviceMode: true,
   });
 
   // Load wallet credentials
