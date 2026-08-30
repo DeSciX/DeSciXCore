@@ -35,8 +35,12 @@
  *     copy matches the git tag it claims, and nothing about provenance attestations.
  *   · A package whose repo version is UNPUBLISHED is reported OK — correctly, there is no
  *     collision — but that is not a statement that its next publish will be sound.
- *   · It needs the network. An unreachable registry is exit 2, never a pass.
- *   · Nothing runs it automatically.
+ *   · It needs the network. An unreachable registry is exit 2, never a pass — and because it
+ *     now runs in CI, an outage fails the build rather than passing it. That is the intended
+ *     trade: "I could not measure" must never be reported as "clean".
+ *   · IT RUNS AUTOMATICALLY. .github/workflows/ci-gates.yml runs it on every push and pull
+ *     request, with nothing swallowing its exit status. It was a human-run script until
+ *     2026-08-30; that is no longer true and this line changed with the fact.
  *
  * USAGE:  node scripts/check-registry-content-drift.mjs [--json]
  * EXIT :  0 no drift · 1 drift found · 2 could not measure (never a silent pass)
@@ -154,6 +158,8 @@ console.log(
     '\n  COVERAGE BOUNDARY: compares the repo tree to the REGISTRY by packing both and hashing\n' +
     '  every shipped file. It does NOT check the registry copy against its git tag, does not read\n' +
     '  provenance attestations, and reports an unpublished repo version as OK (no collision — not\n' +
-    '  a promise about its next publish). Needs the network; an unreachable registry is exit 2.\n' +
-    '  Nothing runs it automatically.');
+    '  a promise about its next publish). Needs the network; an unreachable registry is exit 2,\n' +
+    '  which FAILS the build rather than passing it.\n' +
+    '  RUNS AUTOMATICALLY: .github/workflows/ci-gates.yml, every push and pull request, with no\n' +
+    '  continue-on-error and no condition — this gate\'s exit status is the job\'s.');
 process.exit(bad.length ? 1 : 0);
