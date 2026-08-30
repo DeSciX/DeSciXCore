@@ -137,7 +137,7 @@ After `descix login` / bootstrap, all testing must use `node DeSciX_Core/descix-
 - `descix kb corpus sync` is the ONLY KB sync surface: corpus manifest → chunks → Pinecone.
 - `descix kb create` creates the KB and is `kb corpus sync`'s dependency — `kb corpus sync` refuses and names it when the KB is not registered.
 - `descix kb chunk`, `descix kb sync`, `descix sync kb` and `descix update kb` are REMOVED. Each exits non-zero naming `descix kb corpus sync`. There is no alias and no fallback flag.
-- `descix update` covers app and site only; `update all`/`update auto` do not touch the KB.
+- `descix update` covers app and site only. `update all` does app+site and skips the KB; `update auto` REFUSES with a non-zero exit naming `descix kb corpus sync` when run from the app's `kb/` directory, because that is where it would previously have synced a KB.
 - Drive Mode (Drive → GCS → Pinecone) is server-side only for PWA users; never add Drive pipeline calls to CLI commands
 - `descix drive pull/push` manage the Drive source IPDoc store — they are the correct commands for Drive content authoring
 

@@ -8,9 +8,11 @@
  * compat fence is a path that still WORKS under an old name. These do not work at all.
  *
  * Why a module and not a literal at each site: two derivations of one fact is the general
- * form of mirror drift. The retired set is enumerated ONCE here; bin/descix.js registers
- * from this list and tests/kb-sync-single-surface.test.js asserts against this same list,
- * so a registration and its gate cannot disagree.
+ * form of mirror drift. The retired set is enumerated ONCE here. bin/descix.js registers by
+ * ITERATING this list via registerAllRetiredKbSync() -- it does not name any retired verb
+ * itself -- and tests/kb-sync-single-surface.test.js asserts against the same list. So the
+ * drift is closed in BOTH directions: a surface added to the list is registered, and a
+ * surface cannot be registered without being in the list.
  */
 
 /** The single canonical KB sync surface. Named in every refusal. */
@@ -24,11 +26,13 @@ export const CANONICAL_KB_CREATE = 'descix kb create';
  * `invocation` is what a user types; `parent` is the commander parent it hung off.
  */
 export const RETIRED_KB_SYNC_SURFACES = [
-  { invocation: 'descix sync',       name: 'sync',   parent: 'program', note: 'group had no surviving children' },
-  { invocation: 'descix sync kb',    name: 'kb',     parent: 'sync',    note: 'context-aware wrapper' },
-  { invocation: 'descix kb chunk',   name: 'chunk',  parent: 'kb',      note: 'low-level chunk step' },
-  { invocation: 'descix kb sync',    name: 'sync',   parent: 'kb',      note: 'low-level upsert step' },
-  { invocation: 'descix update kb',  name: 'kb',     parent: 'update',  note: 'dispatcher branch' },
+  { id: 'sync',      parent: 'program', name: 'sync',  invocation: 'descix sync',      registered: true  },
+  { id: 'sync.kb',   parent: 'sync',    name: 'kb',    invocation: 'descix sync kb',   registered: true  },
+  { id: 'kb.chunk',  parent: 'kb',      name: 'chunk', invocation: 'descix kb chunk',  registered: true  },
+  { id: 'kb.sync',   parent: 'kb',      name: 'sync',  invocation: 'descix kb sync',   registered: true  },
+  // registered:false -- `update` survives for app/site, so this one is a dispatcher branch
+  // inside the live `update` command rather than a commander registration of its own.
+  { id: 'update.kb', parent: 'update',  name: 'kb',    invocation: 'descix update kb', registered: false },
 ];
 
 /** Implementations deleted with those surfaces. No exported symbol survives without a caller (I3). */
@@ -100,4 +104,31 @@ export function registerRetiredKbSync(parent, name, invocation, red) {
       console.error(red(`\n❌ ${retiredKbSyncMessage(invocation)}\n`));
       process.exit(1);
     });
+}
+
+/**
+ * Register EVERY retired surface by iterating RETIRED_KB_SYNC_SURFACES.
+ *
+ * This is what makes the one-owner claim true rather than merely asserted: bin/descix.js
+ * calls this once and never names a retired verb itself, so a retired surface cannot be
+ * registered without appearing in the list above.
+ *
+ * @param {Record<string, import('commander').Command>} roots - seed parents, e.g. { program, kb }
+ * @param {(s:string)=>string} red - chalk.red or equivalent
+ * @returns {Record<string, import('commander').Command>} roots plus each registered surface by id
+ */
+export function registerAllRetiredKbSync(roots, red) {
+  const byId = { ...roots };
+  for (const s of RETIRED_KB_SYNC_SURFACES) {
+    if (!s.registered) continue;
+    const parent = byId[s.parent];
+    if (!parent) {
+      throw new Error(
+        `retired-kb-sync: no parent '${s.parent}' available for '${s.invocation}'. ` +
+        'Seed it in the roots map or order the list so the parent is registered first.'
+      );
+    }
+    byId[s.id] = registerRetiredKbSync(parent, s.name, s.invocation, red);
+  }
+  return byId;
 }

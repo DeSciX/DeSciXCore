@@ -26,6 +26,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { spawnSync } from 'child_process';
 import {
   RETIRED_KB_SYNC_SURFACES,
   DELETED_KB_SYNC_SYMBOLS,
@@ -136,31 +137,43 @@ test('I2: `update kb` refuses instead of dispatching to a sync implementation', 
   );
 });
 
-test('I2: every retired invocation is registered ONLY through the one owner helper', () => {
-  for (const s of RETIRED_KB_SYNC_SURFACES) {
-    if (s.parent === 'update') continue; // dispatcher branch, asserted above
-    const re = new RegExp(`registerRetiredKbSync\\([^)]*'${s.name}',\\s*'${s.invocation.replace(/ /g, ' ')}'`);
-    assert.match(
-      SRC,
-      re,
-      `${s.invocation} must be registered via registerRetiredKbSync so it exits non-zero naming ${CANONICAL_KB_SYNC}`
+test('I2: bin/descix.js names NO retired verb itself — it iterates the owner list', () => {
+  // The one-owner claim is only true if the entrypoint cannot register a surface that is
+  // absent from RETIRED_KB_SYNC_SURFACES. Hand-typed registerRetiredKbSync(parent,'chunk',...)
+  // calls would close list->registration drift but NOT registration->list drift.
+  assert.ok(
+    !/registerRetiredKbSync\s*\(/.test(SRC),
+    'bin/descix.js must not call registerRetiredKbSync per-surface; it must iterate the list'
+  );
+  const bootstraps = [...SRC.matchAll(/registerAllRetiredKbSync\s*\(/g)];
+  assert.equal(bootstraps.length, 1, 'exactly one registerAllRetiredKbSync call is expected');
+});
+
+test('I2 CONFORMANCE: every surface in the owner list actually refuses at runtime', () => {
+  // Driven off the exported list, not a hand-copy: adding a surface to the list without
+  // wiring it fails HERE. This runs the real CLI, so it measures the executing artifact.
+  const registered = RETIRED_KB_SYNC_SURFACES.filter((s) => s.registered);
+  assert.ok(registered.length >= 4, `fixture: expected >=4 registered surfaces, saw ${registered.length}`);
+
+  for (const surface of [...registered, ...RETIRED_KB_SYNC_SURFACES.filter((s) => !s.registered)]) {
+    const argv = surface.invocation.replace(/^descix /, '').split(' ');
+    const r = spawnSync(process.execPath, [ENTRY, ...argv], { encoding: 'utf-8' });
+    const out = `${r.stdout}${r.stderr}`;
+    assert.notEqual(r.status, 0, `${surface.invocation} must exit NON-ZERO (got ${r.status})`);
+    assert.ok(
+      out.includes(CANONICAL_KB_SYNC),
+      `${surface.invocation} must name ${CANONICAL_KB_SYNC}; got: ${out.slice(0, 200)}`
     );
   }
 });
 
-test('I2: updateAuto\'s kb branch refuses through the ONE owner, not a private copy', () => {
-  const upd = fs.readFileSync(path.join(CLI_ROOT, 'lib', 'commands', 'update.js'), 'utf-8');
-  // Auto-detect resolves to 'kb' whenever the user stands in the app's kb/ directory, so this
-  // branch is REACHED in normal use — it is the likeliest surviving way to try a KB sync.
-  assert.match(
-    upd,
-    /case 'kb':[\s\S]{0,600}?refuseRetiredKbSync\('descix update kb'/,
-    "updateAuto's kb branch must refuse via refuseRetiredKbSync"
-  );
-  assert.ok(
-    !/case 'kb':[\s\S]{0,400}?updateKB\(/.test(upd),
-    'updateAuto must not dispatch to a kb sync implementation'
-  );
+test('I2 CONFORMANCE: the canonical and kept verbs still succeed', () => {
+  // The negative half. Without this the suite would pass if the change deleted everything.
+  for (const argv of [['kb', 'corpus', 'sync', '--help'], ['kb', 'create', '--help'],
+                      ['kb', 'doctor', '--help'], ['update', '--help'], ['drive', 'pull', '--help']]) {
+    const r = spawnSync(process.execPath, [ENTRY, ...argv], { encoding: 'utf-8' });
+    assert.equal(r.status, 0, `descix ${argv.join(' ')} must still succeed (got ${r.status})`);
+  }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
