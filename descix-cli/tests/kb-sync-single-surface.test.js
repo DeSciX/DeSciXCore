@@ -218,9 +218,11 @@ test('I4: `kb create` is still registered', () => {
   );
 });
 
-test('I4: the unregistered-KB refusal names `descix kb create` and NOT `app init`', () => {
+test('I4: the unregistered-KB refusal names the verb that actually creates a KB', () => {
   const corpus = fs.readFileSync(path.join(CLI_ROOT, 'lib', 'commands', 'corpus.js'), 'utf-8');
-  assert.match(corpus, /descix kb create/, 'the refusal must name `descix kb create`');
+  // NOTE: no whole-FILE assertion here. A file-wide /descix kb create/ match would pass on
+  // the explanatory comment alone, so it would stay green even if the refusal stopped
+  // naming any verb at all — a gate that measures nothing. Scope to the refusal block.
   // Scope to the unregistered-KB refusal itself. corpus.js has a SEPARATE refusal about
   // community/product resolution that legitimately mentions app registration; I4 is about
   // the missing-KB path only, and widening this assertion would make the gate fire on
@@ -230,11 +232,11 @@ test('I4: the unregistered-KB refusal names `descix kb create` and NOT `app init
     corpus.indexOf('// 4. Process each manifest')
   );
   assert.ok(kbRefusal.length > 50, 'fixture: the KB refusal block must be located');
-  assert.match(kbRefusal, /descix kb create/, 'the KB refusal must name `descix kb create`');
-  assert.ok(
-    !/app init/.test(kbRefusal),
-    'the KB refusal must not name `app init` — that repairs an uninitialized APP, not a missing KB'
-  );
+  // MEASURED, and it reverses an earlier instruction: `descix kb create` invokes
+  // create_skeleton_kb (bin/descix.js:2087) and FAILS on a git-mode app with
+  // "no Drive folder". `descix app init` invokes init_git_mode_kb (:1163) and works.
+  // The refusal must name the verb that actually repairs the state it reports.
+  assert.match(kbRefusal, /descix app init/, 'the KB refusal must name `descix app init`');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
