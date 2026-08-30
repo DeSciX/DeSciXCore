@@ -28,7 +28,7 @@ import * as creditsCommands from '../lib/commands/credits.js';
 import * as airdropCommands from '../lib/commands/airdrop.js';
 import { runInit } from '../lib/commands/init.js';
 import * as updateCommands from '../lib/commands/update.js';
-import { registerRetiredKbSync, refuseRetiredKbSync, CANONICAL_KB_SYNC } from '../lib/commands/retired-kb-sync.js';
+import { registerAllRetiredKbSync, refuseRetiredKbSync, CANONICAL_KB_SYNC } from '../lib/commands/retired-kb-sync.js';
 import { runStatus } from '../lib/commands/status.js';
 import { runDoctor } from '../lib/commands/doctor.js';
 import { runHealth } from '../lib/commands/health.js';
@@ -466,11 +466,9 @@ airdropCommand
 
 // ============ Sync Commands: REMOVED ============
 // `sync assets`, `sync site` and `sync kb` are all gone, so the `sync` GROUP is gone with
-// them: a registered verb with no working children is dead weight. `sync` and `sync kb` now
-// exit non-zero naming `descix kb corpus sync`. Registered from the ONE owner list in
-// lib/commands/retired-kb-sync.js so a registration and its gate cannot drift apart.
-const retiredSyncCommand = registerRetiredKbSync(program, 'sync', 'descix sync', chalk.red);
-registerRetiredKbSync(retiredSyncCommand, 'kb', 'descix sync kb', chalk.red);
+// them: a registered verb with no working children is dead weight. Every retired surface is
+// registered in ONE place below (search registerAllRetiredKbSync), driven off the owner list
+// in lib/commands/retired-kb-sync.js -- this file names no retired verb itself.
 
 // ============ Community/App Commands ============
 
@@ -2186,8 +2184,10 @@ kbCommand
 // `kb chunk` and `kb sync` (low-level Git-mode steps) are REMOVED. Their implementations
 // runKbChunk/runKbSync are deleted from lib/commands/kb.js. Both names exit non-zero naming
 // `descix kb corpus sync`.
-registerRetiredKbSync(kbCommand, 'chunk', 'descix kb chunk', chalk.red);
-registerRetiredKbSync(kbCommand, 'sync', 'descix kb sync', chalk.red);
+// EVERY retired kb-sync surface is registered here, by ITERATING the owner list -- no verb
+// name is typed in this file. Adding a surface to RETIRED_KB_SYNC_SURFACES registers it;
+// nothing can be registered without being in that list.
+registerAllRetiredKbSync({ program, kb: kbCommand }, chalk.red);
 
 
 // app records — APP DATA PLANE structured record store (CEO-D-2026-06-02-APP-DATA-PLANE)
