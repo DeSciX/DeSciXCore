@@ -180,7 +180,7 @@ export async function updateAuto(options = {}) {
       case 'site':
         return await updateSite(options);
       case 'microservice':
-        console.log(chalk.yellow('  Microservice deployment not supported via update. Use \'descix deploy\'.\n'));
+        console.log(chalk.yellow('  Microservice deployment not supported via update. Use \'descix microservice deploy\'.\n'));
         return { success: false, reason: 'use_deploy' };
       default:
         console.log(chalk.yellow(`  Unknown sync type: ${syncType}. Use 'descix update app/kb/site' explicitly.\n`));
@@ -281,7 +281,7 @@ export async function updateApp(options = {}) {
     }
     
     if (!baseFolderId) {
-      throw new Error('No base Drive folder configured. Run descix login --setup first.');
+      throw new Error('No base Drive folder configured: set driveConfig.base_folder_id in .descix/workspace.json.');
     }
     
     // Navigate to assets folder: {base}/{community}/{app}/assets
