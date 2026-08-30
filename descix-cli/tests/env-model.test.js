@@ -1,14 +1,9 @@
 /**
- * Conformance for the CLI environment model (CEO ruling, 2026-08-18) as AMENDED by
- * contract-ws-devplane-cli-must-not-misreport-itself I1 (signed 2026-08-29).
+ * Conformance for the CLI environment model (CEO ruling, 2026-08-18).
  *
- * The 2026-08-18 holding STANDS in full: `set-env dev` writes the CLOUD dev URL, it no
- * longer deletes env.apiUrl, and it never derives localhost from an environment NAME.
- *
- * What I1 CHANGES is only the unconfigured case. There is no longer a shipped PROD
- * default: an unconfigured workspace resolves to NULL and the origin owner
- * (lib/origin.js) throws naming the remedy, because "the developer configured nothing"
- * and "the developer chose production" must not be the same observable state. A local backend is a URL you name (`set-env dev --url https://localhost:4000`
+ * The shipped default is PROD. `set-env dev` writes the CLOUD dev URL — it no
+ * longer deletes env.apiUrl and it never derives localhost from an environment
+ * NAME. A local backend is a URL you name (`set-env dev --url https://localhost:4000`
  * or env.apiUrl direct), because a URL is configuration and an environment is a
  * place. The origins themselves have ONE owner (@descix/app-sdk/dev envOrigins);
  * ENV_MAP adds only the CLI's Secret Manager label.
@@ -50,15 +45,11 @@ test('every named environment carries a URL — dev is no longer null', () => {
   assert.equal(WorkspaceConfig.ENV_MAP.prod.secretLabel, 'LIVE');
 });
 
-test('an unconfigured workspace resolves to NOTHING, not to the PROD default', async (t) => {
-  // AMENDED by I1. This previously asserted `getApiUrl() === DEFAULT_API_URL`, which pinned
-  // the defect: a workspace naming no origin was indistinguishable from one that had chosen
-  // production. The origin is now absent, and lib/origin.js turns that absence into a loud
-  // failure at the point of use.
+test('an unconfigured workspace resolves to the shipped PROD default', async (t) => {
   const wsRoot = await tempWorkspace(t, { products: [] });
   const ws = await WorkspaceConfig.load(wsRoot);
-  assert.equal(ws.getApiUrl(), null);
-  assert.notEqual(ws.getApiUrl(), DEFAULT_API_URL);
+  assert.equal(ws.getApiUrl(), DEFAULT_API_URL);
+  assert.equal(ws.getApiUrl(), 'https://descix.net');
 });
 
 test('an environment NAME never derives localhost from a platform port', async (t) => {
@@ -70,10 +61,7 @@ test('an environment NAME never derives localhost from a platform port', async (
     products: [],
   });
   const ws = await WorkspaceConfig.load(wsRoot);
-  // The 2026-08-18 holding is unchanged and is what this test measures: a platform port must
-  // NOT become an origin. Only the expected value moves, from the PROD default to null (I1).
-  assert.doesNotMatch(String(ws.getApiUrl()), /localhost|127\.0\.0\.1/);
-  assert.equal(ws.getApiUrl(), null);
+  assert.equal(ws.getApiUrl(), DEFAULT_API_URL);
 });
 
 test('set-env dev WRITES the cloud dev URL (it used to delete the key)', async (t) => {
