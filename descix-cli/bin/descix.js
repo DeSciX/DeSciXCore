@@ -67,6 +67,28 @@ function progress(options, ...args) {
   else console.log(...args);
 }
 
+/**
+ * THE ONE OWNER of "a command threw, and the process must stop saying why".
+ *
+ * WHY THIS EXISTS (measured 2026-08-30 on the SHIPPED artifact): 27 command actions ended in a
+ * bare `catch (error) { process.exit(1); }`. `DESCIX_API_URL=not-a-url descix credits balance`
+ * exited 1 with ZERO BYTES on stdout AND stderr — the origin owner had built an
+ * OriginInvalidError carrying the full remedy text and this handler threw it away. The contract
+ * row "a configured-but-invalid origin FAILS LOUD naming the fix" was met in the module and
+ * unmet on the artifact, because a message nobody prints is not a message.
+ *
+ * That is this contract's own bug class — silence — reaching the developer through the
+ * contract's own remedy path. A handler that discards the reason is indistinguishable from a
+ * crash, and it trains developers to believe the CLI has no error messages.
+ *
+ * @param {Error} error - the error that ended the command
+ */
+function fail(error) {
+  const message = (error && error.message) ? error.message : String(error);
+  console.error(chalk.red(`\n${message}\n`));
+  process.exit(1);
+}
+
 const program = new Command();
 
 program
@@ -125,7 +147,7 @@ program
         await authCommands.loginDevice(options);
       }
     } catch (error) {
-      process.exit(1);
+      fail(error);
     }
   });
 
@@ -136,7 +158,7 @@ program
     try {
       await authCommands.logout();
     } catch (error) {
-      process.exit(1);
+      fail(error);
     }
   });
 
@@ -149,7 +171,7 @@ program
     try {
       await authCommands.adminLogin(options);
     } catch (error) {
-      process.exit(1);
+      fail(error);
     }
   });
 
@@ -192,7 +214,7 @@ program
       await requireAuth(apiClient);
       await authCommands.whoami();
     } catch (error) {
-      process.exit(1);
+      fail(error);
     }
   });
 
@@ -203,7 +225,7 @@ program
     try {
       await authCommands.reconnect();
     } catch (error) {
-      process.exit(1);
+      fail(error);
     }
   });
 
@@ -297,7 +319,7 @@ buyCommand
     try {
       await buyCommands.createQuote(options);
     } catch (error) {
-      process.exit(1);
+      fail(error);
     }
   });
 
@@ -308,7 +330,7 @@ buyCommand
     try {
       await buyCommands.checkStatus(quoteId);
     } catch (error) {
-      process.exit(1);
+      fail(error);
     }
   });
 
@@ -324,7 +346,7 @@ buyCommand
         initialInterval: parseInt(options.interval)
       });
     } catch (error) {
-      process.exit(1);
+      fail(error);
     }
   });
 
@@ -350,7 +372,7 @@ creditsCommand
     try {
       await creditsCommands.showBalance();
     } catch (error) {
-      process.exit(1);
+      fail(error);
     }
   });
 
@@ -362,7 +384,7 @@ creditsCommand
     try {
       await creditsCommands.showHistory(options);
     } catch (error) {
-      process.exit(1);
+      fail(error);
     }
   });
 
@@ -377,7 +399,7 @@ creditsCommand
     try {
       await creditsCommands.buyCredits({ usd: options.usd, returnBase: options.returnBase });
     } catch (error) {
-      process.exit(1);
+      fail(error);
     }
   });
 
@@ -391,7 +413,7 @@ creditsCommand
     try {
       await creditsCommands.grantCredits(options);
     } catch (error) {
-      process.exit(1);
+      fail(error);
     }
   });
 
@@ -405,7 +427,7 @@ creditsCommand
     try {
       await creditsCommands.refundCredits(options);
     } catch (error) {
-      process.exit(1);
+      fail(error);
     }
   });
 
@@ -431,7 +453,7 @@ airdropCommand
     try {
       await airdropCommands.executeQueue(options);
     } catch (error) {
-      process.exit(1);
+      fail(error);
     }
   });
 
@@ -4293,7 +4315,7 @@ configCommand
     try {
       await configCommands.show();
     } catch (error) {
-      process.exit(1);
+      fail(error);
     }
   });
 
@@ -4306,7 +4328,7 @@ configCommand
     try {
       await configCommands.setUrl(url, options);
     } catch (error) {
-      process.exit(1);
+      fail(error);
     }
   });
 
@@ -4322,7 +4344,7 @@ configCommand
     try {
       await configCommands.init(options.env, options);
     } catch (error) {
-      process.exit(1);
+      fail(error);
     }
   });
 
@@ -4335,7 +4357,7 @@ configCommand
     try {
       await configCommands.setEnv(env, options);
     } catch (error) {
-      process.exit(1);
+      fail(error);
     }
   });
 
@@ -4347,7 +4369,7 @@ configCommand
     try {
       await configCommands.setGatewayPort(port === 'none' ? null : port);
     } catch (error) {
-      process.exit(1);
+      fail(error);
     }
   });
 
@@ -4362,7 +4384,7 @@ configCommand
     try {
       await configCommands.setDevCerts(options);
     } catch (error) {
-      process.exit(1);
+      fail(error);
     }
   });
 
@@ -4374,7 +4396,7 @@ configCommand
     try {
       await configCommands.setPowchUrl(url === 'none' ? null : url);
     } catch (error) {
-      process.exit(1);
+      fail(error);
     }
   });
 
@@ -4386,7 +4408,7 @@ configCommand
     try {
       await configCommands.setSiteUrl(url === 'none' ? null : url);
     } catch (error) {
-      process.exit(1);
+      fail(error);
     }
   });
 
@@ -4621,7 +4643,7 @@ mcpCommand
     try {
       await mcpCommands.init();
     } catch (error) {
-      process.exit(1);
+      fail(error);
     }
   });
 
@@ -4633,7 +4655,7 @@ mcpCommand
     try {
       await mcpCommands.test(options);
     } catch (error) {
-      process.exit(1);
+      fail(error);
     }
   });
 
@@ -4644,7 +4666,7 @@ mcpCommand
     try {
       await mcpCommands.config();
     } catch (error) {
-      process.exit(1);
+      fail(error);
     }
   });
 
@@ -4655,7 +4677,7 @@ mcpCommand
     try {
       await mcpCommands.quickstart();
     } catch (error) {
-      process.exit(1);
+      fail(error);
     }
   });
 
@@ -4903,7 +4925,7 @@ const updateCommand = program
           await updateCommands.updateAuto(options);
       }
     } catch (error) {
-      process.exit(1);
+      fail(error);
     }
   });
 

@@ -254,7 +254,7 @@ The PWA Workspace Builder allows users to configure which apps to sync to their 
 ### Setup Command
 
 ```bash
-descix mcp quickstart [--dev]
+descix mcp quickstart
 ```
 
 **Flow:**
@@ -380,7 +380,7 @@ The CLI does not create apps directly. Users should:
 
 ```bash
 # After app is created via PWA:
-descix mcp quickstart --dev            # Hydrate workspace (first time)
+descix mcp quickstart                  # Hydrate workspace (first time)
 descix kb corpus sync               # Pull, chunk, sync KB
 descix site upload -a app   # Deploy static site
 ```

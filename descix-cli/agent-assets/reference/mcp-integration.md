@@ -233,7 +233,7 @@ const result = await execute_remote_command({
 ### 5.1 Initial Setup Phase
 
 ```
-descix mcp quickstart [--dev]
+descix mcp quickstart
        │
        ▼
    Prerequisites Check (gcloud, ADC)
@@ -395,7 +395,7 @@ descix microservice vectorize -r SERVICE_README.md
 **Solution:**
 ```bash
 # Run setup first
-descix mcp quickstart --dev
+descix mcp quickstart
 
 # Or ensure you're in the workspace root
 cd /path/to/workspace

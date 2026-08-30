@@ -21,12 +21,15 @@ npm install -g @descix/cli
     ```
     This will guide you through connecting your Google Drive and setting up your local environment.
 
-    **Development Mode**:
-    If you are developing locally or against a test environment, you can use the `--dev` flag:
+    **Choosing an environment**:
+    The `--dev` flag has been REMOVED. Its absence silently meant production, so the most common
+    invocation targeted PROD without saying so. Name the environment instead:
     ```bash
-    npx descix setup --dev
+    descix config init --env dev      # or demo, or prod
     ```
-    This defaults to `https://localhost:4000` unless configured otherwise.
+    An unconfigured workspace resolves to the declared default, PROD, and every network-bound
+    command prints the environment, origin and source it resolved on stderr. For a local backend,
+    name the URL: `descix config set-env dev --url https://localhost:4000`.
 
 3.  **Check your status**:
     ```bash

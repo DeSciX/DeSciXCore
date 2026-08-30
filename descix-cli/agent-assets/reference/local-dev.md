@@ -171,10 +171,28 @@ the survey outranks the paper for exactly the reader who does not yet know the p
 
 ### 3.2. Target resolution (one owner, explicit-first)
 
-| Target | 1. flag | 2. workspace | 3. derived | 4. default |
+| Target | 1. flag / env | 2. workspace | 3. global | 4. default |
 |---|---|---|---|---|
-| **API** | `--api-url` / `DESCIX_API_URL` | `env.apiUrl` | `env.platform.microservice.port` | **PROD** (`https://descix.net`) |
+| **API** | `--api-url` / `--env` / `DESCIX_API_URL` | `env.apiUrl`, then the legacy top-level `apiUrl` | `~/.descix/config.json` `api_url` | **the declared default: PROD** |
 | **Shell** (`/`) | `--site-url` | `env.siteUrl` | **the API origin, when the API is remote** | `env.platform.site.port`, else fail loud |
+
+**There is no port-derived step for the API.** An environment NAME never becomes an origin, and
+`env.platform.microservice.port` is not consulted: a local backend is a URL you name
+(`descix config set-env dev --url https://localhost:4000`, or `env.apiUrl` direct). The single
+owner of this order is `lib/origin.js::PRECEDENCE`; this table is a description of it, not a
+second copy of the rule.
+
+**Every resolution carries its SOURCE, and every network-bound command prints it on stderr** —
+always, not only when it lands on the default:
+
+```
+env: prod (default — no workspace config; `descix config init --env dev` targets DEV) <prod origin>
+env: dev (.descix/workspace.json env.apiUrl) https://dev.descix.net
+```
+
+An unconfigured workspace resolving to PROD is the shipped product's declared target, not a
+fallback; what makes it legitimate is that it is announced. A configured-but-unusable origin is
+a different case and FAILS LOUD naming the remedy, rather than quietly becoming the default.
 
 The derived Shell rule is the important one: point the API at a cloud environment and the shell comes from that same origin, so one origin carries shell + app + `/apifront` with nothing else configured. A stale `env.platform.site` block does not hijack the root once the API is remote. Platform developers opt IN to a local shell by naming it (`--site-url https://localhost:5174` or `env.siteUrl`).
 

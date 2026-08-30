@@ -231,7 +231,7 @@ These commands provide granular control over the V2 local-first pipeline.
 ### Setup Command
 
 ```bash
-descix mcp quickstart [--dev]
+descix mcp quickstart
 ```
 
 Flow:
