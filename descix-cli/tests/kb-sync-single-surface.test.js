@@ -131,8 +131,8 @@ test('I2: `update kb` refuses instead of dispatching to a sync implementation', 
   );
   assert.match(
     SRC,
-    /retiredKbSyncMessage\('descix update kb'\)/,
-    '`update kb` must fail loud naming the canonical surface'
+    /refuseRetiredKbSync\('descix update kb'/,
+    '`update kb` must fail loud naming the canonical surface, via the one owner'
   );
 });
 
@@ -146,6 +146,21 @@ test('I2: every retired invocation is registered ONLY through the one owner help
       `${s.invocation} must be registered via registerRetiredKbSync so it exits non-zero naming ${CANONICAL_KB_SYNC}`
     );
   }
+});
+
+test('I2: updateAuto\'s kb branch refuses through the ONE owner, not a private copy', () => {
+  const upd = fs.readFileSync(path.join(CLI_ROOT, 'lib', 'commands', 'update.js'), 'utf-8');
+  // Auto-detect resolves to 'kb' whenever the user stands in the app's kb/ directory, so this
+  // branch is REACHED in normal use — it is the likeliest surviving way to try a KB sync.
+  assert.match(
+    upd,
+    /case 'kb':[\s\S]{0,600}?refuseRetiredKbSync\('descix update kb'/,
+    "updateAuto's kb branch must refuse via refuseRetiredKbSync"
+  );
+  assert.ok(
+    !/case 'kb':[\s\S]{0,400}?updateKB\(/.test(upd),
+    'updateAuto must not dispatch to a kb sync implementation'
+  );
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
