@@ -24,7 +24,7 @@ import crypto from 'crypto';
 import { DeSciXApiClient } from '../api-client.js';
 import { requireAuth } from '../auth-guard.js';
 import { WorkspaceConfig } from '../workspace-config.js';
-import { runKbChunk, runKbSync } from './kb.js';
+import { retiredKbSyncMessage } from './retired-kb-sync.js';
 
 /**
  * Helper to load workspace context with options override
@@ -170,7 +170,8 @@ export async function updateAuto(options = {}) {
       case 'app':
         return await updateApp(options);
       case 'kb':
-        return await updateKB(options);
+        // kb sync has exactly ONE surface. Auto-detect must not silently do nothing here.
+        throw new Error(retiredKbSyncMessage('descix update kb'));
       case 'site':
         return await updateSite(options);
       case 'microservice':
@@ -346,61 +347,8 @@ export async function updateApp(options = {}) {
   }
 }
 
-/**
- * Update knowledge base (Git Mode: local chunk → kb_sync_chunks → Pinecone)
- *
- * Drive Mode (Drive → GCS → Pinecone) is server-side only for PWA users.
- * CLI mandates Git Mode: local files are chunked locally and upserted directly.
- *
- * Convention: KB files are in {appPath}/kb/{kbId}/
- */
-export async function updateKB(options = {}) {
-  const apiClient = new DeSciXApiClient();
-  await requireAuth(apiClient);
-
-  const spinner = ora('Loading context...').start();
-
-  try {
-    const ctx = await loadWorkspaceContext(options);
-    const kbId = ctx.kbId;
-
-    spinner.succeed(`KB: ${ctx.appId}/${kbId}`);
-
-    // Resolve community_id from Products when missing (Unified Registry - app_id only)
-    if (!ctx.communityId) {
-      try {
-        const productCtx = await apiClient.invoke('get_product_context', { app_id: ctx.appId });
-        ctx.communityId = productCtx?.community_id || productCtx?.message?.community_id;
-        if (!ctx.communityId) {
-          throw new Error(`Product "${ctx.appId}" not found in Products registry. Run bootstrap.`);
-        }
-      } catch (err) {
-        if (err.message?.includes('not found')) throw err;
-        throw new Error(`Could not resolve community for app "${ctx.appId}". Run bootstrap.`);
-      }
-    }
-
-    console.log(chalk.cyan('\n📤 Updating Knowledge Base\n'));
-    console.log(chalk.gray(`  Community: ${ctx.communityId}`));
-    console.log(chalk.gray(`  App: ${ctx.appId}`));
-    console.log(chalk.gray(`  KB: ${kbId}`));
-    console.log(chalk.gray(`  Source: ${path.join(ctx.appPath, 'kb', kbId)}\n`));
-
-    // Git Mode: chunk local files → kb_sync_chunks → Pinecone
-    // (Drive → GCS → Pinecone is server-side only for PWA users)
-    const kbOptions = { ...options, app: ctx.appId, community: ctx.communityId, kb: kbId, quiet: true };
-    await runKbChunk(kbOptions);
-    await runKbSync(apiClient, kbOptions);
-
-    console.log(chalk.green('\n✓ Knowledge base updated successfully\n'));
-    return { success: true };
-
-  } catch (error) {
-    spinner.fail('Update failed');
-    console.error(chalk.red(`\n❌ ${error.message}\n`));
-    throw error;
-  }
-}
+// updateKB is DELETED. `update kb` refuses and names `descix kb corpus sync`; `update all`
+// and `update auto` no longer touch the KB. No exported symbol survives without a caller.
 
 /**
  * Update site (deploy to GCS)
@@ -592,16 +540,9 @@ export async function updateAll(options = {}) {
       // assets folder doesn't exist, skip
     }
     
-    // Check for KB folder and update if exists
-    const kbDir = path.join(ctx.appPath, 'kb');
-    try {
-      await fs.access(kbDir);
-      console.log(chalk.white('\n─── Knowledge Base ───\n'));
-      results.kb = await updateKB(options);
-    } catch {
-      // kb folder doesn't exist, skip
-    }
-    
+    // Knowledge bases are NOT part of `update all`. The one KB sync surface is
+    // `descix kb corpus sync` (git-manifest); this composite keeps doing app and site.
+
     // Check for site folder and update if exists
     const siteDir = path.join(ctx.appPath, 'site');
     try {
@@ -626,7 +567,6 @@ export async function updateAll(options = {}) {
 export default {
   updateAuto,
   updateApp,
-  updateKB,
   updateSite,
   updateAll
 };

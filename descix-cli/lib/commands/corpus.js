@@ -392,13 +392,13 @@ export async function runCorpusSync(apiClient, options) {
     const missingKbNames = requestedKbNames.filter(name => !registeredKbNames.has(name));
     if (missingKbNames.length > 0) {
       // Hard-fail: every KB we are about to sync into must already be registered in Firestore.
-      // No hardcoded fallback. The user runs `descix app init` (or equivalent) to register first.
+      // No hardcoded fallback. The user creates the KB first with `descix kb create`.
       spinner.fail(`Unregistered KB(s) for app "${appId}"`);
       throw new Error(
         `KnowledgeBase document(s) missing in Firestore for app "${appId}": ${missingKbNames.join(', ')}.\n` +
         `Registered KBs for this app: ${[...registeredKbNames].join(', ') || '(none)'}.\n` +
         `Syncing vectors into Pinecone without a matching KB doc would orphan them (chat queries hard-fail).\n` +
-        `Fix: run \`descix app init -a ${appId}\` (creates the default KB doc) or extend the app's KB set first.`
+        `Fix: create it first with \`descix kb create -c <community_id> -a ${appId} -k <kb_name>\`.`
       );
     }
 
