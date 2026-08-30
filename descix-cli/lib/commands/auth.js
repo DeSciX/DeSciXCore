@@ -15,6 +15,7 @@ import { requireAuth } from '../auth-guard.js';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import * as fs from 'fs/promises';
+import { diag } from '../diagnostic-log.js';
 
 const execAsync = promisify(exec);
 const POLL_INTERVAL_MS = 3000; // 3 seconds
@@ -141,13 +142,13 @@ async function pollDeviceLogin(apiClient, deviceCode, onStatus = null) {
 export async function loginDevice(options = {}) {
   const apiClient = new DeSciXApiClient({ baseUrl: options.url });
   
-  console.log(chalk.cyan('\n🔐 DeSciX Device Login\n'));
+  diag(chalk.cyan('\n🔐 DeSciX Device Login\n'));
   
   const spinner = ora('Requesting device login...').start();
   
   // Ensure we have the base URL resolved
   await apiClient.ensureBaseUrl();
-  console.log(chalk.gray(`   API: ${apiClient.baseUrl}\n`));
+  diag(chalk.gray(`   API: ${apiClient.baseUrl}\n`));
   
   try {
     // Detect workspace root
@@ -172,8 +173,8 @@ export async function loginDevice(options = {}) {
           WalletFileManager.getProjectWalletPath(workspaceRoot));
         oauthLeg = await prepareOAuthLeg(apiClient, existingWallet, options.scope);
       } catch (e) {
-        console.log(chalk.yellow(`\n⚠️  OAuth token leg unavailable (${e.message}).`));
-        console.log(chalk.yellow('   Proceeding with wallet-signature login only.\n'));
+        diag(chalk.yellow(`\n⚠️  OAuth token leg unavailable (${e.message}).`));
+        diag(chalk.yellow('   Proceeding with wallet-signature login only.\n'));
       }
     }
 
@@ -194,14 +195,14 @@ export async function loginDevice(options = {}) {
 
     spinner.succeed('Device login request created');
 
-    console.log(chalk.yellow('\n📱 Browser will open automatically...\n'));
-    console.log(chalk.white('In the browser, you will need to:'));
-    console.log(chalk.gray('  1. Enter your email address'));
-    console.log(chalk.gray('  2. Verify your email with the code sent'));
-    console.log(chalk.gray('  3. Accept the Terms of Service'));
-    console.log(chalk.gray('  4. Connect your crypto wallet'));
-    console.log(chalk.gray('  5. Sign the message to prove wallet ownership'));
-    console.log('');
+    diag(chalk.yellow('\n📱 Browser will open automatically...\n'));
+    diag(chalk.white('In the browser, you will need to:'));
+    diag(chalk.gray('  1. Enter your email address'));
+    diag(chalk.gray('  2. Verify your email with the code sent'));
+    diag(chalk.gray('  3. Accept the Terms of Service'));
+    diag(chalk.gray('  4. Connect your crypto wallet'));
+    diag(chalk.gray('  5. Sign the message to prove wallet ownership'));
+    diag('');
 
     spinner.start('Opening browser...');
 
@@ -211,10 +212,10 @@ export async function loginDevice(options = {}) {
     const opened = await openBrowser(verificationUrl);
     if (opened) {
       spinner.succeed('Browser opened');
-      console.log(chalk.yellow(`\nURL: ${verificationUrl}\n`));
+      diag(chalk.yellow(`\nURL: ${verificationUrl}\n`));
     } else {
       spinner.warn('Could not open browser automatically');
-      console.log(chalk.yellow(`\nPlease open: ${verificationUrl}\n`));
+      diag(chalk.yellow(`\nPlease open: ${verificationUrl}\n`));
     }
 
     // Poll for completion
@@ -254,12 +255,12 @@ export async function loginDevice(options = {}) {
           tokenEndpointBase: apiClient.baseUrl,
         });
       } catch (e) {
-        console.log(chalk.yellow(`\n⚠️  OAuth code redemption failed: ${e.message}`));
-        console.log(chalk.yellow('   Wallet-signature login is still valid; re-run "descix login" for OAuth tokens.\n'));
+        diag(chalk.yellow(`\n⚠️  OAuth code redemption failed: ${e.message}`));
+        diag(chalk.yellow('   Wallet-signature login is still valid; re-run "descix login" for OAuth tokens.\n'));
       }
     } else if (oauthLeg && !credentials.oauth_code) {
-      console.log(chalk.yellow('\n⚠️  Server did not issue an OAuth code (device→OAuth bridge not available).'));
-      console.log(chalk.yellow('   Wallet-signature login is still valid.\n'));
+      diag(chalk.yellow('\n⚠️  Server did not issue an OAuth code (device→OAuth bridge not available).'));
+      diag(chalk.yellow('   Wallet-signature login is still valid.\n'));
     }
 
     const walletPath = WalletFileManager.getProjectWalletPath(workspaceRoot);
@@ -267,11 +268,11 @@ export async function loginDevice(options = {}) {
 
     spinner.succeed(chalk.green('Login successful!'));
     if (walletData.oauth) {
-      console.log(chalk.green('   OAuth tokens cached (30-day silent refresh — gcloud-style).'));
-      console.log(chalk.gray(`   Scope: ${walletData.oauth.scope}`));
+      diag(chalk.green('   OAuth tokens cached (30-day silent refresh — gcloud-style).'));
+      diag(chalk.gray(`   Scope: ${walletData.oauth.scope}`));
     }
-    console.log(chalk.cyan(`\n✅ Credentials saved to:`));
-    console.log(chalk.gray(`   ${walletPath}\n`));
+    diag(chalk.cyan(`\n✅ Credentials saved to:`));
+    diag(chalk.gray(`   ${walletPath}\n`));
     
     // Sync auto-purchase apps
     spinner.start('Syncing app entitlements...');
@@ -293,28 +294,28 @@ export async function loginDevice(options = {}) {
       }
     } catch (error) {
       spinner.warn(chalk.yellow('Could not sync app entitlements'));
-      console.log(chalk.gray(`   ${error.message}\n`));
+      diag(chalk.gray(`   ${error.message}\n`));
     }
     
-    console.log(chalk.white('You can now use all DeSciX CLI commands!\n'));
+    diag(chalk.white('You can now use all DeSciX CLI commands!\n'));
 
   } catch (error) {
     spinner.fail(chalk.red('Login failed'));
     console.error(chalk.red(error.message));
     
     if (error.message.includes('expired')) {
-      console.log(chalk.yellow('💡 Tip: Device codes expire after 15 minutes.'));
-      console.log(chalk.yellow('   Run the login command again to get a new code.\n'));
+      diag(chalk.yellow('💡 Tip: Device codes expire after 15 minutes.'));
+      diag(chalk.yellow('   Run the login command again to get a new code.\n'));
     } else {
-      console.log(chalk.yellow('💡 Tip: Make sure you:'));
-      console.log(chalk.yellow('   - Have an internet connection'));
-      console.log(chalk.yellow('   - Can access the DeSciX platform'));
-      console.log(chalk.yellow('   - Complete all steps in the browser'));
-      console.log(chalk.yellow(`   - API URL is correct: ${apiClient.baseUrl || 'unknown'}`));
+      diag(chalk.yellow('💡 Tip: Make sure you:'));
+      diag(chalk.yellow('   - Have an internet connection'));
+      diag(chalk.yellow('   - Can access the DeSciX platform'));
+      diag(chalk.yellow('   - Complete all steps in the browser'));
+      diag(chalk.yellow(`   - API URL is correct: ${apiClient.baseUrl || 'unknown'}`));
       if (apiClient.baseUrl?.includes('localhost')) {
-        console.log(chalk.yellow('   - Local backend server is running'));
+        diag(chalk.yellow('   - Local backend server is running'));
       }
-      console.log('');
+      diag('');
     }
     throw error;
   }
@@ -324,11 +325,11 @@ export async function loginDevice(options = {}) {
  * Direct wallet login command (not yet implemented)
  */
 export async function loginWallet() {
-  console.log(chalk.cyan('\n🔐 DeSciX Wallet Login\n'));
-  console.log(chalk.yellow('\n⚠️  Direct wallet login requires a Web3 provider.\n'));
-  console.log(chalk.white('For CLI/MCP, device login is recommended:\n'));
-  console.log(chalk.cyan('  descix login\n'));
-  console.log(chalk.gray('This opens your browser where you can connect your wallet.\n'));
+  diag(chalk.cyan('\n🔐 DeSciX Wallet Login\n'));
+  diag(chalk.yellow('\n⚠️  Direct wallet login requires a Web3 provider.\n'));
+  diag(chalk.white('For CLI/MCP, device login is recommended:\n'));
+  diag(chalk.cyan('  descix login\n'));
+  diag(chalk.gray('This opens your browser where you can connect your wallet.\n'));
   throw new Error('Direct wallet login not yet implemented for CLI. Use device login instead.');
 }
 
@@ -379,10 +380,10 @@ export async function reconnect() {
     await WalletFileManager.saveWalletFile(walletPath, updatedWalletData);
     
     spinner.succeed(chalk.green('Reconnected successfully!'));
-    console.log(chalk.cyan(`\n✅ Status: ${result.auth_status || 'CONNECTED'}`));
-    console.log(chalk.gray(`   User: ${sessionInfo?.email || sessionInfo?.id || walletInfo.userId}`));
-    console.log(chalk.gray(`   Wallet: ${walletInfo.walletAddress?.substring(0, 10)}...`));
-    console.log(chalk.gray(`   Session refreshed\n`));
+    diag(chalk.cyan(`\n✅ Status: ${result.auth_status || 'CONNECTED'}`));
+    diag(chalk.gray(`   User: ${sessionInfo?.email || sessionInfo?.id || walletInfo.userId}`));
+    diag(chalk.gray(`   Wallet: ${walletInfo.walletAddress?.substring(0, 10)}...`));
+    diag(chalk.gray(`   Session refreshed\n`));
     
   } catch (error) {
     spinner.fail(chalk.red('Reconnection failed'));
@@ -411,27 +412,27 @@ export async function whoami() {
     
     spinner.succeed(chalk.green('Authentication status'));
     
-    console.log(chalk.cyan('\n📋 Current Session:\n'));
-    console.log(chalk.white(`   User ID:    ${userInfo?.id || userInfo?.user_id || walletInfo?.userId || 'Unknown'}`));
-    console.log(chalk.white(`   Email:      ${userInfo?.email || walletInfo?.email || 'N/A'}`));
+    diag(chalk.cyan('\n📋 Current Session:\n'));
+    diag(chalk.white(`   User ID:    ${userInfo?.id || userInfo?.user_id || walletInfo?.userId || 'Unknown'}`));
+    diag(chalk.white(`   Email:      ${userInfo?.email || walletInfo?.email || 'N/A'}`));
     if (walletInfo) {
-      console.log(chalk.white(`   Wallet:     ${walletInfo.walletAddress?.substring(0, 10)}...${walletInfo.walletAddress?.slice(-6) || ''}`));
+      diag(chalk.white(`   Wallet:     ${walletInfo.walletAddress?.substring(0, 10)}...${walletInfo.walletAddress?.slice(-6) || ''}`));
       if (walletInfo.communityId) {
-        console.log(chalk.white(`   Community:  ${walletInfo.communityId}`));
+        diag(chalk.white(`   Community:  ${walletInfo.communityId}`));
       }
       if (walletInfo.tokenSymbol) {
-        console.log(chalk.white(`   Token:      ${walletInfo.tokenSymbol}`));
+        diag(chalk.white(`   Token:      ${walletInfo.tokenSymbol}`));
       }
-      console.log(chalk.white(`   Session:    ${isValid ? chalk.green('Valid') : chalk.red('Expired')}`));
+      diag(chalk.white(`   Session:    ${isValid ? chalk.green('Valid') : chalk.red('Expired')}`));
       
       if (walletInfo.expiresAt) {
         const expiresDate = new Date(walletInfo.expiresAt);
         const now = new Date();
         if (expiresDate > now) {
           const hoursLeft = Math.round((expiresDate - now) / (1000 * 60 * 60));
-          console.log(chalk.white(`   Expires:    ${hoursLeft}h remaining`));
+          diag(chalk.white(`   Expires:    ${hoursLeft}h remaining`));
         } else {
-          console.log(chalk.white(`   Expires:    ${chalk.red('Expired')}`));
+          diag(chalk.white(`   Expires:    ${chalk.red('Expired')}`));
         }
       }
     }
@@ -439,7 +440,7 @@ export async function whoami() {
     if (userInfo) {
       // Account Details: feature access is entitlement-based (community membership / subscriptions),
       // NOT a custodial balance or a STAKED state — both removed per CEO-D-2026-06-14-DROP-CUSTODIAL-ELIMINATE-STAKED.
-      console.log(chalk.cyan('\n📊 Account Details:\n'));
+      diag(chalk.cyan('\n📊 Account Details:\n'));
 
       try {
         const purchasesResponse = await apiClient.invoke('fetch_my_purchases', { product_type: 'APP' }, { allowGuest: false });
@@ -447,24 +448,24 @@ export async function whoami() {
         const communities = purchases.communities || [];
         const apps = purchases.apps || purchases.products || [];
 
-        console.log(chalk.white(`   Communities: ${communities.length}`));
-        console.log(chalk.white(`   Apps:        ${apps.length}`));
+        diag(chalk.white(`   Communities: ${communities.length}`));
+        diag(chalk.white(`   Apps:        ${apps.length}`));
         if (apps.length > 0) {
           apps.slice(0, 5).forEach(a => {
             const id = a.app_id || a.appId || a.id || a.product_id;
-            if (id) console.log(chalk.gray(`               - ${id}`));
+            if (id) diag(chalk.gray(`               - ${id}`));
           });
-          if (apps.length > 5) console.log(chalk.gray(`               ... and ${apps.length - 5} more`));
+          if (apps.length > 5) diag(chalk.gray(`               ... and ${apps.length - 5} more`));
         }
       } catch (err) {
         // Ignore purchase fetch errors
       }
     }
     
-    console.log('');
+    diag('');
     
     if (walletInfo && !isValid) {
-      console.log(chalk.yellow('   ⚠️  Session expired. Run "descix reconnect" to refresh.\n'));
+      diag(chalk.yellow('   ⚠️  Session expired. Run "descix reconnect" to refresh.\n'));
     }
     
   } catch (error) {
@@ -488,7 +489,7 @@ export async function logout() {
 
     if (!walletPath) {
       spinner.info(chalk.yellow('Not logged in'));
-      console.log(chalk.gray('\n   No credentials to remove.\n'));
+      diag(chalk.gray('\n   No credentials to remove.\n'));
       return;
     }
 
@@ -503,16 +504,16 @@ export async function logout() {
           token: walletInfo.oauth.refresh_token,
           clientId: walletInfo.oauth.client_id,
         });
-        console.log(chalk.gray('\n   OAuth refresh-token chain revoked server-side.'));
+        diag(chalk.gray('\n   OAuth refresh-token chain revoked server-side.'));
       } catch (e) {
-        console.log(chalk.yellow(`\n   ⚠️  OAuth revocation failed (${e.message}); removing local credentials anyway.`));
+        diag(chalk.yellow(`\n   ⚠️  OAuth revocation failed (${e.message}); removing local credentials anyway.`));
       }
     }
 
     await fs.unlink(walletPath);
 
     spinner.succeed(chalk.green('Logged out'));
-    console.log(chalk.cyan('\n✅ Credentials removed\n'));
+    diag(chalk.cyan('\n✅ Credentials removed\n'));
 
   } catch (error) {
     spinner.fail(chalk.red('Logout failed'));
@@ -578,9 +579,9 @@ export async function adminLogin(options = {}) {
     await WalletFileManager.saveWalletFile(walletPath, walletData);
 
     spinner.succeed(chalk.green(`Logged in as admin: ${email}`));
-    console.log(chalk.dim(`  Wallet: ${walletData.walletAddress}`));
-    console.log(chalk.dim(`  Session expires: ${walletData.expiresAt}`));
-    console.log(chalk.dim(`  Credentials saved to: ${walletPath}`));
+    diag(chalk.dim(`  Wallet: ${walletData.walletAddress}`));
+    diag(chalk.dim(`  Session expires: ${walletData.expiresAt}`));
+    diag(chalk.dim(`  Credentials saved to: ${walletPath}`));
   } catch (error) {
     spinner.fail(error.message || 'Admin login failed');
     process.exit(1);
