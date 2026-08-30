@@ -259,13 +259,12 @@ reaching for.
 
 ## Two things worth knowing
 
-**Provenance is available and is currently switched off.** Trusted publishing normally attaches
-a cryptographic provenance attestation automatically, which requires a **public** source
-repository — npm: *"Ensure your `package.json` is configured with a public `repository`…"*.
-`DeSciXCore` is public, so nothing blocks it. The workflow still sets
-`NPM_CONFIG_PROVENANCE=false` explicitly. **Turning it on is one line** — delete that env var —
-and it is a real supply-chain gain, but it changes what a release publishes, so the switch is the
-CEO's to make deliberately rather than as a side effect of this runbook.
+**Provenance is on.** Trusted publishing attaches a cryptographic provenance attestation
+automatically, which requires a **public** source repository — npm: *"Ensure your `package.json`
+is configured with a public `repository`…"*. `DeSciXCore` is public, so a publish from this
+workflow emits one. `npm view <package> dist.attestations` answers whether a given release
+carries it — non-empty output naming `slsa.dev/provenance` is the assertion; the command exits 0
+either way, so exit status alone proves nothing.
 
 **The workflow file is now the credential.** With no token to steal, the thing an attacker wants
 is edit access to `.github/workflows/npm-publish.yml` — change what it publishes, or from where.
