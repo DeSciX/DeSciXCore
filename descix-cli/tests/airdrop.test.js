@@ -16,14 +16,22 @@ import { executeQueue } from '../lib/commands/airdrop.js';
 
 /**
  * Minimal fake API client that:
- *  - satisfies `loadCredentials()` + `hasCredentials()` (auth-guard shortcut)
+ *  - satisfies `ensureInitialized()` + `loadCredentials()` + `hasCredentials()` (auth-guard)
  *  - records `invoke()` calls (command + params)
  *  - returns scripted responses per command
+ *
+ * `ensureInitialized` was ADDED to this double on 2026-08-30, when requireAuth() began settling
+ * and PRINTING the origin before the credential check (contract I1, A'). The double had drifted
+ * from the interface it stands in for, and the honest repair is to complete the double — NOT to
+ * make requireAuth() call the method only if it happens to exist. A guard that tiptoes around a
+ * missing method would also tiptoe around a REAL client that stopped providing it, which is the
+ * silent-success class this whole contract exists to remove.
  */
 function makeFakeApiClient(scripted = {}) {
     const calls = [];
     const client = {
         _calls: calls,
+        async ensureInitialized() { return; },
         async loadCredentials() { return; },
         hasCredentials() { return true; },
         async invoke(command, params = {}) {
