@@ -2,6 +2,11 @@
   "name": "@descix/platform-api",
   "version": "2.0.1",
   "description": "Shared platform infrastructure: Firestore models, auth/session, permissions, entitlements, email",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DeSciX/DeSciXCore.git",
+    "directory": "descix-platform-api"
+  },
   "type": "module",
   "main": "src/index.js",
   "exports": {
