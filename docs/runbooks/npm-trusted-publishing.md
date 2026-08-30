@@ -77,9 +77,18 @@ npm view @descix/app-sdk versions
 Run them separately. Passing several names to a single `npm view` prints the versions of the first
 one and exits 0, which reads as an answer about all of them.
 
-*Not published, deliberately:* `@descix/cli` and `@descix/platform-api` — the workflow refuses both
+*Not published, deliberately:* `@descix/platform-api` — the workflow refuses it
 by name, along with `cryptoapis-sdk`, which is vendored third-party code and must never reach the
 registry under our scope, and `descix-vscode`, which ships to the VS Code Marketplace instead.
+
+**The developer CLI is no longer refused by name.** The by-name refusal was deleted from the
+workflow's `case "$PKG" in` because the CLI is the SDK product surface (CEO scoping 2026-08-27/28;
+VISION ruling 2026-08-30 01:19Z) and it is already a published package. **It is still not
+routable**, and that is deliberate rather than an oversight: the publish set's OWNER is the
+`workflow_dispatch` `options:` list, `publishable = options - refused`, and the CLI has never
+appeared in `options`. Deleting the refusal therefore removed a stale fence without making the
+package publishable. Adding a name to `options:` is a product decision — that list records one
+(CEO 2026-08-21) — and it is not made in this runbook.
 
 **`@descix/platform-api` does NOT have to be published** — checked rather than assumed:
 `@descix/cloud-core` has zero imports of it today, and its dependencies are only Google Cloud

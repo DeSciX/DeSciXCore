@@ -182,7 +182,7 @@ jobs:
       - name: Refuse to publish excluded packages
         run: |
           case "$PKG" in
-            cryptoapis-sdk|descix-vscode|descix-cli|descix-platform-api|.)
+            cryptoapis-sdk|descix-vscode|descix-platform-api|.)
               echo "::error::'$PKG' is NOT publishable to npm under @descix."
               exit 1
               ;;
