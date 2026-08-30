@@ -77,3 +77,22 @@ jobs:
       - name: interactive device-login is unreachable from the stdio server
         working-directory: descix-cli
         run: node scripts/check-mcp-headless-reachability.mjs
+
+  cli-self-reference:
+    name: Every command and flag the CLI names must exist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # Root install: npm workspaces monorepo. The gate walks `descix --help` to build its truth
+      # set, so the binary has to be able to start.
+      - name: Install workspace dependencies
+        run: npm ci --ignore-scripts
+
+      - name: No shipped string names a command or flag the CLI does not have
+        working-directory: descix-cli
+        run: node scripts/check-cli-self-reference.mjs

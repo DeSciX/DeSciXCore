@@ -70,7 +70,7 @@ export async function runKbPull(apiClient, options) {
     const driveConfig = workspaceConfig.driveConfig;
     if (!directFolderId && !driveConfig?.base_folder_id) {
       spinner.fail('Drive not configured');
-      console.log(chalk.yellow('\n💡 Run "descix setup --dev" first to link Drive, or use --folder <id> for one-time import.\n'));
+      console.log(chalk.yellow('\n💡 Drive is not linked: set driveConfig.base_folder_id in .descix/workspace.json, or use --folder <id> for a one-time import.\n'));
       throw new Error('The base_folder_id is required for KB operations (or use --folder for one-time import).');
     }
 
@@ -151,7 +151,7 @@ export async function runKbPush(apiClient, options) {
     const driveConfig = workspaceConfig.driveConfig;
     if (!driveConfig?.base_folder_id) {
       spinner.fail('Drive not configured');
-      throw new Error('Run "descix setup --dev" first to link Drive.');
+      throw new Error('Drive is not linked: set driveConfig.base_folder_id in .descix/workspace.json.');
     }
 
     // 4. Get paths
