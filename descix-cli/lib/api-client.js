@@ -11,6 +11,7 @@ import axios from 'axios';
 import { WorkspaceConfig } from './workspace-config.js';
 import { resolveOrigin } from './origin.js';
 import { reportEnvironment, EXPLICIT_ORIGIN_SOURCE } from './environment-report.js';
+import { diag } from './diagnostic-log.js';
 
 export class DeSciXApiClient {
   constructor(options = {}) {
@@ -302,16 +303,16 @@ export class DeSciXApiClient {
    * @returns {Promise<Object>} Response data
    */
   async invokeRaw(command, params = {}, credentials = null, options = {}) {
-    console.log(`[ApiClient] invoking ${command}...`);
+    diag(`[ApiClient] invoking ${command}...`);
     await this.ensureBaseUrl();
-    console.log(`[ApiClient] Base URL: ${this.baseUrl}`);
+    diag(`[ApiClient] Base URL: ${this.baseUrl}`);
     
     const requestBody = this.buildRequestBody(command, params, credentials);
     if (options.skipSessionCheck) {
       requestBody.access_token = null; // Force guest-like call for refresh
     }
     const url = `${this.baseUrl}/apifront/`;
-    console.log(`[ApiClient] POST ${url}`);
+    diag(`[ApiClient] POST ${url}`);
 
     const axiosConfig = {
       headers: { 'Content-Type': 'application/json' },
@@ -330,7 +331,7 @@ export class DeSciXApiClient {
 
     try {
       const response = await axios.post(url, requestBody, axiosConfig);
-      console.log(`[ApiClient] Response status: ${response.status}`);
+      diag(`[ApiClient] Response status: ${response.status}`);
       const data = response.data;
       
       if (data.status !== 'OK') {
@@ -367,17 +368,14 @@ export class DeSciXApiClient {
    * @returns {Promise<Array<{name, description, inputSchema}>>}
    */
   async mcpListTools(options = {}) {
-    // The stdio MCP transport owns stdout for JSON-RPC; invoke()'s [ApiClient] console.log noise
-    // would corrupt it. Route stdout chatter to stderr for the duration of this call only.
-    const origLog = console.log;
-    console.log = (...a) => console.error(...a);
-    try {
-      const resp = await this.invoke('list_mcp_tools', {}, options);
-      const msg = resp?.message || resp;
-      return msg?.tools || [];
-    } finally {
-      console.log = origLog;
-    }
+    // The console.log monkey-patch that stood here is DELETED, not kept as insurance. It routed
+    // stdout to stderr for the duration of THIS call only — a call-site workaround for a
+    // write-site defect, which protected one path and left every other path through
+    // invoke()/invokeRaw() corrupting the stdio protocol stream. Diagnostics now go to stderr at
+    // the point of writing (lib/diagnostic-log.js), so there is nothing left to wrap.
+    const resp = await this.invoke('list_mcp_tools', {}, options);
+    const msg = resp?.message || resp;
+    return msg?.tools || [];
   }
 
   /**
@@ -482,7 +480,7 @@ export class DeSciXApiClient {
         } else if (command !== 'device_request_login' && command !== 'device_check_status') {
           // If refresh failed (e.g. signature invalid or user not found), 
           // we should trigger device login if this is a CLI environment
-          console.log('[ApiClient] Session refresh failed, triggering device login...');
+          diag('[ApiClient] Session refresh failed, triggering device login...');
           const { loginDevice } = await import('./commands/auth.js');
           await loginDevice({ url: this.baseUrl, workspaceRoot: this.workspaceRoot });
           
