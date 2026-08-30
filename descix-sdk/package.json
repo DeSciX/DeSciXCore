@@ -2,6 +2,11 @@
   "name": "@descix/sdk",
   "version": "1.1.0",
   "description": "DeSciX SDK - Shared runtime libraries for Node.js and Browser",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DeSciX/DeSciXCore.git",
+    "directory": "descix-sdk"
+  },
   "type": "module",
   "main": "./src/index.js",
   "exports": {

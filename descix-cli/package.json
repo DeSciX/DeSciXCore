@@ -2,6 +2,11 @@
   "name": "@descix/cli",
   "version": "1.0.3",
   "description": "DeSciX CLI and MCP Server - Unified command-line interface for DeSciX platform",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DeSciX/DeSciXCore.git",
+    "directory": "descix-cli"
+  },
   "type": "module",
   "main": "./bin/descix.js",
   "bin": {

@@ -2,6 +2,11 @@
   "name": "@descix/app-sdk",
   "version": "0.1.2",
   "description": "DeSciX App Shell - init-to-READY logic, core API, Powch integration, dev proxy config",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DeSciX/DeSciXCore.git",
+    "directory": "descix-app-sdk"
+  },
   "type": "module",
   "main": "./src/index.js",
   "exports": {
