@@ -14,6 +14,16 @@ import { DeSciXApiClient } from './api-client.js';
  * @returns {Promise<Object>} User information if authenticated
  */
 export async function requireAuth(apiClient) {
+  // Settle (and PRINT) the origin BEFORE the credential check, not after it.
+  //
+  // MEASURED 2026-08-30: this guard called loadCredentials() directly and exited 1 on a missing
+  // credential, so initialize() never ran and the env line never printed. An unauthenticated
+  // developer was told "Authentication required" with no statement of WHICH environment they
+  // had failed to authenticate against — the exact confusion this contract exists to end, on
+  // the path where it is most likely to bite. ensureInitialized() is idempotent, so the later
+  // invoke() below re-uses this same initialisation.
+  await apiClient.ensureInitialized();
+
   // Load credentials from wallet file
   await apiClient.loadCredentials();
   

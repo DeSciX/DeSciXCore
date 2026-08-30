@@ -10,6 +10,7 @@ import path from 'path';
 import axios from 'axios';
 import { WorkspaceConfig } from './workspace-config.js';
 import { resolveOrigin } from './origin.js';
+import { reportEnvironment, EXPLICIT_ORIGIN_SOURCE } from './environment-report.js';
 
 export class DeSciXApiClient {
   constructor(options = {}) {
@@ -46,10 +47,26 @@ export class DeSciXApiClient {
       this.workspaceRoot = null;
     }
 
-    // Step 2: Set API URL from WorkspaceConfig or environment (only if not already set)
+    // Step 2: Settle the API origin, and SAY SO.
+    //
+    // THE PRINT LIVES HERE, NOT IN detectApiUrl(), AND THAT IS THE WHOLE POINT. detectApiUrl()
+    // is only reached when `baseUrl` was NOT supplied to the constructor. Six construction
+    // sites DO supply it (service-api-client, wizard/setup, commands/auth, commands/status,
+    // commands/doctor, bin/mcp-server), so a print hung off detectApiUrl() would go silent on
+    // exactly the paths a developer is most likely to be pointing somewhere unexpected.
+    // initialize() is the one seam both paths cross. (Enumerated across all 87
+    // `new DeSciXApiClient(` sites, 2026-08-30.)
+    let originSource;
     if (!this.baseUrl) {
-      this.baseUrl = await this.detectApiUrl();
+      const resolved = await this.detectApiUrl();
+      this.baseUrl = resolved.origin;
+      originSource = resolved.source;
+    } else {
+      this.baseUrl = String(this.baseUrl).trim().replace(/\/+$/, '');
+      originSource = EXPLICIT_ORIGIN_SOURCE;
     }
+    // I1 (A', rev 2): ALWAYS, not default-only. Silence was the defect; PROD was not.
+    reportEnvironment({ origin: this.baseUrl, source: originSource });
 
     // Step 3: Load credentials from known wallet location
     await this.loadCredentials();
@@ -58,8 +75,12 @@ export class DeSciXApiClient {
   }
 
   /**
-   * Detect API URL from workspace config or environment
-   * @returns {Promise<string>} API base URL
+   * Detect the API origin from workspace config or environment.
+   *
+   * Returns the SOURCE alongside the origin, because "where did this come from" is the question
+   * every misreport in this contract failed to answer, and the caller must print it.
+   *
+   * @returns {Promise<{origin: string, source: string, isDefault: boolean}>}
    */
   async detectApiUrl() {
     // Every branch of this function used to be able to yield the production origin without the
@@ -74,16 +95,16 @@ export class DeSciXApiClient {
       globalApiUrl = gc.api_url || null;
     } catch {}
 
-    // Throws OriginUnresolvedError, naming the remedy, when nothing is configured. That throw
-    // is the feature: a command with no server to talk to must say so, not silently reach for
-    // production.
-    const { origin } = resolveOrigin({
+    // Never returns null and never throws for an ABSENT configuration: nothing configured is
+    // the declared default (PROD), carrying `source: default`, which the caller prints. It DOES
+    // throw OriginInvalidError when a source named an origin that cannot be used — silently
+    // discarding what the developer typed is the same defect from the other direction.
+    return resolveOrigin({
       envVar: process.env.DESCIX_API_URL,
       workspaceEnvApiUrl: this._workspaceConfig?.env?.apiUrl,
       legacyApiUrl: this._workspaceConfig?.apiUrl,
       globalApiUrl,
     });
-    return origin;
   }
 
   /**

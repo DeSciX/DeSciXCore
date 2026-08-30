@@ -1,33 +1,39 @@
 /**
- * THE ONE OWNER OF "which DeSciX origin does this invocation talk to".
+ * THE ONE OWNER OF "which DeSciX origin does this invocation talk to, and who chose it".
  *
- * WHY (measured 2026-08-29, `getApiUrl()` on an unconfigured workspace returned
- * `https://descix.net`): the CLI had no representation of "nobody chose an origin". Every
- * resolution site ended in the production literal, so a developer who had configured nothing
- * and a developer who had deliberately chosen production produced byte-identical results. The
- * CLI then reported that origin back in agent-instruction files, in `config show`, and in the
- * wallet it minted — naming a production origin the developer never picked.
+ * WHY (measured 2026-08-29, published @descix/cli 1.0.1): `getApiUrl()` on an unconfigured
+ * workspace returned the production origin and said NOTHING. A developer who had configured
+ * nothing and a developer who had deliberately chosen production produced byte-identical
+ * results, and the CLI then reported that origin back in agent-instruction files, in
+ * `config show`, and in the wallet it minted.
  *
- * THE RULE THIS ENFORCES: a resolver MISS FAILS LOUD. There is no default origin. `prod` is a
- * thing you CHOOSE (`--env prod`, `descix config set-env prod`), never a thing you land on by
- * omission.
+ * THE RULE THIS ENFORCES (contract I1 as amended by (A'), rev 2, 2026-08-30):
+ *   · An unconfigured workspace resolves to the DECLARED DEFAULT, production. That is the
+ *     shipped product's target and CEO-D-2026-08-18 stands. The PROD target was never the
+ *     defect.
+ *   · SILENCE was the defect. Every resolution carries its SOURCE, and every network-bound
+ *     command PRINTS it — always, not only on the default. "Chose prod" and "chose nothing"
+ *     are distinguished by `source`, never by a null nobody sees.
+ *   · A CONFIGURED-but-invalid origin still FAILS LOUD, naming the fix. Landing on the default
+ *     is a product decision; silently discarding something the developer actually typed is not.
  *
- * This module holds NO copy of the origin table. The three named origins live in
- * `WorkspaceConfig.ENV_MAP` (itself derived from `@descix/app-sdk/dev` ENV_ORIGINS), which is
- * what `--env` resolves against; consumers that need a name for an origin use
- * `walletEnvironmentStamp`. Keeping the table out of here is deliberate: two derivations of one
- * fact is the mirror drift this contract exists to end.
+ * NO SECOND SPELLING OF THE DEFAULT. The origin table has ONE owner, `@descix/app-sdk/dev`,
+ * and this module IMPORTS the production origin from it rather than writing the literal down.
+ * That is deliberate and it is load-bearing for acceptance A1: `grep` of the packed tarball for
+ * the production literal outside the one owner returns 0 because there is no second copy to
+ * find -- not even here.
  *
  * This file imports nothing from the CLI, so it can be consumed by `workspace-config.js`
  * without a cycle.
  */
+import { DEFAULT_API_URL } from '@descix/app-sdk/dev';
 
 /**
  * The single spelling of "are these two origins the same origin" — trailing slashes and
  * surrounding whitespace do not make an origin different.
  *
- * Exported because `wallet-environment.js` compares origins against ENV_MAP and MUST use the
- * same comparison this module resolves with; a second private copy is how the two drift.
+ * Exported because other modules compare origins against ENV_MAP and MUST use the same
+ * comparison this module resolves with; a second private copy is how the two drift.
  *
  * @param {string} origin
  * @returns {string}
@@ -37,14 +43,19 @@ export function normalizeOrigin(origin) {
 }
 
 /**
- * Thrown when no configured source names an origin. Carries a `code` so callers can recognise
- * it without matching on message text.
+ * Thrown when a source NAMED an origin and that origin is not usable. Carries a `code` so
+ * callers can recognise it without matching on message text.
+ *
+ * This is the loud failure I1 requires. It replaced `OriginUnresolvedError`, which fired when
+ * NOTHING was configured — a case that is no longer a failure at all under (A'), because the
+ * declared default answers it. The old error was DELETED rather than fenced: an unreachable
+ * error path kept "just in case" is the compat fence CEO-D-2026-07-26 forbids.
  */
-export class OriginUnresolvedError extends Error {
+export class OriginInvalidError extends Error {
     constructor(message) {
         super(message);
-        this.name = 'OriginUnresolvedError';
-        this.code = 'ORIGIN_UNRESOLVED';
+        this.name = 'OriginInvalidError';
+        this.code = 'ORIGIN_INVALID';
     }
 }
 
@@ -59,12 +70,38 @@ const PRECEDENCE = [
     ['~/.descix/config.json api_url', 'globalApiUrl'],
 ];
 
-/** The remedy text every miss prints. One spelling, so every surface says the same thing. */
+/** The remedy text every failure prints. One spelling, so every surface says the same thing. */
 export const ORIGIN_REMEDY =
     'Choose one explicitly:\n' +
-    '  descix config set-env dev|demo|prod     (persists env.apiUrl in .descix/workspace.json)\n' +
+    '  descix config init --env dev|demo|prod  (persists env.apiUrl in .descix/workspace.json)\n' +
     '  descix --env dev|demo|prod <command>    (this invocation only)\n' +
     '  export DESCIX_API_URL=https://...       (this shell only)';
+
+/**
+ * The SOURCE label for a resolution nobody configured. Exported so the printed env line, the
+ * tests and any consumer all use one spelling instead of three that drift.
+ *
+ * The wording is the contract's own (I1, rev 2): it names the state AND the one command that
+ * changes it, because a developer who reads "prod" and does not want prod needs the fix in the
+ * same line, not in a doc.
+ */
+export const DEFAULT_ORIGIN_SOURCE =
+    'default — no workspace config; `descix config init --env dev` targets DEV';
+
+/**
+ * Is this string usable as an API origin? Absolute http(s) URLs only.
+ * @param {string} value
+ * @returns {boolean}
+ */
+function isUsableOrigin(value) {
+    let parsed;
+    try {
+        parsed = new URL(String(value).trim());
+    } catch {
+        return false;
+    }
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+}
 
 /**
  * Resolve the API origin from the sources a caller has in hand.
@@ -74,38 +111,33 @@ export const ORIGIN_REMEDY =
  * @param {string|null} [sources.workspaceEnvApiUrl]  workspace.json env.apiUrl
  * @param {string|null} [sources.legacyApiUrl]        workspace.json top-level apiUrl
  * @param {string|null} [sources.globalApiUrl]        ~/.descix/config.json api_url
- * @returns {{ origin: string, source: string }} the origin AND which source supplied it — the
- *          source is returned because "where did this come from" is the question every
- *          misreport in this contract failed to answer.
- * @throws {OriginUnresolvedError} when no source names an origin. It does NOT return a default;
- *         that absence is the entire point of this module.
+ * @returns {{ origin: string, source: string, isDefault: boolean }} the origin AND which source
+ *          supplied it — the source is returned because "where did this come from" is the
+ *          question every misreport in this contract failed to answer. It NEVER returns null
+ *          and it never throws for an absent configuration.
+ * @throws {OriginInvalidError} when a source NAMED an origin that cannot be used. Falling back
+ *         to the default here would silently discard what the developer typed, which is the
+ *         same class of defect from the other direction.
  */
 export function resolveOrigin(sources = {}) {
     for (const [label, key] of PRECEDENCE) {
         const value = sources[key];
         if (typeof value === 'string' && value.trim() !== '') {
-            return { origin: normalizeOrigin(value), source: label };
+            if (!isUsableOrigin(value)) {
+                throw new OriginInvalidError(
+                    `The DeSciX API origin configured in ${label} is not a usable origin: "${String(value).trim()}".\n` +
+                    'An origin must be an absolute http(s) URL, e.g. https://dev.descix.net.\n\n' +
+                    ORIGIN_REMEDY,
+                );
+            }
+            return { origin: normalizeOrigin(value), source: label, isDefault: false };
         }
     }
-    throw new OriginUnresolvedError(
-        'No DeSciX API origin is configured, so this command has no server to talk to.\n' +
-        'Nothing was found in any of: ' + PRECEDENCE.map(([label]) => label).join(', ') + '.\n\n' +
-        ORIGIN_REMEDY,
-    );
-}
-
-/**
- * Non-throwing form, for surfaces that must DISPLAY the state rather than act on it
- * (`config show`, `status`). Returns null instead of inventing an origin.
- *
- * @param {object} sources - same shape as {@link resolveOrigin}
- * @returns {{ origin: string, source: string }|null}
- */
-export function resolveOriginOrNull(sources = {}) {
-    try {
-        return resolveOrigin(sources);
-    } catch (err) {
-        if (err instanceof OriginUnresolvedError) return null;
-        throw err;
-    }
+    // Nothing was configured. That is not a failure — it is the shipped product's declared
+    // target, and the caller is required to PRINT that it landed here.
+    return {
+        origin: normalizeOrigin(DEFAULT_API_URL),
+        source: DEFAULT_ORIGIN_SOURCE,
+        isDefault: true,
+    };
 }

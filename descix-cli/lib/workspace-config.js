@@ -1,6 +1,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { ENV_ORIGINS } from '@descix/app-sdk/dev';
+import { resolveOrigin } from './origin.js';
 
 /**
  * ONE OWNER for turning a workspace-relative localPath into an absolute path.
@@ -538,9 +539,14 @@ export class WorkspaceConfig {
    * @returns {string|null} the configured origin, or null if this workspace names none
    */
   getApiUrl() {
-    if (this.env?.apiUrl) return this.env.apiUrl;
-    if (this.apiUrl) return this.apiUrl;
-    return null;
+    // Consumes the ONE origin owner rather than re-deriving the precedence or re-spelling the
+    // declared default. Under (A') an unconfigured workspace resolves to the declared default
+    // PROD; the SOURCE that distinguishes "chose prod" from "chose nothing" is carried by
+    // resolveOrigin() and printed by the api-client, never by a null returned from here.
+    return resolveOrigin({
+      workspaceEnvApiUrl: this.env?.apiUrl,
+      legacyApiUrl: this.apiUrl,
+    }).origin;
   }
 
   /**
