@@ -45,3 +45,35 @@ jobs:
       # fail the build, deliberately: "I could not measure" must never be reported as "clean".
       - name: A repo version equal to a published version must have identical content
         run: node scripts/check-registry-content-drift.mjs
+
+  mcp-protocol-session:
+    name: The MCP stdio session must not corrupt or hang its own protocol
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # INSTALL AT THE ROOT, not inside descix-cli. This repo is an npm WORKSPACES monorepo
+      # (root package.json declares six workspaces), so the root lockfile is the one that
+      # resolves @descix/* to the sibling packages. Installing inside the workspace would either
+      # fail or resolve differently, and the failure would look like a gate failure while
+      # measuring nothing — the exact trap descix-cli's own gate file warns about: a fresh tree
+      # without a correct dependency graph reports failures that are about npm, not about code.
+      - name: Install workspace dependencies
+        run: npm ci --ignore-scripts
+
+      # TWO AXES, DELIBERATELY BOTH. The purity gate measures a SURFACE (bytes on stdout) and is
+      # blind to a session that emits nothing and then silently awaits a browser. The
+      # reachability gate measures the BEHAVIOUR by tripping an ESM resolve hook the instant the
+      # interactive-login module is reached, so RED is observable without a browser or a hang.
+      # Neither substitutes for the other; running only one would leave the worse defect green.
+      - name: stdout carries only JSON-RPC
+        working-directory: descix-cli
+        run: node scripts/check-mcp-stdout-purity.mjs
+
+      - name: interactive device-login is unreachable from the stdio server
+        working-directory: descix-cli
+        run: node scripts/check-mcp-headless-reachability.mjs

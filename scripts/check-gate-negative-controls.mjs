@@ -92,11 +92,28 @@ const CONTROLS = [
      '"version": "2.0.0"', '"version": "1.0.1"',
      'a repo version equal to a published version whose CONTENT differs',
      'script'],
+
+    // A6 TRANSPORT AXIS — one console.log restored on a stdio-reachable path.
+    ['check-mcp-stdout-purity', 'descix-cli/lib/api-client.js',
+     '    diag(`[ApiClient] invoking ${command}...`);',
+     '    console.log(`[ApiClient] invoking ${command}...`);',
+     'non-JSON-RPC bytes on the MCP protocol stream',
+     'script'],
+
+    // A6 BEHAVIOUR AXIS — the construction site stops declaring itself headless, so the
+    // interactive device-login branch becomes reachable again. The purity gate above goes GREEN
+    // on this exact state; that is why both controls exist.
+    ['check-mcp-headless-reachability', 'descix-cli/bin/mcp-server.js',
+     '    serviceMode: true,\n', '',
+     'loginDevice reachable from a stdio-constructed client (a silent hang the byte gate cannot see)',
+     'script'],
 ];
 
 /** How each control is run. Anything not listed runs as a filtered descix-cli test. */
 const SCRIPT_GATES = {
     'check-registry-content-drift': ['scripts/check-registry-content-drift.mjs'],
+    'check-mcp-stdout-purity': ['descix-cli/scripts/check-mcp-stdout-purity.mjs'],
+    'check-mcp-headless-reachability': ['descix-cli/scripts/check-mcp-headless-reachability.mjs'],
 };
 
 const runGate = (gate) => {
@@ -166,9 +183,11 @@ if (!suiteGreen) ok = false;
 
 console.log(
     `\n[check-gate-negative-controls] ran ${CONTROLS.length} controls: the origin/identity gates ` +
-    `in ${SUITE}, plus the standalone content-drift gate. CATCHES: a gate that passes on a ` +
-    'broken tree, and a harness that cannot read GREEN. DOES NOT READ: the packed tarball, ' +
-    'gates outside those, or defect classes they do not assert. NEEDS THE NETWORK — the ' +
-    'content-drift control queries the npm registry, so an offline run fails it for a reason ' +
-    'that is not a gate defect. RUN BY: a human — nothing runs this automatically.');
+    `in ${SUITE}, plus three standalone gates — registry content-drift, MCP stdout purity, and ` +
+    'MCP headless reachability. CATCHES: a gate that passes on a broken tree, and a harness that ' +
+    'cannot read GREEN. DOES NOT READ: the packed tarball, gates outside those, or defect ' +
+    'classes they do not assert. NEEDS THE NETWORK — the content-drift control queries the npm ' +
+    'registry, so an offline run fails it for a reason that is not a gate defect. RUN BY: a ' +
+    'human; the three standalone gates also run in .github/workflows/ci-gates.yml, but THIS ' +
+    'harness — the thing that proves they can fail — is not wired to anything.');
 process.exit(ok ? 0 : 1);
