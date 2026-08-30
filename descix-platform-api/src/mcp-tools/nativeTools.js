@@ -51,7 +51,7 @@ import { filterOperatorClause, SCALAR_FILTER_OPERATORS, ARRAY_FILTER_OPERATORS }
 // zero-import leaf, so this import respects the infrastructure-free rule above.
 import {
     BEAT_STATUSES, LEGACY_WORKING_STATUSES, LEGACY_STOP_STATUSES, LIVENESS_VALUES,
-    WRITE_MODES, WATERMARK_WRITE_MODES, WAKE_EXEMPT_STATUSES, WATERMARK_FIELDS, ENVELOPE_STATUSES, ENVELOPE_STATUS_DEFAULT, TO_AGENT_SENTINELS,
+    WRITE_MODES, WAKE_EXEMPT_STATUSES, WATERMARK_FIELDS, ENVELOPE_STATUSES, ENVELOPE_STATUS_DEFAULT, TO_AGENT_SENTINELS,
     ENVELOPE_SECTIONS, ENVELOPE_TEXT_SHAPE, ENVELOPE_PHASES, ENVELOPE_PHASE_DEFAULT, ENVELOPE_PHASE_TRANSITIONS,
     FABRIC_RECORD_KINDS,
     RETIRED_SENTINELS, BEAT_CLOCK_FIELDS, beatClockFieldFor, beatClockAgeField,
@@ -355,6 +355,73 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
             required: ['app_id', 'kb_id'],
         },
     },
+    {
+        name: 'app_record_entry_create',
+        description: 'Row-level CRUD on ONE entry of ONE top-level LIST field of ONE app record, performed SERVER-SIDE inside a transaction. Use these instead of read-modify-writing a list through app_records_put. That pattern is lossy in two directions at once: anything a concurrent writer appends between your read and your write is destroyed with no error (a delivery ledger was measured going from 98 entries to 1), and because the whole list travels through your process on every append, ONE bad character replaces the entire accumulated array while the put still answers success:true. Here the list NEVER travels — you name one entry by key and the reply carries a COUNT and a SHA of the resulting list, which you can recompute and compare. TWO LIST SHAPES ARE SUPPORTED and a list keeps the shape it has. A FLAT string[] — which is what every delivery ledger already is — needs NO migration: the string IS its own key, so you address it with entry_key alone and omit `entry`. A list of OBJECTS carries a server-stamped `entry_key` on each. Mixing shapes is refused rather than guessed. REFUSE-NEVER-COERCE: a missing field, a non-array target, an element that is neither a string nor a keyed object, a shape change, a 1MB overflow, and (on update) a field changing JSON type or a nested merge that would drop inner keys are each REFUSED BY NAME with nothing written. CREATE one entry. FIRST-CLAIM-WINS: if `entry_key` already exists it is REFUSED (APP_ENTRY_EXISTS) and never overwritten, so two racing creators cannot both believe they authored it.',
+        mutating: true,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                app_id: { type: 'string', description: 'App ID that owns the record.' },
+                kb_id: { type: 'string', description: 'Record collection ID.' },
+                file_id: { type: 'string', description: 'The record whose list field is being addressed. The record must already exist — it is never created for you, because a typo would silently start a second record.' },
+                field: { type: 'string', description: 'The TOP-LEVEL field holding the list. It must already exist and already be an array; neither is created or converted for you.' },
+                entry_key: { type: 'string', description: 'Identity of the ONE entry addressed. Server-stamped into the stored entry as `entry_key`; a contradicting copy inside the entry body is refused rather than silently overridden.' },
+                entry: { type: 'object', description: 'OPTIONAL. The entry body for an OBJECT-shaped list; `entry_key` is stamped in by the server. OMIT it for a flat string[] list, where the stored element is the entry_key itself. Supplying it against a string-shaped list is REFUSED rather than silently converting the list, which would make the ledger unwritable through fabric_watermark_put.' },
+            },
+            required: ['app_id', 'kb_id', 'file_id', 'field', 'entry_key'],
+        },
+    },
+    {
+        name: 'app_record_entry_get',
+        description: 'Row-level CRUD on ONE entry of ONE top-level LIST field of ONE app record, performed SERVER-SIDE inside a transaction. Use these instead of read-modify-writing a list through app_records_put. That pattern is lossy in two directions at once: anything a concurrent writer appends between your read and your write is destroyed with no error (a delivery ledger was measured going from 98 entries to 1), and because the whole list travels through your process on every append, ONE bad character replaces the entire accumulated array while the put still answers success:true. Here the list NEVER travels — you name one entry by key and the reply carries a COUNT and a SHA of the resulting list, which you can recompute and compare. TWO LIST SHAPES ARE SUPPORTED and a list keeps the shape it has. A FLAT string[] — which is what every delivery ledger already is — needs NO migration: the string IS its own key, so you address it with entry_key alone and omit `entry`. A list of OBJECTS carries a server-stamped `entry_key` on each. Mixing shapes is refused rather than guessed. REFUSE-NEVER-COERCE: a missing field, a non-array target, an element that is neither a string nor a keyed object, a shape change, a 1MB overflow, and (on update) a field changing JSON type or a nested merge that would drop inner keys are each REFUSED BY NAME with nothing written. READ one entry, never the list. An ABSENT key is a SUCCESS with count 0 and a named `empty_reason` — an empty result is a success, never an error — so a get-after-delete truthfully returns 0. The three writing verbs still REFUSE an absent key: acting on nothing differs from looking at nothing.',
+        mutating: false,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                app_id: { type: 'string', description: 'App ID that owns the record.' },
+                kb_id: { type: 'string', description: 'Record collection ID.' },
+                file_id: { type: 'string', description: 'The record whose list field is being addressed. The record must already exist — it is never created for you, because a typo would silently start a second record.' },
+                field: { type: 'string', description: 'The TOP-LEVEL field holding the list. It must already exist and already be an array; neither is created or converted for you.' },
+                entry_key: { type: 'string', description: 'Identity of the ONE entry addressed. Server-stamped into the stored entry as `entry_key`; a contradicting copy inside the entry body is refused rather than silently overridden.' },
+                fields: { type: 'array', items: { type: 'string' }, description: 'Optional projection of the returned entry. Omit or ["*"] for the whole entry.' },
+            },
+            required: ['app_id', 'kb_id', 'file_id', 'field', 'entry_key'],
+        },
+    },
+    {
+        name: 'app_record_entry_update',
+        description: 'Row-level CRUD on ONE entry of ONE top-level LIST field of ONE app record, performed SERVER-SIDE inside a transaction. Use these instead of read-modify-writing a list through app_records_put. That pattern is lossy in two directions at once: anything a concurrent writer appends between your read and your write is destroyed with no error (a delivery ledger was measured going from 98 entries to 1), and because the whole list travels through your process on every append, ONE bad character replaces the entire accumulated array while the put still answers success:true. Here the list NEVER travels — you name one entry by key and the reply carries a COUNT and a SHA of the resulting list, which you can recompute and compare. TWO LIST SHAPES ARE SUPPORTED and a list keeps the shape it has. A FLAT string[] — which is what every delivery ledger already is — needs NO migration: the string IS its own key, so you address it with entry_key alone and omit `entry`. A list of OBJECTS carries a server-stamped `entry_key` on each. Mixing shapes is refused rather than guessed. REFUSE-NEVER-COERCE: a missing field, a non-array target, an element that is neither a string nor a keyed object, a shape change, a 1MB overflow, and (on update) a field changing JSON type or a nested merge that would drop inner keys are each REFUSED BY NAME with nothing written. UPDATE one entry by merging `entry` into the stored one. REFUSES an absent key (APP_ENTRY_ABSENT) — it never creates, because a typo would otherwise add a second entry beside the one you meant to change — and REFUSES a field whose JSON type would change (APP_ENTRY_STORED_TYPE_DISAGREEMENT), which breaks every reader that already parsed it. A nested object is merged SHALLOWLY, so a merge that would drop inner keys is REFUSED (APP_ENTRY_NESTED_KEY_DROP) — send the whole sub-object, or delete and re-create the entry. A flat string[] entry has no body to merge and update is refused on it: its whole value is its key, so a rename is a delete plus a create.',
+        mutating: true,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                app_id: { type: 'string', description: 'App ID that owns the record.' },
+                kb_id: { type: 'string', description: 'Record collection ID.' },
+                file_id: { type: 'string', description: 'The record whose list field is being addressed. The record must already exist — it is never created for you, because a typo would silently start a second record.' },
+                field: { type: 'string', description: 'The TOP-LEVEL field holding the list. It must already exist and already be an array; neither is created or converted for you.' },
+                entry_key: { type: 'string', description: 'Identity of the ONE entry addressed. Server-stamped into the stored entry as `entry_key`; a contradicting copy inside the entry body is refused rather than silently overridden.' },
+                entry: { type: 'object', description: 'Fields to merge into the stored entry. `entry_key` is server-owned.' },
+            },
+            required: ['app_id', 'kb_id', 'file_id', 'field', 'entry_key', 'entry'],
+        },
+    },
+    {
+        name: 'app_record_entry_delete',
+        description: 'Row-level CRUD on ONE entry of ONE top-level LIST field of ONE app record, performed SERVER-SIDE inside a transaction. Use these instead of read-modify-writing a list through app_records_put. That pattern is lossy in two directions at once: anything a concurrent writer appends between your read and your write is destroyed with no error (a delivery ledger was measured going from 98 entries to 1), and because the whole list travels through your process on every append, ONE bad character replaces the entire accumulated array while the put still answers success:true. Here the list NEVER travels — you name one entry by key and the reply carries a COUNT and a SHA of the resulting list, which you can recompute and compare. TWO LIST SHAPES ARE SUPPORTED and a list keeps the shape it has. A FLAT string[] — which is what every delivery ledger already is — needs NO migration: the string IS its own key, so you address it with entry_key alone and omit `entry`. A list of OBJECTS carries a server-stamped `entry_key` on each. Mixing shapes is refused rather than guessed. REFUSE-NEVER-COERCE: a missing field, a non-array target, an element that is neither a string nor a keyed object, a shape change, a 1MB overflow, and (on update) a field changing JSON type or a nested merge that would drop inner keys are each REFUSED BY NAME with nothing written. DELETE one entry. REFUSES an absent key (APP_ENTRY_ABSENT) rather than reporting a deletion that removed nothing, which is indistinguishable from a misspelled key.',
+        mutating: true,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                app_id: { type: 'string', description: 'App ID that owns the record.' },
+                kb_id: { type: 'string', description: 'Record collection ID.' },
+                file_id: { type: 'string', description: 'The record whose list field is being addressed. The record must already exist — it is never created for you, because a typo would silently start a second record.' },
+                field: { type: 'string', description: 'The TOP-LEVEL field holding the list. It must already exist and already be an array; neither is created or converted for you.' },
+                entry_key: { type: 'string', description: 'Identity of the ONE entry addressed. Server-stamped into the stored entry as `entry_key`; a contradicting copy inside the entry body is refused rather than silently overridden.' },
+            },
+            required: ['app_id', 'kb_id', 'file_id', 'field', 'entry_key'],
+        },
+    },
     // ─────────────────────────────────────────────────────────────────────────────────────────
     // COORDINATION FABRIC — typed verbs over the app-records collection egpt-frqtl/coordination.
     //
@@ -567,32 +634,15 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
         },
     },
     {
-        name: 'fabric_watermark_migrate',
-        description: 'Migrate one seat\'s watermark onto the provenance-bearing ledger. IT REPORTS, IT NEVER DROPS: every entry gets exactly one of three NAMED fates — MOVED (a field that is not one of the five ledger fields, e.g. a `notes` paragraph that could only have arrived by a raw app_records_put; it is written onto seat-state-<LABEL> BEFORE it is cleared here), STAMPED (a pre-provenance bare entry, now attributed to you and marked as having no recorded original writer), or REFUSED (an entry that cannot be represented in the typed ledger — PROSE rather than a record key — which is LEFT EXACTLY WHERE IT IS for a human to re-file). A refusal is a BLOCK on that entry, never a warning that precedes a deletion. Run once per seat before switching that seat to mode:append.',
-        mutating: true,
-        inputSchema: {
-            type: 'object',
-            properties: {
-                seat_label: { type: 'string', description: 'The seat LABEL whose watermark is being migrated.' },
-                writer: { type: 'string', description: 'REQUIRED — the agent id running the migration. Pre-provenance entries are stamped with it and explicitly marked as having no recorded original writer, so a migrated claim is never mistaken for one this writer actually made.' },
-            },
-            required: ['seat_label', 'writer'],
-            additionalProperties: false,
-        },
-    },
-    {
         name: 'fabric_watermark_put',
-        description: 'Write the delivery ledger "watermark-<LABEL>". `mode` is REQUIRED and has NO DEFAULT. USE \'append\': it SET-UNIONS the named fields SERVER-SIDE, which is what a delivery ledger wants — a client read-union-write loses every entry written between its read and its write, and one such patch was measured taking a delivered ledger from 98 entries to 1. \'patch\' merges FIELDS but REPLACES each array wholesale, and \'replace\' additionally clears the fields you omit; BOTH now REFUSE a write that would DROP an existing entry (FABRIC_WATERMARK_DESTRUCTIVE_WRITE), because a delivery claim that vanishes is indistinguishable afterwards from mail that never arrived. To withdraw entries deliberately use \'quarantine\' with `quarantine_writer`. `writer` is REQUIRED on every write that touches the ledger and every entry is stamped {key, writer, at}: a claim outlives the credibility of whoever made it, and a secretary stopped FOR CAUSE left a \'delivered\' claim its successor could neither trust nor safely discard. Entries are stored as JSON objects; a bare pre-provenance string is still READ but can no longer be WRITTEN — run fabric_watermark_migrate once per seat to stamp them. The ledger has exactly '
-            + WATERMARK_FIELDS.length + ' fields: ' + WATERMARK_FIELDS.join(', ')
+        description: 'Write the delivery ledger "watermark-<LABEL>". `mode` is REQUIRED and has NO DEFAULT. \'patch\' merges the FIELDS you send and leaves the other ledger fields alone; \'replace\' additionally CLEARS every ledger field you omit. NEITHER MERGES WITHIN A FIELD: each array you send REPLACES that field\'s array wholesale, so you must send the WHOLE list you intend to be stored. To protect that, a write that would DROP an entry the ledger already holds is REFUSED BY NAME (FABRIC_WATERMARK_DESTRUCTIVE_WRITE) and nothing is written — a delivery claim that vanishes is indistinguishable afterwards from mail that never arrived, and the read-modify-write every caller performs here loses entries whenever a concurrent writer lands between the read and the write. Adding entries is always allowed; there is NO removal path on this verb, in either mode — withdrawing a claim is a different act from recording one and is not offered as a side effect of a routine put. The ledger has exactly ' + WATERMARK_FIELDS.length + ' fields: ' + WATERMARK_FIELDS.join(', ')
             + '. Any other field is REJECTED rather than stored, because a ledger field no reader consults is a delivery record that silently does nothing. broadcast_seen is the correct place to record that this seat has processed a broadcast — never flip the broadcast itself.',
         mutating: true,
         inputSchema: {
             type: 'object',
             properties: {
                 seat_label: { type: 'string', description: 'The seat LABEL.' },
-                mode: { type: 'string', enum: [...WATERMARK_WRITE_MODES], description: 'REQUIRED, no default. append = server-side set-union (idempotent; re-appending an entry is a no-op and does not restamp it). patch/replace = wholesale array write, REFUSED if it would drop an existing entry. quarantine = withdraw one writer\'s claims across every ledger field, leaving every other writer\'s intact.' },
-                writer: { type: 'string', description: 'REQUIRED on every write that touches the ledger — the agent id making the claim. Stamped onto every entry so a successor can decide WHOSE claims to trust.' },
-                quarantine_writer: { type: 'string', description: 'Required by mode \'quarantine\' and meaningless otherwise: the writer whose claims are being withdrawn. Without it a quarantine would be an untargeted delete of the whole ledger, so it is refused.' },
+                mode: { type: 'string', enum: [...WRITE_MODES], description: 'REQUIRED, no default. patch = merge these FIELDS, leaving other ledger fields untouched. replace = this call is the whole ledger; every field you omit is CLEARED. Within a field both write the array you send WHOLESALE — there is no server-side merge — and both REFUSE a write that would drop an entry already stored, whether by sending a shorter array or (under replace) by omitting a field that holds entries.' },
                 // AN ARRAY, because that is what the writer writes. fabric_broadcast_ack merges the
                 // acknowledged KEYS into this field as a list and re-reads it as a list; publishing
                 // it as a `string` "high-water mark" advertised a shape no code on either side ever

@@ -1099,81 +1099,6 @@ export const WATERMARK_FIELDS = Object.freeze([
     'broadcast_seen', 'delivered', 'resolved', 'held', 'awaiting',
 ]);
 
-/**
- * THE LEDGER ENTRY — a delivery claim, and WHO made it.
- *
- * WHY PROVENANCE. A claim outlives the credibility of whoever made it. A secretary that was stopped
- * FOR CAUSE left a `delivered` claim on its seat's watermark that its successor could neither trust
- * nor safely discard, because nothing on the entry said who wrote it: dropping it risked re-handing
- * mail already delivered, keeping it risked never handing up mail that never was. Stamping the
- * writer makes that a decidable question, which is the whole point of R2 and the reason
- * `quarantine` can exist at all.
- *
- * ENCODING. An entry is JSON `{"key":…,"writer":…,"at":…}` in the flat string[] the store allows —
- * a nested object is neither filterable nor projectable here, exactly as the wake block is flat for
- * the same reason. A BARE STRING is a PRE-PROVENANCE entry: it is READ (so the live ledgers stay
- * legible) and it is MIGRATED, but it can no longer be WRITTEN.
- */
-export const LEDGER_ENTRY_FIELDS = Object.freeze(['key', 'writer', 'at']);
-
-/** The record key a ledger entry refers to, whichever encoding it is in. ONE owner of "what does
- *  this entry point at", so dedupe, union and quarantine cannot disagree about identity. */
-export function ledgerEntryKey(entry) {
-    if (typeof entry !== 'string') return null;
-    if (!entry.startsWith('{')) return entry;
-    try {
-        const p = JSON.parse(entry);
-        return typeof p?.key === 'string' ? p.key : entry;
-    } catch { return entry; }
-}
-
-/** The writer that made this claim, or null for a pre-provenance bare entry. */
-export function ledgerEntryWriter(entry) {
-    if (typeof entry !== 'string' || !entry.startsWith('{')) return null;
-    try {
-        const p = JSON.parse(entry);
-        return typeof p?.writer === 'string' ? p.writer : null;
-    } catch { return null; }
-}
-
-/** Stamp a key into a provenance-bearing entry. The clock is the SERVER's, passed in — never read
- *  here — so a ledger entry cannot claim it was written at a time no write happened. */
-export function stampLedgerEntry(key, writer, at) {
-    return JSON.stringify({ key: String(key), writer: String(writer), at: String(at) });
-}
-
-/**
- * SERVER-SIDE SET-UNION of a ledger field, deduplicated BY KEY, first claim winning.
- *
- * This GENERALISES the union `fabric_broadcast_ack` already owned for `broadcast_seen` — it is not
- * a second owner. That verb computed a merge for exactly one of the five ledger fields and the
- * semantics were never lifted, which is why every other field was left to a client read-union-write
- * that a single racing patch could wipe (measured: one patch took a `delivered` ledger from 98
- * entries to 1).
- *
- * FIRST CLAIM WINS on a duplicate key, so the union is IDEMPOTENT and re-appending an entry does
- * not restamp it with a later writer's name — a delivery is a fact about when it FIRST happened.
- */
-export function unionLedger(existing = [], incoming = []) {
-    const out = [];
-    const seen = new Set();
-    for (const e of [...(existing || []), ...(incoming || [])]) {
-        const k = ledgerEntryKey(e);
-        if (k === null || seen.has(k)) continue;
-        seen.add(k);
-        out.push(e);
-    }
-    return out;
-}
-
-/**
- * The write modes `fabric_watermark_put` accepts — the two generic ones PLUS the two the ledger
- * needs. It is its OWN set rather than an extension of WRITE_MODES because `append` and
- * `quarantine` are meaningless on every other record on this surface, and widening the shared enum
- * would advertise them on verbs that would then have to refuse them one by one.
- */
-export const WATERMARK_WRITE_MODES = Object.freeze([...WRITE_MODES, 'append', 'quarantine']);
-
 // ── Predicates ───────────────────────────────────────────────────────────────────────────────
 
 /** Case-folded membership. The fabric is written by shells, Python hooks and models alike; a
@@ -1331,10 +1256,6 @@ export function fabricVocabulary() {
         // The lifecycle fields that SURVIVE a write that does not mention them, on both
         // fabric_envelope_put and fabric_contract_put.
         lifecycle_preserved_fields: [...LIFECYCLE_PRESERVED_FIELDS],
-        // The ledger's provenance contract: the modes fabric_watermark_put accepts and the
-        // fields every stamped entry carries.
-        watermark_write_modes: [...WATERMARK_WRITE_MODES],
-        ledger_entry_fields: [...LEDGER_ENTRY_FIELDS],
         wake_record_field_names: [...WAKE_RECORD_FIELD_NAMES],
         // The beat-clock contract, so the plugin reader GENERATES its copy of "which field is the
         // model's clock" instead of hand-typing it — the exact mirror that made the two-writers
