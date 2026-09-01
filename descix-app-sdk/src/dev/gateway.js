@@ -24,7 +24,7 @@ import path from 'path';
 import { createViteProxyConfig } from './createViteProxyConfig.js';
 import { getViteHttpsConfig, resolveCertPaths, trustCertCommand } from './getViteHttpsConfig.js';
 import { watchWorkspaceConfig } from './watchWorkspaceConfig.js';
-import { buildWorkspaceProducts } from './workspaceProducts.js';
+import { buildWorkspaceProducts, gatewayOrigin } from './workspaceProducts.js';
 import { staticSitePlugin } from './staticSitePlugin.js';
 import { resolveGatewayTargets, proxyEntry, isLocalOrigin } from './resolveGatewayTargets.js';
 import { resolveGatewayPort, portInUseMessage } from './gatewayPort.js';
@@ -165,7 +165,21 @@ export async function runGateway(options = {}) {
     cwd: options.cwd || process.cwd(),
     gatewayPort: port,
   });
-  log(`  App:       ${binding.appId}   [${binding.source}]  → standalone at ${binding.appUrl}`);
+  // The binding's MODE and the app's ROUTE are two different facts, and one line
+  // that carried both said neither. `standalone` is binding.mode, and the mode is
+  // delivered by the binding this gateway serves at its ROOT (appBindingPlugin
+  // below; read by the shell in SdkInitializer via fetchAppBinding). It is NOT
+  // delivered by binding.appUrl — that is gatewayProductUrl, the app's own route,
+  // which is the SAME value buildWorkspaceProducts hands the shell as an iframe
+  // src. Printing "standalone at <appUrl>" therefore named the mode and the route
+  // as one address, and sent developers to the one URL that cannot answer for the
+  // mode: APP_BINDING_PATH is served at the root and 404s under /p/.
+  //
+  // Say what each URL IS and let neither stand in for the other. Nothing here
+  // describes what /p/ SHOULD be — that is not this banner's question to answer.
+  log(`  App:       ${binding.appId}   [${binding.source}]   mode: ${binding.mode}`);
+  log(`  Open:      ${gatewayOrigin(port)}/   → App Shell; reads ${APP_BINDING_PATH} and boots ${binding.appId} ${binding.mode}`);
+  log(`  App route: ${binding.appUrl}   → this app's route on the gateway (the URL the shell loads it from)`);
   log('');
 
   const proxyRules = buildGatewayProxy(workspaceRoot, targets);
