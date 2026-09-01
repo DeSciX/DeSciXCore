@@ -108,18 +108,17 @@ export function resetView() {
 /**
  * Is a host actually LISTENING to view changes?
  *
- * Publication is not capability. `AppWidget` subscribes (via useDeSciXView) and
- * honours the request; the shell's STANDALONE_APP view mounts `CodeSiteWidget`
- * DIRECTLY, with no useDeSciXView between them, so that host subscribes to nothing —
- * `set()` validates, updates `current`, notifies an empty subscriber set, and returns
- * the mode you asked for while the screen never changes.
- * (Subscription lives in the shell's view layer, not in the widget: the same
- * CodeSiteWidget is honour-bound under AppWidget and inert standalone.)
- * A no-op that returns success is indistinguishable from success, which is the exact
- * failure class this platform's doctrine exists to prevent.
+ * Publication is not capability. A host that never subscribed still gets a working
+ * `set()`: it validates, updates `current`, notifies an empty subscriber set, and
+ * returns the mode you asked for while the screen never changes. A no-op that returns
+ * success is indistinguishable from success, which is the exact failure class this
+ * platform's doctrine exists to prevent — so `set()`'s return value is never evidence
+ * that the layout moved, and this is.
  *
  * Subscriber count is the truthful answer, and it is already tracked here — so an
  * app can ask before it trusts the layout to change.
+ *
+ * Subscription belongs to the host's view layer, not to the widget it renders.
  *
  * @returns {boolean} true when at least one host will re-render on a view change
  */

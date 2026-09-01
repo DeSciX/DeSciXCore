@@ -58,10 +58,10 @@ const PLATFORM_APP_MESSAGES = {
  * is a full mode, not a cosmetic hide: no ChatWidget mounts and no toggle renders,
  * so the widget is a bare app frame that needs no session and makes no server call.
  *
- * That mode is what the shell's STANDALONE_APP view mounts — the guest-safe face of
- * the app a shell is BOUND to (`descix serve`, or a deployed app face). It is the
- * same container the store uses at APP_USAGE, differing only by this prop, which is
- * why there is one iframe-app widget here and not two.
+ * It is the host's view layer that decides that prop, from the view the APP asked
+ * for — never from which launch path the shell was opened at. This widget does not
+ * subscribe to view changes; the host does, which is what `DeSciX.view.available()`
+ * reports.
  *
  * Platform apps (daita, powch) are guarded from iframe rendering to prevent
  * recursion (daita) and duplicate instances (powch) — but ONLY when this widget is
