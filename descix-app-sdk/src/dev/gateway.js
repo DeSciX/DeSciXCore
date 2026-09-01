@@ -205,6 +205,9 @@ export async function runGateway(options = {}) {
       ...httpsConfig,
       host: true,
       hmr: false,
+      // A pure reverse proxy watches nothing. `null` selects Vite's NoopWatcher
+      // instead of a recursive chokidar walk of the entire workspace root.
+      watch: null,
       proxy: proxyRules,
     },
     define: buildDefines(config, workspaceRoot, targets),
@@ -251,6 +254,9 @@ export async function runGateway(options = {}) {
         ...httpsConfig,
         host: true,
         hmr: false,
+        // A pure reverse proxy watches nothing. `null` selects Vite's NoopWatcher
+        // instead of a recursive chokidar walk of the entire workspace root.
+        watch: null,
         proxy: newProxy,
       },
       define: buildDefines(newConfig, workspaceRoot, newTargets),
