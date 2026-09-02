@@ -229,8 +229,11 @@ export async function runGateway(options = {}) {
   });
 
   await listenOrFailLoud(server, port, portSource);
-  log(`\n  Gateway listening on https://localhost:${port}\n`);
-  log(`  App binding: https://localhost:${port}${APP_BINDING_PATH}\n`);
+  // gatewayOrigin owns this shape (workspaceProducts.js). These two lines used to
+  // hand-derive it, which is the same two-derivations-of-one-fact shape as the
+  // banner defect above — and it sat two lines below the fix for it.
+  log(`\n  Gateway listening on ${gatewayOrigin(port)}\n`);
+  log(`  App binding: ${gatewayOrigin(port)}${APP_BINDING_PATH}\n`);
   log(`  Dev cert: ${certPath}`);
   log(`  Passkey login needs this cert trusted once:\n    ${trustCertCommand(certPath)}\n`);
 
