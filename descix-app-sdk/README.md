@@ -92,7 +92,9 @@ cd my-app && descix serve                   # the app is detected from the direc
   API:       https://dev.descix.net   [workspace env.apiUrl]
   Shell:     https://dev.descix.net   [same origin as API (workspace env.apiUrl)]
   Port:      5173                     [built-in default (5173)]
-  App:       <app-id>                 [cwd]  → standalone at https://localhost:5173/p/<app-id>
+  App:       <app-id>                 [cwd]   mode: standalone
+  Open:      https://localhost:5173/   → App Shell; reads /__descix/app-binding.json and boots <app-id> standalone
+  App route: https://localhost:5173/p/<app-id>   → this app's route on the gateway (the URL the shell loads it from)
 
     /                                  → https://dev.descix.net   (App Shell — sign in here)
     /apifront                          → https://dev.descix.net
