@@ -2327,7 +2327,7 @@ corpusCommand
   .option('-k, --kb <name>', 'KB name (syncs specific manifest; default: all)')
   .option('-v, --verbose', 'Show verbose output')
   .option('--ref <ref>', 'Override the git ref for ALL manifest sources (e.g., --ref ws-admin-b1). Precedence: --ref > manifest source.ref > "main".')
-  .option('--rebuild', 'Reconcile Pinecone against the current manifest walk: enumerate remote file_ids, purge any not in the current corpus, then re-sync from scratch. Use to recover from accumulated stale-chunk drift. Prompts before deleting unless --yes is supplied.')
+  .option('--rebuild', 'Reconcile Pinecone against REMOTE state: enumerate remote file_ids, purge any not in the current corpus, then re-sync from scratch. NOT needed to remove deleted files — an ordinary sync already purges them, diffing the walk against sync-state\'s last_sync_commit (measured: a plain sync purged 1962 chunks across 124 stale blob SHAs). Use --rebuild ONLY when that local sync-state cannot be trusted: it is lost, hand-edited, or vectors were orphaned outside the history it tracks. Prompts before deleting unless --yes is supplied.')
   .option('--dry-run', 'Enumerate would-be-purged file_ids and would-be-upserted chunks without ANY Pinecone writes. Exit 0 if no drift, 1 if drift. Read-only.')
   .option('--show-walk', 'Print the resolved ref + the first 50 walked files BEFORE any Pinecone operations. Useful for verifying --ref / manifest source resolution.')
   .option('--yes', 'Skip the interactive purge confirmation in --rebuild mode. Use in scripting/CI.')
