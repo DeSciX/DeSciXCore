@@ -85,12 +85,23 @@ export async function extract({ env, cliPaths } = {}) {
     relPath: CM_FILE,
     section: `§${SECTION.number} ${SECTION.heading}`
   });
+  // The symbol is matched WITHIN an export list rather than as the list's sole member. The old
+  // pattern anchored on the closing brace immediately after the name, so it broke the moment a
+  // second symbol was re-exported beside it — the extractor reported the re-export missing when
+  // it was present and one token wider.
+  //
+  // HONEST LIMITATION, stated rather than implied: this is still textual matching, so it remains a
+  // derivation of a fact the module itself owns. The robust fix is to consume the owner's actual
+  // exports, but this extractor cannot import communityManagement.js — that would pull the whole
+  // Cloud service graph (config bootstrap, Firestore) into the CLI. Matching the identifier inside
+  // any export list is what survives a re-ordering; a move to `export * from` would still need
+  // this line changed.
   const reExportMatch = findInLines({
     lines: cm.lines,
-    regex: /export\s*\{\s*hydrateCommunityIdFromProducts\s*\}/,
+    regex: /export\s*\{[^}]*\bhydrateCommunityIdFromProducts\b/,
     section: `§${SECTION.number} ${SECTION.heading}`,
     source: `${CM_FILE} (hydrate re-export)`,
-    expected: 'export { hydrateCommunityIdFromProducts }',
+    expected: 'hydrateCommunityIdFromProducts named in an export list',
     recovery: `Verify ${CM_FILE} still re-exports hydrateCommunityIdFromProducts.`
   });
 
