@@ -59,7 +59,12 @@ export {
 } from './permissions/index.js';
 
 // Entitlements
+// resolveAppCommunityId is the AUTHORITATIVE derivation (app_id -> owning community, no request
+// value consulted) and is what a security boundary must consume. hydrateCommunityIdFromProducts is
+// the fill-if-absent convenience beside it. Exporting only the latter pointed every reader of this
+// barrel at the one that is explicitly NOT an authorization primitive.
 export {
+    resolveAppCommunityId,
     hydrateCommunityIdFromProducts
 } from './entitlements/index.js';
 
