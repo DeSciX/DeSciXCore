@@ -88,9 +88,26 @@ const CONTROLS = [
     // registry, recreating EXACTLY the 2026-08-30 04:15Z state: a repo version equal to a
     // published version whose content differs. That state is what shipped a stale SSOT to every
     // registry consumer while "no file:/link: deps" read green.
+    // THE TAMPER TRACKS THE CURRENT VERSION, and it has to: this control's anchor was
+    // '"version": "2.0.0"' while package.json said 2.0.1, so it had ZERO matches and the harness
+    // could not land it. A negative control that cannot be applied is not a negative control —
+    // it is a line of prose claiming one exists. The tamper puts the version back to one already
+    // ON THE REGISTRY with different content, recreating exactly the state that shipped a stale
+    // SSOT to every registry consumer while "no file:/link: deps" read green.
     ['check-registry-content-drift', 'descix-platform-api/package.json',
-     '"version": "2.0.0"', '"version": "1.0.1"',
+     '"version": "2.1.0"', '"version": "2.0.1"',
      'a repo version equal to a published version whose CONTENT differs',
+     'script'],
+
+    // THE PUBLISH-TIME PARITY AXIS. The drift gate above cannot cover the artifact in flight:
+    // the version being published is not yet on the registry, so it passes vacuously for exactly
+    // that package. This tamper dirties a SHIPPED source file without committing it, which is a
+    // publish from a tree that matches no commit — the tarball would carry bytes the repository
+    // cannot account for, and every provenance claim tying it to the sha would be false.
+    ['check-packed-matches-source', 'descix-cloud-core/src/index.js',
+     "export { getFirestoreInstance } from './firestore.js';",
+     "export { getFirestoreInstance } from './firestore.js';\nexport const TAMPER = 'bytes on no commit';",
+     'a tarball built from a dirty tree — shipped content that is on no commit at this sha',
      'script'],
 
     // A6 TRANSPORT AXIS — one console.log restored on a stdio-reachable path.
@@ -119,6 +136,7 @@ const CONTROLS = [
 /** How each control is run. Anything not listed runs as a filtered descix-cli test. */
 const SCRIPT_GATES = {
     'check-registry-content-drift': ['scripts/check-registry-content-drift.mjs'],
+    'check-packed-matches-source': ['scripts/check-packed-matches-source.mjs'],
     'check-mcp-stdout-purity': ['descix-cli/scripts/check-mcp-stdout-purity.mjs'],
     'check-mcp-headless-reachability': ['descix-cli/scripts/check-mcp-headless-reachability.mjs'],
     'check-cli-self-reference': ['descix-cli/scripts/check-cli-self-reference.mjs'],

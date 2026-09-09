@@ -209,6 +209,27 @@ jobs:
       - name: Refuse to publish an artifact nobody can install
         run: node scripts/check-prepublish-deps-cli.mjs "$PKG"
 
+      # REFUSE AN ARTIFACT THE REPOSITORY CANNOT ACCOUNT FOR. Every gate above this line reads
+      # metadata — a package name, a version string, a dependency range — and none of them has
+      # ever looked at the CONTENT about to be uploaded. On 2026-09-09 all five @descix packages
+      # were found published with content that no longer matched the repo under UNCHANGED version
+      # numbers; a version string agreeing is precisely the state in which that class of defect
+      # hides, which is why this gate compares bytes and never a version.
+      #
+      # It is keyed on the GUARD'S resolved package, like the refusal above, so it works on the
+      # release path and not only on a dispatch. $GITHUB_SHA is the commit actions/checkout@v4
+      # checked out, so the gate asks the one question that matters here: is the tarball we are
+      # about to publish the source we committed at this sha?
+      #
+      # THIS IS NOT check-registry-content-drift.mjs AND DOES NOT REPLACE IT. That gate asks
+      # whether a repo version equal to a PUBLISHED version has the same content, runs in
+      # ci-gates.yml, and is the gate for a forgotten bump. It cannot cover the publish itself:
+      # the version in flight is by definition not yet on the registry, so it would pass
+      # vacuously for exactly the artifact being shipped. The two gates guard different halves
+      # and neither is a copy of the other.
+      - name: The packed artifact must equal the committed source at this sha
+        run: node scripts/check-packed-matches-source.mjs "$PKG" --sha "$GITHUB_SHA"
+
       - name: Publish
         working-directory: ${{ needs.guard.outputs.package }}
         run: |
