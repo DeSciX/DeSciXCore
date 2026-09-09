@@ -85,9 +85,11 @@ The broker validates this context and propagates it to downstream services.
 
 ### 3.1 Primary Discovery Mechanism
 
-`tell_me_how` is the **primary entry point** for discovering platform capabilities. Always use it before attempting platform operations.
+**Prerequisite: the developer is signed in.** `tell_me_how` returns caller-specific context (and `kb corpus sync` writes to a KB namespace) — both correctly refuse a credential-free caller, loud: `Authentication required`, exit 1. There is no guest/unauthenticated form of discovery, and that refusal must not be treated as a bug to work around. The step before discovery is `descix login --env dev`: it starts a device-code flow — opens a browser and mints a fresh sign-in code for that one invocation — and completes once the browser confirms it.
 
-**Rule:** Ask `tell_me_how` first, then execute the recommended command.
+Once signed in, `tell_me_how` is the **primary entry point** for discovering platform capabilities. Always use it before attempting platform operations.
+
+**Rule:** Sign in, then ask `tell_me_how` first, then execute the recommended command.
 
 ### 3.2 Three Scopes
 
@@ -100,6 +102,9 @@ The broker validates this context and propagates it to downstream services.
 ### 3.3 CLI Usage
 
 ```bash
+# Sign in first — device-code flow, opens a browser (skip if already authenticated)
+descix login --env dev
+
 # Default (entitlements scope)
 descix tell-me-how "How do I create a new app?"
 
@@ -341,10 +346,11 @@ Custom services integrate with the same pattern:
 
 ### 7.1 For AI Agents
 
-1. **Always use tell_me_how first** - Don't guess at command names
-2. **Use project scope when in a workspace** - More focused results
-3. **Chain operations** - tell_me_how -> execute_remote_command
-4. **Handle errors gracefully** - Show user-friendly messages
+1. **Be signed in before discovery** - `descix login --env dev` (device-code flow) is the step before `tell_me_how`; it refuses loud, not silently, for a credential-free caller
+2. **Always use tell_me_how first (once signed in)** - Don't guess at command names
+3. **Use project scope when in a workspace** - More focused results
+4. **Chain operations** - tell_me_how -> execute_remote_command
+5. **Handle errors gracefully** - Show user-friendly messages
 
 ### 7.2 For Service Developers
 
