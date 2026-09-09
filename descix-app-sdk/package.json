@@ -1,6 +1,6 @@
 {
   "name": "@descix/app-sdk",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "DeSciX App Shell - init-to-READY logic, core API, Powch integration, dev proxy config",
   "repository": {
     "type": "git",
