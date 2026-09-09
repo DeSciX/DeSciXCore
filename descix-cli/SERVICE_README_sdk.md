@@ -2,11 +2,11 @@
 
 ## Overview
 
-The DeSciX SDK provides command-line tools and MCP (Model Context Protocol) integration for building applications on the DeSciX platform. The SDK enables developers to authenticate, manage workspaces, create apps, and leverage AI-assisted development through Cursor IDE integration.
+The DeSciX SDK provides command-line tools and MCP (Model Context Protocol) integration for building applications on the DeSciX platform. The SDK enables developers to authenticate, manage workspaces, create apps, and leverage AI-assisted development through editor MCP integration (Claude Code, Copilot, Cursor, Cline).
 
 **Key capabilities:**
 - CLI commands for all platform operations
-- MCP server for Cursor IDE integration
+- MCP server integration for Claude Code, Copilot, Cursor and Cline
 - Intelligent tool discovery via `tell_me_how`
 - Entitlements-driven workspace setup
 - Git-aware project initialization
@@ -28,23 +28,22 @@ npm link
 
 ## CLI Commands
 
-### descix setup
+### descix quickstart
 
-**Description:** One-time workspace configuration wizard
-**Use when:** First time setting up DeSciX in a new workspace or Cursor project
+**Description:** One-command setup: auth → workspace → agent files → MCP config
+**Use when:** First time setting up DeSciX in a new workspace
 **What it does:**
-1. Prompts for API endpoint (production/local/custom)
-2. Runs device authentication (opens browser)
-3. Creates `.cursor/mcp.json` for MCP server
-4. Creates `.cursor/rules/descix_mcp.mdc` for AI agent instructions
-5. Creates `.descix/workspace.json` with initial configuration
+1. Authenticates via device login if no valid session exists
+2. Initializes `.descix/workspace.json` if missing
+3. Generates agent instruction files (`CLAUDE.md`, `.github/copilot-instructions.md`, `.cursorrules`, `.clinerules`) from the workspace's registered app/community
+4. Generates `.vscode/mcp.json` for MCP server config (skipped if the DeSciX VS Code extension already handles MCP)
+5. Copies SDK assets into `.descix/sdk-assets/`
 
 **Example:**
 ```bash
 cd ~/Projects/MyApp
-descix setup
+descix quickstart
 # Follow the prompts
-# Restart Cursor after completion
 ```
 
 ---
@@ -54,8 +53,11 @@ descix setup
 **Description:** Authenticate with the DeSciX platform
 **Use when:** Session expired or first-time authentication
 **Options:**
-- `--device` (default): Opens browser for Powch authentication
-- `--wallet`: Direct wallet signature authentication
+- (default, no flag needed): Device login — opens a browser for Powch authentication
+- `--wallet`: Direct wallet signature authentication (advanced, not yet implemented)
+- `-u, --url <url>`: API URL override
+- `--no-oauth`: Skip the OAuth long-lived token leg (wallet-signature login only)
+- `--scope <scope>`: OAuth scope to request (default: `mcp:read mcp:tools mcp:write mcp:admin`)
 
 **Example:**
 ```bash
@@ -107,41 +109,44 @@ descix tell-me-how --scope discovery "What AI training tools exist?"
 
 ---
 
-### descix app create
+### descix app init
 
-**Description:** Create or hydrate an app using the interactive wizard
-**Use when:** Starting a new project or hydrating an existing app
+**Description:** Create (if needed) and initialize an app: platform record + default KB + local workspace registration and scaffold. Idempotent.
+**Use when:** Starting a new project or hydrating an existing app. This is the single canonical path — the old two-step `app create` then `app init` is deleted; `descix app create` now hard-fails naming this replacement.
 **Options:**
-- `-c, --community <id>`: Community ID
-- `-a, --app <name>`: App name
-- `--wizard`: Interactive wizard mode
-- `--quick`: Skip optional prompts
-
-**Note:** New apps should primarily be provisioned via the PWA. This command can hydrate a local workspace from an existing app or create a skeleton if permitted.
+- `-a, --app <app_id>` (required): App ID. With `-c` this is the app NAME to create.
+- `-c, --community <id>`: Community ID — required to create an app that does not exist yet
+- `-s, --short <short_name>`: Short id segment (no hyphens) used when creating; defaults to `--app`
+- `--overwrite`: When creating, overwrite an existing app record intentionally
+- `--kb <name>`: Knowledge base name (default: `General`)
+- `-p, --path <dir>`: Local app directory (default: auto-detected or cwd)
 
 **Example:**
 ```bash
-# Interactive wizard
-descix app create --wizard
+descix app init -a myapp -c descix
 ```
 
 ---
 
 ### descix kb
 
-**Description:** Manage Knowledge Base content (Git Mode)
-**Use when:** Processing KB documents locally
+**Description:** Manage Knowledge Base registration, corpus sync and per-KB configuration
+**Use when:** Creating a KB, syncing its corpus to Pinecone, or managing per-KB settings
 
 **Subcommands:**
-- `pull`: Download source documents from Drive to `kb/src/`
-- `chunk`: Process source files into chunks in `kb/chunks/`
-- `sync`: Push chunks to the platform (Pinecone)
-- `build`: Run the full pipeline (Pull -> Chunk -> Sync)
+- `create` / `list` / `delete`: Register, list or remove a KB
+- `corpus sync`: The one KB sync surface — walks the corpus manifest, chunks in-memory, pushes to Pinecone
+- `set-override-model` / `clear-override-model`: Pin or clear a per-KB model override
+- `status`: Show corpus sync state (files, chunks, last sync, resolved ref)
+- `doctor`: Detect drift between local sync-state and live Pinecone vector count
+- `records put|query|get|delete`: Structured record CRUD on a KB
+
+**Drive content authoring is a separate command:** `descix drive pull` / `descix drive push` (not under `kb`) move source documents between Drive and the local working tree.
 
 **Example:**
 ```bash
-# Full build pipeline
-descix kb build -c descix -a myapp
+# Sync a KB's corpus manifest to Pinecone
+descix kb corpus sync -a myapp -k General
 ```
 
 
@@ -274,9 +279,9 @@ metering notes on the `ask_question_to_app` and `query_knowledge_base` tool desc
 
 ---
 
-## MCP Tools (for Cursor AI)
+## MCP Tools
 
-After running `descix quickstart` and restarting Cursor, these MCP tools are available to the AI agent. `descix quickstart` signs you in as its first step (a `descix login --env dev` device-code flow — opens a browser, mints a fresh sign-in code per invocation) before it writes workspace, agent-instruction and MCP config files; there is no unauthenticated form of any of this.
+After running `descix quickstart` and reloading your editor/session, these MCP tools are available to the AI agent. `descix quickstart` authenticates via device login as its first step (opens a browser device-code flow) before it writes workspace, agent-instruction and MCP config files; there is no unauthenticated form of any of this.
 
 ### tell_me_how
 
@@ -305,7 +310,7 @@ tell_me_how({
 
 ```javascript
 execute_remote_command({
-  command: "create_app",
+  command: "create_app_for_community",
   params: {
     community_id: "descix",
     app_name: "My New App"
@@ -315,90 +320,31 @@ execute_remote_command({
 
 ---
 
-### descix_init
+### query_knowledge_base
 
-**Description:** Initialize a local project for DeSciX deployment
-**Use when:** Setting up a new project folder
-
-```javascript
-descix_init({
-  projectPath: "/Users/dev/Projects/MyApp",
-  appName: "my-app",
-  communityId: "descix"
-})
-```
-
-**Creates:**
-- `.descix/workspace.json` or `.descix/context.json`
-- `app_description.md` from README if missing
-- Folder structure for knowledge base
-
----
-
-### descix_wizard_step
-
-**Description:** Execute multi-step wizard workflows
-**Use when:** Creating apps, communities, or complex operations
+**Description:** Vector-similarity search over a knowledge base — returns raw source chunks with dereferenceable citations (retrieval, no synthesis, stateless)
+**Use when:** You want primary-source passages/citations, or to ground/check an `ask_question_to_app` answer
 
 ```javascript
-descix_wizard_step({
-  wizard_type: "create_app",
-  step: "init",
-  params: {
-    community_id: "descix",
-    app_name: "My App"
-  }
-})
-```
-
-**Wizard types:**
-- `create_app`: App creation with folder setup
-- `create_community`: Community creation with token
-- `publish_kb`: Knowledge base sync and publish
-
----
-
-### git_sync_ops
-
-**Description:** Git operations with auto-generated commit messages
-**Use when:** Committing changes, checking status
-
-```javascript
-git_sync_ops({
-  operation: "status",  // or "commit", "diff", "sync_info"
-  projectPath: "/Users/dev/Projects/MyApp"
-})
-```
-
----
-
-### search_knowledge_base
-
-**Description:** Search a specific knowledge base via RAG
-**Use when:** You know the exact KB to search
-
-```javascript
-search_knowledge_base({
-  communityId: "descix",
-  appId: "docs",
-  kbId: "sdk",
+query_knowledge_base({
+  app_id: "docs",
+  kb_id: "sdk",
   query: "How do I authenticate?"
 })
 ```
 
 ---
 
-### chat_with_kb
+### ask_question_to_app
 
-**Description:** Conversational RAG with knowledge base context
-**Use when:** Complex questions requiring AI reasoning
+**Description:** Ask a natural-language question against an app's knowledge base and get a synthesized, cited answer (stateful — pass `previous_interaction_id` to continue a thread)
+**Use when:** Complex questions requiring AI reasoning over a community's own sources
 
 ```javascript
-chat_with_kb({
-  communityId: "descix",
-  appId: "docs",
-  kbId: "sdk",
-  message: "Explain the authentication flow step by step"
+ask_question_to_app({
+  app_id: "docs",
+  knowledgebase_name: "sdk",
+  user_input: "Explain the authentication flow step by step"
 })
 ```
 
@@ -406,65 +352,44 @@ chat_with_kb({
 
 ## Workspace Configuration
 
-### workspace.json (Monorepo)
+### workspace.json (v2.1 — canonical)
 
-For multi-app workspaces, create `.descix/workspace.json`:
+`.descix/workspace.json` is written and mutated by `descix init` / `descix app init` / `descix app set-*` — never hand-edited. The v2.1 format is `env.platform` (the shell/store app, served at root) plus `env.products[]` (apps hosted inside the shell); the older `communities`-based v1 format is not supported and hard-errors on load ("v1 workspace format is not supported. Migrate to v2.1."):
 
 ```json
 {
-  "version": "2.0",
-  "primaryCommunity": "descix",
-  "directoryMappings": {
-    "frontend": { "communityId": "descix", "appId": "pwa", "kbId": "General" },
-    "backend": { "communityId": "descix", "appId": "cloud", "kbId": "General" },
-    "docs": { "communityId": "descix", "appId": "docs", "kbId": "sdk" }
-  },
-  "defaultContext": {
-    "communityId": "descix",
-    "appId": "docs",
-    "kbId": "sdk"
+  "version": "2.1",
+  "env": {
+    "platform": { "appId": "daita", "communityId": "descix", "localPath": ".", "kbId": "General" },
+    "products": [
+      { "appId": "docs", "communityId": "descix", "kbId": "sdk", "localPath": "descix-docs" }
+    ]
   }
 }
 ```
 
-### context.json (Single App)
-
-For individual app folders, create `.descix/context.json`:
-
-```json
-{
-  "version": "2.0",
-  "type": "app",
-  "community_id": "descix",
-  "app_id": "myapp",
-  "app_name": "My Application",
-  "folders": {
-    "app": { "local_path": ".", "sync_type": "assets" },
-    "kb": { "local_path": "docs", "sync_type": "rag" }
-  }
-}
-```
+A single-app (non-monorepo) workspace uses the same v2.1 shape with only `env.platform` set and an empty (or omitted) `env.products[]` — there is no separate single-app file format.
 
 ---
 
 ## Common Workflows
 
-### New Developer Onboarding (Cursor IDE)
+### New Developer Onboarding
 
 1. Install CLI: `npm install -g @descix/cli`
-2. Run setup: `descix setup`
-3. Restart Cursor (Cmd+Shift+P → "Reload Window")
+2. Run quickstart: `descix quickstart` — authenticates, initializes `.descix/workspace.json`, generates agent instruction files (`CLAUDE.md`, `.github/copilot-instructions.md`, `.cursorrules`, `.clinerules`) for Claude Code, Copilot, Cursor and Cline, and writes `.vscode/mcp.json` (skipped if the DeSciX VS Code extension is installed — it registers MCP natively)
+3. Reload the editor/session so it picks up the generated files
 4. AI agent can now use MCP tools
 5. Ask: "How do I create an app?"
 6. AI uses `tell_me_how` → `execute_remote_command`
 
 ### Entitlements-First App Creation
 
-1. AI calls `execute_remote_command({ command: "fetch_my_purchases" })`
+1. AI calls `fetch_my_purchases()` directly (it is its own MCP tool, not an `execute_remote_command` target)
 2. AI presents user's communities and apps
 3. User selects community (or creates new)
-4. AI calls `descix_wizard_step` for app creation
-5. AI creates local `.descix/context.json`
+4. AI calls `execute_remote_command({ command: "create_app_for_community", params: {...} })` for app creation
+5. AI runs `descix app init` to register the local workspace mapping in `.descix/workspace.json`
 
 ### Monorepo Setup
 
@@ -479,9 +404,9 @@ For individual app folders, create `.descix/context.json`:
 ## Troubleshooting
 
 ### "MCP tools not available"
-1. Run `descix setup` in workspace root
-2. Restart Cursor completely
-3. Check `.cursor/mcp.json` exists with `descix` server
+1. Run `descix quickstart` in workspace root
+2. Reload your editor/session completely
+3. Check `.vscode/mcp.json` exists with a `descix` server (this file is skipped, by design, if the DeSciX VS Code extension is installed — it registers MCP natively)
 
 ### "Session expired"
 Run `descix reconnect` or `descix login`
@@ -490,7 +415,7 @@ Run `descix reconnect` or `descix login`
 Service READMEs may not be vectorized. Ask admin to run `descix microservice vectorize` for relevant services.
 
 ### "workspace.json not found" for project scope
-Run `descix init` or let AI create workspace.json via `descix_init` MCP tool.
+Run `descix init` (or `descix quickstart`, which runs it for you if missing).
 
 ---
 
