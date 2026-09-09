@@ -66,6 +66,15 @@ export class DeSciXApiClient {
       this.baseUrl = String(this.baseUrl).trim().replace(/\/+$/, '');
       originSource = EXPLICIT_ORIGIN_SOURCE;
     }
+    // KEPT ON THE CLIENT, not just printed and dropped. `status` and `doctor` have to SHOW the
+    // resolved origin and its source in their own report bodies; when this was a local variable
+    // the only way for them to state an origin was to derive one themselves, and both did —
+    // from GlobalConfig.api_url, which is legitimately null. That produced three different
+    // answers for one state seconds apart (status "production (null)", doctor "API URL: null",
+    // app list the real origin). A consumer can only ferry the owner's answer if the owner's
+    // answer is still reachable.
+    this.originSource = originSource;
+
     // I1 (A', rev 2): ALWAYS, not default-only. Silence was the defect; PROD was not.
     reportEnvironment({ origin: this.baseUrl, source: originSource });
 
