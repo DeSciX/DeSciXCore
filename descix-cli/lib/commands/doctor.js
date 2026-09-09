@@ -13,7 +13,6 @@ import fs from 'fs/promises';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { DeSciXApiClient } from '../api-client.js';
-import { GlobalConfig } from '../global-config.js';
 import { isAuthenticated } from '../auth-guard.js';
 
 const execAsync = promisify(exec);
@@ -62,6 +61,28 @@ async function checkNode() {
  * Check API Connectivity
  */
 async function checkConnectivity(apiClient) {
+  // NO NETWORK VERDICT ON AN ORIGIN WE DO NOT HAVE. Measured on published 1.0.4: doctor was
+  // handed `baseUrl: globalConfig.api_url`, which is legitimately null on a machine that has
+  // never written ~/.descix/config.json, and then called `fetch(null)`. That throws, so doctor
+  // reported `[✗] API Connectivity — Unreachable / Fix: Check your internet connection.
+  // API URL: null` — UNCONFIGURED STATE MISREPORTED AS A NETWORK FAILURE, sending the developer
+  // to debug their wifi over a config fact. A red verdict on a null origin is not a measurement
+  // of anything; neither would a green one be.
+  //
+  // This is now unreachable through runDoctor, which resolves via the origin owner (never null,
+  // or a loud OriginInvalidError). It stays as a hard guard because "the caller always passes a
+  // good origin" is exactly the assumption that produced the defect.
+  if (!apiClient.baseUrl) {
+    return {
+      ok: false,
+      message: 'NOT CHECKED — no origin resolved',
+      remediation:
+        'This is a configuration fact, not a network problem, and no connectivity result is\n' +
+        '    reported for it. Choose an origin:\n' +
+        '      descix config init --env dev|demo|prod',
+    };
+  }
+
   try {
     // Just check if we can reach the health endpoint or root
     // The API client doesn't expose a raw ping, but we can try a lightweight call
@@ -148,10 +169,11 @@ export async function checkGcloud() {
     const version = stdout.split('\n')[0].trim(); // e.g. "Google Cloud SDK 456.0.0"
     return { ok: true, message: version };
   } catch (error) {
-    return { 
-      ok: false, 
-      message: 'Not installed or not in PATH', 
-      remediation: `Install the Google Cloud SDK: https://cloud.google.com/sdk/docs/install` 
+    return {
+      ok: false,
+      advisory: true,
+      message: 'Not installed or not in PATH',
+      remediation: `Only needed to administer DeSciX infrastructure. If you are building on DeSciX, ignore this.\n    Install (admins): https://cloud.google.com/sdk/docs/install`
     };
   }
 }
@@ -166,10 +188,11 @@ export async function checkAdc() {
       await fs.access(process.env.GOOGLE_APPLICATION_CREDENTIALS);
       return { ok: true, message: 'Configured via Env Var' };
     } catch {
-      return { 
-        ok: false, 
-        message: 'Env Var set but file missing', 
-        remediation: `Check GOOGLE_APPLICATION_CREDENTIALS path: ${process.env.GOOGLE_APPLICATION_CREDENTIALS}` 
+      return {
+        ok: false,
+        advisory: true,
+        message: 'Env Var set but file missing',
+        remediation: `Check GOOGLE_APPLICATION_CREDENTIALS path: ${process.env.GOOGLE_APPLICATION_CREDENTIALS}`
       };
     }
   }
@@ -191,10 +214,11 @@ export async function checkAdc() {
     // For now, existence is a good enough proxy for "attempted setup"
     return { ok: true, message: 'Configured (Default Location)' };
   } catch {
-    return { 
-      ok: false, 
-      message: 'Missing Credentials', 
-      remediation: `Run: gcloud auth application-default login --scopes=https://www.googleapis.com/auth/drive.file,https://www.googleapis.com/auth/drive` 
+    return {
+      ok: false,
+      advisory: true,
+      message: 'Missing Credentials',
+      remediation: `Only needed for Google Drive-backed KB authoring and infrastructure admin.\n    If you are building on DeSciX, ignore this.\n    Admins run: gcloud auth application-default login --scopes=https://www.googleapis.com/auth/drive.file,https://www.googleapis.com/auth/drive`
     };
   }
 }
@@ -209,9 +233,26 @@ export async function runDoctor(options = {}) {
   const results = [];
   
   try {
-    const globalConfig = await GlobalConfig.load();
-    const apiClient = new DeSciXApiClient({ baseUrl: globalConfig.api_url });
-    
+    // THE ORIGIN COMES FROM THE ONE OWNER. This was `new DeSciXApiClient({ baseUrl:
+    // globalConfig.api_url })` — a THIRD independent derivation of the origin, beside status's
+    // and beside the real one. ~/.descix/config.json names no origin on a fresh machine, so
+    // doctor ran its whole diagnosis against `null`. Passing NO baseUrl routes through
+    // initialize() → resolveOrigin(), which never returns null, fails loud on an origin that was
+    // named but unusable, and prints the `env:` line doctor was missing.
+    const apiClient = new DeSciXApiClient();
+    try {
+      await apiClient.ensureInitialized();
+    } catch (error) {
+      // A CONFIGURED-BUT-INVALID origin is not a diagnosis to render in a results table — it is
+      // the answer, and it already carries its own remedy from the origin owner. Fail loud
+      // rather than continuing into checks whose results would all be meaningless.
+      spinner.stop();
+      console.error(chalk.red(`\n${error.message}\n`));
+      process.exitCode = 1;
+      return;
+    }
+
+
     // 1. Node Version
     spinner.text = 'Checking Node.js...';
     const nodeRes = await checkNode();
@@ -247,9 +288,19 @@ export async function runDoctor(options = {}) {
     // Print Results
     let hasFailures = false;
     
+    // AN ADVISORY IS NOT A FAILURE. gcloud and ADC are administrator dependencies: an external
+    // developer building ON DeSciX has no business holding Google ADC credentials, yet doctor
+    // showed them a red [✗] and exited non-zero for not having them — telling every non-admin
+    // caller their environment is broken when it is correct and complete. A check that cries
+    // wolf on correct behaviour trains people to ignore the checks that matter.
     results.forEach(res => {
       if (res.ok) {
         console.log(`${chalk.green('[✓]')} ${chalk.white(res.label)} ${chalk.gray(res.message ? `(${res.message})` : '')}`);
+      } else if (res.advisory) {
+        console.log(`${chalk.gray('[-]')} ${chalk.white(res.label)} ${chalk.gray(`(${res.message} — not required)`)}`);
+        if (res.remediation) {
+          console.log(`    ${chalk.gray('Note:')}  ${chalk.gray(res.remediation)}`);
+        }
       } else {
         hasFailures = true;
         console.log(`${chalk.red('[✗]')} ${chalk.white(res.label)}`);
@@ -259,19 +310,35 @@ export async function runDoctor(options = {}) {
         }
       }
     });
-    
+
     console.log();
-    
+
+    // COVERAGE BOUNDARY, printed on green as well as red: the reader of a pass must see where
+    // the pass stops.
+    console.log(chalk.gray(
+      'Checked: Node version, API origin resolution + reachability, session, local write\n' +
+      'permissions. [-] rows are admin-only dependencies and never fail this command. NOT\n' +
+      'checked: your app\'s own build, chain state, or any credential\'s permissions at the API.'
+    ));
+    console.log();
+
     if (hasFailures) {
       console.log(chalk.yellow('⚠️  Some checks failed. Please review the issues above.'));
-      process.exit(1);
+      // `process.exitCode` rather than `process.exit(1)`: it lets Node drain stdout before
+      // exiting, where an immediate process.exit can truncate buffered output on a pipe.
+      // NO DEFECT WAS MEASURED HERE — this is a hardening, and the distinction matters. A
+      // suspected "exit code says 0 while the text says failed" was investigated on published
+      // 1.0.4 and DID NOT REPRODUCE: the 0 came from reading `$?` after a shell PIPELINE, which
+      // reports the exit of the last stage (`head`), not of `descix`. Recorded so the next
+      // reader does not re-open it: 1.0.4 exits 1 correctly.
+      process.exitCode = 1;
     } else {
       console.log(chalk.green('✨ All checks passed! Your environment is ready.'));
     }
-    
+
   } catch (error) {
     spinner.fail('Doctor crashed');
     console.error(chalk.red(`\nUnexpected error: ${error.message}`));
-    process.exit(1);
+    process.exitCode = 1;
   }
 }
