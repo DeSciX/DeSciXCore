@@ -202,12 +202,13 @@ descix purchases
 
 ## MCP Tools (for Cursor AI)
 
-After running `descix setup` and restarting Cursor, these MCP tools are available to the AI agent:
+After running `descix quickstart` and restarting Cursor, these MCP tools are available to the AI agent. `descix quickstart` signs you in as its first step (a `descix login --env dev` device-code flow — opens a browser, mints a fresh sign-in code per invocation) before it writes workspace, agent-instruction and MCP config files; there is no unauthenticated form of any of this.
 
 ### tell_me_how
 
 **Description:** Primary discovery tool - finds relevant commands for any task
-**Use first:** Always use this before attempting platform operations
+**Prerequisite:** the caller is signed in — it returns caller-specific context and is refused loud (`Authentication required`, exit 1) for a credential-free caller, never a silent partial answer
+**Use first:** Once signed in, always use this before attempting platform operations
 
 ```javascript
 tell_me_how({ 
