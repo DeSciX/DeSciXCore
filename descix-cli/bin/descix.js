@@ -13,6 +13,7 @@ import { DeSciXApiClient } from '../lib/api-client.js';
 import { requireAuth } from '../lib/auth-guard.js';
 import { WorkspaceConfig } from '../lib/workspace-config.js';
 import { CLI_VERSION } from '../lib/cli-version.js';
+import { recordInvocationOrigin } from '../lib/origin.js';
 // Chat session pointer + the ONE rule for when a dead pointer may be self-healed.
 import {
   getSessionInteractionId,
@@ -107,12 +108,24 @@ const ENV_URL_MAP = Object.fromEntries(
   Object.entries(WorkspaceConfig.ENV_MAP).map(([k, v]) => [k, v.url])
 );
 
+// The fold into DESCIX_API_URL is what makes every consumer see ONE variable — and it is also
+// what used to DESTROY the answer to "who chose this origin", so the origin owner printed a
+// static disjunction ("DESCIX_API_URL (or --api-url / --env)") for all three cases. The fold
+// stays; the provenance is now RECORDED alongside it, in the same breath, so the owner can name
+// the actual source. Recording it here rather than deriving it in the owner keeps one owner of
+// the fact: the only code that knows a flag was passed is the code that read the flag.
 program.hook('preAction', (thisCommand) => {
-  const opts = thisCommand.opts();
+  // Read from the ROOT program, not from the action command. `--env` and `--api-url` are
+  // declared ONCE, globally, and Commander binds them to the root — an identically-named option
+  // redeclared on a subcommand is shadowed and silently never populated (measured on 1.0.4:
+  // `descix config init --env dev` reached its action with `{}` and rejected its own advertised
+  // flag). One declaration, read from where Commander actually puts it.
+  const opts = program.opts();
 
   // --api-url takes highest priority
   if (opts.apiUrl) {
     process.env.DESCIX_API_URL = opts.apiUrl;
+    recordInvocationOrigin(opts.apiUrl, 'flagApiUrl');
     return;
   }
 
@@ -120,12 +133,23 @@ program.hook('preAction', (thisCommand) => {
   if (opts.env) {
     const envName = opts.env.toLowerCase();
     if (!(envName in ENV_URL_MAP)) {
-      console.error(chalk.red(`Unknown environment: ${opts.env}. Use: dev, demo, prod`));
+      // THE REFUSAL CARRIES THE CUSTOM-ENVIRONMENT PATH. This validator runs BEFORE any command
+      // action, so it is now the only thing a developer typing `--env staging` ever sees — the
+      // richer text inside `config init` that names `config set-env` for exactly this case can
+      // no longer be reached through the flag. A refusal that names only the three built-in
+      // names would strand every self-hosted or port-forwarded gateway with no next step, which
+      // is the same dead end as a remedy string for a command that does not run.
+      console.error(chalk.red(
+        `Unknown environment: ${opts.env}. Known environments: ${Object.keys(ENV_URL_MAP).join(', ')}.\n\n` +
+        'For a self-hosted or port-forwarded gateway, name it with its origin instead:\n' +
+        `  descix config set-env ${envName} --url https://...`
+      ));
       process.exit(1);
     }
     // Every named environment resolves to a URL (including dev → cloud DEV).
     // A local backend is a URL you name, not an environment.
     process.env.DESCIX_API_URL = ENV_URL_MAP[envName];
+    recordInvocationOrigin(ENV_URL_MAP[envName], 'flagEnv');
   }
 });
 
@@ -4334,15 +4358,24 @@ configCommand
 
 configCommand
   .command('init')
-  .description('Initialize configuration for an environment (requires --env)')
+  .description('Pin this workspace to an environment (requires the global --env dev|demo|prod)')
   // `--dev` DELETED, not deprecated: its absence meant PRODUCTION, so the most common
   // invocation (`descix config init`) wrote a prod origin nobody named. There is no default.
-  .option('--env <name>', 'Environment to initialize: dev, demo or prod')
+  //
+  // `--env` IS NOT REDECLARED HERE, and that is the fix, not an omission. It was declared both
+  // globally (program.option, above) and on this subcommand; Commander 14 binds `--env dev` to
+  // the ROOT program, so this action received `{}` and threw "requires an environment" — the
+  // command REJECTED THE FLAG ITS OWN --help ADVERTISED. Measured on published 1.0.4, and worse
+  // than a missing command: the CLI printed `descix config init --env dev` as the remedy for an
+  // unconfigured origin (origin.js DEFAULT_ORIGIN_SOURCE) and that exact copy-pasted string
+  // exited 1. Two declarations of one flag is the mirror-drift class; one owner is the cure.
   .option('--url <url>', 'Explicit origin (for a self-hosted or port-forwarded gateway)')
   .option('-g, --global', 'Save to global config (~/.descixrc)')
+  .addHelpText('after', '\nEnvironment comes from the global flag:\n' +
+    '  descix config init --env dev|demo|prod\n')
   .action(async (options) => {
     try {
-      await configCommands.init(options.env, options);
+      await configCommands.init(program.opts().env, options);
     } catch (error) {
       fail(error);
     }
