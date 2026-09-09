@@ -19,6 +19,7 @@ import { promisify } from 'util';
 import { DeSciXApiClient } from '../api-client.js';
 import { GlobalConfig } from '../global-config.js';
 import { isAuthenticated } from '../auth-guard.js';
+import { environmentNameFor } from '../environment-report.js';
 
 const execAsync = promisify(exec);
 
@@ -89,7 +90,24 @@ export async function runStatus(options = {}) {
   console.log(`OS:             ${os.type()} ${os.release()}`);
   
   const globalConfig = await GlobalConfig.load();
-  console.log(`Environment:    ${globalConfig.environment} (${globalConfig.api_url})`);
+
+  // THE ORIGIN COMES FROM THE ONE OWNER, VIA ITS CONSUMER. This line used to read
+  // `${globalConfig.environment} (${globalConfig.api_url})` — a SECOND, independent derivation
+  // of the origin that consulted only ~/.descix/config.json. That file legitimately names no
+  // origin, so on an unconfigured workspace status printed "production (null)": an environment
+  // NAME it had not resolved, beside a null origin, while `descix app list` seconds later
+  // correctly reported prod at https://descix.net from the actual owner. `environment` here is
+  // GlobalConfig's own unrelated default string, not a resolution — it was never an answer to
+  // "which origin will this CLI talk to".
+  //
+  // Constructing the client with NO baseUrl is what routes through the owner: initialize()
+  // resolves via resolveOrigin() and prints the `env:` line (I1 — every network-bound command,
+  // always). status and doctor were the two network-bound commands missing that line, which is
+  // exactly why the three-way disagreement stayed invisible.
+  const apiClient = new DeSciXApiClient();
+  await apiClient.ensureInitialized();
+  console.log(`Environment:    ${environmentNameFor(apiClient.baseUrl)} (${apiClient.originSource})`);
+  console.log(`API Origin:     ${chalk.green(apiClient.baseUrl)}`);
   console.log();
 
   // Load workspace context via WorkspaceConfig
@@ -110,7 +128,6 @@ export async function runStatus(options = {}) {
   console.log(chalk.white('Authentication'));
   console.log(chalk.white('--------------'));
 
-  const apiClient = new DeSciXApiClient({ baseUrl: globalConfig.api_url });
   const isAuth = await isAuthenticated(apiClient);
 
   if (isAuth) {
@@ -150,8 +167,15 @@ export async function runStatus(options = {}) {
         console.log(`Local Apps:     ${allApps.join(', ')}`);
       }
 
-      console.log(`API:            ${workspaceConfig.getApiUrl() ||
-        '(not configured — run `descix config set-env dev|demo|prod`)'}`);
+      // WHAT THE WORKSPACE FILE ITSELF SAYS — deliberately NOT a resolved origin. The resolved
+      // origin and its source are reported once, above, by the owner's consumer. This line used
+      // to call getApiUrl() with a `|| '(not configured …)'` fallback; getApiUrl() now consumes
+      // the origin owner and so NEVER returns null, making that branch unreachable — a dead
+      // fallback that could only ever misreport. Printing the raw key answers the different and
+      // genuinely useful question "is this origin coming from my workspace, or from elsewhere?"
+      const workspaceApiUrl = workspaceConfig.env?.apiUrl;
+      console.log(`API (this file): ${workspaceApiUrl
+        || '(unset — origin resolves from the sources printed above)'}`);
       console.log(`Local Root:     ${workspaceRoot}`);
     } catch (error) {
       console.log(`Mode:           ${chalk.red('Unknown/Invalid')} (${error.message})`);

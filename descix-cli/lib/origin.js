@@ -60,15 +60,87 @@ export class OriginInvalidError extends Error {
 }
 
 /**
- * The resolution order, most explicit first. Each entry is [human-readable source, key].
- * The ORDER is the contract; the array is the only place it is written down.
+ * The SOURCE label for each thing that can name an origin. One key, one spelling.
+ *
+ * WHY EACH LABEL NAMES EXACTLY ONE THING (measured 2026-09-09 on published 1.0.4): the envVar
+ * label used to read `DESCIX_API_URL (or --api-url / --env)` — a STATIC DISJUNCTION printed
+ * whichever of the three had actually chosen the origin, and printed verbatim even with
+ * DESCIX_API_URL provably unset. `--env dev`, `--api-url https://dev.descix.net` and a real
+ * `DESCIX_API_URL=...` produced three byte-identical source strings. A source that lists the
+ * possibilities is not a source: it is the same "who chose this origin" silence this module
+ * exists to end, one level in from the null it already fixed.
+ *
+ * The flag labels are reachable because `bin/descix.js` RECORDS which flag set the variable
+ * (see `recordInvocationOrigin`) instead of only folding it into `process.env` and discarding
+ * the provenance.
  */
-const PRECEDENCE = [
-    ['DESCIX_API_URL (or --api-url / --env)', 'envVar'],
-    ['.descix/workspace.json env.apiUrl', 'workspaceEnvApiUrl'],
-    ['.descix/workspace.json apiUrl (legacy)', 'legacyApiUrl'],
-    ['~/.descix/config.json api_url', 'globalApiUrl'],
-];
+export const ORIGIN_SOURCE_LABELS = {
+    flagApiUrl: '--api-url flag',
+    flagEnv: '--env flag',
+    envVar: 'DESCIX_API_URL environment variable',
+    workspaceEnvApiUrl: '.descix/workspace.json env.apiUrl',
+    legacyApiUrl: '.descix/workspace.json apiUrl (legacy)',
+    globalApiUrl: '~/.descix/config.json api_url',
+};
+
+/**
+ * The resolution order, most explicit first. The ORDER is the contract; this array is the only
+ * place it is written down. Labels come from ORIGIN_SOURCE_LABELS, never from a second literal.
+ */
+const PRECEDENCE = ['envVar', 'workspaceEnvApiUrl', 'legacyApiUrl', 'globalApiUrl'];
+
+/**
+ * What this invocation's FLAGS named, if anything: `{ origin, sourceKey }`.
+ *
+ * `--api-url` and `--env` are folded into `process.env.DESCIX_API_URL` by the CLI's preAction
+ * hook so that every consumer sees one variable. That fold is what destroys the provenance, so
+ * the hook records it here in the same breath. Module-level because there is exactly ONE
+ * invocation per process, and because this module is imported by every consumer of the origin —
+ * one owner of the fact, not a copy ferried through four call signatures.
+ */
+let invocationOrigin = null;
+
+/**
+ * Record that a COMMAND-LINE FLAG chose this invocation's origin.
+ *
+ * @param {string} origin - the origin the flag resolved to
+ * @param {'flagApiUrl'|'flagEnv'} sourceKey - which flag it was
+ * @throws when handed a key that has no published label — a source with no name is the defect.
+ */
+export function recordInvocationOrigin(origin, sourceKey) {
+    if (!Object.prototype.hasOwnProperty.call(ORIGIN_SOURCE_LABELS, sourceKey)) {
+        throw new Error(
+            `recordInvocationOrigin: "${sourceKey}" is not a known origin source. ` +
+            `Known: ${Object.keys(ORIGIN_SOURCE_LABELS).join(', ')}.`,
+        );
+    }
+    invocationOrigin = { origin: normalizeOrigin(origin), sourceKey };
+}
+
+/** TEST SEAM ONLY: forget this invocation's recorded flag provenance. */
+export function _resetInvocationOriginForTests() {
+    invocationOrigin = null;
+}
+
+/**
+ * The label for the value that won, naming WHICH source supplied it.
+ *
+ * The envVar slot is the only one with more than one possible author, because the flags are
+ * folded into it. It reports a flag ONLY when the recorded flag actually accounts for the value
+ * in hand — if a flag was recorded and DESCIX_API_URL nevertheless holds something else, the
+ * honest answer is the environment variable.
+ *
+ * @param {string} key
+ * @param {string} value
+ * @returns {string}
+ */
+function sourceLabelFor(key, value) {
+    if (key === 'envVar' && invocationOrigin
+        && invocationOrigin.origin === normalizeOrigin(value)) {
+        return ORIGIN_SOURCE_LABELS[invocationOrigin.sourceKey];
+    }
+    return ORIGIN_SOURCE_LABELS[key];
+}
 
 /** The remedy text every failure prints. One spelling, so every surface says the same thing. */
 export const ORIGIN_REMEDY =
@@ -120,9 +192,10 @@ function isUsableOrigin(value) {
  *         same class of defect from the other direction.
  */
 export function resolveOrigin(sources = {}) {
-    for (const [label, key] of PRECEDENCE) {
+    for (const key of PRECEDENCE) {
         const value = sources[key];
         if (typeof value === 'string' && value.trim() !== '') {
+            const label = sourceLabelFor(key, value);
             if (!isUsableOrigin(value)) {
                 throw new OriginInvalidError(
                     `The DeSciX API origin configured in ${label} is not a usable origin: "${String(value).trim()}".\n` +

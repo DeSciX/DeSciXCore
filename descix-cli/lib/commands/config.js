@@ -101,13 +101,29 @@ export async function init(env, options = {}) {
     // Write through the CANONICAL writer. This function used to assign the LEGACY top-level
     // `workspaceConfig.apiUrl`, while `config set-env` writes `env.apiUrl` — two writers of one
     // fact, writing two different keys, one of which `getApiUrl()` only consults as a fallback.
-    const workspaceConfig = await WorkspaceConfig.load();
+    //
+    // `tryLoad`, NOT `load`, AND IT CREATES ONE WHEN THERE IS NONE. This is what closes the
+    // PROD WINDOW at the start of every onboarding (measured on published 1.0.4): in a fresh
+    // directory `config init --env dev` threw "Workspace not configured", `config set-env dev`
+    // threw the same, and so there was NO WORKING WAY TO PIN THE ENVIRONMENT BEFORE the first
+    // command ran — every one of them silently targeted PROD while printing a remedy that could
+    // not be executed. Pinning the environment must not require a workspace to already exist:
+    // choosing the origin is the FIRST thing a developer does, not something they may only do
+    // after they have already talked to the wrong one.
+    const existing = await WorkspaceConfig.tryLoad();
+    const workspaceConfig = existing
+      || new WorkspaceConfig({ version: '2.1', type: 'workspace', env: {} }, process.cwd());
+    const created = !existing;
     const result = await workspaceConfig.setEnvironment(normalized, options.url || null);
 
     console.log(chalk.green('\n✅ Configuration initialized!\n'));
     console.log(chalk.white(`   Environment: ${result.environment}`));
     console.log(chalk.white(`   API URL:     ${result.apiUrl}`));
-    console.log(chalk.gray(`   Saved to:    ${result.configPath}\n`));
+    console.log(chalk.gray(`   Saved to:    ${result.configPath}`));
+    if (created) {
+      console.log(chalk.gray('   (new workspace created here — this directory is now the workspace root)'));
+    }
+    console.log('');
 
   } catch (error) {
     console.error(chalk.red('Error initializing config:', error.message));
@@ -124,7 +140,32 @@ export async function init(env, options = {}) {
  */
 export async function setEnv(envName, options = {}) {
   try {
-    const workspaceConfig = await WorkspaceConfig.load();
+    // ONE SURFACE PER CAPABILITY. `config init` and `config set-env` both write through the same
+    // canonical writer (setEnvironment) — that shared owner is correct — but they must not both
+    // accept the SAME input, or there are two commands for one act and the CLI's own remedy
+    // string can name the loser. `config init` is canonical for the three KNOWN environments:
+    // the origin owner prints `descix config init --env dev` as the remedy, so that command must
+    // be the one that does it. `set-env` keeps the capability `init` genuinely does not have —
+    // a CUSTOM environment name with an explicit --url — and REFUSES the known names outright,
+    // naming its replacement. A refusal, not a warning: a warning would leave two working paths.
+    const knownName = WorkspaceConfig.ENV_MAP[String(envName).toLowerCase()];
+    if (knownName) {
+      throw new Error(
+        `"${envName}" is a known environment — use the canonical command:\n` +
+        `  descix config init --env ${String(envName).toLowerCase()}\n\n` +
+        'descix config set-env is for a CUSTOM environment name with an explicit origin, e.g.\n' +
+        '  descix config set-env staging --url https://staging.example.com'
+      );
+    }
+
+    // Same tryLoad-or-create as `config init`, for the same reason: `config init`'s own error
+    // text sends a developer HERE for the self-hosted / port-forwarded case, so this command has
+    // to work where that developer actually is. If it still required a pre-existing workspace,
+    // init's remedy would point at a command that refuses — the identical closed loop, moved one
+    // hop along. A remedy string is only true if the command it names runs.
+    const existing = await WorkspaceConfig.tryLoad();
+    const workspaceConfig = existing
+      || new WorkspaceConfig({ version: '2.1', type: 'workspace', env: {} }, process.cwd());
 
     const result = await workspaceConfig.setEnvironment(envName, options.url || null);
 
