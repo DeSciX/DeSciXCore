@@ -513,8 +513,17 @@ export async function runCorpusSync(apiClient, options) {
 
       // 3a. Walk corpus
       const walkSpinner = ora('  Walking source directories...').start();
-      const { files, commitSha, provenance } = await walkCorpus(manifest, workspaceRoot);
+      const { files, commitSha, provenance, gateBoundary } = await walkCorpus(manifest, workspaceRoot);
       walkSpinner.succeed(`  Found ${files.length} files (commit: ${commitSha.substring(0, 8)})`);
+
+      // A gate prints its own COVERAGE BOUNDARY with its verdict — on GREEN as well as
+      // RED — so the reader of a pass can see where the pass stops without hunting for a
+      // report elsewhere. Every file above cleared the source gate.
+      console.log(chalk.gray(`  [source-gate] PASS — all ${files.length} file(s) tracked by git at their manifest ref.`));
+      console.log(chalk.gray(`  [source-gate] compares: ${gateBoundary.compares}`));
+      console.log(chalk.gray(`  [source-gate] catches: ${gateBoundary.catches}`));
+      console.log(chalk.gray(`  [source-gate] does NOT read: ${gateBoundary.does_not_read}`));
+      console.log(chalk.gray(`  [source-gate] runs automatically: ${gateBoundary.runs_automatically}`));
 
       // ── Deliverable A: --show-walk prints the resolved ref + first 50 files
       // BEFORE any Pinecone read/write so the operator can sanity-check the
