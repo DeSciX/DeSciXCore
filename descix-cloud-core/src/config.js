@@ -87,6 +87,13 @@ const PERMISSIONS = {
     COMMUNITY_MANAGE_TOKENS: 'COMMUNITY_MANAGE_TOKENS',
     APP_MANAGE_ROLES: 'APP_MANAGE_ROLES',
     APP_MANAGE_USERS: 'APP_MANAGE_USERS',
+    // Administering the APP ITSELF — its metadata, its assets, its site deploy. The APP_ prefix is
+    // load-bearing: checkPermission dispatches on it to isAppAdmin(user, communityId, appId), which
+    // answers "may this caller administer THIS app" and admits the app's own owner as well as
+    // community and platform admins. A COMMUNITY_ permission cannot express that — it can only ask
+    // whether the caller runs the whole community, which is why an app's own owner could not
+    // update or deploy their own app.
+    APP_MANAGE_APP: 'APP_MANAGE_APP',
     ACCESS_PRIVATE_KB: 'ACCESS_PRIVATE_KB',
 };
 
