@@ -791,7 +791,7 @@ export async function runCorpusSync(apiClient, options) {
           if (!success) {
             syncSpinner.warn(
               `  Batch ${i}-${i + batch.length} did not complete after ${MAX_RETRIES} retries. ` +
-              `Synced ${upserted} chunks so far. This run is BOUNDED (it did not hang) — ` +
+              `Synced ${renderCount(upserted)} chunks so far. This run is BOUNDED (it did not hang) — ` +
               `re-run 'descix kb corpus sync -a ${appId} -k ${kbName}' to RESUME: id-keyed upserts ` +
               `are idempotent so already-synced batches are cheap and the remainder continues.`
             );
@@ -804,7 +804,7 @@ export async function runCorpusSync(apiClient, options) {
           }
         }
 
-        syncSpinner.succeed(`  Upserted: ${upserted} chunks`);
+        syncSpinner.succeed(`  Upserted: ${renderCount(upserted)} chunks`);
 
         // Write failure log to .descix if any batches failed
         if (syncFailures.length > 0) {
@@ -885,11 +885,14 @@ export async function runCorpusSync(apiClient, options) {
       }
 
       totalFilesProcessed += newOrChangedFiles.length;
-      totalChunksCreated += upserted;
       totalFilesSkipped += unchangedCount;
-      // Same rule: an unreported leg contributes 0 to the run total rather than -1.
-      totalFilesDeleted += (isReportedCount(deleted) ? deleted : 0) +
-                           (isReportedCount(rebuildPurged) ? rebuildPurged : 0);
+      // A run total is summed by the SAME owner the per-batch total uses (:754), so an
+      // unreported leg leaves the total unstateable instead of quietly summing around it.
+      // Contributing 0 keeps -1 out of the printed total by fabricating a number in its
+      // place — the same untruth, told where nobody can see it.
+      totalChunksCreated = accumulateReportedCount(totalChunksCreated, upserted);
+      totalFilesDeleted = accumulateReportedCount(totalFilesDeleted, deleted);
+      totalFilesDeleted = accumulateReportedCount(totalFilesDeleted, rebuildPurged);
     }
 
     // Summary
@@ -912,13 +915,12 @@ export async function runCorpusSync(apiClient, options) {
 
     console.log(chalk.green('\nCorpus sync complete:'));
     console.log(chalk.white(`  Files synced:    ${totalFilesProcessed}`));
-    console.log(chalk.white(`  Chunks created:  ${totalChunksCreated}`));
+    console.log(chalk.white(`  Chunks created:  ${renderCount(totalChunksCreated)}`));
     console.log(chalk.white(`  Files unchanged: ${totalFilesSkipped}`));
-    if (totalFilesDeleted > 0) {
-      console.log(chalk.white(`  Chunks deleted:  ${totalFilesDeleted}`));
-    } else {
-      console.log(chalk.gray(`  Chunks deleted:  0`));
-    }
+    // Only a zero the store actually REPORTED is dimmed as a no-op; an unreported total
+    // is stated as unknown in full white, never collapsed into the "nothing happened" line.
+    const deletedLine = `  Chunks deleted:  ${renderCount(totalFilesDeleted)}`;
+    console.log(totalFilesDeleted === 0 ? chalk.gray(deletedLine) : chalk.white(deletedLine));
     console.log('');
     return { dryRun: false };
 
