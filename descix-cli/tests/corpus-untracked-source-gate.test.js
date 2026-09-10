@@ -25,7 +25,7 @@ import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { execSync } from 'child_process';
-import { loadManifest } from '../lib/core/ManifestLoader.js';
+import { loadManifest, resolveOwningRepo } from '../lib/core/ManifestLoader.js';
 import { walkCorpus } from '../lib/core/CorpusWalker.js';
 
 const SHA40 = /^[0-9a-f]{40}$/;
@@ -408,6 +408,106 @@ test('a source inside NO git repository at all is REFUSED, not assumed', async (
   );
 });
 
+// ────────── THE EMPTY-INPUT BOUNDARY: a source that DOES NOT EXIST ──────────
+// A gate that cannot fail AT ITS EMPTY-INPUT BOUNDARY is not a gate. Every test above
+// feeds the tracked-ness predicate at least one file. A DIRECTORY SOURCE POINTING AT A
+// MISSING PATH feeds it NOTHING: walkDir returns [] for a directory it cannot read, so
+// the per-file loop never runs, nothing is refused, and the manifest passes with zero
+// files — a silent green over a source that is simply not there. MEASURED on the real
+// workspace: EVP-EGPT's ten `EGPT/` sources contributed ZERO files at base and nobody
+// was told. The `if (!exists)` block in walkCorpus is what closes that boundary, and
+// until these tests existed nothing held it closed — with the block removed the suite
+// still ran 16/0.
+//
+// THE FIXTURE IS PART OF THE GATE, TWICE OVER. The absent path must sit where its
+// OWNING REPO IS RESOLVABLE — i.e. its parent directory exists inside a git repo — or
+// the second block (`NOT INSIDE ANY GIT REPOSITORY`) would refuse it instead and these
+// tests would pass with the block under test deleted. That is exactly the illusory
+// scope-out measured on the real EVP-EGPT manifest: deleting the block changed the
+// diagnostic there and not the outcome, so a fixture shaped like that measures nothing.
+// The self-check below pins the fixture to the shape that CAN exhibit the failure.
+
+/**
+ * A repo where `present/` is committed with two files and `no-such-dir` does not exist —
+ * but its parent (the repo root) does, and IS a git repository. So `resolveOwningRepo`
+ * answers for the absent path, and the only thing that can refuse it is the existence
+ * check itself.
+ */
+async function mkExistsRepo(prefix) {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
+  execSync('git init -q -b main', { cwd: root });
+  execSync('git config user.email t@t.t && git config user.name t', { cwd: root, shell: '/bin/bash' });
+  await fs.mkdir(path.join(root, 'present'), { recursive: true });
+  await fs.writeFile(path.join(root, 'present', 'a.md'), '# a\n\ncommitted content\n');
+  await fs.writeFile(path.join(root, 'present', 'b.md'), '# b\n\ncommitted content\n');
+  execSync('git add -A && git commit -q -m init', { cwd: root, shell: '/bin/bash' });
+  return root;
+}
+
+test('fixture self-check: the absent source has an OWNING REPO, so only the existence check can refuse it', async () => {
+  const root = await mkExistsRepo('gate-exists-fixture-');
+  const absent = path.join(root, 'no-such-dir');
+
+  assert.equal(await fs.access(absent).then(() => true, () => false), false,
+    'the fixture path must genuinely not exist — otherwise there is no absent source to refuse');
+
+  // THE LOAD-BEARING HALF: resolveOwningRepo must NOT return null here. If it did, the
+  // `NOT INSIDE ANY GIT REPOSITORY` branch would refuse the source and the DOES-NOT-EXIST
+  // block could be deleted with these tests still green — a gate that cannot fail.
+  const owner = resolveOwningRepo(absent);
+  assert.notEqual(owner, null,
+    'the absent path must lie inside a git repository, or the NEXT block refuses it and this suite measures the wrong thing');
+  assert.equal(owner.repoRelativePath, 'no-such-dir');
+
+  // And the present half really is tracked at the ref, so the pair discriminates.
+  assert.match(execSync('git rev-parse "main:present/a.md"', { cwd: root, encoding: 'utf-8' }).trim(), SHA40);
+});
+
+test('an ABSENT in-repo source is REFUSED BY NAME, not silently walked as zero files', async () => {
+  const root = await mkExistsRepo('gate-exists-absent-');
+  const mp = await writeManifest(root, 'Absent', [
+    { path: 'no-such-dir', ref: 'main', tier: 1, doc_type: 'x', syncignore: [] },
+  ]);
+  const manifest = await loadManifest(mp, root);
+
+  await assert.rejects(
+    () => walkCorpus(manifest, root),
+    (err) => {
+      assert.match(err.message, /DOES NOT EXIST/, 'the refusal must name the CAUSE, not just fail');
+      assert.match(err.message, /no-such-dir/, 'and must name the offending source path');
+      assert.ok(Array.isArray(err.refused) && err.refused.length === 1,
+        'the absent source must appear in the aggregated refusal, so the scan can report it as data');
+      return true;
+    },
+    'a manifest source that is not on disk must REFUSE — with the existence check removed it ' +
+    'passes silently with 0 files, which is how ten EVP-EGPT sources contributed nothing unnoticed'
+  );
+});
+
+test('DISCRIMINATING PAIR: present tracked path PASSES with its files, absent path REFUSES', async () => {
+  // One fixture, one manifest shape, two paths — the predicate must read differently on
+  // them. Without the present half, "everything refuses" would look like a passing gate.
+  const root = await mkExistsRepo('gate-exists-pair-');
+
+  const presentMp = await writeManifest(root, 'Pair-Present', [
+    { path: 'present', ref: 'main', tier: 1, doc_type: 'x', syncignore: [] },
+  ]);
+  const { files } = await walkCorpus(await loadManifest(presentMp, root), root);
+  assert.equal(files.length, 2, 'the PRESENT tracked directory source must pass WITH its files');
+  assert.deepEqual(files.map(f => f.relative_path).sort(), ['present/a.md', 'present/b.md']);
+
+  const absentMp = await writeManifest(root, 'Pair-Absent', [
+    { path: 'no-such-dir', ref: 'main', tier: 1, doc_type: 'x', syncignore: [] },
+  ]);
+  const absentManifest = await loadManifest(absentMp, root);
+  await assert.rejects(
+    () => walkCorpus(absentManifest, root),
+    /DOES NOT EXIST/,
+    'the ABSENT source must refuse — 2 files vs a refusal is the discrimination; 2 files vs ' +
+    '0 files and no refusal is what the block-removed tree gives, and 0 files is silent'
+  );
+});
+
 // ───────────────────────── SUPER-DRY: the old path is GONE ─────────────────────────
 
 test('the working-tree `git hash-object` fallback is DELETED, not fenced', async () => {
@@ -425,5 +525,39 @@ test('the working-tree `git hash-object` fallback is DELETED, not fenced', async
   assert.doesNotMatch(
     src, /allow[_-]?untracked|force[_-]?untracked|skip[_-]?tracked[_-]?check/i,
     'no compat fence / opt-out flag may restore the deleted path'
+  );
+});
+
+test('ONE OWNER: the source-tracking scan derives no ref resolution of its own', async () => {
+  // The DORMANT second derivation. `scan-corpus-source-tracking.mjs` reported the class-(ii)
+  // `likely_from` attribution with its own `git rev-parse`, run through a helper bound to
+  // cwd = the workspace root, on a workspace-RELATIVE path — the identical ambient-root
+  // mistake that made the gate refuse 596 committed files, surviving in the REPORTING half.
+  // It read clean only because class (ii) is empty on today's data, which is precisely why
+  // it had to go: a live bug gets found, a dormant one waits and then detonates silently.
+  //
+  // Asserted on the SOURCE the scan actually executes. RED at 4cc3ff5 (the `rev-parse` is
+  // present at :232), GREEN here.
+  const src = await fs.readFile(
+    path.join(import.meta.dirname, '..', 'scripts', 'scan-corpus-source-tracking.mjs'),
+    'utf-8'
+  );
+  // Comments are allowed to NAME the thing that was removed; executable code is not. Strip
+  // line comments before asserting, so the explanation above may survive in the file.
+  const code = src.split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+
+  assert.doesNotMatch(
+    code, /rev-parse/,
+    'the scan must run NO `git rev-parse` of its own — "is this tracked at its ref" has one ' +
+    'owner (CorpusWalker::resolveTrackedBlobSha), which resolves it in the repository ' +
+    'ManifestLoader::resolveOwningRepo names'
+  );
+  assert.match(
+    src, /import\s*\{[^}]*resolveTrackedBlobSha[^}]*\}\s*from\s*'\.\.\/lib\/core\/CorpusWalker\.js'/,
+    'and it must CONSUME that owner rather than re-implementing the predicate'
+  );
+  assert.match(
+    src, /import\s*\{[^}]*resolveOwningRepo[^}]*\}\s*from\s*'\.\.\/lib\/core\/ManifestLoader\.js'/,
+    'ownership stays consumed from its one owner too'
   );
 });
