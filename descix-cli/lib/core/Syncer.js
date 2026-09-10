@@ -26,6 +26,54 @@ import * as path from 'path';
 import { loadChunks } from './Chunker.js';
 
 /**
+ * THE ONE VALUE this CLI uses to mean "the store did not report a count".
+ *
+ * A receipt is derived from the STORE, never from the REQUEST. Where the store
+ * cannot report, we say so — we never substitute the number of things we ASKED
+ * to be changed, because that number is a description of our own request and
+ * carries no information about what happened.
+ *
+ * @type {number}
+ */
+export const UNREPORTED_COUNT = -1;
+
+/**
+ * Normalize a count the store returned into either that count or UNREPORTED_COUNT.
+ * This is the ONLY place the "did the store report a number?" decision is made.
+ *
+ * @param {*} value - the raw count field as it arrived from the store
+ * @returns {number} the store's count, or UNREPORTED_COUNT if it reported none
+ */
+export function reportedCount(value) {
+  return Number.isFinite(value) ? value : UNREPORTED_COUNT;
+}
+
+/**
+ * True when `value` is a count the store actually reported. Callers use this to
+ * choose between printing a number and printing "unknown" — never to fabricate one.
+ *
+ * @param {*} value
+ * @returns {boolean}
+ */
+export function isReportedCount(value) {
+  return Number.isFinite(value) && value >= 0;
+}
+
+/**
+ * Sum counts across batches while preserving unknown-ness: if ANY batch could not
+ * be reported, the total is not a number we can honestly state.
+ *
+ * @param {number} runningTotal - UNREPORTED_COUNT once any batch was unreportable
+ * @param {*} batchValue - the raw count field from this batch's store response
+ * @returns {number}
+ */
+export function accumulateReportedCount(runningTotal, batchValue) {
+  const next = reportedCount(batchValue);
+  if (!isReportedCount(runningTotal) || !isReportedCount(next)) return UNREPORTED_COUNT;
+  return runningTotal + next;
+}
+
+/**
  * Compute delta between local chunks and remote Pinecone records
  * Uses content_hash for efficient change detection when available.
  * 
@@ -129,7 +177,9 @@ export async function getRemoteChunkIds(apiClient, communityId, appId, kbId) {
  * @param {string} appId - App ID
  * @param {string} kbId - Knowledge base ID
  * @param {Array} chunks - Chunk records to upsert
- * @returns {Promise<{upserted: number}>}
+ * @returns {Promise<{upserted: number}>} `upserted` is the store's own count, or
+ *          UNREPORTED_COUNT if ANY batch's store response carried no count.
+ *          Test it with isReportedCount(); never print it unguarded.
  */
 export async function upsertChunks(apiClient, communityId, appId, kbId, chunks) {
   if (chunks.length === 0) {
@@ -147,7 +197,9 @@ export async function upsertChunks(apiClient, communityId, appId, kbId, chunks) 
       kb_id: kbId,
       chunks: batch
     });
-    totalUpserted += result.upserted_count || batch.length;
+    // apiClient.invoke returns the whole { status, message: {...} } envelope.
+    const data = result?.message || result;
+    totalUpserted = accumulateReportedCount(totalUpserted, data?.upserted_count);
   }
 
   return { upserted: totalUpserted };
@@ -164,7 +216,9 @@ export async function upsertChunks(apiClient, communityId, appId, kbId, chunks) 
  * @param {string} appId - App ID
  * @param {string} kbId - Knowledge base ID
  * @param {Array<string>} chunkIds - Chunk IDs to delete
- * @returns {Promise<{deleted: number}>}
+ * @returns {Promise<{deleted: number}>} `deleted` is the store's own count, or
+ *          UNREPORTED_COUNT if the store reported none. It is NOT chunkIds.length.
+ *          Test it with isReportedCount(); never print it unguarded.
  */
 export async function deleteStaleChunks(apiClient, communityId, appId, kbId, chunkIds) {
   if (chunkIds.length === 0) {
@@ -179,7 +233,7 @@ export async function deleteStaleChunks(apiClient, communityId, appId, kbId, chu
   });
 
   const data = result?.message || result;
-  return { deleted: data.deleted_count ?? chunkIds.length };
+  return { deleted: reportedCount(data?.deleted_count) };
 }
 
 /**
@@ -198,7 +252,10 @@ export async function deleteStaleChunks(apiClient, communityId, appId, kbId, chu
  * @param {string} appId - App ID
  * @param {string} kbId - Knowledge base ID
  * @param {Array<string>} fileIds - file_id values to delete (e.g., ['corpus:abc...', 'local:def...'])
- * @returns {Promise<{deleted: number, deleted_by_file_id: number}>}
+ * @returns {Promise<{deleted: number, deleted_by_file_id: number}>} Each field is the
+ *          store's own count, or UNREPORTED_COUNT if the store reported that field.
+ *          The two are INDEPENDENT — one may be reported and the other not. Neither
+ *          is validFileIds.length. Test with isReportedCount(); never print unguarded.
  */
 export async function deleteStaleChunksByFileId(apiClient, communityId, appId, kbId, fileIds) {
   if (!Array.isArray(fileIds) || fileIds.length === 0) {
@@ -220,8 +277,8 @@ export async function deleteStaleChunksByFileId(apiClient, communityId, appId, k
 
   const data = result?.message || result;
   return {
-    deleted: data.deleted_count ?? validFileIds.length,
-    deleted_by_file_id: data.deleted_by_file_id ?? validFileIds.length
+    deleted: reportedCount(data?.deleted_count),
+    deleted_by_file_id: reportedCount(data?.deleted_by_file_id)
   };
 }
 
@@ -253,7 +310,8 @@ export async function deleteStaleChunksByFileId(apiClient, communityId, appId, k
  * @param {string} kbId - Knowledge base ID
  * @returns {Promise<{ deleted: number, purged_scope: boolean }>}
  *          `deleted` is the actual count of vectors purged (the batched path always
- *          reports it); -1 only if a future primitive cannot report a count.
+ *          reports it), or UNREPORTED_COUNT if the store reported no count.
+ *          Test it with isReportedCount(); never print it unguarded.
  */
 export async function purgeKbScope(apiClient, communityId, appId, kbId) {
   const result = await apiClient.invoke('kb_delete_chunks', {
@@ -264,7 +322,7 @@ export async function purgeKbScope(apiClient, communityId, appId, kbId) {
   });
   const data = result?.message || result;
   return {
-    deleted: typeof data?.deleted_count === 'number' ? data.deleted_count : -1,
+    deleted: reportedCount(data?.deleted_count),
     purged_scope: data?.purged_scope === true
   };
 }
