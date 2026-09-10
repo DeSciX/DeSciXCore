@@ -19,7 +19,7 @@ The DeSciX CLI supports three workspace modes, determined by the structure of `w
 ```json
 {
   "communities": {
-    "descix": {
+    "daita": {
       "apps": {
         "agent": {
           "localPath": ".",
@@ -54,7 +54,7 @@ The DeSciX CLI supports three workspace modes, determined by the structure of `w
 ```json
 {
   "communities": {
-    "descix": {
+    "daita": {
       "apps": {
         "agent": { "localPath": "agent", "sync_mode": "git" },
         "docs": { "localPath": "docs", "sync_mode": "git" }
@@ -84,7 +84,7 @@ The DeSciX CLI supports three workspace modes, determined by the structure of `w
 ```json
 {
   "communities": {
-    "descix": {
+    "daita": {
       "apps": {
         "agent": { "localPath": "descix/agent", "sync_mode": "git" }
       }
@@ -169,7 +169,7 @@ The DeSciX CLI supports three workspace modes, determined by the structure of `w
   "walletAddress": "0x...",
   "signature": "...",
   "tokenSymbol": "DAITA",
-  "communityId": "descix",
+  "communityId": "daita",
   "userId": "user_...",
   "email": "user@example.com",
   "sessionToken": "...",

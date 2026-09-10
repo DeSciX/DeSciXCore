@@ -148,7 +148,7 @@ All core SDK logic resides in `DeSciX_Core/descix-cli/lib/core/`.
 {
   "version": "2.0",
   "communities": {
-    "descix": {
+    "daita": {
       "apps": {
         "agent": {
           "localPath": "descix/agent",
@@ -256,7 +256,7 @@ Flow:
 
 ```json
 {
-  "community_id": "descix",
+  "community_id": "daita",
   "app_id": "agent",
   "kb_id": "General",
   "chunks": [
@@ -264,7 +264,7 @@ Flow:
       "id": "descix_agent_General_research_0",
       "text": "...",
       "entity_type": "CHUNK",
-      "community_id": "descix",
+      "community_id": "daita",
       "app_id": "agent",
       "knowledgebase_name": "General",
       "file_id": "research.md",
