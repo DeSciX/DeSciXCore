@@ -30,11 +30,49 @@ export class CommunityManager {
    * Communities you own or that are shared with you stay reachable via fetch_my_purchases even
    * when they are not listed.
    *
+   * UNKNOWN OPTIONS ARE REFUSED, because deleting `publicOnly` without this INVERTED fail-loud.
+   * Before the deletion, `list({publicOnly:true})` put `public_only` in the params bag and the
+   * gateway threw INVALID_PARAMS naming it. After it, the option matched nothing, `params` came out
+   * `{}` and the call SUCCEEDED — the caller's intent discarded in silence, which is strictly worse
+   * than the broken call it replaced. Measured 2026-09-10 with a stub client: `list({publicOnly:true})`
+   * resolved without error and forwarded `{}`. So the refusal moves to this boundary rather than
+   * being lost with the parameter.
+   *
+   * ACCEPTED is this METHOD's own option surface, not a mirror of the served schema. They coincide
+   * today; they are different contracts, and an option that mapped onto some other param would
+   * belong here without belonging there. The gateway still enforces its own params independently —
+   * this check never claims to stand in for it.
+   *
    * @param {Object} options - Query options
    * @param {string} [options.filter] - Optional filter string, passed through verbatim
    * @returns {Promise<Array>} Array of community objects
+   * @throws {Error} code INVALID_PARAMS when any option other than `filter` is supplied
    */
   async list(options = {}) {
+    const ACCEPTED = ['filter'];
+    const unknown = Object.keys(options).filter((k) => !ACCEPTED.includes(k));
+    if (unknown.length > 0) {
+      const err = new Error(
+        `CommunityManager.list: unknown option${unknown.length > 1 ? 's' : ''} ` +
+        `${unknown.map((k) => `'${k}'`).join(', ')}. ` +
+        `Accepted options: ${ACCEPTED.join(', ')}. ` +
+        'Rejected at the SDK boundary — the option was NOT applied, and no default was substituted.' +
+        (unknown.includes('publicOnly')
+          ? " 'publicOnly' was REMOVED, not renamed: the platform owns `listed` (access) and " +
+            '`tradeable` (token-tradeability) separately, and there is no "public" sense left to ' +
+            'express. Communities you own or that are shared with you remain reachable via ' +
+            'fetch_my_purchases even when they are not listed.'
+          : '')
+      );
+      err.code = 'INVALID_PARAMS';
+      err.data = {
+        command: 'CommunityManager.list',
+        unknown_parameters: unknown,
+        accepted_parameters: ACCEPTED,
+      };
+      throw err;
+    }
+
     const params = {};
     if (options.filter !== undefined) params.filter = options.filter;
 
