@@ -7,7 +7,8 @@
  * Architecture:
  * - Files stay in place — no copying or staging
  * - Git blob SHAs provide versioning (same content = same SHA)
- * - Untracked/modified files use `git hash-object` for working tree version
+ * - GIT IS THE ONLY SOURCE OF TRUTH FOR WHAT IS A CORPUS SOURCE: a file must be TRACKED
+ *   AT THE MANIFEST'S REF or it is refused by name. There is no working-tree fallback.
  * - Chunk IDs are content-addressed: {app_id}:{kb_name}:{blob_sha}:{chunk_idx}
  */
 
@@ -60,42 +61,99 @@ function isIgnored(relativePath, syncignore) {
   return false;
 }
 
+const SHA40 = /^[0-9a-f]{40}$/i;
+
 /**
- * Compute the git blob SHA for a file.
- * First tries `git rev-parse {ref}:{workspace-relative-path}` for tracked files.
- * Falls back to `git hash-object {file}` for untracked/modified files.
+ * Explain WHICH WAY a path failed the "tracked at ref" predicate. Purely diagnostic —
+ * it never decides anything, so there is still exactly one decision site. Each branch
+ * ends in an instruction the operator can act on without further investigation.
  *
- * @param {string} absolutePath - Absolute path to the file
- * @param {string} workspaceRelativePath - Path relative to workspace root
- * @param {string} ref - Git ref (branch/tag)
- * @param {string} workspaceRoot - Workspace root directory
- * @returns {string} Git blob SHA (40 hex chars)
+ * @returns {string} the reason string embedded in the aggregated refusal
  */
-function computeBlobSha(absolutePath, workspaceRelativePath, ref, workspaceRoot) {
+function diagnoseUntracked(workspaceRelativePath, ref, workspaceRoot) {
+  // (c) Present at HEAD but absent at THIS ref — checked first, because .gitignore
+  // patterns do not apply to tracked files and would misdiagnose this case.
   try {
-    // Try to get the blob SHA from the git tree at the specified ref
-    const sha = execSync(
+    execSync(`git rev-parse "HEAD:${workspaceRelativePath}"`,
+      { cwd: workspaceRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+    return `present at HEAD but ABSENT AT REF "${ref}" — the manifest pins a ref that ` +
+           `predates this file; commit it on "${ref}" or point the source at the right ref`;
+  } catch { /* not at HEAD either — fall through */ }
+
+  // (a) Deliberately excluded from the repository. The measured defect class.
+  try {
+    const hit = execSync(`git check-ignore -v "${workspaceRelativePath}"`,
+      { cwd: workspaceRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
+    ).trim().split('\n')[0];
+    if (hit) {
+      return `IGNORED BY GIT (${hit.split('\t')[0]}) and not tracked at ref "${ref}" — ` +
+             `content the repository deliberately excludes must never become a citable ` +
+             `KB source; remove this source from the manifest`;
+    }
+  } catch { /* not ignored — fall through */ }
+
+  // (b) Simply never committed.
+  return `UNTRACKED at ref "${ref}" — the file exists on disk but git does not track it; ` +
+         `commit it on "${ref}", or remove this source from the manifest`;
+}
+
+/**
+ * THE SOURCE GATE — the single owner of "is this file a legitimate corpus source".
+ *
+ * A source is legitimate iff GIT TRACKS IT AT THE MANIFEST'S REF. That one predicate is
+ * the whole rule, and it is deliberately not split by WHY a path fails it: gitignored
+ * scratch, never-committed, and absent-at-an-older-ref are all "not tracked at ref".
+ * Splitting them would re-derive "what is a corpus source" in a second place, and the
+ * copies would drift.
+ *
+ * THE WORKING TREE IS NEVER CONSULTED. Reading a sha from disk when the ref lookup failed
+ * is the measured defect: it served content git was explicitly told to exclude as a
+ * citable KB source (corpus:04406066... = `.claude/agent-memory/evp-descix/qa-pairs.jsonl`,
+ * excluded by .gitignore, chunked and served anyway). That path is deleted, not fenced
+ * behind a flag, and there is nothing that restores it — SUPER-DRY, CEO-D-2026-07-26.
+ *
+ * Returns a REASON rather than throwing so the caller can aggregate every offender into
+ * one refusal instead of failing on the first (mirroring CorpusDenyLint's report/assert
+ * split — the established refusal shape in this codebase).
+ *
+ * @param {string} workspaceRelativePath - Path relative to workspace root
+ * @param {string} ref - Git ref (branch/tag) the manifest source named
+ * @param {string} workspaceRoot - Workspace root directory
+ * @returns {{sha: string|null, reason: string|null}} sha when tracked at ref; else reason
+ */
+export function resolveTrackedBlobSha(workspaceRelativePath, ref, workspaceRoot) {
+  let sha;
+  try {
+    sha = execSync(
       `git rev-parse "${ref}:${workspaceRelativePath}"`,
       { cwd: workspaceRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
     ).trim();
-    return sha;
   } catch {
-    // File is untracked or path doesn't exist in git tree at that ref
-    // Fall back to hashing the working tree version
-    try {
-      const sha = execSync(
-        `git hash-object "${absolutePath}"`,
-        { cwd: workspaceRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
-      ).trim();
-      return sha;
-    } catch {
-      // Last resort: return null — caller should skip this file
-      return null;
-    }
+    // ONE PREDICATE ("tracked at ref"), THREE DIAGNOSTICS. The decision has already been
+    // made above — everything below only explains WHICH WAY the path failed, so DRY holds
+    // and each population gets a self-curing instruction instead of a mystery.
+    return { sha: null, reason: diagnoseUntracked(workspaceRelativePath, ref, workspaceRoot) };
   }
+
+  if (!SHA40.test(sha)) {
+    return {
+      sha: null,
+      reason: `git rev-parse "${ref}:${workspaceRelativePath}" returned "${sha}", which is not a blob sha`
+    };
+  }
+  return { sha, reason: null };
 }
 
-const SHA40 = /^[0-9a-f]{40}$/i;
+/**
+ * What this gate compares, catches, and does NOT read — printed with the verdict so a
+ * reader of a GREEN sees where the green stops, in the gate's own words.
+ */
+export const SOURCE_GATE_BOUNDARY = Object.freeze({
+  compares: 'each walked file against `git rev-parse <manifest source ref>:<workspace-relative path>`',
+  catches: 'any corpus source not tracked by git at its ref — gitignored scratch, never-committed files, and paths absent from an older ref',
+  does_not_read: 'file CONTENT (see CorpusDenyLint for content/path deny-classes), Pinecone live state, and cross-repo trees (refused separately by resolveSourceProvenance)',
+  runs_automatically: 'yes — inside walkCorpus, so every `descix kb corpus sync` passes through it; there is no flag that skips it'
+});
 
 /**
  * Resolve ONE source's provenance: which repository, which ref, and the exact commit synced.
@@ -247,6 +305,9 @@ async function isFile(filePath) {
 export async function walkCorpus(manifest, workspaceRoot) {
   const files = [];
   const provenance = [];
+  // Every file the source gate refused, collected so ONE error can name them all. A
+  // first-throw would hide offenders 2..N and turn one fix into N sync attempts.
+  const refused = [];
   let commitSha = 'unknown';
 
   // Nested-source dedup (WS-EVP-DESCIX-KB-CLEANUP item 4): a manifest may list both a directory
@@ -321,10 +382,13 @@ export async function walkCorpus(manifest, workspaceRoot) {
       // Compute workspace-relative path for git operations
       const workspaceRelativePath = path.relative(workspaceRoot, filePath);
 
-      // Compute blob SHA
-      const blobSha = computeBlobSha(filePath, workspaceRelativePath, ref, workspaceRoot);
+      // THE SOURCE GATE. A file that git does not track at this source's ref is REFUSED
+      // by name — never silently chunked from the working tree, and never silently
+      // skipped either (a skip on a clean worktree would PURGE its live chunks).
+      const { sha: blobSha, reason } = resolveTrackedBlobSha(workspaceRelativePath, ref, workspaceRoot);
       if (!blobSha) {
-        continue; // Skip files that can't be hashed
+        refused.push({ path: workspaceRelativePath, ref, reason, source: source.path });
+        continue;
       }
 
       // "Which repo does this content belong to" has ONE owner: resolveSourceProvenance.
@@ -351,7 +415,28 @@ export async function walkCorpus(manifest, workspaceRoot) {
     }
   }
 
-  return { files, commitSha, provenance };
+  // ONE aggregated refusal naming every offender, its ref and its reason. Raised AFTER
+  // the full walk so the operator fixes the manifest once rather than N times, and BEFORE
+  // any caller can chunk, upsert or purge — the refused files are neither served nor
+  // treated as deletions.
+  if (refused.length > 0) {
+    // The error must be fixable IN ONE ACT from its text alone: it names the manifest
+    // FILE to edit and the offending ENTRY within it, not merely the resolved path.
+    // `_manifestPath` is owned by ManifestLoader — consume it, never re-derive it.
+    const manifestFile = manifest._manifestPath || `(manifest for kb "${manifest.kb_name}")`;
+    const lines = refused.map(
+      r => `  - ${r.path}\n      ref: "${r.ref}"   manifest entry: sources[] path "${r.source}"\n      ${r.reason}`
+    );
+    throw new Error(
+      `Corpus source gate FAILED for KB "${manifest.kb_name}": ${refused.length} file(s) are ` +
+      `not tracked by git at their manifest ref — refusing to sync.\n` +
+      `Manifest to edit: ${manifestFile}\n${lines.join('\n')}\n` +
+      `Every corpus source must be committed at its ref. There is no working-tree fallback: ` +
+      `content git excludes must never be served as a citable KB source.`
+    );
+  }
+
+  return { files, commitSha, provenance, gateBoundary: SOURCE_GATE_BOUNDARY };
 }
 
-export default { walkCorpus, resolveSourceProvenance };
+export default { walkCorpus, resolveSourceProvenance, resolveTrackedBlobSha, SOURCE_GATE_BOUNDARY };
