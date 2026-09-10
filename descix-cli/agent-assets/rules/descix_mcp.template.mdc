@@ -118,7 +118,7 @@ tell_me_how({
 ### Tier 3: chat_with_kb (Rich Context)
 ```javascript
 chat_with_kb({
-  communityId: "descix",
+  communityId: "daita",
   appId: "docs",
   kbId: "sdk",
   message: "Explain the deployment workflow for dynamic sites"

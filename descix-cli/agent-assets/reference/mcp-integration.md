@@ -71,7 +71,7 @@ All MCP calls include a `_descix` context object for identity propagation:
     expires_at: "..."
   },
   workspace: {
-    community_id: "descix",
+    community_id: "daita",
     app_id: "agent"
   }
 }
@@ -224,7 +224,7 @@ const plan = await tell_me_how({
 const result = await execute_remote_command({
   command: plan.recommended_tools[0].name,
   params: {
-    community_id: "descix",
+    community_id: "daita",
     app_id: "agent",
     kb_id: "General"
   }
@@ -293,7 +293,7 @@ When `--scope project` is used:
 // workspace.json
 {
   "communities": {
-    "descix": {
+    "daita": {
       "apps": {
         "agent": { "localPath": ".", "sync_mode": "git" }
       }

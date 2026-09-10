@@ -17,9 +17,9 @@ Purpose: Maps local folders to DeSciX apps and stores all configuration.
 ```json
 {
   "version": "2.0",
-  "primaryCommunity": "descix",
+  "primaryCommunity": "daita",
   "communities": {
-    "descix": {
+    "daita": {
       "apps": {
         "appsdk": {
           "localPath": "descix/appsdk",
