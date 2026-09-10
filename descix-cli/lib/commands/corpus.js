@@ -27,7 +27,10 @@ import { WorkspaceConfig } from '../workspace-config.js';
 import { loadManifests } from '../core/ManifestLoader.js';
 import { walkCorpus } from '../core/CorpusWalker.js';
 import { chunkFile, categorizeFile } from '../core/Chunker.js';
-import { upsertChunks, deleteStaleChunks, deleteStaleChunksByFileId, listRemoteFileIds, purgeKbScope } from '../core/Syncer.js';
+import {
+  upsertChunks, deleteStaleChunks, deleteStaleChunksByFileId, listRemoteFileIds, purgeKbScope,
+  isReportedCount, accumulateReportedCount, UNREPORTED_COUNT
+} from '../core/Syncer.js';
 import { lintManifestForDenyClasses, assertNoViolations } from '../core/CorpusDenyLint.js';
 
 /**
@@ -149,6 +152,61 @@ async function chunkCorpusFile(fileEntry, context) {
       chunk_title: chunk.metadata.title || chunk.metadata.name || null
     };
   }).filter(Boolean);
+}
+
+/**
+ * Read the previously-synced chunk total out of sync state.
+ *
+ * Three states must not be conflated:
+ *   no sync state at all      -> 0, a fact about US (we have never synced), not the store
+ *   total_chunks is a number  -> that number, INCLUDING a legitimate 0
+ *   total_chunks null/absent  -> UNKNOWN. The previous run could not state its total,
+ *                                so no delta computed from it can be trusted.
+ *
+ * @param {Object|null} previousState - the loaded sync state, or null on first sync
+ * @param {string} kbName - for the error message
+ * @returns {number}
+ * @throws {Error} when a sync state exists but carries no usable chunk total
+ */
+export function readPreviousChunkCount(previousState, kbName = 'this KB') {
+  if (!previousState) return 0;
+  if (Number.isFinite(previousState.total_chunks)) return previousState.total_chunks;
+  throw new Error(
+    `Sync state for ${kbName} carries no chunk total (total_chunks is ` +
+    `${JSON.stringify(previousState.total_chunks)}), so the previous run's total is UNKNOWN. ` +
+    `Coercing it to 0 would silently understate the store and corrupt every later delta. ` +
+    `Re-run with --rebuild to re-establish a known total.`
+  );
+}
+
+/**
+ * Compute the chunk total to PERSIST, preserving unknown-ness.
+ *
+ * Returns null — not a number — when either component is unreportable, because a
+ * sync state is read by later runs and a fabricated integer there outlives the
+ * console line that produced it.
+ *
+ * @param {number} previousChunkCount
+ * @param {number} upserted - a store count or UNREPORTED_COUNT
+ * @param {number} deleted - a store count or UNREPORTED_COUNT
+ * @returns {number|null}
+ */
+export function computeTotalChunks(previousChunkCount, upserted, deleted) {
+  if (!isReportedCount(upserted) || !isReportedCount(deleted)) return null;
+  return previousChunkCount + upserted - deleted;
+}
+
+/**
+ * Render a count for display: the number when the store reported it, otherwise a
+ * phrase that says so. Consumes the module's count owner rather than re-testing
+ * `>= 0` at each call site.
+ *
+ * @param {number} value
+ * @param {string} unknownText
+ * @returns {string}
+ */
+export function renderCount(value, unknownText = 'an unreported number of') {
+  return isReportedCount(value) ? String(value) : unknownText;
 }
 
 /**
@@ -507,9 +565,13 @@ export async function runCorpusSync(apiClient, options) {
           const remote = await listRemoteFileIds(apiClient, appId, kbName);
           rebuildRemoteUniqueCount = remote.unique_count;
           rebuildRemoteTotalChunks = remote.total_chunks;
+          // `Pinecone reports N` is an ATTRIBUTION to the store, so it may only carry
+          // numbers the store actually reported. The file_ids list is always real
+          // (listRemoteFileIds throws rather than fabricating it); the counts may not be.
           rebuildSpinner.succeed(
-            `  [rebuild] Pinecone reports ${remote.unique_count} corpus-scheme file_id(s) / ` +
-            `${remote.total_chunks} enumerable chunk(s) (legacy orphans may exceed this)`
+            `  [rebuild] Pinecone enumerated ${remote.file_ids.length} corpus-scheme file_id(s); ` +
+            `reports ${renderCount(remote.unique_count)} unique / ` +
+            `${renderCount(remote.total_chunks)} enumerable chunk(s) (legacy orphans may exceed this)`
           );
 
           if (options.dryRun) {
@@ -521,9 +583,13 @@ export async function runCorpusSync(apiClient, options) {
             ));
           } else {
             // Interactive confirmation guard. --yes skips for scripting/CI.
+            // A destructive-action prompt must not overstate its own certainty: if the
+            // store reported no count, say so rather than printing "≥-1".
             console.log(chalk.yellow(
               `\n  About to FULL-SCOPE PURGE every vector in ${communityId}/${appId}/${kbName} ` +
-              `(≥${rebuildRemoteTotalChunks} enumerable chunk(s); legacy orphans included), ` +
+              (isReportedCount(rebuildRemoteTotalChunks)
+                ? `(≥${rebuildRemoteTotalChunks} enumerable chunk(s); legacy orphans included), `
+                : `(the store reported no chunk count; ALL vectors in scope will go), `) +
               `then re-upsert the full local walk (${files.length} file(s)).`
             ));
 
@@ -544,9 +610,9 @@ export async function runCorpusSync(apiClient, options) {
               rebuildScopePurged = purgeResult.purged_scope;
               // deleteRAG via filter-based deleteMany returns -1 (count not knowable
               // from the SDK). Surface honestly rather than fabricating a number.
-              rebuildPurged = purgeResult.deleted >= 0 ? purgeResult.deleted : 0;
+              rebuildPurged = purgeResult.deleted;
               purgeSpinner.succeed(
-                purgeResult.deleted >= 0
+                isReportedCount(purgeResult.deleted)
                   ? `  [rebuild] Purged ${purgeResult.deleted} vector(s) (full scope) and reset KB doc rag fields`
                   : `  [rebuild] Purged full scope (filter-based delete; SDK reports no count) and reset KB doc rag fields`
               );
@@ -574,7 +640,7 @@ export async function runCorpusSync(apiClient, options) {
         previousState = null;
       }
       const previousBlobShas = new Set(previousState?.synced_blob_shas || []);
-      const previousChunkCount = previousState?.total_chunks || 0;
+      const previousChunkCount = readPreviousChunkCount(previousState, kbName);
 
       if (previousBlobShas.size > 0) {
         console.log(chalk.gray(`  Previous sync: ${previousBlobShas.size} files, ${previousChunkCount} chunks`));
@@ -640,7 +706,12 @@ export async function runCorpusSync(apiClient, options) {
         console.log(chalk.white(`    Would upsert: ${allChunks.length} chunks from ${newOrChangedFiles.length} file(s)`));
         console.log(chalk.white(`    Would delete (stale-file): ${fileIdsToDelete.length} blob SHA(s)`));
         if (options.rebuild) {
-          console.log(chalk.white(`    Would purge (rebuild): FULL scope ${communityId}/${appId}/${kbName} (≥${rebuildRemoteTotalChunks} enumerable chunks; legacy orphans included)`));
+          console.log(chalk.white(
+            `    Would purge (rebuild): FULL scope ${communityId}/${appId}/${kbName} ` +
+            (isReportedCount(rebuildRemoteTotalChunks)
+              ? `(≥${rebuildRemoteTotalChunks} enumerable chunks; legacy orphans included)`
+              : `(the store reported no chunk count; all vectors in scope)`)
+          ));
         }
         // Track for the summary exit-code computation at the end of the loop.
         totalFilesProcessed += newOrChangedFiles.length;
@@ -648,7 +719,10 @@ export async function runCorpusSync(apiClient, options) {
         totalFilesSkipped += unchangedCount;
         // Full-scope rebuild would purge ≥ the enumerable chunk count. Use it as the
         // would-delete tally so dry-run reports drift whenever a purge would run.
-        totalFilesDeleted += fileIdsToDelete.length + (options.rebuild ? rebuildRemoteTotalChunks : 0);
+        // Only add a rebuild figure the store actually reported; an unknown count
+        // contributes nothing rather than silently subtracting one from the total.
+        totalFilesDeleted += fileIdsToDelete.length +
+          ((options.rebuild && isReportedCount(rebuildRemoteTotalChunks)) ? rebuildRemoteTotalChunks : 0);
         // Do NOT call upsertChunks, deleteStaleChunksByFileId, deleteStaleChunks,
         // or saveSyncState in dry-run. Continue to next manifest.
         continue;
@@ -675,7 +749,9 @@ export async function runCorpusSync(apiClient, options) {
           while (!success && retries < MAX_RETRIES) {
             try {
               const result = await upsertChunks(apiClient, communityId, appId, kbName, batch);
-              upserted += result.upserted;
+              // Unknown-ness survives the running total: one unreportable batch makes
+              // the whole figure unstateable rather than quietly summing around it.
+              upserted = accumulateReportedCount(upserted, result.upserted);
               success = true;
               syncSpinner.text = `  Upserting chunks... ${i + batch.length}/${allChunks.length}`;
             } catch (err) {
@@ -715,7 +791,7 @@ export async function runCorpusSync(apiClient, options) {
           if (!success) {
             syncSpinner.warn(
               `  Batch ${i}-${i + batch.length} did not complete after ${MAX_RETRIES} retries. ` +
-              `Synced ${upserted} chunks so far. This run is BOUNDED (it did not hang) — ` +
+              `Synced ${renderCount(upserted)} chunks so far. This run is BOUNDED (it did not hang) — ` +
               `re-run 'descix kb corpus sync -a ${appId} -k ${kbName}' to RESUME: id-keyed upserts ` +
               `are idempotent so already-synced batches are cheap and the remainder continues.`
             );
@@ -728,7 +804,7 @@ export async function runCorpusSync(apiClient, options) {
           }
         }
 
-        syncSpinner.succeed(`  Upserted: ${upserted} chunks`);
+        syncSpinner.succeed(`  Upserted: ${renderCount(upserted)} chunks`);
 
         // Write failure log to .descix if any batches failed
         if (syncFailures.length > 0) {
@@ -752,9 +828,14 @@ export async function runCorpusSync(apiClient, options) {
           // (community_id, app_id, knowledgebase_name) — guarantees namespace isolation.
           const result = await deleteStaleChunksByFileId(apiClient, communityId, appId, kbName, fileIdsToDelete);
           deleted = result.deleted;
-          deleteSpinner.succeed(`  Purged: ${deleted} chunk(s) across ${fileIdsToDelete.length} stale blob SHA(s)`);
+          deleteSpinner.succeed(
+            `  Purged: ${renderCount(deleted)} chunk(s) across ${fileIdsToDelete.length} stale blob SHA(s)`
+          );
         } catch (err) {
-          deleteSpinner.warn(`  Delete failed: ${err.message}`);
+          // The purge ERRORED: how many were removed is unknown. Leaving `deleted` at 0
+          // would persist "nothing was deleted" into sync state as though it were a fact.
+          deleted = UNREPORTED_COUNT;
+          deleteSpinner.warn(`  Delete failed (deleted count unknown): ${err.message}`);
         }
       }
 
@@ -767,12 +848,14 @@ export async function runCorpusSync(apiClient, options) {
         // synced — the resolved sha is, and it stays exact after the branch moves.
         sources_provenance: provenance,
         synced_files_count: files.length,
-        total_chunks: previousChunkCount + upserted - deleted,
+        // null, never a fabricated integer: this file is read by later runs, so a
+        // wrong number here outlives the console line that produced it.
+        total_chunks: computeTotalChunks(previousChunkCount, upserted, deleted),
         timestamp: new Date().toISOString(),
         files_upserted: newOrChangedFiles.length,
         files_unchanged: unchangedCount,
-        chunks_upserted: upserted,
-        chunks_deleted: deleted,
+        chunks_upserted: isReportedCount(upserted) ? upserted : null,
+        chunks_deleted: isReportedCount(deleted) ? deleted : null,
         synced_blob_shas: allSyncedBlobShas
       });
 
@@ -802,9 +885,14 @@ export async function runCorpusSync(apiClient, options) {
       }
 
       totalFilesProcessed += newOrChangedFiles.length;
-      totalChunksCreated += upserted;
       totalFilesSkipped += unchangedCount;
-      totalFilesDeleted += deleted + rebuildPurged;
+      // A run total is summed by the SAME owner the per-batch total uses (:754), so an
+      // unreported leg leaves the total unstateable instead of quietly summing around it.
+      // Contributing 0 keeps -1 out of the printed total by fabricating a number in its
+      // place — the same untruth, told where nobody can see it.
+      totalChunksCreated = accumulateReportedCount(totalChunksCreated, upserted);
+      totalFilesDeleted = accumulateReportedCount(totalFilesDeleted, deleted);
+      totalFilesDeleted = accumulateReportedCount(totalFilesDeleted, rebuildPurged);
     }
 
     // Summary
@@ -827,13 +915,12 @@ export async function runCorpusSync(apiClient, options) {
 
     console.log(chalk.green('\nCorpus sync complete:'));
     console.log(chalk.white(`  Files synced:    ${totalFilesProcessed}`));
-    console.log(chalk.white(`  Chunks created:  ${totalChunksCreated}`));
+    console.log(chalk.white(`  Chunks created:  ${renderCount(totalChunksCreated)}`));
     console.log(chalk.white(`  Files unchanged: ${totalFilesSkipped}`));
-    if (totalFilesDeleted > 0) {
-      console.log(chalk.white(`  Chunks deleted:  ${totalFilesDeleted}`));
-    } else {
-      console.log(chalk.gray(`  Chunks deleted:  0`));
-    }
+    // Only a zero the store actually REPORTED is dimmed as a no-op; an unreported total
+    // is stated as unknown in full white, never collapsed into the "nothing happened" line.
+    const deletedLine = `  Chunks deleted:  ${renderCount(totalFilesDeleted)}`;
+    console.log(totalFilesDeleted === 0 ? chalk.gray(deletedLine) : chalk.white(deletedLine));
     console.log('');
     return { dryRun: false };
 
@@ -917,7 +1004,11 @@ export async function runCorpusStatus(apiClient, options) {
       console.log(chalk.white(`  Last sync:       ${syncState.timestamp}`));
       console.log(chalk.white(`  Commit:          ${syncState.last_sync_commit?.substring(0, 8) || 'unknown'}`));
       console.log(chalk.white(`  Files tracked:   ${syncState.synced_files_count}`));
-      console.log(chalk.white(`  Chunks in store: ${syncState.total_chunks}`));
+      console.log(chalk.white(
+        `  Chunks in store: ${Number.isFinite(syncState.total_chunks)
+          ? syncState.total_chunks
+          : 'unknown (the last sync could not obtain a count; re-run with --rebuild)'}`
+      ));
 
       // Quick change detection: walk and compare blob SHAs
       if (options.verbose) {

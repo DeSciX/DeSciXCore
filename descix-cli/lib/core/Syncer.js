@@ -26,6 +26,54 @@ import * as path from 'path';
 import { loadChunks } from './Chunker.js';
 
 /**
+ * THE ONE VALUE this CLI uses to mean "the store did not report a count".
+ *
+ * A receipt is derived from the STORE, never from the REQUEST. Where the store
+ * cannot report, we say so — we never substitute the number of things we ASKED
+ * to be changed, because that number is a description of our own request and
+ * carries no information about what happened.
+ *
+ * @type {number}
+ */
+export const UNREPORTED_COUNT = -1;
+
+/**
+ * Normalize a count the store returned into either that count or UNREPORTED_COUNT.
+ * This is the ONLY place the "did the store report a number?" decision is made.
+ *
+ * @param {*} value - the raw count field as it arrived from the store
+ * @returns {number} the store's count, or UNREPORTED_COUNT if it reported none
+ */
+export function reportedCount(value) {
+  return Number.isFinite(value) ? value : UNREPORTED_COUNT;
+}
+
+/**
+ * True when `value` is a count the store actually reported. Callers use this to
+ * choose between printing a number and printing "unknown" — never to fabricate one.
+ *
+ * @param {*} value
+ * @returns {boolean}
+ */
+export function isReportedCount(value) {
+  return Number.isFinite(value) && value >= 0;
+}
+
+/**
+ * Sum counts across batches while preserving unknown-ness: if ANY batch could not
+ * be reported, the total is not a number we can honestly state.
+ *
+ * @param {number} runningTotal - UNREPORTED_COUNT once any batch was unreportable
+ * @param {*} batchValue - the raw count field from this batch's store response
+ * @returns {number}
+ */
+export function accumulateReportedCount(runningTotal, batchValue) {
+  const next = reportedCount(batchValue);
+  if (!isReportedCount(runningTotal) || !isReportedCount(next)) return UNREPORTED_COUNT;
+  return runningTotal + next;
+}
+
+/**
  * Compute delta between local chunks and remote Pinecone records
  * Uses content_hash for efficient change detection when available.
  * 
@@ -73,39 +121,64 @@ export function computeChunkDelta(localChunks, remoteChunks) {
 }
 
 /**
- * Get existing chunk metadata from Pinecone (with content_hash for delta)
- * Falls back to IDs-only if metadata endpoint not available.
- * 
+ * Get existing chunk metadata from Pinecone (with content_hash for delta).
+ * Falls back to the IDs-only endpoint when the metadata endpoint is unavailable.
+ *
+ * An empty array means the STORE REPORTED an empty KB. It never means "we could
+ * not find out" — when neither endpoint can report, this THROWS naming both
+ * endpoints and both causes, because an unknown remote set presented as an empty
+ * one makes every caller conclude that nothing is stale.
+ *
  * @param {Object} apiClient - DeSciXApiClient instance
  * @param {string} communityId - Community ID
  * @param {string} appId - App ID
  * @param {string} kbId - Knowledge base ID
- * @returns {Promise<Array<{id: string, content_hash: string}>>} Chunk metadata
+ * @returns {Promise<Array<{id: string, content_hash: string}>|Array<string>>} Chunk
+ *          metadata, or plain chunk ids from the compatibility endpoint.
+ * @throws {Error} when neither endpoint reports the remote chunk set.
  */
 export async function getRemoteChunkMetadata(apiClient, communityId, appId, kbId) {
+  // A fallback is a COMPATIBILITY PATH, not an error handler: we fall back when
+  // the newer endpoint is absent, and we FAIL LOUD when neither can report.
+  // Returning [] here would present a transport failure as a store state
+  // ("remote is empty"), and every caller would then compute that nothing is
+  // stale and re-upsert everything — silently.
+  const failures = [];
+
   try {
-    // Try new metadata endpoint first
     const result = await apiClient.invoke('kb_get_chunk_metadata', {
       app_id: appId,
       kb_id: kbId
     });
     // apiClient.invoke returns { status, message: { chunks, count, ... } }
-    const data = result.message || result;
-    return data.chunks || [];
+    const data = result?.message || result;
+    // An empty ARRAY is the store reporting an empty KB — legal, and preserved.
+    // An ABSENT field is the store not reporting at all — not the same fact.
+    if (Array.isArray(data?.chunks)) return data.chunks;
+    failures.push("kb_get_chunk_metadata: response carried no 'chunks' array");
   } catch (error) {
-    // Fall back to IDs-only endpoint
-    try {
-      const result = await apiClient.invoke('kb_get_chunk_ids', {
-        app_id: appId,
-        kb_id: kbId
-      });
-      // apiClient.invoke returns { status, message: { chunk_ids, count, ... } }
-      const data = result.message || result;
-      return data.chunk_ids || [];
-    } catch {
-      return [];
-    }
+    failures.push(`kb_get_chunk_metadata: ${error.message}`);
   }
+
+  try {
+    const result = await apiClient.invoke('kb_get_chunk_ids', {
+      app_id: appId,
+      kb_id: kbId
+    });
+    // apiClient.invoke returns { status, message: { chunk_ids, count, ... } }
+    const data = result?.message || result;
+    if (Array.isArray(data?.chunk_ids)) return data.chunk_ids;
+    failures.push("kb_get_chunk_ids: response carried no 'chunk_ids' array");
+  } catch (error) {
+    failures.push(`kb_get_chunk_ids: ${error.message}`);
+  }
+
+  throw new Error(
+    `Cannot enumerate remote chunks for ${appId}/${kbId}: both endpoints failed to report. ` +
+    'The remote chunk set is UNKNOWN — it must NOT be treated as an empty KB, because ' +
+    'that would silently skip stale-chunk deletion and re-upsert everything. ' +
+    failures.join(' | ')
+  );
 }
 
 /**
@@ -129,7 +202,9 @@ export async function getRemoteChunkIds(apiClient, communityId, appId, kbId) {
  * @param {string} appId - App ID
  * @param {string} kbId - Knowledge base ID
  * @param {Array} chunks - Chunk records to upsert
- * @returns {Promise<{upserted: number}>}
+ * @returns {Promise<{upserted: number}>} `upserted` is the store's own count, or
+ *          UNREPORTED_COUNT if ANY batch's store response carried no count.
+ *          Test it with isReportedCount(); never print it unguarded.
  */
 export async function upsertChunks(apiClient, communityId, appId, kbId, chunks) {
   if (chunks.length === 0) {
@@ -147,7 +222,9 @@ export async function upsertChunks(apiClient, communityId, appId, kbId, chunks) 
       kb_id: kbId,
       chunks: batch
     });
-    totalUpserted += result.upserted_count || batch.length;
+    // apiClient.invoke returns the whole { status, message: {...} } envelope.
+    const data = result?.message || result;
+    totalUpserted = accumulateReportedCount(totalUpserted, data?.upserted_count);
   }
 
   return { upserted: totalUpserted };
@@ -164,7 +241,9 @@ export async function upsertChunks(apiClient, communityId, appId, kbId, chunks) 
  * @param {string} appId - App ID
  * @param {string} kbId - Knowledge base ID
  * @param {Array<string>} chunkIds - Chunk IDs to delete
- * @returns {Promise<{deleted: number}>}
+ * @returns {Promise<{deleted: number}>} `deleted` is the store's own count, or
+ *          UNREPORTED_COUNT if the store reported none. It is NOT chunkIds.length.
+ *          Test it with isReportedCount(); never print it unguarded.
  */
 export async function deleteStaleChunks(apiClient, communityId, appId, kbId, chunkIds) {
   if (chunkIds.length === 0) {
@@ -179,7 +258,7 @@ export async function deleteStaleChunks(apiClient, communityId, appId, kbId, chu
   });
 
   const data = result?.message || result;
-  return { deleted: data.deleted_count ?? chunkIds.length };
+  return { deleted: reportedCount(data?.deleted_count) };
 }
 
 /**
@@ -198,7 +277,10 @@ export async function deleteStaleChunks(apiClient, communityId, appId, kbId, chu
  * @param {string} appId - App ID
  * @param {string} kbId - Knowledge base ID
  * @param {Array<string>} fileIds - file_id values to delete (e.g., ['corpus:abc...', 'local:def...'])
- * @returns {Promise<{deleted: number, deleted_by_file_id: number}>}
+ * @returns {Promise<{deleted: number, deleted_by_file_id: number}>} Each field is the
+ *          store's own count, or UNREPORTED_COUNT if the store reported that field.
+ *          The two are INDEPENDENT — one may be reported and the other not. Neither
+ *          is validFileIds.length. Test with isReportedCount(); never print unguarded.
  */
 export async function deleteStaleChunksByFileId(apiClient, communityId, appId, kbId, fileIds) {
   if (!Array.isArray(fileIds) || fileIds.length === 0) {
@@ -220,8 +302,8 @@ export async function deleteStaleChunksByFileId(apiClient, communityId, appId, k
 
   const data = result?.message || result;
   return {
-    deleted: data.deleted_count ?? validFileIds.length,
-    deleted_by_file_id: data.deleted_by_file_id ?? validFileIds.length
+    deleted: reportedCount(data?.deleted_count),
+    deleted_by_file_id: reportedCount(data?.deleted_by_file_id)
   };
 }
 
@@ -253,7 +335,8 @@ export async function deleteStaleChunksByFileId(apiClient, communityId, appId, k
  * @param {string} kbId - Knowledge base ID
  * @returns {Promise<{ deleted: number, purged_scope: boolean }>}
  *          `deleted` is the actual count of vectors purged (the batched path always
- *          reports it); -1 only if a future primitive cannot report a count.
+ *          reports it), or UNREPORTED_COUNT if the store reported no count.
+ *          Test it with isReportedCount(); never print it unguarded.
  */
 export async function purgeKbScope(apiClient, communityId, appId, kbId) {
   const result = await apiClient.invoke('kb_delete_chunks', {
@@ -264,7 +347,7 @@ export async function purgeKbScope(apiClient, communityId, appId, kbId) {
   });
   const data = result?.message || result;
   return {
-    deleted: typeof data?.deleted_count === 'number' ? data.deleted_count : -1,
+    deleted: reportedCount(data?.deleted_count),
     purged_scope: data?.purged_scope === true
   };
 }
@@ -286,10 +369,21 @@ export async function listRemoteFileIds(apiClient, appId, kbId) {
     kb_id: kbId
   });
   const data = result?.message || result;
+  // Same rule as getRemoteChunkMetadata: an empty array is the store REPORTING an
+  // empty namespace; an ABSENT array is the store not reporting. This list is the
+  // drift input (stale = remote_file_ids - local), so fabricating [] here would
+  // silently mean "nothing is stale" — the failure this module exists to prevent.
+  if (!Array.isArray(data?.file_ids)) {
+    throw new Error(
+      `Cannot enumerate remote file_ids for ${appId}/${kbId}: the store reported no ` +
+      `'file_ids' array. The remote file set is UNKNOWN and must NOT be treated as ` +
+      `empty — that would silently skip the stale purge.`
+    );
+  }
   return {
-    file_ids: data.file_ids || [],
-    unique_count: data.unique_count || 0,
-    total_chunks: data.total_chunks || 0
+    file_ids: data.file_ids,
+    unique_count: reportedCount(data?.unique_count),
+    total_chunks: reportedCount(data?.total_chunks)
   };
 }
 
@@ -336,9 +430,9 @@ export async function syncKb(apiClient, config, options = {}) {
   if (onProgress) onProgress('Fetching existing chunks from Pinecone...');
   const remoteChunks = await getRemoteChunkMetadata(apiClient, communityId, appId, kbId);
   
-  const remoteCount = Array.isArray(remoteChunks) 
-    ? remoteChunks.length 
-    : 0;
+  // getRemoteChunkMetadata returns an array or throws — it never reports an
+  // unknown remote set as an empty one, so there is no non-array case to default.
+  const remoteCount = remoteChunks.length;
   
   if (verbose) {
     console.log(`  Local chunks: ${localChunks.length}`);
@@ -361,7 +455,10 @@ export async function syncKb(apiClient, config, options = {}) {
       deleted = deleteResult.deleted;
       if (verbose) console.log(`  Deleted ${deleted} stale chunks`);
     } catch (error) {
-      if (verbose) console.log(`  Delete failed: ${error.message}`);
+      // The delete ERRORED: how many were removed is unknown. Leaving `deleted` at 0
+      // would report "nothing was deleted" — a claim about the store we cannot make.
+      deleted = UNREPORTED_COUNT;
+      console.warn(`  Delete failed (deleted count unknown): ${error.message}`);
     }
   }
   
@@ -385,12 +482,11 @@ export async function syncKb(apiClient, config, options = {}) {
   let deletedByFileId = 0;
   try {
     const localFileIds = new Set(localChunks.map(c => c.file_id).filter(Boolean));
-    const remoteFileIdsResp = await apiClient.invoke('kb_list_file_ids', {
-      app_id: appId,
-      kb_id: kbId
-    });
-    const remoteData = remoteFileIdsResp?.message || remoteFileIdsResp;
-    const remoteFileIds = remoteData?.file_ids || [];
+    // Consume the module's own enumeration owner rather than re-invoking
+    // kb_list_file_ids and hand-unwrapping its payload: two derivations of one
+    // fact drift apart silently, and this copy would keep the `|| []` defect
+    // that the owner no longer has.
+    const { file_ids: remoteFileIds } = await listRemoteFileIds(apiClient, appId, kbId);
     const staleFileIds = remoteFileIds.filter(fid => !localFileIds.has(fid));
     if (staleFileIds.length > 0) {
       if (onProgress) onProgress(`Purging ${staleFileIds.length} stale file_id(s)...`);
@@ -398,14 +494,18 @@ export async function syncKb(apiClient, config, options = {}) {
       deletedByFileId = purgeResult.deleted;
     }
   } catch (purgeErr) {
-    // Non-fatal: surface via verbose log. The chunk_id-based delete above is the primary
-    // path; this is a safety net. We do NOT silently swallow — caller sees a warning.
-    if (verbose) console.log(`  File-id purge skipped: ${purgeErr.message}`);
+    // Non-fatal: the chunk_id-based delete above is the primary path and this is a
+    // safety net. We do NOT silently swallow — the caller sees a warning. That claim
+    // was previously false: the warning sat behind `if (verbose)`, so a default run
+    // saw nothing. It is unconditional now, which is what makes the sentence true.
+    console.warn(`  File-id purge skipped (stale chunks may remain): ${purgeErr.message}`);
   }
 
   return {
     synced,
-    deleted: deleted + deletedByFileId,
+    // Unknown-ness survives the sum: if either leg could not be reported, their
+    // total is not a number we can state. (-1 + 5 would silently read as 4.)
+    deleted: accumulateReportedCount(deleted, deletedByFileId),
     deleted_chunk_ids: deleted,
     deleted_by_file_id: deletedByFileId,
     unchanged
@@ -433,7 +533,8 @@ export async function getSyncStatus(apiClient, config) {
   
   // Get remote chunk metadata
   const remoteChunks = await getRemoteChunkMetadata(apiClient, communityId, appId, kbId);
-  const remoteCount = Array.isArray(remoteChunks) ? remoteChunks.length : 0;
+  // Array-or-throw, as above: no fabricated zero for an unknown remote set.
+  const remoteCount = remoteChunks.length;
   
   // Compute delta using content_hash
   const { toUpsert, toDelete, unchanged } = computeChunkDelta(localChunks, remoteChunks);
