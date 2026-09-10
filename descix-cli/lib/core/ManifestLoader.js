@@ -13,6 +13,7 @@
  */
 
 import * as fs from 'fs/promises';
+import { statSync, realpathSync } from 'fs';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
 // Canonical doc_class taxonomy lives in CorpusDenyLint — import it, never re-list.
@@ -108,6 +109,73 @@ export function detectRepoSlug(dir) {
   } catch {
     return null;
   }
+}
+
+/**
+ * THE ONE OWNER OF "WHICH REPOSITORY OWNS THIS FILE".
+ *
+ * A workspace is NOT one repository. This one crosses three kinds of boundary at once:
+ * the superrepo itself; git SUBMODULES (DeSciX/DeSciX_Cloud|Core|Powch are gitlinks —
+ * `git ls-tree HEAD DeSciX/` shows mode 160000); and SIBLING repos that are not submodules
+ * at all but independent checkouts the superrepo deliberately ignores (EGPT-research via
+ * .gitignore:9, FRAQTL — each with its own `.git` and its own `origin` remote).
+ *
+ * A REF HAS NO MEANING EXCEPT RELATIVE TO A REPOSITORY. Resolving one against the ambient
+ * workspace root is what made this gate refuse 596 files that ARE committed: the superrepo
+ * sees a submodule only as a gitlink commit, and an ignored sibling repo not at all.
+ * `git rev-parse --show-toplevel` walks UP from the path and stops at the FIRST enclosing
+ * repository — which is precisely the repository whose branches the source's `ref` names,
+ * and which settles submodule and sibling boundaries with ONE mechanism rather than two.
+ *
+ * This is NOT the question `detectRepoSlug` answers. That one is "what is this repository
+ * CALLED" (for the cross-repo self-naming refusal); this one is "where does it BEGIN", so a
+ * ref and a repo-relative path can be formed. Both live here so repository identity has a
+ * single home and no consumer re-derives either.
+ *
+ * @param {string} absolutePath - absolute path to a file or directory in the workspace
+ * @returns {{repoRoot: string, repoRelativePath: string}|null} null when the path lies in
+ *          NO git repository at all — callers must fail loud, never assume a root.
+ */
+const OWNING_REPO_CACHE = new Map(); // real directory -> repoRoot. POSITIVE results only.
+export function resolveOwningRepo(absolutePath) {
+  const abs = path.resolve(absolutePath);
+  // `--show-toplevel` needs a directory that exists, and a source may name a file. Split
+  // off the basename ONLY for a non-directory: for a DIRECTORY source, `path.dirname` would
+  // step over the very boundary being resolved (dirname of `DeSciX/DeSciX_Cloud` is the
+  // superrepo, which is the wrong answer).
+  let dir = abs, base = null;
+  try {
+    if (!statSync(abs).isDirectory()) { dir = path.dirname(abs); base = path.basename(abs); }
+  } catch {
+    dir = path.dirname(abs); base = path.basename(abs);
+  }
+
+  // BOTH SIDES MUST BE REAL PATHS OR THE SUBTRACTION IS GARBAGE. `git rev-parse
+  // --show-toplevel` always answers with symlinks resolved, so comparing it against a
+  // caller path that still contains one yields a `../../..`-riddled relative path that
+  // matches nothing. This is not a corner case: on macOS every temp dir is /var ->
+  // /private/var, and this repo's own dev flow serves the Core tree through a symlink.
+  let realDir;
+  try { realDir = realpathSync(dir); } catch { realDir = dir; }
+
+  let repoRoot = OWNING_REPO_CACHE.get(realDir);
+  if (repoRoot === undefined) {
+    try {
+      repoRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+        cwd: realDir, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+      }).trim();
+    } catch {
+      return null; // No repository. NOT cached: a negative is not durable — the directory
+    }              //  may be `git init`-ed later in the same process (fixtures do exactly this).
+    if (!repoRoot) return null;
+    OWNING_REPO_CACHE.set(realDir, repoRoot);
+  }
+
+  const repoRelativeDir = path.relative(repoRoot, realDir);
+  return {
+    repoRoot,
+    repoRelativePath: base ? path.join(repoRelativeDir, base) : repoRelativeDir,
+  };
 }
 
 /**
