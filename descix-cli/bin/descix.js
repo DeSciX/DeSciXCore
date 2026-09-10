@@ -11,7 +11,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { DeSciXApiClient } from '../lib/api-client.js';
 import { requireAuth } from '../lib/auth-guard.js';
-import { WorkspaceConfig } from '../lib/workspace-config.js';
+import { WorkspaceConfig, unmappedAppMessage } from '../lib/workspace-config.js';
 import { CLI_VERSION } from '../lib/cli-version.js';
 import { recordInvocationOrigin } from '../lib/origin.js';
 // Chat session pointer + the ONE rule for when a dead pointer may be self-healed.
@@ -2507,8 +2507,7 @@ siteCommand
       
       const appConfig = workspaceConfig.getAppByAppId(ctx.appId);
       if (!appConfig) {
-        console.error(chalk.red('\n❌ App not found in workspace.json.'));
-        console.log(chalk.gray('  Run "npx descix init" to set up your workspace.\n'));
+        console.error(chalk.red(`\n❌ ${unmappedAppMessage(ctx.appId)}\n`));
         process.exit(1);
       }
 
@@ -2874,8 +2873,7 @@ siteCommand
       if (!port) {
         const appConfig = workspaceConfig.getAppByAppId(appId);
         if (!appConfig) {
-          console.error(chalk.red('\n❌ App not found in workspace.json.'));
-          console.log(chalk.gray('  Run "npx descix init" to set up your workspace.\n'));
+          console.error(chalk.red(`\n❌ ${unmappedAppMessage(appId)}\n`));
           process.exit(1);
         }
         // Read site.port from the live env entry (not from the constructed copy)
@@ -3116,8 +3114,7 @@ microserviceCommand
       
       const appConfig = workspaceConfig.getAppByAppId(ctx.appId);
       if (!appConfig) {
-        console.error(chalk.red('\n❌ App not found in workspace.json.'));
-        console.log(chalk.gray('  Run "npx descix init" to set up your workspace.\n'));
+        console.error(chalk.red(`\n❌ ${unmappedAppMessage(ctx.appId)}\n`));
         process.exit(1);
       }
 

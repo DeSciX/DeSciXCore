@@ -2,6 +2,29 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { ENV_ORIGINS } from '@descix/app-sdk/dev';
 import { resolveOrigin } from './origin.js';
+// The one canonical KB-sync surface, from its owner. The example in requireContext() is a remedy
+// a stuck developer will copy verbatim, so it must resolve to the live verb rather than a literal
+// that can go stale where nobody is watching.
+import { CANONICAL_KB_SYNC } from './commands/retired-kb-sync.js';
+
+/**
+ * THE ONE OWNER of "this app is not mapped in workspace.json, here is how to fix it".
+ *
+ * This text existed as three byte-identical copies in this file, and TWO OTHER call sites in
+ * bin/descix.js answered the same condition with a DIFFERENT and wrong remedy — `npx descix init`,
+ * which initialises a WORKSPACE and cannot map an app, so a developer who followed it stayed
+ * exactly as stuck. That is the mirror-drift tell: the same condition explained two ways, and the
+ * wrong one was the one a developer actually hit on the onboarding path.
+ *
+ * @param {string} appId - the app that is not mapped
+ * @returns {string}
+ */
+export function unmappedAppMessage(appId) {
+  return (
+    `App "${appId}" is not mapped in workspace.json. ` +
+    'Use `descix app init` to register, or `descix app set-localpath -a <id> -p <path>` to repoint.'
+  );
+}
 
 /**
  * ONE OWNER for turning a workspace-relative localPath into an absolute path.
@@ -508,7 +531,7 @@ export class WorkspaceConfig {
         'Options:\n' +
         '  1. cd into an app directory\n' +
         '  2. Use flag: -a <app_id>\n\n' +
-        'Example: npx descix update kb -a daita'
+        `Example: npx ${CANONICAL_KB_SYNC} -a daita`
       );
     }
     
@@ -637,8 +660,7 @@ export class WorkspaceConfig {
 
     if (!entry) {
       throw new Error(
-        `App "${appId}" is not mapped in workspace.json. ` +
-        'Use `descix app init` to register, or `descix app set-localpath -a <id> -p <path>` to repoint.'
+        unmappedAppMessage(appId)
       );
     }
 
@@ -687,8 +709,7 @@ export class WorkspaceConfig {
 
     if (!entry) {
       throw new Error(
-        `App "${appId}" is not mapped in workspace.json. ` +
-        'Use `descix app init` to register, or `descix app set-localpath -a <id> -p <path>` to repoint.'
+        unmappedAppMessage(appId)
       );
     }
 
@@ -743,8 +764,7 @@ export class WorkspaceConfig {
 
     if (!entry) {
       throw new Error(
-        `App "${appId}" is not mapped in workspace.json. ` +
-        'Use `descix app init` to register, or `descix app set-localpath -a <id> -p <path>` to repoint.'
+        unmappedAppMessage(appId)
       );
     }
 

@@ -4,7 +4,6 @@
  * Commands for updating resources based on workspace.json context detection:
  *   descix update          # Auto-detect what to update
  *   descix update app      # Sync app assets to Drive
- *   descix update kb       # Sync KB + vectorize
  *   descix update site     # Deploy site to GCS
  *   descix update all      # Update everything
  * 
