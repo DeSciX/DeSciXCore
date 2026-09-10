@@ -51,18 +51,20 @@ function resolvedSource(root, rel, tier, extra = {}) {
 test('item4: nested child source files are collected ONCE, owned by the deepest source', async () => {
     const root = await mkTmp('kbcleanup-walk-');
     try {
-        // A corpus source always lives in a repo with commits: `ref` must resolve to a real
-        // commit or the walk has no honest provenance to record. An empty initial commit is
-        // the minimum realistic fixture; it does not affect what this test measures (which
-        // source OWNS each walked file — the files below stay untracked either way).
+        // A corpus source always lives in a repo with commits, and every source must be
+        // TRACKED AT ITS REF (CorpusWalker's source gate) — so the fixture COMMITS its
+        // files. That is not incidental scaffolding: an untracked file is not a legitimate
+        // corpus source at all, so a fixture built from untracked files could not exercise
+        // the ownership rule this test measures. What is measured is unchanged: which
+        // source OWNS each walked file.
         execSync('git init -q -b main', { cwd: root });
         execSync('git config user.email t@t.t && git config user.name t', { cwd: root, shell: '/bin/bash' });
-        execSync('git commit -q --allow-empty -m base', { cwd: root });
         await fs.mkdir(path.join(root, 'svc', 'handlers'), { recursive: true });
         await fs.writeFile(path.join(root, 'svc', 'a.js'), 'export const a = 1;\n');
         await fs.writeFile(path.join(root, 'svc', 'b.js'), 'export const b = 2;\n');
         await fs.writeFile(path.join(root, 'svc', 'handlers', 'c.js'), 'export const c = 3;\n');
         await fs.writeFile(path.join(root, 'svc', 'handlers', 'd.js'), 'export const d = 4;\n');
+        execSync('git add -A && git commit -q -m base', { cwd: root, shell: '/bin/bash' });
 
         // Mirror the unk-beast/Corpus shape: a broad dir source (tier 3) + a nested child (tier 2).
         const manifest = {
@@ -100,16 +102,15 @@ test('item4: nested child source files are collected ONCE, owned by the deepest 
 test('item4: an explicit single-file source out-specifies its enclosing directory source', async () => {
     const root = await mkTmp('kbcleanup-walk2-');
     try {
-        // A corpus source always lives in a repo with commits: `ref` must resolve to a real
-        // commit or the walk has no honest provenance to record. An empty initial commit is
-        // the minimum realistic fixture; it does not affect what this test measures (which
-        // source OWNS each walked file — the files below stay untracked either way).
+        // Files are COMMITTED: every corpus source must be tracked at its ref (see the
+        // sibling test above). What this test measures — that an explicit file source
+        // out-specifies its enclosing directory source — is unchanged.
         execSync('git init -q -b main', { cwd: root });
         execSync('git config user.email t@t.t && git config user.name t', { cwd: root, shell: '/bin/bash' });
-        execSync('git commit -q --allow-empty -m base', { cwd: root });
         await fs.mkdir(path.join(root, 'svc'), { recursive: true });
         await fs.writeFile(path.join(root, 'svc', 'app.js'), 'export const app = 1;\n');
         await fs.writeFile(path.join(root, 'svc', 'other.js'), 'export const o = 2;\n');
+        execSync('git add -A && git commit -q -m base', { cwd: root, shell: '/bin/bash' });
 
         const manifest = {
             _resolvedSources: [
