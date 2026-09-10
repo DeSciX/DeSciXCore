@@ -256,6 +256,158 @@ test('POSITIVE CONTROL: a tracked file MODIFIED in the working tree syncs at its
   assert.equal(files[0].blob_sha, refSha, 'and it syncs at the committed sha, ignoring local edits');
 });
 
+// ─────────────── CROSS-REPO: the workspace is NOT one repository ───────────────
+// THE FIXTURE IS PART OF THE GATE. Every fixture above uses `root` as BOTH the workspace
+// root AND the only git repository, so it is structurally incapable of exhibiting the
+// defect that BLOCKED the first revision: a ref resolved against the AMBIENT workspace
+// root instead of the repository that owns the file. The real workspace crosses that
+// boundary twice over — DeSciX/DeSciX_* are submodules (gitlinks), EGPT-research and
+// FRAQTL are independent sibling checkouts the superrepo .gitignores — and 596 committed
+// files were refused because of it. These fixtures reproduce both shapes.
+
+/**
+ * Workspace repo with a NESTED INDEPENDENT REPO inside it, the submodule shape:
+ * the outer repo sees `inner/` only as an opaque boundary, exactly as a superrepo sees a
+ * gitlink. `inner/lib/tracked.md` is COMMITTED ON `main` IN THE INNER REPO and is
+ * unknown to the outer one.
+ */
+async function mkNestedRepos(prefix) {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
+  execSync('git init -q -b main', { cwd: root });
+  execSync('git config user.email t@t.t && git config user.name t', { cwd: root, shell: '/bin/bash' });
+  await fs.mkdir(path.join(root, 'outer'), { recursive: true });
+  await fs.writeFile(path.join(root, 'outer', 'super.md'), '# superrepo content\n');
+  await fs.writeFile(path.join(root, '.gitignore'), 'sibling/\n');
+  execSync('git add -A && git commit -q -m outer-init', { cwd: root, shell: '/bin/bash' });
+
+  const inner = path.join(root, 'inner');
+  await fs.mkdir(path.join(inner, 'lib'), { recursive: true });
+  execSync('git init -q -b main', { cwd: inner });
+  execSync('git config user.email t@t.t && git config user.name t', { cwd: inner, shell: '/bin/bash' });
+  await fs.writeFile(path.join(inner, 'lib', 'tracked.md'), '# committed INSIDE the inner repo\n');
+  await fs.writeFile(path.join(inner, 'lib', 'never-committed.md'), '# untracked in the inner repo\n');
+  execSync('git add lib/tracked.md && git commit -q -m inner-init', { cwd: inner, shell: '/bin/bash' });
+
+  // Sibling shape: an independent repo the OUTER repo .gitignores (EGPT-research/FRAQTL).
+  const sibling = path.join(root, 'sibling');
+  await fs.mkdir(path.join(sibling, 'docs'), { recursive: true });
+  execSync('git init -q -b main', { cwd: sibling });
+  execSync('git config user.email t@t.t && git config user.name t', { cwd: sibling, shell: '/bin/bash' });
+  await fs.writeFile(path.join(sibling, 'docs', 'paper.md'), '# committed in an IGNORED sibling repo\n');
+  execSync('git add -A && git commit -q -m sibling-init', { cwd: sibling, shell: '/bin/bash' });
+
+  return { root, inner, sibling };
+}
+
+test('fixture self-check: the nested/sibling files are invisible to the WORKSPACE repo but committed in their own', async () => {
+  const { root, inner, sibling } = await mkNestedRepos('gate-xrepo-fixture-');
+
+  // The outer repo cannot see either file at its own ref — this is what makes the fixture
+  // able to exhibit the ambient-root defect at all.
+  assert.throws(() => execSync('git rev-parse "main:inner/lib/tracked.md"', { cwd: root, stdio: ['pipe', 'pipe', 'pipe'] }),
+    'the WORKSPACE repo must NOT resolve the nested repo\'s file — otherwise the fixture is same-repo');
+  assert.throws(() => execSync('git rev-parse "main:sibling/docs/paper.md"', { cwd: root, stdio: ['pipe', 'pipe', 'pipe'] }),
+    'the WORKSPACE repo must NOT resolve the ignored sibling repo\'s file');
+
+  // And the sibling really is ignored by the outer repo, like EGPT-research/.gitignore:9.
+  assert.match(execSync('git check-ignore -v sibling/docs/paper.md', { cwd: root, encoding: 'utf-8' }),
+    /\.gitignore:1:sibling\//, 'the sibling must be genuinely .gitignored by the workspace repo');
+
+  // But each IS committed on main in the repository that owns it.
+  assert.match(execSync('git rev-parse "main:lib/tracked.md"', { cwd: inner, encoding: 'utf-8' }).trim(), SHA40);
+  assert.match(execSync('git rev-parse "main:docs/paper.md"', { cwd: sibling, encoding: 'utf-8' }).trim(), SHA40);
+});
+
+test('CROSS-REPO POSITIVE CONTROL: a file tracked in a NESTED repo at its own ref PASSES', async () => {
+  // The regression that blocked revision 1, in one test: `DeSciX/DeSciX_Cloud/...` is
+  // committed on the submodule's `main` and must sync, not refuse.
+  const { root, inner } = await mkNestedRepos('gate-xrepo-nested-');
+  const mp = await writeManifest(root, 'Nested', [
+    { path: 'inner/lib/tracked.md', ref: 'main', tier: 1, doc_type: 'x', syncignore: [] },
+  ]);
+  const manifest = await loadManifest(mp, root);
+
+  const { files } = await walkCorpus(manifest, root);
+  assert.equal(files.length, 1, 'a file committed in the repo that OWNS it must not be refused');
+  const fromInner = execSync('git rev-parse "main:lib/tracked.md"', { cwd: inner, encoding: 'utf-8' }).trim();
+  assert.equal(files[0].blob_sha, fromInner, 'and its sha must come from the OWNING repo\'s ref');
+});
+
+test('CROSS-REPO POSITIVE CONTROL: a file in an IGNORED SIBLING repo, tracked at its own ref, PASSES', async () => {
+  // EGPT-research/FRAQTL shape: .gitignored by the workspace repo, fully tracked in its own.
+  // Under the ambient-root gate this got the WORST diagnosis — "IGNORED BY GIT ... remove
+  // this source from the manifest" — about content that is properly committed.
+  const { root, sibling } = await mkNestedRepos('gate-xrepo-sibling-');
+  const mp = await writeManifest(root, 'Sibling', [
+    { path: 'sibling/docs', ref: 'main', tier: 1, doc_type: 'x', syncignore: [] },
+  ]);
+  const manifest = await loadManifest(mp, root);
+
+  const { files } = await walkCorpus(manifest, root);
+  assert.equal(files.length, 1, 'an ignored-by-the-superrepo sibling repo\'s committed file must sync');
+  const fromSibling = execSync('git rev-parse "main:docs/paper.md"', { cwd: sibling, encoding: 'utf-8' }).trim();
+  assert.equal(files[0].blob_sha, fromSibling);
+});
+
+test('the gate KEEPS ITS TEETH across the boundary: untracked INSIDE the nested repo is still REFUSED', async () => {
+  // The failure mode to fear now is the opposite one: "fix" the false refusals by making
+  // the gate lenient. A file the OWNING repo does not track must still be refused, and the
+  // diagnosis must name the repository it was judged in.
+  const { root } = await mkNestedRepos('gate-xrepo-teeth-');
+  const mp = await writeManifest(root, 'Teeth', [
+    { path: 'inner/lib/never-committed.md', ref: 'main', tier: 1, doc_type: 'x', syncignore: [] },
+  ]);
+  const manifest = await loadManifest(mp, root);
+
+  await assert.rejects(
+    () => walkCorpus(manifest, root),
+    (err) => {
+      assert.match(err.message, /never-committed\.md/, 'must name the offending path');
+      assert.match(err.message, /UNTRACKED at ref "main"/, 'must still refuse on the owning repo\'s verdict');
+      assert.match(err.message, /in inner/, 'the diagnosis must name WHICH REPOSITORY judged it');
+      return true;
+    },
+    'crossing a repo boundary must not become a way to launder untracked content in'
+  );
+});
+
+test('provenance records the OWNING repository\'s commit, not the workspace root\'s', async () => {
+  // One owner, consulted by both sites: if the blob comes from the inner repo, the commit
+  // recorded beside it must too, or sync-state attributes content to a commit that never
+  // contained it.
+  const { root, inner } = await mkNestedRepos('gate-xrepo-prov-');
+  const mp = await writeManifest(root, 'Prov', [
+    { path: 'inner/lib/tracked.md', ref: 'main', tier: 1, doc_type: 'x', syncignore: [] },
+  ]);
+  const manifest = await loadManifest(mp, root);
+
+  const { provenance } = await walkCorpus(manifest, root);
+  const innerCommit = execSync('git rev-parse main', { cwd: inner, encoding: 'utf-8' }).trim();
+  const outerCommit = execSync('git rev-parse main', { cwd: root, encoding: 'utf-8' }).trim();
+  assert.equal(provenance[0].resolved_commit_sha, innerCommit, 'must record the OWNING repo\'s commit');
+  assert.notEqual(provenance[0].resolved_commit_sha, outerCommit, 'and must NOT record the workspace root\'s');
+});
+
+test('a source inside NO git repository at all is REFUSED, not assumed', async () => {
+  const bare = await fs.mkdtemp(path.join(os.tmpdir(), 'gate-norepo-'));
+  await fs.mkdir(path.join(bare, 'loose'), { recursive: true });
+  await fs.writeFile(path.join(bare, 'loose', 'orphan.md'), '# in no repository\n');
+  const mp = await writeManifest(bare, 'NoRepo', [
+    { path: 'loose/orphan.md', ref: 'main', tier: 1, doc_type: 'x', syncignore: [] },
+  ]);
+  const manifest = await loadManifest(mp, bare, { ownRepoSlug: null });
+
+  await assert.rejects(
+    () => walkCorpus(manifest, bare),
+    (err) => {
+      assert.match(err.message, /NO GIT REPOSITORY|NOT INSIDE ANY GIT REPOSITORY/i,
+        'a path no repository owns must be refused by name, never silently accepted');
+      return true;
+    },
+    'resolveOwningRepo returning null must fail loud'
+  );
+});
+
 // ───────────────────────── SUPER-DRY: the old path is GONE ─────────────────────────
 
 test('the working-tree `git hash-object` fallback is DELETED, not fenced', async () => {
