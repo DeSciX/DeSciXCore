@@ -369,10 +369,21 @@ export async function listRemoteFileIds(apiClient, appId, kbId) {
     kb_id: kbId
   });
   const data = result?.message || result;
+  // Same rule as getRemoteChunkMetadata: an empty array is the store REPORTING an
+  // empty namespace; an ABSENT array is the store not reporting. This list is the
+  // drift input (stale = remote_file_ids - local), so fabricating [] here would
+  // silently mean "nothing is stale" — the failure this module exists to prevent.
+  if (!Array.isArray(data?.file_ids)) {
+    throw new Error(
+      `Cannot enumerate remote file_ids for ${appId}/${kbId}: the store reported no ` +
+      `'file_ids' array. The remote file set is UNKNOWN and must NOT be treated as ` +
+      `empty — that would silently skip the stale purge.`
+    );
+  }
   return {
-    file_ids: data.file_ids || [],
-    unique_count: data.unique_count || 0,
-    total_chunks: data.total_chunks || 0
+    file_ids: data.file_ids,
+    unique_count: reportedCount(data?.unique_count),
+    total_chunks: reportedCount(data?.total_chunks)
   };
 }
 
@@ -444,7 +455,10 @@ export async function syncKb(apiClient, config, options = {}) {
       deleted = deleteResult.deleted;
       if (verbose) console.log(`  Deleted ${deleted} stale chunks`);
     } catch (error) {
-      if (verbose) console.log(`  Delete failed: ${error.message}`);
+      // The delete ERRORED: how many were removed is unknown. Leaving `deleted` at 0
+      // would report "nothing was deleted" — a claim about the store we cannot make.
+      deleted = UNREPORTED_COUNT;
+      console.warn(`  Delete failed (deleted count unknown): ${error.message}`);
     }
   }
   
@@ -468,12 +482,11 @@ export async function syncKb(apiClient, config, options = {}) {
   let deletedByFileId = 0;
   try {
     const localFileIds = new Set(localChunks.map(c => c.file_id).filter(Boolean));
-    const remoteFileIdsResp = await apiClient.invoke('kb_list_file_ids', {
-      app_id: appId,
-      kb_id: kbId
-    });
-    const remoteData = remoteFileIdsResp?.message || remoteFileIdsResp;
-    const remoteFileIds = remoteData?.file_ids || [];
+    // Consume the module's own enumeration owner rather than re-invoking
+    // kb_list_file_ids and hand-unwrapping its payload: two derivations of one
+    // fact drift apart silently, and this copy would keep the `|| []` defect
+    // that the owner no longer has.
+    const { file_ids: remoteFileIds } = await listRemoteFileIds(apiClient, appId, kbId);
     const staleFileIds = remoteFileIds.filter(fid => !localFileIds.has(fid));
     if (staleFileIds.length > 0) {
       if (onProgress) onProgress(`Purging ${staleFileIds.length} stale file_id(s)...`);
@@ -481,14 +494,18 @@ export async function syncKb(apiClient, config, options = {}) {
       deletedByFileId = purgeResult.deleted;
     }
   } catch (purgeErr) {
-    // Non-fatal: surface via verbose log. The chunk_id-based delete above is the primary
-    // path; this is a safety net. We do NOT silently swallow — caller sees a warning.
-    if (verbose) console.log(`  File-id purge skipped: ${purgeErr.message}`);
+    // Non-fatal: the chunk_id-based delete above is the primary path and this is a
+    // safety net. We do NOT silently swallow — the caller sees a warning. That claim
+    // was previously false: the warning sat behind `if (verbose)`, so a default run
+    // saw nothing. It is unconditional now, which is what makes the sentence true.
+    console.warn(`  File-id purge skipped (stale chunks may remain): ${purgeErr.message}`);
   }
 
   return {
     synced,
-    deleted: deleted + deletedByFileId,
+    // Unknown-ness survives the sum: if either leg could not be reported, their
+    // total is not a number we can state. (-1 + 5 would silently read as 4.)
+    deleted: accumulateReportedCount(deleted, deletedByFileId),
     deleted_chunk_ids: deleted,
     deleted_by_file_id: deletedByFileId,
     unchanged
