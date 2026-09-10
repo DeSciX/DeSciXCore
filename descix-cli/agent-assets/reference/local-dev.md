@@ -143,10 +143,6 @@ KB querying will surface. If you fix something there, the fix reaches readers of
 nobody asking the KB — so do not assume KB coverage for a surface that has none. This is a known
 boundary, not a defect.
 
-`descix kb chunk`, `descix kb sync` and `descix update kb` still run but are **superseded
-duplicates** — each names `kb corpus sync` as its replacement in its own `--help` and is slated
-for removal. Do not put them in new instructions.
-
 #### What you put in a KB changes what comes out of it
 
 Retrieval is **vocabulary-dominated**, and when it goes wrong it does so silently. Measured against

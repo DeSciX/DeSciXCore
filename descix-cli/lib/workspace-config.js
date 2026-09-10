@@ -2,6 +2,29 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { ENV_ORIGINS } from '@descix/app-sdk/dev';
 import { resolveOrigin } from './origin.js';
+// The one canonical KB-sync surface, from its owner. The example in requireContext() is a remedy
+// a stuck developer will copy verbatim, so it must resolve to the live verb rather than a literal
+// that can go stale where nobody is watching.
+import { CANONICAL_KB_SYNC } from './commands/retired-kb-sync.js';
+
+/**
+ * THE ONE OWNER of "this app is not mapped in workspace.json, here is how to fix it".
+ *
+ * This text existed as three byte-identical copies in this file, and TWO OTHER call sites in
+ * bin/descix.js answered the same condition with a DIFFERENT and wrong remedy — `npx descix init`,
+ * which initialises a WORKSPACE and cannot map an app, so a developer who followed it stayed
+ * exactly as stuck. That is the mirror-drift tell: the same condition explained two ways, and the
+ * wrong one was the one a developer actually hit on the onboarding path.
+ *
+ * @param {string} appId - the app that is not mapped
+ * @returns {string}
+ */
+export function unmappedAppMessage(appId) {
+  return (
+    `App "${appId}" is not mapped in workspace.json. ` +
+    'Use `descix app init` to register, or `descix app set-localpath -a <id> -p <path>` to repoint.'
+  );
+}
 
 /**
  * ONE OWNER for turning a workspace-relative localPath into an absolute path.
@@ -248,6 +271,17 @@ export class WorkspaceConfig {
   /**
    * Save workspace configuration in v2.1 format.
    * Always writes env.platform / env.products structure.
+   *
+   * PRESERVES KEYS IT DOES NOT UNDERSTAND. This method used to serialize a fixed field list from
+   * memory over the whole file, so ANY top-level key it did not itself enumerate was silently
+   * destroyed by the next `descix app set-port` — a writer re-serializing a known schema and
+   * discarding the rest. That is the same defect class as a record writer dropping a field it was
+   * never taught about, and it is invisible: the write succeeds, the file looks well-formed, and
+   * the loss is only discovered by whoever needed the missing key.
+   *
+   * The on-disk file is re-read at save time rather than trusted from construction, because the
+   * instance may have been held across another writer's save.
+   *
    * @param {string} [workspaceRoot] - Workspace root directory (uses stored root if not provided)
    * @returns {Promise<string>} Path to saved config
    */
@@ -266,7 +300,32 @@ export class WorkspaceConfig {
     // Build env block for v2.1 output
     const envBlock = (this.env && Object.keys(this.env).length > 0) ? this.env : null;
 
+    // The keys this writer OWNS. Everything else on disk is carried through untouched.
+    const OWNED = ['version', 'workspaceRoot', 'type', 'env', 'driveConfig'];
+
+    let onDisk = {};
+    try {
+      const existing = await fs.readFile(configPath, 'utf-8');
+      const parsed = JSON.parse(existing);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) onDisk = parsed;
+    } catch (err) {
+      // ENOENT is the ordinary first save. A PRESENT-BUT-UNPARSEABLE file is different: carrying
+      // on would overwrite content we could not read, so refuse and name the file.
+      if (err.code !== 'ENOENT') {
+        throw new Error(
+          `Refusing to overwrite ${configPath}: it exists but could not be read as JSON ` +
+          `(${err.message}). Fix or remove it — saving now would destroy whatever it holds.`
+        );
+      }
+    }
+
+    const carried = {};
+    for (const [k, v] of Object.entries(onDisk)) {
+      if (!OWNED.includes(k)) carried[k] = v;
+    }
+
     const configData = {
+      ...carried,
       version: '2.1',
       workspaceRoot: path.resolve(root),
       type: this.type,
@@ -508,7 +567,7 @@ export class WorkspaceConfig {
         'Options:\n' +
         '  1. cd into an app directory\n' +
         '  2. Use flag: -a <app_id>\n\n' +
-        'Example: npx descix update kb -a daita'
+        `Example: npx ${CANONICAL_KB_SYNC} -a daita`
       );
     }
     
@@ -637,8 +696,7 @@ export class WorkspaceConfig {
 
     if (!entry) {
       throw new Error(
-        `App "${appId}" is not mapped in workspace.json. ` +
-        'Use `descix app init` to register, or `descix app set-localpath -a <id> -p <path>` to repoint.'
+        unmappedAppMessage(appId)
       );
     }
 
@@ -687,8 +745,7 @@ export class WorkspaceConfig {
 
     if (!entry) {
       throw new Error(
-        `App "${appId}" is not mapped in workspace.json. ` +
-        'Use `descix app init` to register, or `descix app set-localpath -a <id> -p <path>` to repoint.'
+        unmappedAppMessage(appId)
       );
     }
 
@@ -743,8 +800,7 @@ export class WorkspaceConfig {
 
     if (!entry) {
       throw new Error(
-        `App "${appId}" is not mapped in workspace.json. ` +
-        'Use `descix app init` to register, or `descix app set-localpath -a <id> -p <path>` to repoint.'
+        unmappedAppMessage(appId)
       );
     }
 
