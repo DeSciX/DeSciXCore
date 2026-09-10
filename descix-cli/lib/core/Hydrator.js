@@ -726,11 +726,15 @@ export async function checkStagingFiles(stagingDir) {
  * 
  * @param {string} scaffoldType - 'site' or 'microservice'
  * @param {string} appPath - Path to the app directory
- * @param {Object} options - { verbose, force }
+ * @param {Object} options - { verbose, force, substitute }
+ * @param {{appId: string, communityId: string, appName?: string}} [options.substitute] - the
+ *   caller's real identity. Supply it for any scaffold a developer will actually use: without it
+ *   the copy is verbatim and every {{TOKEN}} ships unresolved. Omitting it is only appropriate
+ *   when materializing the raw template itself.
  * @returns {Promise<{copied: number}>}
  */
 export async function copyScaffold(scaffoldType, appPath, options = {}) {
-  const { verbose = false, force = false } = options;
+  const { verbose = false, force = false, substitute = null } = options;
   
   const scaffoldDir = SCAFFOLD_DIRS[scaffoldType];
   if (!scaffoldDir) {
@@ -767,8 +771,36 @@ export async function copyScaffold(scaffoldType, appPath, options = {}) {
   
   // Copy scaffold recursively
   const stats = { copied: 0 };
-  await copyDir(scaffoldDir, targetDir, stats, verbose);
-  
+  let values = null;
+  if (substitute) {
+    if (!substitute.appId || !substitute.communityId) {
+      throw new Error(
+        'copyScaffold: substitute requires both appId and communityId. Refusing to resolve a ' +
+        'scaffold against a partial identity — a half-substituted scaffold is harder to spot ' +
+        'than an unsubstituted one.'
+      );
+    }
+    values = {
+      APP_ID: substitute.appId,
+      COMMUNITY_ID: substitute.communityId,
+      APP_NAME: substitute.appName || substitute.appId,
+    };
+  }
+
+  const unresolved = [];
+  await copyDir(scaffoldDir, targetDir, stats, verbose, values, unresolved);
+
+  // FAIL LOUD. A placeholder that survives the copy reaches the developer as literal braces, and
+  // that is exactly the class of defect this substitution exists to end — so it must never be a
+  // warning. Name every offender so a new token added to a template cannot ship unnoticed.
+  if (unresolved.length > 0) {
+    throw new Error(
+      `Scaffold "${scaffoldType}" has ${unresolved.length} unresolved placeholder(s): ` +
+      `${unresolved.join(', ')}. Every {{TOKEN}} in a scaffold needs a value in copyScaffold's ` +
+      `substitute map (see templates/scaffolds/README.md for the documented set).`
+    );
+  }
+
   return stats;
 }
 
@@ -785,21 +817,66 @@ async function hasContentInDir(dirPath) {
 }
 
 /**
- * Recursively copy a directory
+ * THE ONE OWNER of scaffold placeholder substitution.
+ *
+ * templates/scaffolds/README.md has documented this contract all along — "Scaffolds use these
+ * placeholders (replaced during copy): {{APP_NAME}}, {{APP_ID}}, {{COMMUNITY_ID}}" — but nothing
+ * ever performed the replacement. Both scaffolds shipped their placeholders and their sample
+ * literals verbatim, so a developer's site was titled `{{APP_NAME}}` and the sample handler
+ * queried a community that is not theirs.
+ *
+ * SUBSTITUTION, NOT A SECOND LITERAL. The fix resolves each token to the caller's real values;
+ * it does not swap one hardcoded community for another. That is what lets the same scaffold serve
+ * every community without the CLI knowing any of their names.
+ *
+ * @param {string} text - file contents
+ * @param {Record<string,string>} values - token name (without braces) -> replacement
+ * @returns {string}
  */
-async function copyDir(src, dest, stats, verbose) {
+function applyScaffoldTokens(text, values) {
+  return text.replace(/\{\{([A-Z_]+)\}\}/g, (whole, token) =>
+    Object.prototype.hasOwnProperty.call(values, token) ? values[token] : whole
+  );
+}
+
+/** A NUL byte is the cheap, dependency-free binary tell. Never rewrite bytes we cannot read. */
+function looksBinary(buf) {
+  return buf.includes(0);
+}
+
+/**
+ * Recursively copy a directory, optionally substituting scaffold tokens on the way.
+ *
+ * @param {Record<string,string>|null} values - when null, the copy is byte-for-byte verbatim
+ * @param {string[]} unresolved - collects `file:{{TOKEN}}` for tokens no value was supplied for
+ */
+async function copyDir(src, dest, stats, verbose, values = null, unresolved = [], relBase = '') {
   await fs.mkdir(dest, { recursive: true });
-  
+
   const entries = await fs.readdir(src, { withFileTypes: true });
-  
+
   for (const entry of entries) {
     const srcPath = path.join(src, entry.name);
     const destPath = path.join(dest, entry.name);
-    
+    const rel = relBase ? `${relBase}/${entry.name}` : entry.name;
+
     if (entry.isDirectory()) {
-      await copyDir(srcPath, destPath, stats, verbose);
+      await copyDir(srcPath, destPath, stats, verbose, values, unresolved, rel);
     } else {
-      await fs.copyFile(srcPath, destPath);
+      if (values) {
+        const buf = await fs.readFile(srcPath);
+        if (looksBinary(buf)) {
+          await fs.copyFile(srcPath, destPath);
+        } else {
+          const out = applyScaffoldTokens(buf.toString('utf8'), values);
+          // Anything still wearing braces had no value supplied. Collect it rather than shipping
+          // it: an unresolved placeholder reaching a developer is the defect this exists to end.
+          for (const m of out.matchAll(/\{\{([A-Z_]+)\}\}/g)) unresolved.push(`${rel}:{{${m[1]}}}`);
+          await fs.writeFile(destPath, out);
+        }
+      } else {
+        await fs.copyFile(srcPath, destPath);
+      }
       stats.copied++;
       if (verbose) console.log(`  Copied: ${entry.name}`);
     }

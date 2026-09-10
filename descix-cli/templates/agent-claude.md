@@ -151,9 +151,6 @@ descix kb corpus sync -c <community> -a <app> -k <KB>
 descix kb corpus status -c <community> -a <app>
 ```
 
-`descix update kb`, `descix kb chunk` and `descix kb sync` still run, but each names
-`kb corpus sync` as its replacement in its own `--help` and is slated for removal. Do not put
-them in new instructions.
 
 ## Local Development
 

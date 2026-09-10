@@ -684,7 +684,12 @@ export const AppProvider = ({ children }) => {
     }
 
     try {
-      const response = await Api.purchaseProduct(app, ProductTypes.APP);
+      // Same positional-vs-destructured defect as joinCommunity below: the object was passed
+      // POSITIONALLY into purchaseProduct's single destructured options bag, so product_id,
+      // user_id, product_price and project_token all arrived undefined. Here the dispatched
+      // command happened to come out right by accident (undefined !== COMMUNITY), which is why
+      // it stayed invisible — the params were garbage regardless.
+      const response = await Api.handlePurchase(app, ProductTypes.APP);
       
       if (response.needsOnboarding) {
         // User needs to complete onboarding - go to Dashboard
@@ -720,7 +725,12 @@ export const AppProvider = ({ children }) => {
     }
 
     try {
-      const response = await Api.purchaseProduct(community, ProductTypes.COMMUNITY);
+      // handlePurchase is the (item, type) owner that maps a community/app object onto
+      // purchaseProduct's named params. Calling purchaseProduct directly here passed the object
+      // POSITIONALLY into a signature that destructures ONE options bag, so product_type arrived
+      // undefined, the second argument was discarded, and the `product_type !== COMMUNITY` test
+      // dispatched `purchase_product` instead of `join_community` — with a null user_id.
+      const response = await Api.handlePurchase(community, ProductTypes.COMMUNITY);
 
       if (response.needsOnboarding) {
         // User needs to complete onboarding - go to Dashboard

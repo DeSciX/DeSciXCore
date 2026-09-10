@@ -275,6 +275,7 @@ export async function loginDevice(options = {}) {
     diag(chalk.gray(`   ${walletPath}\n`));
     
     // Sync auto-purchase apps
+    let entitlementsSynced = true;
     spinner.start('Syncing app entitlements...');
     try {
       apiClient.setCredentials({
@@ -293,10 +294,25 @@ export async function loginDevice(options = {}) {
         spinner.succeed(chalk.gray('App entitlements up to date'));
       }
     } catch (error) {
+      entitlementsSynced = false;
       spinner.warn(chalk.yellow('Could not sync app entitlements'));
       diag(chalk.gray(`   ${error.message}\n`));
     }
-    
+
+    // DO NOT CLAIM SUCCESS ON A PARTIAL LOGIN, AND DO NOT EXIT 0.
+    // Credentials are saved either way, so this is genuinely partial rather than a failed login —
+    // but entitlements are what grant app access, so "you can now use all DeSciX CLI commands" is
+    // false when the sync failed. A script branching on the exit code is the caller least able to
+    // read the yellow warning above, which is why the code is the sharper half of this fix.
+    if (!entitlementsSynced) {
+      diag(chalk.yellow(
+        'Logged in, but app entitlements did NOT sync. Credentials are saved; commands needing an ' +
+        'entitlement may fail until you re-run `descix login`.\n'
+      ));
+      process.exitCode = 1;
+      return;
+    }
+
     diag(chalk.white('You can now use all DeSciX CLI commands!\n'));
 
   } catch (error) {
