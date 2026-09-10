@@ -30,7 +30,7 @@ import { execSync } from 'child_process';
 // The gate and the owning-repo resolver are CONSUMED, never re-implemented: this scan
 // reports what the executing sync would do, so it must ask the same code.
 import { loadManifest, resolveOwningRepo } from '../lib/core/ManifestLoader.js';
-import { walkCorpus } from '../lib/core/CorpusWalker.js';
+import { walkCorpus, resolveTrackedBlobSha } from '../lib/core/CorpusWalker.js';
 
 const workspaceRoot = process.argv[2];
 if (!workspaceRoot) {
@@ -227,9 +227,22 @@ for (const descixDir of findAppDirs(workspaceRoot)) {
         });
       } else {
         // Class (ii). Try to attribute it to a manifest entry that is currently untracked.
+        //
+        // ASK THE GATE, DO NOT RE-DERIVE ITS PREDICATE. "Is this source tracked at its ref?"
+        // has ONE owner — CorpusWalker::resolveTrackedBlobSha, which resolves the ref in the
+        // repository ManifestLoader::resolveOwningRepo names. This line used to run its own
+        // `git rev-parse` through the workspaceRoot-bound helper on a workspace-RELATIVE
+        // path, so it asked the superrepo about files owned by submodules and sibling repos —
+        // the same ambient-root defect that blocked the previous revision, surviving in the
+        // reporting half where it was DORMANT (class (ii) is empty on today's data) and would
+        // therefore have detonated silently the first time it was not. A dormant second
+        // derivation waits; a live one gets found. Consuming the owner also means this
+        // attribution can no longer disagree with the MERGE-IMPACT set printed below it:
+        // they are now the same predicate, evaluated once.
         const suspects = manifest.sources
           .filter(s => { const a = path.resolve(workspaceRoot, s.path);
-                         return fs.existsSync(a) && fs.statSync(a).isFile() && !gitOrNull(`git rev-parse "${(s.ref || 'main')}:${s.path}"`); })
+                         return fs.existsSync(a) && fs.statSync(a).isFile()
+                                && !resolveTrackedBlobSha(a, s.ref || 'main', workspaceRoot).sha; })
           .map(s => s.path);
         findings.unresolvable.push({ kb: manifest.kb_name, sha, ref, likely_from: suspects });
       }
@@ -274,6 +287,9 @@ R('');
 R('── COVERAGE BOUNDARY OF THIS SCAN ──');
 R('   compares: recorded synced_blob_shas against git ls-tree at the commit sync-state recorded, RESOLVED IN THE REPOSITORY');
 R('             THAT PRODUCED IT (provenance.repo_root); and manifest entries against the EXECUTING CorpusWalker gate.');
+R('   derives nothing itself: "which repo owns this file" is ManifestLoader::resolveOwningRepo and "is it tracked at its');
+R('             ref" is CorpusWalker::resolveTrackedBlobSha — this scan CONSUMES both, so its report cannot disagree with');
+R('             what a sync would actually do. It runs no ref resolution of its own.');
 R('   catches:  served sources that are not tracked blobs at their recorded ref (classes i and ii), and entries that refuse today.');
 R('   does NOT read: Pinecone live vectors (a chunk deleted server-side still appears here), KBs with no local sync-state,');
 R('                  cross-repo `repo:` source CONTENT, or chunk CONTENT — and it cannot distinguish an unresolvable id whose');
