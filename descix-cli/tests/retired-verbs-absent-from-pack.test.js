@@ -112,17 +112,18 @@ test('the gate can see a retired verb at all (fixture check)', () => {
   );
 });
 
-test('DOC SURFACE: report-only, pending a ruling on P2 scope', () => {
-  // templates/ and agent-assets/ SHIP (they are in package.json.files), so a retired verb here
-  // still reaches a developer. Whether P2's "the CLI's own output" covers them is a scope
-  // question for the contracting party, so this leg REPORTS and does not assert.
+test('SHIPPED DOC SURFACE: no retired verb delivered as instruction', () => {
+  // RULED IN SCOPE (DEVPLANE gen4-49). The test is whether the CLI DELIVERS it as instruction to
+  // a reader who will ACT on it. templates/ and agent-assets/ ship inside the tarball, and an
+  // agent-*.md telling an AGENT that a retired verb still runs is worse than a README telling a
+  // human: the agent acts without hesitating. Repo docs that do not ship are out of scope and are
+  // not read here — the packed file list is the boundary.
   const hits = scan(isDocSurface);
-  console.log(`
-  ── SHIPPED DOC SURFACE: ${hits.length} retired-verb mention(s) ─────────────────
-${hits.length ? hits.map((h) => '   ' + h).join('\n') : '   (none)'}
-  Report-only by design: these files ship, but whether they fall under P2 is the
-  contracting party's call, not this gate's.
-  ───────────────────────────────────────────────────────────────────────────`);
+  assert.deepEqual(
+    hits,
+    [],
+    'A retired verb ships as instruction to someone who will act on it:\n  ' + hits.join('\n  ')
+  );
 });
 
 test('COVERAGE BOUNDARY (prints on green as well as red)', () => {
@@ -142,6 +143,8 @@ test('COVERAGE BOUNDARY (prints on green as well as red)', () => {
       a live verb.
     - any verb retired outside RETIRED_KB_SYNC_SURFACES (e.g. 'descix kb pull',
       which moved to 'descix drive pull', is not in that list).
+    - repo docs that do not ship. The packed file list is the scope boundary,
+      so a stale claim in a README npm does not publish stays invisible here.
     - the published tarball on the registry — only what THIS tree would pack.
     - other packages. @descix/app-sdk and @descix/sdk ship separately.
   AUTOMATION       : runs under this package's \`npm test\`

@@ -1,12 +1,12 @@
 {
   "service": {
-    "name": "sample-service",
+    "name": "{{APP_ID}}",
     "version": "1.0.0",
     "description": "Sample DeSciX Add-on Service",
     "healthEndpoint": "/health",
     "debugPort": 3003,
-    "app_id": "sample-app",
-    "community_id": "descix"
+    "app_id": "{{APP_ID}}",
+    "community_id": "{{COMMUNITY_ID}}"
   },
   "commands": {
     "sample_hello": {
@@ -21,7 +21,9 @@
             "description": "Message to echo"
           }
         },
-        "required": ["message"]
+        "required": [
+          "message"
+        ]
       }
     },
     "sample_analyze": {
@@ -36,7 +38,9 @@
             "description": "Topic to analyze"
           }
         },
-        "required": ["query"]
+        "required": [
+          "query"
+        ]
       }
     }
   },

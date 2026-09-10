@@ -9,7 +9,7 @@ This folder contains the documents that power the AI assistant. Add your content
 ## How It Works
 
 1. **Add Documents**: Upload markdown, text, or PDF files to this folder
-2. **Sync**: Use `descix kb sync` to process and vectorize your documents
+2. **Sync**: Use `descix kb corpus sync -a <app_id>` to process and vectorize your documents
 3. **Query**: Users can now ask questions and get answers based on your content
 
 ## Folder Structure
