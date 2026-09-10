@@ -22,8 +22,8 @@ Purpose: Maps local folders to DeSciX apps and stores all configuration.
     "daita": {
       "apps": {
         "appsdk": {
-          "localPath": "descix/appsdk",
-          "absolutePath": "/path/to/workspace/descix/appsdk",
+          "localPath": "daita/appsdk",
+          "absolutePath": "/path/to/workspace/daita/appsdk",
           "kbId": "General"
         }
       }
