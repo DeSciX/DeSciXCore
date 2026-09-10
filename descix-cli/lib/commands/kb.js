@@ -27,6 +27,10 @@ import { hydrateKb, pushStaging, checkStagingFiles } from '../core/Hydrator.js';
 import { processKb } from '../core/Chunker.js';
 import { syncKb, getSyncStatus } from '../core/Syncer.js';
 import * as driveADC from '../google-storage-adc.js';
+// The one canonical KB-sync surface, from its owner. Never spell it as a literal here: these
+// commands' next steps are read by a developer as instructions, so they must name the live verb
+// and nothing else.
+import { CANONICAL_KB_SYNC } from './retired-kb-sync.js';
 
 // ============ Pull Command ============
 
@@ -110,8 +114,7 @@ export async function runKbPull(apiClient, options) {
     if (!options.quiet) {
       console.log(chalk.cyan('\n📋 Next steps:'));
       console.log(chalk.gray('   1. Review files in kb/' + kbId + '/'));
-      console.log(chalk.gray('   2. Run "descix kb chunk" to generate chunks'));
-      console.log(chalk.gray('   3. Run "descix kb sync" to push to Pinecone\n'));
+      console.log(chalk.gray(`   2. Run "${CANONICAL_KB_SYNC} -a <app_id>" to push to Pinecone\n`));
     }
     
     return result;
@@ -220,8 +223,8 @@ export async function runKbPush(apiClient, options) {
     // Show next steps
     if (!options.quiet) {
       console.log(chalk.cyan('\n📋 Next steps:'));
-      console.log(chalk.gray('   1. Run "descix kb pull" to sync all Drive content'));
-      console.log(chalk.gray('   2. Run "descix kb chunk" to generate chunks\n'));
+      console.log(chalk.gray('   1. Run "descix drive pull" to sync all Drive content'));
+      console.log(chalk.gray(`   2. Run "${CANONICAL_KB_SYNC} -a <app_id>" to push to Pinecone\n`));
     }
     
     return result;

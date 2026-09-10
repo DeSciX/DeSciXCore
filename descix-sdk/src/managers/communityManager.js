@@ -17,15 +17,28 @@ export class CommunityManager {
   }
 
   /**
-   * List all communities accessible to the user
+   * List the communities listed in the app store.
+   *
+   * `public_only` is GONE, not renamed. The served find_communities contract accepts exactly one
+   * parameter, `filter`, and the gateway REFUSES anything else before injection — measured
+   * 2026-09-10: `find_communities {public_only:false}` returns INVALID_PARAMS "unknown parameter
+   * 'public_only'. Accepted parameters: filter", so every call this method made threw. There is no
+   * compat shim for it precisely because there is no behaviour to preserve.
+   *
+   * There is also no "public" sense left to express: the platform owns `listed` (the access sense)
+   * and `tradeable` (token-tradeability) separately, and the old `is_public` conflated them.
+   * Communities you own or that are shared with you stay reachable via fetch_my_purchases even
+   * when they are not listed.
+   *
    * @param {Object} options - Query options
-   * @param {boolean} [options.publicOnly=false] - Only show public communities
+   * @param {string} [options.filter] - Optional filter string, passed through verbatim
    * @returns {Promise<Array>} Array of community objects
    */
   async list(options = {}) {
-    const response = await this.apiClient.invoke('find_communities', {
-      public_only: options.publicOnly || false
-    }, { allowGuest: options.publicOnly });
+    const params = {};
+    if (options.filter !== undefined) params.filter = options.filter;
+
+    const response = await this.apiClient.invoke('find_communities', params, { allowGuest: false });
 
     const result = response.message || response;
     return result.communities || result || [];

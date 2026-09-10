@@ -13,6 +13,10 @@ import { dirname, join } from 'path';
 // clone.js is imported dynamically inside the invite flow to avoid circular deps
 import { WorkspaceConfig } from '../workspace-config.js';
 import { generateAgentFiles } from '../agent-files.js';
+// The canonical KB-sync surface is owned by retired-kb-sync.js. Consume the constant: a literal
+// spelled here is a second derivation of the same fact, and the removed verb this replaced
+// reached a developer who had done everything right.
+import { CANONICAL_KB_SYNC } from './retired-kb-sync.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -208,8 +212,9 @@ export async function runInit(apiClient, options = {}) {
 
     console.log(chalk.cyan('\n─── Next Steps ───\n'));
     console.log(chalk.white(`  1. descix app init -a ${appId} -c ${communityId}    # register app on platform`));
-    console.log(chalk.white(`  2. descix update kb -c ${communityId} -a ${appId}   # sync KB to Pinecone`));
-    console.log(chalk.white(`  3. descix chat -c ${communityId} -a ${appId} -q "test"  # verify RAG\n`));
+    console.log(chalk.gray(`  2. Create a corpus manifest at .descix/manifests/General.json`));
+    console.log(chalk.white(`  3. ${CANONICAL_KB_SYNC} -a ${appId}   # sync KB to Pinecone`));
+    console.log(chalk.white(`  4. descix chat -c ${communityId} -a ${appId} -q "test"  # verify RAG\n`));
     console.log(chalk.green('✅ Workspace initialized.\n'));
     rl.close();
     return { created: ['.descix/workspace.json'], skipped: [], warnings: [] };
@@ -250,7 +255,7 @@ export async function initWorkspace(options) {
     created,
     skipped: [],
     warnings: [],
-    nextSteps: [`descix app init -a ${appId} -c ${communityId}`, `descix update kb -c ${communityId} -a ${appId}`]
+    nextSteps: [`descix app init -a ${appId} -c ${communityId}`, `${CANONICAL_KB_SYNC} -a ${appId}`]
   };
 }
 
