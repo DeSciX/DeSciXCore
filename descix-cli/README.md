@@ -15,11 +15,12 @@ npm install -g @descix/cli
     descix login
     ```
 
-2.  **Setup your workspace**:
+2.  **Initialize your workspace**:
     ```bash
-    descix setup
+    descix init
     ```
-    This will guide you through connecting your Google Drive and setting up your local environment.
+    This writes `.descix/workspace.json` for the current project. Pass `-c <community_id> -a <app_id>`
+    to pre-fill the app context, or `--from-invite <token>` to resolve an invite token.
 
     **Choosing an environment**:
     The `--dev` flag has been REMOVED. Its absence silently meant production, so the most common
@@ -58,40 +59,40 @@ Best for platform admins or agencies managing multiple communities.
 ## Core Commands
 
 - `descix login`: Authenticate with the platform.
-- `descix setup`: Initialize or repair your workspace configuration.
 - `descix status`: View your current environment status and workspace mode.
-- `descix init`: Create `.descix/workspace.json` for the current project.
+- `descix init`: Initialize workspace for DeSciX app development (Git-aware) — writes `.descix/workspace.json`.
 - `descix app create`: Show instructions; use `--quick -c <community> -a <name>` for template-only app creation, or use PWA / `descix-admin app create`.
-- `descix sync`: Sync content to the platform (Site, Assets).
-- `descix kb`: Manage Knowledge Base content (Pull -> Chunk -> Sync).
+- `descix app sync-assets`: Sync local assets (`system_instructions.md`, `app_description.md`, `icon.png`) to the platform.
+- `descix drive pull` / `descix drive push`: Drive content authoring — pull from Drive to local markdown, push staging back to Drive.
+- `descix kb`: Manage Knowledge Bases (`list`, `create`, `delete`, and `corpus sync`).
 
 ## Knowledge Base Management (Git Mode)
 
-For apps managed via CLI (Git Mode), use the following commands to process your Knowledge Base locally:
+The CLI exposes exactly ONE knowledge-base sync surface: `descix kb corpus sync`, driven by a
+git-tracked corpus manifest. The older four-step local pipeline has been REMOVED — its invocations
+now exit non-zero and name this replacement.
 
-1.  **Pull**: Fetch source documents from Drive.
+1.  **Create** the knowledge base (once per KB):
     ```bash
-    descix kb pull
+    descix kb create -c <community_id> -a <app_id> -k <kb_name>
     ```
-2.  **Chunk**: Process documents into chunks locally.
+2.  **Author** a corpus manifest at `.descix/manifests/<kb_name>.json` describing the sources to sync.
+3.  **Sync** the corpus to the platform (Pinecone):
     ```bash
-    descix kb chunk
+    descix kb corpus sync -a <app_id> [-k <kb_name>]
     ```
-3.  **Sync**: Push chunks to the platform (Pinecone).
-    ```bash
-    descix kb sync
-    ```
-4.  **Build**: Run the full pipeline (Pull -> Chunk -> Sync).
-    ```bash
-    descix kb build
-    ```
+    It walks the git blobs at the manifest's ref, so only changed files are re-vectorized. Useful
+    flags: `--dry-run` (report drift, write nothing), `--show-walk` (print the resolved ref and the
+    files it would walk), `--ref <ref>` (override the git ref for all manifest sources).
+
+To fetch source documents from Google Drive into local markdown, use `descix drive pull`.
 
 ## Provisioning
 
 **Communities and apps are created in the PWA** (Workspace Config / Device Setup / App Manager) or via **Admin CLI** (`descix-admin community create`, `descix-admin app create`) for platform admins. The user CLI does not create communities or full app structures; use `descix init` to write `.descix/workspace.json` and PWA or Admin CLI to create entities.
 
 1.  Create your App in the PWA (Workspace Builder).
-2.  Run `descix setup` to hydrate your local folder structure.
+2.  Run `descix init` to write `.descix/workspace.json` for that app in your local project.
 
 ## Airdrop Admin Operations (WS-ADMIN-B1)
 
