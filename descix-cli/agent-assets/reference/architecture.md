@@ -151,9 +151,9 @@ All core SDK logic resides in `DeSciX_Core/descix-cli/lib/core/`.
     "daita": {
       "apps": {
         "agent": {
-          "localPath": "descix/agent",
+          "localPath": "daita/agent",
           "kbId": "General",
-          "absolutePath": "/path/to/workspace/descix/agent",
+          "absolutePath": "/path/to/workspace/daita/agent",
           "site": {
             "port": 3000,
             "devCommand": "npm run docs:dev"
@@ -261,7 +261,7 @@ Flow:
   "kb_id": "General",
   "chunks": [
     {
-      "id": "descix_agent_General_research_0",
+      "id": "daita_agent_General_research_0",
       "text": "...",
       "entity_type": "CHUNK",
       "community_id": "daita",

@@ -86,7 +86,7 @@ The DeSciX CLI supports three workspace modes, determined by the structure of `w
   "communities": {
     "daita": {
       "apps": {
-        "agent": { "localPath": "descix/agent", "sync_mode": "git" }
+        "agent": { "localPath": "daita/agent", "sync_mode": "git" }
       }
     },
     "myorg": {

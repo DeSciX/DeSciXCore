@@ -234,7 +234,7 @@ The PWA Workspace Builder allows users to configure which apps to sync to their 
       "daita": {
         "apps": {
           "agent": {
-            "localPath": "descix/agent",
+            "localPath": "daita/agent",
             "sync_mode": "git"
           }
         }
