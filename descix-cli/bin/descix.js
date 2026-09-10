@@ -2517,9 +2517,10 @@ siteCommand
       console.log(chalk.cyan('\n📁 Adding site scaffold...\n'));
       
       const { copyScaffold } = await import('../lib/core/Hydrator.js');
-      const stats = await copyScaffold('site', appPath, { 
-        verbose: true, 
-        force: options.force 
+      const stats = await copyScaffold('site', appPath, {
+        verbose: true,
+        force: options.force,
+        substitute: { appId: ctx.appId, communityId: ctx.communityId }
       });
       
       console.log(chalk.green(`\n✅ Site scaffold added (${stats.copied} files)\n`));
@@ -3146,7 +3147,8 @@ microserviceCommand
       const { copyScaffold } = await import('../lib/core/Hydrator.js');
       const stats = await copyScaffold('microservice', appPath, {
         verbose: true,
-        force: options.force
+        force: options.force,
+        substitute: { appId: ctx.appId, communityId: ctx.communityId }
       });
 
       // Configuration Injection
@@ -3155,15 +3157,16 @@ microserviceCommand
       const manifestPath = path.join(microserviceDir, 'manifest.json');
       const overridesPath = path.join(microserviceDir, 'dev-overrides.json');
 
-      // 1. Inject Context + Port into defaults-config.json
+      // 1. Inject Port into defaults-config.json.
+      // IDENTITY IS NOT SET HERE. copyScaffold resolves {{APP_ID}}/{{COMMUNITY_ID}} during the
+      // copy, so re-deriving them here would be a second derivation of one fact. The port is a
+      // workspace-derived RUNTIME value with no scaffold token, so it stays.
       try {
         const defaultsContent = await fs.readFile(defaultsPath, 'utf-8');
         const defaults = JSON.parse(defaultsContent);
-        defaults.community_id = ctx.communityId;
-        defaults.app_id = ctx.appId;
         defaults.LOCAL_PORT = microservicePort;
         await fs.writeFile(defaultsPath, JSON.stringify(defaults, null, 2));
-        console.log(chalk.gray(`  ✓ Injected context + port into defaults-config.json`));
+        console.log(chalk.gray(`  ✓ Injected port into defaults-config.json`));
       } catch (err) {
         console.warn(chalk.yellow(`  ⚠ Could not update defaults-config.json: ${err.message}`));
       }
@@ -3185,20 +3188,19 @@ microserviceCommand
         console.warn(chalk.yellow(`  ⚠ Could not claim package.json: ${err.message}`));
       }
 
-      // 2. Inject Context + Port into manifest.json
+      // 2. Inject Port into manifest.json.
+      // IDENTITY IS NOT SET HERE. copyScaffold resolved {{APP_ID}}/{{COMMUNITY_ID}} during the
+      // copy, so setting app_id/community_id/name again would be a second derivation of one fact —
+      // the exact mirror-drift shape that let a scaffold ship `community_id: 'descix'` while this
+      // block quietly wrote the right value into a different file.
+      // No domain is injected. A service does not declare its own domain — the platform derives
+      // it ({app_id}.{SITE_DOMAIN}) at registration, and refuses a manifest that declares one.
       try {
         const manifestContent = await fs.readFile(manifestPath, 'utf-8');
         const manifest = JSON.parse(manifestContent);
-        manifest.service.app_id = ctx.appId;
-        manifest.service.community_id = ctx.communityId;
-        manifest.service.name = ctx.appId;
-        // No domain is injected. A service does not declare its own domain — the platform derives
-        // it ({app_id}.{SITE_DOMAIN}) at registration, and refuses a manifest that declares one.
-        // The literal this replaced was `${ctx.appId}.descix.net`: the PROD host, scaffolded into
-        // every service regardless of the env it would be registered against.
         manifest.service.debugPort = microservicePort;
         await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2));
-        console.log(chalk.gray(`  ✓ Injected context + port into manifest.json`));
+        console.log(chalk.gray(`  ✓ Injected port into manifest.json`));
       } catch (err) {
         console.warn(chalk.yellow(`  ⚠ Could not update manifest.json: ${err.message}`));
       }

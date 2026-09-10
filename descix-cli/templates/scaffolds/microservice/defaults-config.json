@@ -1,5 +1,7 @@
 {
   "DEBUG_LOCAL": true,
   "LOCAL_PORT": "auto",
-  "CORE_API_URL": "https://localhost:4000/apifront"
+  "CORE_API_URL": "https://localhost:4000/apifront",
+  "community_id": "{{COMMUNITY_ID}}",
+  "app_id": "{{APP_ID}}"
 }

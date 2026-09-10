@@ -271,6 +271,17 @@ export class WorkspaceConfig {
   /**
    * Save workspace configuration in v2.1 format.
    * Always writes env.platform / env.products structure.
+   *
+   * PRESERVES KEYS IT DOES NOT UNDERSTAND. This method used to serialize a fixed field list from
+   * memory over the whole file, so ANY top-level key it did not itself enumerate was silently
+   * destroyed by the next `descix app set-port` — a writer re-serializing a known schema and
+   * discarding the rest. That is the same defect class as a record writer dropping a field it was
+   * never taught about, and it is invisible: the write succeeds, the file looks well-formed, and
+   * the loss is only discovered by whoever needed the missing key.
+   *
+   * The on-disk file is re-read at save time rather than trusted from construction, because the
+   * instance may have been held across another writer's save.
+   *
    * @param {string} [workspaceRoot] - Workspace root directory (uses stored root if not provided)
    * @returns {Promise<string>} Path to saved config
    */
@@ -289,7 +300,32 @@ export class WorkspaceConfig {
     // Build env block for v2.1 output
     const envBlock = (this.env && Object.keys(this.env).length > 0) ? this.env : null;
 
+    // The keys this writer OWNS. Everything else on disk is carried through untouched.
+    const OWNED = ['version', 'workspaceRoot', 'type', 'env', 'driveConfig'];
+
+    let onDisk = {};
+    try {
+      const existing = await fs.readFile(configPath, 'utf-8');
+      const parsed = JSON.parse(existing);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) onDisk = parsed;
+    } catch (err) {
+      // ENOENT is the ordinary first save. A PRESENT-BUT-UNPARSEABLE file is different: carrying
+      // on would overwrite content we could not read, so refuse and name the file.
+      if (err.code !== 'ENOENT') {
+        throw new Error(
+          `Refusing to overwrite ${configPath}: it exists but could not be read as JSON ` +
+          `(${err.message}). Fix or remove it — saving now would destroy whatever it holds.`
+        );
+      }
+    }
+
+    const carried = {};
+    for (const [k, v] of Object.entries(onDisk)) {
+      if (!OWNED.includes(k)) carried[k] = v;
+    }
+
     const configData = {
+      ...carried,
       version: '2.1',
       workspaceRoot: path.resolve(root),
       type: this.type,

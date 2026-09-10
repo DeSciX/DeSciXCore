@@ -28,10 +28,19 @@ export const SITE_SCAFFOLD_BRIDGE = join(SITE_SCAFFOLD_DIR, 'DeSciXAppSDK.js');
 /**
  * Materialize the site scaffold into `targetDir`.
  *
- * Deliberately dumb: the scaffold is plain browser files with no build step and no
- * placeholders, so "materialize" is a verbatim recursive copy and nothing else. It needs no
- * workspace, no auth and no platform call, which is what lets `@descix/sdk/app`'s bin offer
- * `init` while every platform-side verb stays a served MCP verb.
+ * Deliberately dumb: the scaffold is plain browser files with no build step, so "materialize" is
+ * a verbatim recursive copy and nothing else. It needs no workspace, no auth and no platform
+ * call, which is what lets `@descix/sdk/app`'s bin offer `init` while every platform-side verb
+ * stays a served MCP verb.
+ *
+ * IT DOES NOT SUBSTITUTE, AND THE DIRECTORY DOES CARRY PLACEHOLDERS. site/index.html and
+ * site/app.js hold {{APP_NAME}}, so anything materialized through THIS entry point ships literal
+ * braces to a developer. The CLI's own path resolves them (descix-cli Hydrator::copyScaffold,
+ * which the `descix site init` command drives with the workspace's real ids). This function
+ * cannot do the same as written: its only inputs are a target directory and `force` — it has no
+ * app id and no community id to substitute, precisely because it takes no workspace and no auth.
+ * Closing that is a design decision about what `descix-app init` should ask for, not something to
+ * paper over with a guessed default.
  *
  * REFUSES rather than merges when the target is non-empty: silently copying over a developer's
  * edited app.js is unrecoverable, and "it looked like it worked" is the failure mode that

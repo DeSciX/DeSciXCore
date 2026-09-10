@@ -237,7 +237,7 @@ tell_me_how({
 execute_remote_command({
   command: "create_app_for_community",
   params: {
-    community_id: "descix",
+    community_id: "{{COMMUNITY_ID}}",
     app_name: "My New App"
   }
 })
@@ -285,9 +285,9 @@ ask_question_to_app({
 {
   "version": "2.1",
   "env": {
-    "platform": { "appId": "daita", "communityId": "descix", "localPath": ".", "kbId": "General" },
+    "platform": { "appId": "daita", "communityId": "daita", "localPath": ".", "kbId": "General" },
     "products": [
-      { "appId": "docs", "communityId": "descix", "kbId": "sdk", "localPath": "descix-docs" }
+      { "appId": "docs", "communityId": "daita", "kbId": "sdk", "localPath": "descix-docs" }
     ]
   }
 }
