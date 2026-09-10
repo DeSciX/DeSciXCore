@@ -121,39 +121,64 @@ export function computeChunkDelta(localChunks, remoteChunks) {
 }
 
 /**
- * Get existing chunk metadata from Pinecone (with content_hash for delta)
- * Falls back to IDs-only if metadata endpoint not available.
- * 
+ * Get existing chunk metadata from Pinecone (with content_hash for delta).
+ * Falls back to the IDs-only endpoint when the metadata endpoint is unavailable.
+ *
+ * An empty array means the STORE REPORTED an empty KB. It never means "we could
+ * not find out" — when neither endpoint can report, this THROWS naming both
+ * endpoints and both causes, because an unknown remote set presented as an empty
+ * one makes every caller conclude that nothing is stale.
+ *
  * @param {Object} apiClient - DeSciXApiClient instance
  * @param {string} communityId - Community ID
  * @param {string} appId - App ID
  * @param {string} kbId - Knowledge base ID
- * @returns {Promise<Array<{id: string, content_hash: string}>>} Chunk metadata
+ * @returns {Promise<Array<{id: string, content_hash: string}>|Array<string>>} Chunk
+ *          metadata, or plain chunk ids from the compatibility endpoint.
+ * @throws {Error} when neither endpoint reports the remote chunk set.
  */
 export async function getRemoteChunkMetadata(apiClient, communityId, appId, kbId) {
+  // A fallback is a COMPATIBILITY PATH, not an error handler: we fall back when
+  // the newer endpoint is absent, and we FAIL LOUD when neither can report.
+  // Returning [] here would present a transport failure as a store state
+  // ("remote is empty"), and every caller would then compute that nothing is
+  // stale and re-upsert everything — silently.
+  const failures = [];
+
   try {
-    // Try new metadata endpoint first
     const result = await apiClient.invoke('kb_get_chunk_metadata', {
       app_id: appId,
       kb_id: kbId
     });
     // apiClient.invoke returns { status, message: { chunks, count, ... } }
-    const data = result.message || result;
-    return data.chunks || [];
+    const data = result?.message || result;
+    // An empty ARRAY is the store reporting an empty KB — legal, and preserved.
+    // An ABSENT field is the store not reporting at all — not the same fact.
+    if (Array.isArray(data?.chunks)) return data.chunks;
+    failures.push("kb_get_chunk_metadata: response carried no 'chunks' array");
   } catch (error) {
-    // Fall back to IDs-only endpoint
-    try {
-      const result = await apiClient.invoke('kb_get_chunk_ids', {
-        app_id: appId,
-        kb_id: kbId
-      });
-      // apiClient.invoke returns { status, message: { chunk_ids, count, ... } }
-      const data = result.message || result;
-      return data.chunk_ids || [];
-    } catch {
-      return [];
-    }
+    failures.push(`kb_get_chunk_metadata: ${error.message}`);
   }
+
+  try {
+    const result = await apiClient.invoke('kb_get_chunk_ids', {
+      app_id: appId,
+      kb_id: kbId
+    });
+    // apiClient.invoke returns { status, message: { chunk_ids, count, ... } }
+    const data = result?.message || result;
+    if (Array.isArray(data?.chunk_ids)) return data.chunk_ids;
+    failures.push("kb_get_chunk_ids: response carried no 'chunk_ids' array");
+  } catch (error) {
+    failures.push(`kb_get_chunk_ids: ${error.message}`);
+  }
+
+  throw new Error(
+    `Cannot enumerate remote chunks for ${appId}/${kbId}: both endpoints failed to report. ` +
+    'The remote chunk set is UNKNOWN — it must NOT be treated as an empty KB, because ' +
+    'that would silently skip stale-chunk deletion and re-upsert everything. ' +
+    failures.join(' | ')
+  );
 }
 
 /**
@@ -394,9 +419,9 @@ export async function syncKb(apiClient, config, options = {}) {
   if (onProgress) onProgress('Fetching existing chunks from Pinecone...');
   const remoteChunks = await getRemoteChunkMetadata(apiClient, communityId, appId, kbId);
   
-  const remoteCount = Array.isArray(remoteChunks) 
-    ? remoteChunks.length 
-    : 0;
+  // getRemoteChunkMetadata returns an array or throws — it never reports an
+  // unknown remote set as an empty one, so there is no non-array case to default.
+  const remoteCount = remoteChunks.length;
   
   if (verbose) {
     console.log(`  Local chunks: ${localChunks.length}`);
@@ -491,7 +516,8 @@ export async function getSyncStatus(apiClient, config) {
   
   // Get remote chunk metadata
   const remoteChunks = await getRemoteChunkMetadata(apiClient, communityId, appId, kbId);
-  const remoteCount = Array.isArray(remoteChunks) ? remoteChunks.length : 0;
+  // Array-or-throw, as above: no fabricated zero for an unknown remote set.
+  const remoteCount = remoteChunks.length;
   
   // Compute delta using content_hash
   const { toUpsert, toDelete, unchanged } = computeChunkDelta(localChunks, remoteChunks);

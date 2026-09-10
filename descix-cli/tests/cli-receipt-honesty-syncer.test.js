@@ -22,6 +22,8 @@ import {
   deleteStaleChunks,
   deleteStaleChunksByFileId,
   purgeKbScope,
+  getRemoteChunkMetadata,
+  computeChunkDelta,
   UNREPORTED_COUNT,
   isReportedCount
 } from '../lib/core/Syncer.js';
@@ -181,7 +183,105 @@ test('the owner helper discriminates', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 6. COVERAGE BOUNDARY (printed on GREEN as well as RED)
+// 6. THE SAME PROPERTY APPLIED TO A LIST AND TO AN ERROR
+//    A fallback is a COMPATIBILITY PATH, not an error handler. Falling back on
+//    the first endpoint's failure is correct; returning [] when BOTH fail
+//    presents a transport failure as a store state ("remote is empty"), which
+//    makes stale-chunk deletion silently find nothing to delete.
+// ---------------------------------------------------------------------------
+
+/** A store whose named endpoints throw; any endpoint not named answers `ok`. */
+function storeWhere(behaviour) {
+  return {
+    invoke: async (command) => {
+      const b = behaviour[command];
+      if (b === undefined) throw new Error(`unexpected command ${command}`);
+      if (b instanceof Error) throw b;
+      return { status: 'OK', message: b };
+    }
+  };
+}
+
+test('enumerate: BOTH endpoints failing THROWS and names both, instead of reporting an empty store', async () => {
+  const store = storeWhere({
+    kb_get_chunk_metadata: new Error('ECONNREFUSED: backend unreachable'),
+    kb_get_chunk_ids: new Error('503 Service Unavailable')
+  });
+  await assert.rejects(
+    () => getRemoteChunkMetadata(store, 'c', 'a', 'G'),
+    err => {
+      // The throw must NAME WHAT HAS GONE DEAF: both endpoints and both causes.
+      assert.match(err.message, /kb_get_chunk_metadata/);
+      assert.match(err.message, /kb_get_chunk_ids/);
+      assert.match(err.message, /ECONNREFUSED/);
+      assert.match(err.message, /503/);
+      return true;
+    },
+    'a total enumeration failure returned a value instead of throwing'
+  );
+});
+
+test('enumerate: COMPATIBILITY PRESERVED — first endpoint fails, second succeeds, no throw', async () => {
+  // The older-backend path. This is the test most likely to be broken by a
+  // fail-loud change, so it is explicit rather than implied.
+  const store = storeWhere({
+    kb_get_chunk_metadata: new Error('404 Not Found (older backend)'),
+    kb_get_chunk_ids: { chunk_ids: ['k:a:G:f1:0', 'k:a:G:f1:1'] }
+  });
+  const remote = await getRemoteChunkMetadata(store, 'c', 'a', 'G');
+  assert.deepEqual(remote, ['k:a:G:f1:0', 'k:a:G:f1:1']);
+});
+
+test('enumerate: a store REPORTING an empty KB is preserved as empty (not confused with failure)', async () => {
+  // [] is a legal answer meaning "I looked, there is nothing". It must survive.
+  const store = storeWhere({ kb_get_chunk_metadata: { chunks: [] } });
+  assert.deepEqual(await getRemoteChunkMetadata(store, 'c', 'a', 'G'), []);
+});
+
+test('enumerate: an OK response that OMITS the field is not reported as empty', async () => {
+  // Absent field != empty field. Falls through to the compatibility endpoint,
+  // and throws when that cannot report either.
+  const store = storeWhere({ kb_get_chunk_metadata: {}, kb_get_chunk_ids: {} });
+  await assert.rejects(() => getRemoteChunkMetadata(store, 'c', 'a', 'G'));
+});
+
+test('enumerate: an omitted field on the FIRST endpoint still falls back to the second', async () => {
+  const store = storeWhere({
+    kb_get_chunk_metadata: {},
+    kb_get_chunk_ids: { chunk_ids: ['k:a:G:f1:0'] }
+  });
+  assert.deepEqual(await getRemoteChunkMetadata(store, 'c', 'a', 'G'), ['k:a:G:f1:0']);
+});
+
+test('enumerate: a failed enumeration can never present itself as "nothing is stale"', async () => {
+  // The consequence test. computeChunkDelta on a fabricated [] reports toDelete 0,
+  // which is the DN-2 failure this module exists to close.
+  const local = [
+    { id: 'k:a:G:f1:0', content_hash: 'h0', file_id: 'f1' },
+    { id: 'k:a:G:f1:1', content_hash: 'h1', file_id: 'f1' }
+  ];
+  const dead = storeWhere({
+    kb_get_chunk_metadata: new Error('ECONNREFUSED'),
+    kb_get_chunk_ids: new Error('ECONNREFUSED')
+  });
+  let remote = null;
+  await assert.rejects(async () => { remote = await getRemoteChunkMetadata(dead, 'c', 'a', 'G'); });
+  assert.equal(remote, null, 'enumeration produced a value on total failure');
+
+  // Positive control: with an honest store the stale chunk IS found, so the
+  // predicate above is discriminating rather than vacuous.
+  const live = storeWhere({
+    kb_get_chunk_metadata: { chunks: [
+      { id: 'k:a:G:f1:0', content_hash: 'h0' },
+      { id: 'k:a:G:OLD:0', content_hash: 'hx' }
+    ] }
+  });
+  const delta = computeChunkDelta(local, await getRemoteChunkMetadata(live, 'c', 'a', 'G'));
+  assert.deepEqual(delta.toDelete, ['k:a:G:OLD:0']);
+});
+
+// ---------------------------------------------------------------------------
+// 7. COVERAGE BOUNDARY (printed on GREEN as well as RED)
 // ---------------------------------------------------------------------------
 
 test('coverage boundary', () => {
@@ -191,11 +291,15 @@ test('coverage boundary', () => {
     '            over the real {status,message:{...}} invoke envelope and the bare shape.',
     '  CATCHES:  any request-derived substitution (batch.length / chunkIds.length /',
     '            validFileIds.length), a legitimate 0 eaten as falsy, an unreportable',
-    '            count rendered as a number, and a second in-module definition of UNKNOWN.',
+    '            count rendered as a number, a second in-module definition of UNKNOWN,',
+    '            and a failed chunk enumeration presented as an empty store -- while',
+    '            asserting the older-backend compatibility fallback still works.',
     '  DOES NOT READ: lib/commands/corpus.js -- how UNKNOWN is RENDERED to the user and',
     '            how it flows into `total_chunks: previousChunkCount + upserted - deleted`',
     '            persisted to sync state is OUT OF SCOPE here (doer FLAG-3 to DEVPLANE).',
-    '            It also does not exercise the real HTTP transport or a live store.',
+    '            It also does not exercise the real HTTP transport or a live store,',
+    '            and it does not cover listRemoteFileIds\' `|| 0` / `|| []` fallbacks,',
+    '            which are ruled to land with their corpus.js render (doer FLAG-4).',
     '  RUN BY:   `npm test` in descix-cli (glob tests/*.test.js) -- automatic.'
   ].join('\n'));
 });
