@@ -13,22 +13,29 @@
  * TWO DERIVATIONS OF ONE FACT IS THE GENERAL FORM OF MIRROR DRIFT, and the fix is never to patch
  * the divergent copy: it is to extract ONE owner that every site consumes.
  *
- * HOW DRIFT IS MADE IMPOSSIBLE RATHER THAN MERELY ABSENT. A control's greenness is defined ONCE,
- * as an ordered list of CONDITIONS. Both consumers iterate THAT LIST:
+ * HOW DRIFT IS MADE IMPOSSIBLE RATHER THAN MERELY ABSENT. It takes BOTH of these, and the first
+ * one alone is not enough -- that was this module's own first-version defect:
  *
- *   · the CLASSIFIER calls `record(run)`   -> evaluates every condition to compute PASS/FAIL
- *   · the CONTROL TEST calls `assertGreen()` -> asserts every condition, generated from the list
+ *   1. ONE LIST. A control's greenness is defined once, as an ordered list of CONDITIONS. No
+ *      consumer writes a predicate of its own, so adding or changing a condition is a single edit
+ *      in a single array.
+ *   2. ONE EVALUATION. `record()` evaluates that list EXACTLY ONCE and stores the per-condition
+ *      result. Both consumers then READ that stored result rather than re-asking the conditions:
  *
- * Neither consumer writes a predicate of its own. Adding, removing or changing a condition is a
- * single edit in a single array, and BOTH consumers change in the same breath because there is
- * no second place for them to disagree. You cannot add an assertion to the control test without
- * the classifier seeing it, because the control test has no assertions to add -- it delegates.
+ *        · the CLASSIFIER    calls `record(run)`     -> performs the one evaluation, computes PASS/FAIL
+ *        · the CONTROL TEST  calls `assertGreen()`   -> REPLAYS that evaluation as assertions
+ *        · the DISCRIMINATOR calls `requireGreen()`  -> reads the same state
  *
- * WHAT REMAINS POSSIBLE, STATED PLAINLY: someone could still hand-write an EXTRA assertion beside
- * the delegation. That is not drift between two copies of one predicate -- it is the creation of
- * a NEW second copy, and it is visible as such precisely because this owner exists. The
- * conformance check `assertNoRivalPredicate()` below exists to make even that a FAILURE rather
- * than a silent divergence, and it is exercised by this module's own self-test.
+ * Two readings of one result cannot disagree. Two evaluations of one list CAN, whenever a
+ * condition is not a pure function of `run` -- and that is exactly how the first version of this
+ * module could still produce a vacuous green (see the note on `evaluation` below).
+ *
+ * WHAT REMAINS POSSIBLE, STATED PLAINLY AND COMPLETELY. Someone can still hand-write an EXTRA
+ * assertion beside the delegation in a control test body. That is not drift between two copies of
+ * one predicate -- it is the creation of a NEW second copy, and it is visible as such precisely
+ * because this owner exists. `findRivalPredicates()` below makes the common form of it a FAILURE
+ * rather than a silent divergence; read its own "WHAT IT DOES NOT CATCH" note before relying on
+ * its silence, because it recognises rivals written against `assert` and nothing else.
  *
  * A CONTROL IS FAIL-CLOSED. Every state that is not an observed PASS -- NOT-RUN, a throw, a
  * timeout -- blocks the discriminator it governs. "We never measured it" and "we measured it and
@@ -67,6 +74,23 @@ export function createFixtureControl({ id, kind, governs, rationale, conditions 
     let why = 'the control has not been run yet';
     let run = null;
     let failedIds = [];
+    /**
+     * THE ONE EVALUATION. `record()` evaluates every condition EXACTLY ONCE and stores the result
+     * here; every consumer reads THIS, and no consumer calls `holds()` again.
+     *
+     * WHY (measured 2026-09-15, found by this row's verifier against the first version of this
+     * file): `assertGreen` used to RE-EVALUATE `holds(run)` rather than replay what `record()` had
+     * already decided. One condition list, but TWO EVALUATIONS OF IT at two different times — so a
+     * condition that is not a pure function of `run` (one that stats the fixture, reads the
+     * filesystem or looks at the clock) could hold at classifier time and fail at control-test
+     * time. Probed: classifier PASS, control test FAIL, failedIds [], and the discriminator's
+     * `requireGreen` ALLOWED THE GREEN, with the control test body still a bare delegation that the
+     * rival-predicate detector correctly reported clean. That is the precise symptom this module
+     * exists to abolish, reappearing inside the mechanism built to abolish it. THE SECOND PLACE
+     * THEY COULD DISAGREE WAS THE SECOND EVALUATION, and collapsing it is what makes the
+     * impossibility claim above true rather than aspirational.
+     */
+    let evaluation = null;
 
     /** Evaluate one condition without letting a throw masquerade as a pass. */
     function holdsSafely(c, r) {
@@ -92,42 +116,53 @@ export function createFixtureControl({ id, kind, governs, rationale, conditions 
          */
         record(measuredRun, error = null) {
             if (error) {
-                state = 'FAIL'; run = null; failedIds = ['threw'];
+                state = 'FAIL'; run = null; evaluation = null; failedIds = ['threw'];
                 why = `the control run THREW: ${error && error.message}`;
                 return this;
             }
             if (measuredRun === null || measuredRun === undefined) {
-                state = 'FAIL'; run = null; failedIds = ['absent'];
+                state = 'FAIL'; run = null; evaluation = null; failedIds = ['absent'];
                 why = 'the control produced no run at all';
                 return this;
             }
             run = measuredRun;
-            const failed = conditions.filter((c) => !holdsSafely(c, run));
-            failedIds = failed.map((c) => c.id);
+            // THE ONE EVALUATION. Each condition's verdict AND its diagnosis are captured here, at
+            // this instant, against this run. Nothing downstream re-asks the condition.
+            evaluation = conditions.map((c) => {
+                const held = holdsSafely(c, run);
+                return {
+                    id: c.id,
+                    requirement: c.requirement,
+                    held,
+                    diagnosis: held ? null : diagnoseSafely(c, run),
+                };
+            });
+            const failed = evaluation.filter((e) => !e.held);
+            failedIds = failed.map((e) => e.id);
             if (failed.length) {
                 state = 'FAIL';
-                why = failed.map((c) => diagnoseSafely(c, run)).join('\n           ');
+                why = failed.map((e) => e.diagnosis).join('\n           ');
             } else {
                 state = 'PASS';
-                why = `every condition held: ${conditions.map((c) => c.id).join(', ')}`;
+                why = `every condition held: ${evaluation.map((e) => e.id).join(', ')}`;
             }
             return this;
         },
 
         /**
-         * THE CONTROL TEST'S ENTRY POINT. Asserts EXACTLY the conditions the classifier evaluated,
-         * generated from the same array, so the two can never disagree. The control test body is
-         * this call and nothing else -- that is what makes the drift structural rather than
-         * a matter of discipline.
+         * THE CONTROL TEST'S ENTRY POINT. REPLAYS the single evaluation `record()` performed; it
+         * does NOT re-ask the conditions. The classifier's state and these assertions are two
+         * READINGS of one result, never two evaluations of one list, so they cannot disagree even
+         * when a condition is impure. The control test body is this call and nothing else.
          */
         assertGreen(assert) {
-            assert.ok(run !== null,
+            assert.ok(evaluation !== null,
                 `${id} (${kind} control) did not run at all: ${why}`);
-            for (const c of conditions) {
-                assert.ok(holdsSafely(c, run),
-                    `${id} (${kind} control) CONDITION "${c.id}" FAILED.\n`
-                    + `  REQUIREMENT: ${c.requirement}\n`
-                    + `  DIAGNOSIS  : ${diagnoseSafely(c, run)}`);
+            for (const e of evaluation) {
+                assert.ok(e.held,
+                    `${id} (${kind} control) CONDITION "${e.id}" FAILED.\n`
+                    + `  REQUIREMENT: ${e.requirement}\n`
+                    + `  DIAGNOSIS  : ${e.diagnosis}`);
             }
         },
 
@@ -175,9 +210,21 @@ export function createFixtureControl({ id, kind, governs, rationale, conditions 
  * delegation to its control. This is the one thing the owner cannot make structurally impossible,
  * so it is made mechanically detectable instead.
  *
- * IT MATCHES A CALL, NOT A MENTION: the check counts `assert.<something>(` CALL sites and allows
- * exactly the delegating one. A comment that merely says "assert" does not trip it, and deleting
- * the real delegation does not pass it.
+ * IT MATCHES A CALL, NOT A MENTION: the check counts `assert(` and `assert.<something>(` CALL
+ * sites and allows exactly the delegating one. A comment that merely says "assert" does not trip
+ * it, and deleting the real delegation does not pass it.
+ *
+ * WHAT IT DOES NOT CATCH -- STATED BECAUSE A READER TAKES A GATE'S SILENCE FOR COVERAGE.
+ * It recognises rivals written against the `assert` binding, and NOTHING ELSE. Measured over ten
+ * synthetic bodies, it MISSES a rival expressed as:
+ *   · a bare `throw` (`if (!r.nestedCreated) throw new Error(...)`)
+ *   · a helper call -- `expectCode(r, 0)`, `expect(r.nestedCreated).toBe(true)`
+ *   · a destructured alias -- `const { ok } = assert; ok(...)`, or `strict.equal(...)`
+ *   · an assertion nested inside a closure the body invokes
+ * Its green therefore means "no rival written as assert.*", not "no rival". That is a deliberate
+ * floor: the STRUCTURAL guarantee against drift is the single evaluation in `record()`, which holds
+ * regardless of what a control test body contains. This check is a second line against the one
+ * thing that guarantee cannot reach, not the thing the guarantee rests on.
  *
  * @param {string} source      the control test function's source text
  * @param {string} controlName the identifier the delegation is called on, e.g. 'controlC2'

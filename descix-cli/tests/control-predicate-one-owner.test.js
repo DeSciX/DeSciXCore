@@ -133,6 +133,69 @@ describe('one owner for the control predicate', () => {
         console.log('[DRIFT-2] ONE edit, BOTH consumers moved — the two cannot disagree.');
     });
 
+    // ---------------------------------------------------------------- the second-evaluation hazard
+    // Found by this row's VERIFIER against the first version of the owner: one condition list is
+    // not enough if the list is EVALUATED TWICE. A condition that is not a pure function of `run`
+    // could hold at classifier time and fail at control-test time, and the discriminator — which
+    // reads the CLASSIFIER — would allow the green while the control test failed. The rival-predicate
+    // detector reported the body clean, correctly, because it WAS clean. The second place they could
+    // disagree was the second evaluation.
+
+    /** A condition that is not a pure function of `run`: it flips on its second call. */
+    function makeImpureCondition() {
+        let calls = 0;
+        return {
+            id: 'fixture-still-on-disk',
+            requirement: 'the artefact the control produced must still be present',
+            holds: () => (++calls === 1),
+            diagnose: () => 'the artefact vanished between the classifier and the control test',
+            get calls() { return calls; },
+        };
+    }
+
+    test('DRIFT-3a (NEGATIVE CONTROL): a RE-EVALUATING consumer DOES disagree on an impure condition', () => {
+        // Reconstructs the defect: the classifier evaluates, and then the control test evaluates
+        // AGAIN rather than replaying. This is what the owner used to do.
+        const impure = makeImpureCondition();
+        const classifierState = impure.holds({}) ? 'PASS' : 'FAIL';        // evaluation #1
+        const controlTest = failureOf(() => {
+            assert.ok(impure.holds({}), impure.diagnose());                // evaluation #2
+        });
+        console.log(`[DRIFT-3a] classifier=${classifierState} controlTest=${controlTest === null ? 'PASS' : 'FAIL'} holdsCalls=${impure.calls}`);
+        assert.equal(classifierState, 'PASS');
+        assert.ok(controlTest !== null,
+            'the reconstruction must show the SECOND evaluation disagreeing with the first');
+        console.log('[DRIFT-3a] TWO EVALUATIONS REPRODUCED: classifier PASS, control test FAIL.');
+    });
+
+    test('DRIFT-3b: the owner evaluates ONCE, so an impure condition CANNOT split the two consumers', () => {
+        const impure = makeImpureCondition();
+        const c = createFixtureControl({
+            id: 'GATE X', kind: 'positive', governs: 'GATE Y', rationale: ['r'],
+            conditions: [impure],
+        }).record({ ok: true });
+
+        const controlTest = failureOf(() => c.assertGreen(assert));
+        const discriminator = failureOf(() => c.requireGreen('GATE Y', assert));
+        console.log(`[DRIFT-3b] classifier=${c.state} controlTest=${controlTest === null ? 'PASS' : 'FAIL'} `
+            + `discriminator=${discriminator === null ? 'ALLOWED' : 'REFUSED'} holdsCalls=${impure.calls}`);
+
+        // THE STRUCTURAL ASSERTION: there is exactly ONE evaluation, so there is nothing to diverge.
+        assert.equal(impure.calls, 1,
+            `the owner evaluated the condition ${impure.calls} times. More than one evaluation is a `
+            + 'second place for the classifier and the control test to disagree — which is the '
+            + 'defect this module exists to abolish.');
+
+        // AND THE OBSERVABLE CONSEQUENCE: the two consumers agree, whatever the condition does.
+        const classifierGreen = c.state === 'PASS';
+        const controlGreen = controlTest === null;
+        assert.equal(classifierGreen, controlGreen,
+            'the classifier and the control test reported different verdicts on the same control');
+        assert.equal(controlGreen, discriminator === null,
+            'the discriminator must not allow a green the control test would refuse');
+        console.log('[DRIFT-3b] ONE evaluation; classifier, control test and discriminator all agree.');
+    });
+
     // ---------------------------------------------------------------- fail-closed
     test('FAIL-CLOSED: a control that never ran, or threw, blocks its discriminator', () => {
         const never = createFixtureControl({
