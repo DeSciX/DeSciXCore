@@ -15,8 +15,10 @@
  *   CATCHES: a refusal that nevertheless wrote; a write of a loader-rejected localPath; a
  *            regression that rejects legitimate relative values; a bricked workspace that
  *            set-localpath cannot repair.
- *   DOES NOT READ: env.platform (set-localpath never updates it — a separate open defect); any
- *            non-absolute class of invalid localPath; anything about npm-published @descix/cli.
+ *   ALSO READS: env.platform — covered by the three tests below, which assert the entry actually
+ *            MOVED rather than trusting the exit code and the ✓ banner.
+ *   DOES NOT READ: any non-absolute class of invalid localPath; anything about npm-published
+ *            @descix/cli; the banner's own rendering of the old value.
  *   RUN BY : `npm test` in descix-cli/ (node --test "tests/*.test.js").
  *
  * Run: `node --test tests/app-set-localpath.test.js` from descix-cli/.
