@@ -55,8 +55,12 @@ const CORRUPT = '{ "version": "2.1", "env": { this is not JSON';
 const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
 
 /** Spawn the REAL exported runSetupWizard in a real child process against a disposable fixture. */
-async function runWizard({ workspaceContent, stdinData }) {
+async function runWizard({ workspaceContent, stdinData, subdir = null }) {
   const fixture = await fs.mkdtemp(path.join(os.tmpdir(), 'descix-wizgate-'));
+  // subdir mode: the wizard is invoked BELOW the workspace root. Workspace resolution walks UP,
+  // so an existing workspace here must still be found and the run refused.
+  const runDir = subdir ? path.join(fixture, subdir) : fixture;
+  if (subdir) await fs.mkdir(runDir, { recursive: true });
   const descixDir = path.join(fixture, '.descix');
   await fs.mkdir(descixDir, { recursive: true });
 
@@ -100,7 +104,7 @@ async function runWizard({ workspaceContent, stdinData }) {
     '--input-type=module', '-e',
     `const { runSetupWizard } = await import(${JSON.stringify(SETUP_JS)}); await runSetupWizard();`
   ], {
-    cwd: fixture,
+    cwd: runDir,
     env: { ...process.env, DESCIX_API_URL: `http://127.0.0.1:${port}`, NO_COLOR: '1', FORCE_COLOR: '0' },
     stdio
   });
@@ -125,8 +129,15 @@ async function runWizard({ workspaceContent, stdinData }) {
   let exists = true;
   try { after = await fs.readFile(wsPath, 'utf-8'); } catch { exists = false; }
 
+  // Did the run leave a NESTED workspace behind in the subdirectory it was invoked from?
+  let nestedCreated = false;
+  if (subdir) {
+    try { await fs.stat(path.join(runDir, '.descix', 'workspace.json')); nestedCreated = true; }
+    catch { nestedCreated = false; }
+  }
+
   return {
-    fixture, wsPath, code, out, err, elapsedMs, timedOut, exists,
+    fixture, runDir, nestedCreated, wsPath, code, out, err, elapsedMs, timedOut, exists,
     before, after,
     hashBefore: before === null ? null : sha256(before),
     hashAfter: after === null ? null : sha256(after),
@@ -240,6 +251,46 @@ describe('quickstart wizard must not clobber a present workspace', () => {
         'refusal path must not reach an interactive prompt at all. Got:\n' + r.combined.slice(-1500));
     });
   }
+
+  // GATE B1 — THE DISCRIMINATOR for nested shadowing. Run twice.
+  // Pre-fix the guard read the TARGET PATH ONLY while load() walked UP, so from a subdirectory
+  // it found nothing, reached the banner, and created a NESTED workspace.json shadowing the
+  // parent for every later resolution.
+  for (const pass of [1, 2]) {
+    test(`GATE B1 (pass ${pass}): a SUBDIRECTORY of an existing workspace REFUSES; no nested file created`, async () => {
+      const r = await runWizard({ workspaceContent: HEALTHY, stdinData: 'n\n', subdir: 'packages/inner' });
+      console.log(`[B1 p${pass}] runDir=${r.runDir}`);
+      console.log(`[B1 p${pass}] exit=${r.code} timedOut=${r.timedOut} nestedCreated=${r.nestedCreated}`);
+      console.log(`[B1 p${pass}] parent hashBefore=${r.hashBefore}`);
+      console.log(`[B1 p${pass}] parent hashAfter =${r.hashAfter}`);
+      assert.equal(r.timedOut, false, 'wizard must not hang');
+      assert.equal(r.nestedCreated, false,
+        'a NESTED .descix/workspace.json was created in the subdirectory — it SHADOWS the parent');
+      assert.equal(r.hashAfter, r.hashBefore, "the parent workspace must be byte-identical");
+      assert.notEqual(r.code, 0, 'must exit NON-ZERO');
+      const f = refused(r);
+      assert.ok(f.namesRefusal, 'output must say it REFUSED. Got:\n' + r.combined.slice(-1500));
+      assert.ok(r.combined.includes(r.fixture),
+        'the refusal must NAME THE PARENT ROOT it found, so the user knows which workspace is in force. Got:\n'
+        + r.combined.slice(-1500));
+      assert.match(r.combined, /SHADOW/i,
+        'the refusal must say WHY a nested workspace is refused (it shadows the parent). Got:\n'
+        + r.combined.slice(-1500));
+    });
+  }
+
+  // GATE B3b — a clean SUBDIRECTORY with no workspace anywhere up the tree still proceeds.
+  // This is the fixture that proves B1 refuses because of the PARENT WORKSPACE and not merely
+  // because it was run in a subdirectory.
+  test('GATE B3b (negative control for B1): a subdirectory with NO workspace up-tree still proceeds', async () => {
+    const r = await runWizard({ workspaceContent: null, stdinData: 'n\n', subdir: 'packages/inner' });
+    console.log(`[B3b] exit=${r.code} timedOut=${r.timedOut} created-in-subdir=${r.nestedCreated}`);
+    assert.equal(r.timedOut, false, 'wizard must not hang');
+    assert.ok(r.nestedCreated,
+      'with NO workspace up the tree the wizard must still CREATE one where it was invoked');
+    assert.ok(!/Refusing/i.test(r.combined),
+      'it must not refuse merely for being in a subdirectory. Got:\n' + r.combined.slice(-1500));
+  });
 
   // REACHABILITY — static, and explicitly NOT a discriminator for the guard.
   // It exists because a symbol search from the entrypoint MISSES the call: it is behind
