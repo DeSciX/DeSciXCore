@@ -1,143 +1,156 @@
 /**
  * Tests for `descix app set-localpath`.
  *
- * Coverage:
- *  - happy path: valid path updates localPath in workspace.json env.products entry
- *  - hard-fail: non-existent path → "Path does not exist: <path>"
- *  - hard-fail: unmapped app → canonical "not mapped" message
- *  - hard-fail: missing -a → WorkspaceConfig error (unmapped app id '')
+ * THESE TESTS SPAWN bin/descix.js. They do not re-implement it.
  *
- * Design: tests operate directly against WorkspaceConfig using a temp workspace;
- * they never mutate the real ~/.descix/workspace.json or any app's workspace.json.
+ * The previous version of this file defined a local `runSetLocalpath()` that mirrored the action
+ * body line for line. A mirror cannot fail when the command it mirrors is wrong, and it cannot
+ * pass when the command it mirrors is fixed — it measures the copy. Worse, its happy-path case
+ * asserted that an ABSOLUTE path was written to localPath, encoding the very brick this suite now
+ * guards against: set-localpath writing a value resolveWorkspacePath will refuse on the next read,
+ * leaving a workspace no sanctioned verb could repair.
+ *
+ * COVERAGE BOUNDARY — what this suite reads, and where the green stops:
+ *   READS  : the real CLI's exit status, and the bytes of .descix/workspace.json before/after.
+ *   CATCHES: a refusal that nevertheless wrote; a write of a loader-rejected localPath; a
+ *            regression that rejects legitimate relative values; a bricked workspace that
+ *            set-localpath cannot repair.
+ *   DOES NOT READ: env.platform (set-localpath never updates it — a separate open defect); any
+ *            non-absolute class of invalid localPath; anything about npm-published @descix/cli.
+ *   RUN BY : `npm test` in descix-cli/ (node --test "tests/*.test.js").
  *
  * Run: `node --test tests/app-set-localpath.test.js` from descix-cli/.
  */
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { WorkspaceConfig } from '../lib/workspace-config.js';
+import { fileURLToPath } from 'node:url';
+
+const CLI = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'descix.js');
 
 /**
- * Create an isolated temp workspace.json with one product mapped.
- * Returns { wsRoot, appId, appDir } — appDir is a real directory that exists.
+ * Run the REAL cli. Resolves with { code, stdout, stderr } — never rejects on a non-zero exit,
+ * because a non-zero exit is the thing most of these tests are measuring.
  */
-async function makeTestWorkspace(t) {
-  const wsRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'descix-test-ws-'));
-  const appDir = path.join(wsRoot, 'my-app');
-  await fs.mkdir(appDir, { recursive: true });
-  await fs.mkdir(path.join(wsRoot, '.descix'), { recursive: true });
-
-  const appId = 'testapp';
-  const workspace = {
-    version: '2.1',
-    workspaceRoot: wsRoot,
-    type: 'workspace',
-    env: {
-      products: [{ appId, localPath: 'my-app', kbId: 'General' }]
-    }
-  };
-  await fs.writeFile(
-    path.join(wsRoot, '.descix', 'workspace.json'),
-    JSON.stringify(workspace, null, 2)
-  );
-
-  // Cleanup after test
-  t.after(async () => {
-    await fs.rm(wsRoot, { recursive: true, force: true });
+function runCli(cwd, args) {
+  return new Promise((resolve) => {
+    execFile(process.execPath, [CLI, ...args], { cwd }, (err, stdout, stderr) => {
+      resolve({ code: err ? (err.code ?? 1) : 0, stdout, stderr });
+    });
   });
-
-  return { wsRoot, appId, appDir };
 }
 
 /**
- * Simulate set-localpath logic (mirrors bin/descix.js appCommand set-localpath action).
- * Returns updated WorkspaceConfig on success, throws on failure.
+ * Create an isolated temp workspace with one product mapped at `localPath`.
+ * Pass an absolute value to reproduce a workspace already BRICKED by the old behaviour.
  */
-async function runSetLocalpath(wsRoot, appId, newPath) {
-  const workspaceConfig = await WorkspaceConfig.load(wsRoot);
-  const appConfig = workspaceConfig.getAppByAppId(appId);
-  if (!appConfig) {
-    throw new Error(`App '${appId}' is not mapped. Run 'descix app init -a ${appId}' first.`);
-  }
+async function makeTestWorkspace(t, localPath = 'my-app') {
+  const wsRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'descix-test-ws-'));
+  await fs.mkdir(path.join(wsRoot, 'my-app'), { recursive: true });
+  await fs.mkdir(path.join(wsRoot, 'my-app-v2'), { recursive: true });
+  await fs.mkdir(path.join(wsRoot, '.descix'), { recursive: true });
 
-  let stat;
-  try {
-    stat = await fs.stat(newPath);
-  } catch {
-    throw new Error(`Path does not exist: ${newPath}`);
-  }
-  if (!stat.isDirectory()) {
-    throw new Error(`Path is not a directory: ${newPath}`);
-  }
+  const appId = 'testapp';
+  await fs.writeFile(
+    path.join(wsRoot, '.descix', 'workspace.json'),
+    JSON.stringify(
+      { version: '2.1', type: 'workspace', env: { products: [{ appId, localPath, kbId: 'General' }] } },
+      null,
+      2
+    )
+  );
 
-  // Update env.products entry
-  const products = workspaceConfig.env?.products || [];
-  for (const product of products) {
-    if (product.appId === appId || product.app_id === appId) {
-      product.localPath = newPath;
-      break;
-    }
-  }
-  await workspaceConfig.save(wsRoot);
-  return workspaceConfig;
+  t.after(async () => { await fs.rm(wsRoot, { recursive: true, force: true }); });
+  return { wsRoot, appId };
+}
+
+const wsFile = (wsRoot) => path.join(wsRoot, '.descix', 'workspace.json');
+
+async function sha256(file) {
+  return crypto.createHash('sha256').update(await fs.readFile(file)).digest('hex');
+}
+
+async function localPathOf(wsRoot, appId) {
+  const parsed = JSON.parse(await fs.readFile(wsFile(wsRoot), 'utf-8'));
+  return parsed.env.products.find((p) => p.appId === appId)?.localPath;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('set-localpath — happy path: valid path updates localPath in workspace.json', async (t) => {
-  const { wsRoot, appId, appDir } = await makeTestWorkspace(t);
-
-  // Create a second directory as the new target
-  const newAppDir = path.join(wsRoot, 'my-app-v2');
-  await fs.mkdir(newAppDir, { recursive: true });
-
-  await runSetLocalpath(wsRoot, appId, newAppDir);
-
-  // Reload and verify
-  const reloaded = await WorkspaceConfig.load(wsRoot);
-  const updated = reloaded.getAppByAppId(appId);
-  assert.ok(updated, 'app should still be mapped after update');
-  assert.equal(updated.localPath, newAppDir, 'localPath must equal the new path');
-});
-
-test('set-localpath — hard-fail: non-existent path → canonical error message', async (t) => {
+test('set-localpath — REFUSES an absolute path AND leaves workspace.json byte-identical', async (t) => {
   const { wsRoot, appId } = await makeTestWorkspace(t);
-  const badPath = path.join(wsRoot, 'NONEXISTENT_XYZ_' + Date.now());
+  const before = await sha256(wsFile(wsRoot));
 
-  await assert.rejects(
-    () => runSetLocalpath(wsRoot, appId, badPath),
-    (err) => {
-      assert.match(err.message, /Path does not exist:/);
-      assert.ok(err.message.includes(badPath), 'error must include the bad path');
-      return true;
-    },
-    'must throw for non-existent path'
+  const { code, stderr } = await runCli(wsRoot, [
+    'app', 'set-localpath', '-a', appId, '-p', path.join(wsRoot, 'my-app-v2')
+  ]);
+
+  assert.notEqual(code, 0, 'an absolute path must be refused with a non-zero exit');
+  assert.match(stderr, /absolute path/, 'the refusal must name what is wrong');
+  assert.equal(
+    await sha256(wsFile(wsRoot)),
+    before,
+    'A REFUSAL THAT ALSO WROTE IS THE FAILURE THIS TEST EXISTS TO END: workspace.json must be byte-identical'
   );
 });
 
-test('set-localpath — hard-fail: unmapped app → canonical "not mapped" message', async (t) => {
+test('set-localpath — happy path: a workspace-relative path is accepted and written verbatim', async (t) => {
+  const { wsRoot, appId } = await makeTestWorkspace(t);
+
+  const { code, stderr } = await runCli(wsRoot, ['app', 'set-localpath', '-a', appId, '-p', 'my-app-v2']);
+
+  assert.equal(code, 0, `a legitimate relative path must still be accepted (stderr: ${stderr})`);
+  assert.equal(await localPathOf(wsRoot, appId), 'my-app-v2', 'localPath must be stored relative');
+});
+
+test('set-localpath — RECOVERS a workspace already bricked by the old behaviour', async (t) => {
+  // Seeded with an absolute localPath: exactly what the pre-fix command persisted.
+  const { wsRoot, appId } = await makeTestWorkspace(t, path.join(os.tmpdir(), 'somewhere-absolute'));
+
+  const { code, stderr } = await runCli(wsRoot, ['app', 'set-localpath', '-a', appId, '-p', 'my-app']);
+
+  assert.equal(code, 0, `set-localpath must repair a bricked workspace, not refuse it (stderr: ${stderr})`);
+  assert.equal(await localPathOf(wsRoot, appId), 'my-app', 'the bad absolute value must be replaced');
+});
+
+test('set-localpath — hard-fail: non-existent path, resolved against the WORKSPACE ROOT', async (t) => {
+  const { wsRoot, appId } = await makeTestWorkspace(t);
+  const before = await sha256(wsFile(wsRoot));
+
+  const { code, stderr } = await runCli(wsRoot, [
+    'app', 'set-localpath', '-a', appId, '-p', 'NONEXISTENT_XYZ_' + Date.now()
+  ]);
+
+  assert.notEqual(code, 0, 'must exit non-zero for a non-existent path');
+  assert.match(stderr, /Path does not exist:/);
+  assert.match(stderr, /resolved against workspace root/, 'must say what the path was resolved against');
+  assert.equal(await sha256(wsFile(wsRoot)), before, 'nothing may be written on a refusal');
+});
+
+test('set-localpath — hard-fail: a file is not a directory', async (t) => {
+  const { wsRoot, appId } = await makeTestWorkspace(t);
+  await fs.writeFile(path.join(wsRoot, 'a-file.txt'), 'hello');
+  const before = await sha256(wsFile(wsRoot));
+
+  const { code, stderr } = await runCli(wsRoot, ['app', 'set-localpath', '-a', appId, '-p', 'a-file.txt']);
+
+  assert.notEqual(code, 0);
+  assert.match(stderr, /Path is not a directory:/);
+  assert.equal(await sha256(wsFile(wsRoot)), before, 'nothing may be written on a refusal');
+});
+
+test('set-localpath — hard-fail: unmapped app uses the canonical one-owner message', async (t) => {
   const { wsRoot } = await makeTestWorkspace(t);
-  const realDir = path.join(wsRoot, 'some-real-dir');
-  await fs.mkdir(realDir, { recursive: true });
 
-  await assert.rejects(
-    () => runSetLocalpath(wsRoot, 'totally-unknown-app-id', realDir),
-    /not mapped/,
-    'must throw for unmapped app'
-  );
-});
+  const { code, stderr } = await runCli(wsRoot, [
+    'app', 'set-localpath', '-a', 'totally-unknown-app-id', '-p', 'my-app'
+  ]);
 
-test('set-localpath — hard-fail: path that is a file (not a directory) → "not a directory"', async (t) => {
-  const { wsRoot, appId } = await makeTestWorkspace(t);
-  const filePath = path.join(wsRoot, 'a-file.txt');
-  await fs.writeFile(filePath, 'hello');
-
-  await assert.rejects(
-    () => runSetLocalpath(wsRoot, appId, filePath),
-    /Path is not a directory:/,
-    'must reject file paths'
-  );
+  assert.notEqual(code, 0);
+  assert.match(stderr, /is not mapped in workspace\.json/, 'must be unmappedAppMessage(), not a local copy');
 });

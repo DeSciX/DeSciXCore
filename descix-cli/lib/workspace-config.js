@@ -150,6 +150,29 @@ export class WorkspaceConfig {
   }
 
   /**
+   * The RAW registry entry for an app — `localPath` exactly as workspace.json carries it, with NO
+   * path resolution and therefore no possibility of throwing on a bad stored value.
+   *
+   * This exists for exactly one caller shape: a command that is about to REPLACE an app's
+   * localPath. Such a command must not resolve the OUTGOING value. getAppByAppId() resolves, and
+   * resolving the value you are on your way to overwrite is what made `descix app set-localpath`
+   * unusable precisely when it was needed — a workspace already carrying a rejected localPath
+   * could not be repaired by the one verb whose job is repairing it, while the rejection itself
+   * forbade hand-editing. The verb was the prescribed remedy and the verb refused.
+   *
+   * It reads the SAME map getAppByAppId reads (_buildAppIdMap is still the one owner of "what is
+   * mapped"); it simply stops short of resolution. Do NOT use it to obtain a usable path — take
+   * getAppByAppId().absolutePath for that, so the loader's rejection still runs.
+   *
+   * @param {string} appId - App/product identifier
+   * @returns {{ localPath: string, communityId: string|null, kbId: string }|null}
+   */
+  getAppEntry(appId) {
+    if (!appId) return null;
+    return this._appIdToConfig?.[appId] || null;
+  }
+
+  /**
    * Get the absolute path to an app's site/ directory
    * @param {string} appId - App identifier
    * @returns {string|null} Absolute path to site/ or null if app not mapped

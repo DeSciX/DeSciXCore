@@ -938,7 +938,7 @@ export async function processKb(config, options = {}) {
   try {
     await fs.access(srcDir);
   } catch {
-    throw new Error(`Source directory not found: ${srcDir}\nRun "descix kb pull" first.`);
+    throw new Error(`Source directory not found: ${srcDir}\nRun "descix drive pull" first.`);
   }
   
   await fs.mkdir(chunksDir, { recursive: true });
