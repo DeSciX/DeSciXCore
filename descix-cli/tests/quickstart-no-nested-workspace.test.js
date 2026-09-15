@@ -46,6 +46,7 @@ import * as crypto from 'node:crypto';
 import * as os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createFixtureControl } from './tools/control-predicate.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BIN_JS = path.resolve(__dirname, '../bin/descix.js');
@@ -137,44 +138,46 @@ async function runQuickstart({ withParentWorkspace }) {
 // ===========================================================================================
 // FIXTURE-VALIDITY COUPLING — GATE C2 (positive control) GOVERNS GATE C1 (discriminator).
 //
-// C1 discriminates on an ABSENCE: that no nested .descix/workspace.json was created. An absence
-// is evidence ONLY if this harness could have produced a PRESENCE. C2 is the proof that it could.
-// While C2 is red, C1's absence is UNATTRIBUTABLE — indistinguishable from a harness that creates
-// nothing under any conditions — so C1 must report FAIL, never pass.
+// "What makes C2 green" is defined ONCE, here, as a list of CONDITIONS owned by
+// tests/tools/control-predicate.mjs. BOTH consumers read that one list: the before() classifier
+// computes C2's state from it, and GATE C2's own test asserts it by delegating to the same owner.
+// Neither writes a predicate of its own, so the two cannot drift apart — which is what this
+// file used to do, deriving the same predicate twice and leaving C1 free to report GREEN on a
+// control that had gone red under a condition only one of the copies knew about.
 //
-// The control is measured ONCE here rather than inside the C2 test so that the verdict exists
-// before ANY gate reads it, independently of declaration order or runner concurrency. It costs no
-// extra harness run: C2 consumes this same measurement and asserts exactly what it always did.
+// The control is measured ONCE in before() so the verdict exists before ANY gate reads it,
+// independently of declaration order or runner concurrency, and at no extra harness run.
 //
 // FAIL-CLOSED: every state that is not an observed PASS (NOT-RUN, a throw, a timeout) blocks C1.
 // ===========================================================================================
-let controlC2 = { state: 'NOT-RUN', why: 'the positive control has not been run yet', run: null };
-
-/**
- * Called FIRST by GATE C1. Returns silently only when C2 was observed to PASS; otherwise fails
- * C1 with a message that names the CONTROL as the thing to debug — a refusal that does not name
- * its cause sends the next reader to debug the wrong gate.
- */
-function requireControlC2(gate) {
-  if (controlC2.state === 'PASS') return;
-  assert.fail([
-    `${gate} CANNOT REPORT PASS: its positive control GATE C2 is ${controlC2.state}.`,
-    '',
-    `  WHY C2 GOVERNS ${gate}: ${gate} discriminates on the ABSENCE of a nested`,
-    '    .descix/workspace.json. An absence is evidence ONLY if this harness could have produced',
-    '    a PRESENCE. GATE C2 is the proof that it could. With C2 red, the fixture CANNOT BE SHOWN',
-    '    able to produce the write this gate discriminates on, so a green here would be VACUOUS:',
-    '    it would read as coverage of a real, shipped, destructive defect (a quickstart creating a',
-    '    nested workspace that silently SHADOWS its parent) while being unable to fail.',
-    '',
-    `  CONTROL STATE  : ${controlC2.state}`,
-    `  CONTROL REASON : ${controlC2.why}`,
-    '',
-    '  DEBUG THE CONTROL, NOT THIS GATE. This gate is making no claim about the product right',
-    '  now; it is refusing to report a result it cannot attribute. Fix GATE C2 (the harness must',
-    '  be able to create a workspace again) and this gate will discriminate once more.'
-  ].join('\n'));
-}
+const controlC2 = createFixtureControl({
+  id: 'GATE C2',
+  kind: 'positive',
+  governs: 'GATE C1',
+  rationale: [
+    'GATE C1 discriminates on the ABSENCE of a nested .descix/workspace.json. An absence is',
+    'evidence ONLY if this harness could have produced a PRESENCE. GATE C2 is the proof that it',
+    'could. With C2 red, the fixture CANNOT BE SHOWN able to produce the write C1 discriminates',
+    'on, so a green there would be VACUOUS: it would read as coverage of a real, shipped,',
+    'destructive defect (a quickstart creating a nested workspace that silently SHADOWS its',
+    'parent) while being unable to fail.',
+  ],
+  conditions: [
+    {
+      id: 'did-not-hang',
+      requirement: 'the control run must complete rather than time out',
+      holds: (r) => r.timedOut === false,
+      diagnose: () => 'the control run TIMED OUT (the harness hung)',
+    },
+    {
+      id: 'fixture-can-create',
+      requirement: 'with NOTHING up-tree the same harness must still create a workspace.json',
+      holds: (r) => r.nestedCreated === true,
+      diagnose: (r) => 'THE FIXTURE IS INERT — with NOTHING above it the harness still created no '
+        + `workspace.json (child exit=${r.code}). Tail:\n` + r.combined.slice(-600),
+    },
+  ],
+});
 
 before(async () => {
   console.log([
@@ -189,32 +192,21 @@ before(async () => {
     '           nested case — they run in cwd as before; re-pointing them is a separate decision.',
     'FIXTURE  : C2 is a POSITIVE CONTROL proving the stdin script really drives runInit to a',
     '           WRITE. Without it, C1 would pass on a fixture that could never create a file.',
-    'COUPLED  : C1 is COUPLED TO C2 IN CODE. While C2 is red, C1 reports FAIL and names C2 as',
-    '           the thing to debug. C1 CANNOT emit a green its own control has not earned.',
+    controlC2.boundaryLine(),
     'NO NET   : shape-only disposable wallet; no platform call, no account state touched.',
     'RUN BY   : npm test (node --test "tests/*.test.js"). Nothing else runs it.',
     '==========================================================',
     ''
   ].join('\n'));
 
-  // Measure the positive control ONCE, before any gate reads its verdict.
+  // Measure the positive control ONCE, before any gate reads its verdict. The PASS/FAIL decision
+  // is the owner's, derived from the one condition list — this site does not restate it.
   try {
-    const r = await runQuickstart({ withParentWorkspace: false });
-    controlC2.run = r;
-    if (r.timedOut) {
-      controlC2 = { ...controlC2, state: 'FAIL', why: 'the control run TIMED OUT (the harness hung)' };
-    } else if (!r.nestedCreated) {
-      controlC2 = { ...controlC2, state: 'FAIL',
-        why: 'THE FIXTURE IS INERT — with NOTHING above it the harness still created no '
-           + `workspace.json (child exit=${r.code}). Tail:\n` + r.combined.slice(-600) };
-    } else {
-      controlC2 = { ...controlC2, state: 'PASS',
-        why: `the harness drove runInit to a real write (child exit=${r.code})` };
-    }
+    controlC2.record(await runQuickstart({ withParentWorkspace: false }));
   } catch (e) {
-    controlC2 = { state: 'FAIL', why: 'the control run THREW: ' + (e && e.message), run: null };
+    controlC2.record(null, e);
   }
-  console.log(`[CONTROL C2] state=${controlC2.state} :: ${controlC2.why.split('\n')[0]}`);
+  console.log(controlC2.verdictLine());
 });
 
 describe('descix quickstart must not create a nested workspace', () => {
@@ -223,7 +215,7 @@ describe('descix quickstart must not create a nested workspace', () => {
   for (const pass of [1, 2]) {
     test(`GATE C1 (pass ${pass}): in a SUBDIRECTORY of an existing workspace, creates NO nested workspace`, async () => {
       // THE COUPLING. C1 may not report a green its own positive control has not earned.
-      requireControlC2(`GATE C1 (pass ${pass})`);
+      controlC2.requireGreen(`GATE C1 (pass ${pass})`, assert);
       const r = await runQuickstart({ withParentWorkspace: true });
       console.log(`[C1 p${pass}] subdir=${r.subdir}`);
       console.log(`[C1 p${pass}] exit=${r.code} timedOut=${r.timedOut} nestedCreated=${r.nestedCreated}`);
@@ -248,15 +240,11 @@ describe('descix quickstart must not create a nested workspace', () => {
   // GATE C2 — POSITIVE CONTROL for C1's fixture. Proves the harness CAN produce a workspace.json,
   // so C1's absence of one is attributable to the guard and not to an inert fixture.
   test('GATE C2 (positive control): with NO workspace up-tree the SAME harness DOES create one', async () => {
-    // Consumes the ONE control measurement taken in before(); asserts exactly what it always did.
-    const r = controlC2.run;
-    console.log(`[C2] state=${controlC2.state}`);
-    assert.ok(r !== null, 'the positive control did not run at all: ' + controlC2.why);
-    console.log(`[C2] exit=${r.code} timedOut=${r.timedOut} created=${r.nestedCreated}`);
-    assert.equal(r.timedOut, false, 'quickstart must not hang');
-    assert.ok(r.nestedCreated,
-      'THE FIXTURE IS INERT: this harness could not create a workspace even with nothing above it, '
-      + 'so GATE C1 proves nothing. Output:\n' + r.combined.slice(-2000));
+    // DELEGATES to the ONE owner of this control's greenness. This body deliberately contains no
+    // assertion of its own: a predicate written here would be a SECOND derivation of the fact the
+    // before() classifier already computed, and the two would drift. See tools/control-predicate.mjs.
+    console.log(controlC2.verdictLine());
+    controlC2.assertGreen(assert);
     console.log('[C2] fixture validated: the stdin script drives runInit to a real write.');
   });
 });

@@ -34,6 +34,7 @@ import * as crypto from 'node:crypto';
 import * as os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createFixtureControl } from './tools/control-predicate.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SETUP_JS = path.resolve(__dirname, '../lib/wizard/setup.js');
@@ -176,34 +177,42 @@ function refused(r, { wantVersion = null } = {}) {
 //
 // FAIL-CLOSED: every state that is not an observed PASS (NOT-RUN, a throw, a timeout) blocks B1.
 // ===========================================================================================
-let controlB3b = { state: 'NOT-RUN', why: 'the negative control has not been run yet', run: null };
-
-/**
- * Called FIRST by GATE B1. Returns silently only when B3b was observed to PASS; otherwise fails
- * B1 with a message naming the CONTROL as the thing to debug.
- */
-function requireControlB3b(gate) {
-  if (controlB3b.state === 'PASS') return;
-  assert.fail([
-    `${gate} CANNOT REPORT PASS: its negative control GATE B3b is ${controlB3b.state}.`,
-    '',
-    `  WHY B3b GOVERNS ${gate}: ${gate} reads a REFUSAL and the ABSENCE of a nested`,
-    '    .descix/workspace.json, and attributes both to the PARENT WORKSPACE. That attribution',
-    '    holds only if the same harness, in the same subdirectory with NOTHING up-tree, would',
-    '    PROCEED AND CREATE instead. GATE B3b is that proof. With B3b red, every subdirectory run',
-    '    refuses and creates nothing whatever the cause, so a green here would be VACUOUS: it',
-    '    would read as coverage of a real, shipped, destructive defect (a wizard clobbering a',
-    '    healthy workspace / creating a nested one that SHADOWS its parent) while being unable',
-    '    to fail.',
-    '',
-    `  CONTROL STATE  : ${controlB3b.state}`,
-    `  CONTROL REASON : ${controlB3b.why}`,
-    '',
-    '  DEBUG THE CONTROL, NOT THIS GATE. This gate is making no claim about the product right',
-    '  now; it is refusing to report a result it cannot attribute. Fix GATE B3b (the harness must',
-    '  be able to proceed and create again) and this gate will discriminate once more.'
-  ].join('\n'));
-}
+const controlB3b = createFixtureControl({
+  id: 'GATE B3b',
+  kind: 'negative',
+  governs: 'GATE B1',
+  rationale: [
+    'GATE B1 reads a REFUSAL and the ABSENCE of a nested .descix/workspace.json, and attributes',
+    'both to the PARENT WORKSPACE. That attribution holds only if the same harness, in the same',
+    'subdirectory with NOTHING up-tree, would PROCEED AND CREATE instead. GATE B3b is that proof.',
+    'With B3b red, every subdirectory run refuses and creates nothing whatever the cause, so a',
+    'green in B1 would be VACUOUS: it would read as coverage of a real, shipped, destructive',
+    'defect (a wizard clobbering a healthy workspace / creating a nested one that SHADOWS its',
+    'parent) while being unable to fail.',
+  ],
+  conditions: [
+    {
+      id: 'did-not-hang',
+      requirement: 'the control run must complete rather than time out',
+      holds: (r) => r.timedOut === false,
+      diagnose: () => 'the control run TIMED OUT (the harness hung)',
+    },
+    {
+      id: 'fixture-can-create',
+      requirement: 'with NO workspace up-tree the wizard must still create one where invoked',
+      holds: (r) => r.nestedCreated === true,
+      diagnose: (r) => 'THE FIXTURE IS INERT — with NO workspace up-tree the wizard still created '
+        + `nothing where it was invoked (child exit=${r.code}). Tail:\n` + r.combined.slice(-600),
+    },
+    {
+      id: 'did-not-refuse-for-being-nested',
+      requirement: 'it must not refuse merely for being run in a subdirectory',
+      holds: (r) => !/Refusing/i.test(r.combined),
+      diagnose: () => 'the wizard REFUSED merely for being in a subdirectory, so a refusal in B1 '
+        + 'cannot be attributed to the parent workspace',
+    },
+  ],
+});
 
 before(async () => {
   console.log([
@@ -218,35 +227,20 @@ before(async () => {
     '           bin -> mcp.js -> wizard wiring is covered STATICALLY by the last test only.',
     'STUBBED  : auth/entitlements answered by a local throwaway server. Nothing leaves the',
     '           machine; no account state is touched.',
-    'COUPLED  : B1 is COUPLED TO B3b IN CODE. While B3b is red, B1 reports FAIL and names B3b as',
-    '           the thing to debug. B1 CANNOT emit a green its own control has not earned.',
+    controlB3b.boundaryLine(),
     'RUN BY   : npm test (node --test "tests/*.test.js"). Nothing else runs it.',
     '==========================================================',
     ''
   ].join('\n'));
 
-  // Measure the negative control ONCE, before any gate reads its verdict.
+  // Measure the negative control ONCE, before any gate reads its verdict. The PASS/FAIL decision
+  // is the owner's, derived from the one condition list — this site does not restate it.
   try {
-    const r = await runWizard({ workspaceContent: null, stdinData: 'n\n', subdir: 'packages/inner' });
-    controlB3b.run = r;
-    if (r.timedOut) {
-      controlB3b = { ...controlB3b, state: 'FAIL', why: 'the control run TIMED OUT (the harness hung)' };
-    } else if (!r.nestedCreated) {
-      controlB3b = { ...controlB3b, state: 'FAIL',
-        why: 'THE FIXTURE IS INERT — with NO workspace up-tree the wizard still created nothing '
-           + `where it was invoked (child exit=${r.code}). Tail:\n` + r.combined.slice(-600) };
-    } else if (/Refusing/i.test(r.combined)) {
-      controlB3b = { ...controlB3b, state: 'FAIL',
-        why: 'the wizard REFUSED merely for being in a subdirectory, so a refusal in B1 cannot be '
-           + 'attributed to the parent workspace' };
-    } else {
-      controlB3b = { ...controlB3b, state: 'PASS',
-        why: `the harness proceeded and created a workspace where invoked (child exit=${r.code})` };
-    }
+    controlB3b.record(await runWizard({ workspaceContent: null, stdinData: 'n\n', subdir: 'packages/inner' }));
   } catch (e) {
-    controlB3b = { state: 'FAIL', why: 'the control run THREW: ' + (e && e.message), run: null };
+    controlB3b.record(null, e);
   }
-  console.log(`[CONTROL B3b] state=${controlB3b.state} :: ${controlB3b.why.split('\n')[0]}`);
+  console.log(controlB3b.verdictLine());
 });
 
 describe('quickstart wizard must not clobber a present workspace', () => {
@@ -335,7 +329,7 @@ describe('quickstart wizard must not clobber a present workspace', () => {
   for (const pass of [1, 2]) {
     test(`GATE B1 (pass ${pass}): a SUBDIRECTORY of an existing workspace REFUSES; no nested file created`, async () => {
       // THE COUPLING. B1 may not report a green its own negative control has not earned.
-      requireControlB3b(`GATE B1 (pass ${pass})`);
+      controlB3b.requireGreen(`GATE B1 (pass ${pass})`, assert);
       const r = await runWizard({ workspaceContent: HEALTHY, stdinData: 'n\n', subdir: 'packages/inner' });
       console.log(`[B1 p${pass}] runDir=${r.runDir}`);
       console.log(`[B1 p${pass}] exit=${r.code} timedOut=${r.timedOut} nestedCreated=${r.nestedCreated}`);
@@ -361,16 +355,11 @@ describe('quickstart wizard must not clobber a present workspace', () => {
   // This is the fixture that proves B1 refuses because of the PARENT WORKSPACE and not merely
   // because it was run in a subdirectory.
   test('GATE B3b (negative control for B1): a subdirectory with NO workspace up-tree still proceeds', async () => {
-    // Consumes the ONE control measurement taken in before(); asserts exactly what it always did.
-    const r = controlB3b.run;
-    console.log(`[B3b] state=${controlB3b.state}`);
-    assert.ok(r !== null, 'the negative control did not run at all: ' + controlB3b.why);
-    console.log(`[B3b] exit=${r.code} timedOut=${r.timedOut} created-in-subdir=${r.nestedCreated}`);
-    assert.equal(r.timedOut, false, 'wizard must not hang');
-    assert.ok(r.nestedCreated,
-      'with NO workspace up the tree the wizard must still CREATE one where it was invoked');
-    assert.ok(!/Refusing/i.test(r.combined),
-      'it must not refuse merely for being in a subdirectory. Got:\n' + r.combined.slice(-1500));
+    // DELEGATES to the ONE owner of this control's greenness. This body deliberately contains no
+    // assertion of its own: a predicate written here would be a SECOND derivation of the fact the
+    // before() classifier already computed, and the two would drift. See tools/control-predicate.mjs.
+    console.log(controlB3b.verdictLine());
+    controlB3b.assertGreen(assert);
   });
 
   // REACHABILITY — static, and explicitly NOT a discriminator for the guard.
