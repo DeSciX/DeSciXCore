@@ -55,8 +55,60 @@ export function resolveWorkspacePath(workspaceRoot, localPath, label = 'app') {
 }
 
 /**
+ * The ONE text for "there is no workspace here". It is correct advice for exactly one state —
+ * the file does not exist — and it is a lie for every other state, which is why it now has a
+ * single owner instead of being retyped at each throw site.
+ */
+const NOT_CONFIGURED_MESSAGE =
+  'Workspace not configured.\n' +
+  'Run "npx descix init" first to initialize your workspace.';
+
+/**
+ * THE ONE OWNER of "this workspace.json EXISTS and I could not read it".
+ *
+ * ABSENT and UNREADABLE are two different facts about the world and they need two different
+ * remedies. load() used to collapse them — every read error, JSON syntax error and permission
+ * error became NOT_CONFIGURED_MESSAGE — so a corrupt-but-present workspace.json reported as
+ * absent and the message prescribed `descix init` over a file that was still recoverable. A
+ * REFUSAL MUST NEVER PRESCRIBE A REMEDY THAT DESTROYS THE THING IT IS DIAGNOSING.
+ *
+ * It is a TYPE, not a message prefix, because callers have to branch on it (tryLoad returns
+ * null for absent and rethrows this) and matching on error text is the narrow-string-matching
+ * anti-pattern this file already suffered from — load()'s own v1 re-throw was an
+ * `error.message.includes(...)` test, and it is deleted in the same change.
+ *
+ * save() already refuses to overwrite a present-but-unparseable file and names it. This is the
+ * READ side of that same judgment, so the two halves of the file's lifecycle now agree.
+ */
+export class WorkspaceUnreadableError extends Error {
+  constructor(configPath, cause) {
+    // fs errors already lead with their code ("EACCES: permission denied, open ..."); JSON.parse
+    // errors carry no code at all. Prefix only when it is not already there, so the reason line
+    // never reads "EACCES: EACCES: ...".
+    const raw = cause?.message || String(cause);
+    const detail = cause?.code && !raw.startsWith(cause.code) ? `${cause.code}: ${raw}` : raw;
+    super(
+      `Workspace config exists but could not be read.\n` +
+      `  File:   ${configPath}\n` +
+      `  Reason: ${detail}\n` +
+      `\n` +
+      `This file is still on disk and has NOT been modified. Do NOT run "descix init" here —\n` +
+      `that command is for a workspace that is ABSENT, and this one is DAMAGED.\n` +
+      `  • Recover it: restore ${path.basename(configPath)} from version control or a backup.\n` +
+      `  • If you do not need its contents, move it aside first\n` +
+      `    (mv "${configPath}" "${configPath}.broken") and then run "descix init".\n` +
+      `    Its contents are lost only if you delete it.`
+    );
+    this.name = 'WorkspaceUnreadableError';
+    this.code = 'WORKSPACE_UNREADABLE';
+    this.configPath = configPath;
+    this.cause = cause;
+  }
+}
+
+/**
  * WorkspaceConfig - Manages workspace-specific configuration
- * 
+ *
  * This is the SOLE configuration methodology for DeSciX CLI.
  * All path resolution and context detection uses workspace.json.
  * 
@@ -300,54 +352,76 @@ export class WorkspaceConfig {
    * 
    * Automatically searches upward from startDir to find workspace root.
    * 
+   * ABSENT vs UNREADABLE IS DECIDED HERE AND NOWHERE ELSE. Callers consume the distinction as a
+   * type (WorkspaceUnreadableError), never by re-deciding it or by matching on message text.
+   *
    * @param {string} startDir - Directory to start searching from (default: cwd)
    * @returns {Promise<WorkspaceConfig>} Configuration object
-   * @throws {Error} If workspace not found
+   * @throws {Error} NOT_CONFIGURED_MESSAGE when no workspace.json exists
+   * @throws {WorkspaceUnreadableError} when one exists and cannot be read or parsed
    */
   static async load(startDir = process.cwd()) {
     // First, find workspace root by searching upward
     const workspaceRoot = await WorkspaceConfig.findWorkspaceRoot(startDir);
     if (!workspaceRoot) {
-      throw new Error(
-        'Workspace not configured.\n' +
-        'Run "npx descix init" first to initialize your workspace.'
-      );
+      throw new Error(NOT_CONFIGURED_MESSAGE);
     }
 
     const configPath = path.join(workspaceRoot, '.descix', 'workspace.json');
+
+    let data;
     try {
-      const data = await fs.readFile(configPath, 'utf-8');
-      const parsed = JSON.parse(data);
-
-      // v1 format hard-error: has communities block but no env block
-      if (parsed.communities && !parsed.env) {
-        throw new Error(
-          'v1 workspace format is not supported. Migrate to v2.1.\n' +
-          'Delete .descix/workspace.json and re-run "descix app init" to create a v2.1 workspace.'
-        );
-      }
-
-      return new WorkspaceConfig(parsed, workspaceRoot);
+      data = await fs.readFile(configPath, 'utf-8');
     } catch (error) {
-      if (error.message.includes('v1 workspace format')) throw error;
+      // ENOENT is the only genuinely ABSENT case reachable here: findWorkspaceRoot stat'd this
+      // file a moment ago, so ENOENT means it disappeared in between. Everything else — EACCES
+      // on a file we can see but not open, EISDIR, EIO — is a file that EXISTS. Reporting any of
+      // those as "not configured" is what sent users to `descix init` over recoverable data.
+      if (error.code === 'ENOENT') throw new Error(NOT_CONFIGURED_MESSAGE);
+      throw new WorkspaceUnreadableError(configPath, error);
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(data);
+    } catch (error) {
+      // The file is present and holds bytes we could not parse. Name the parse error and the
+      // path; never absorb this into "not configured".
+      throw new WorkspaceUnreadableError(configPath, error);
+    }
+
+    // v1 format hard-error: has communities block but no env block.
+    // This throw now sits OUTSIDE any catch, so it propagates on its own. The previous
+    // `error.message.includes('v1 workspace format')` re-throw was narrow string matching
+    // (DeSciX anti-pattern #6) guarding a catch that should never have been this wide.
+    if (parsed.communities && !parsed.env) {
       throw new Error(
-        'Workspace not configured.\n' +
-        'Run "npx descix init" first to initialize your workspace.'
+        'v1 workspace format is not supported. Migrate to v2.1.\n' +
+        'Delete .descix/workspace.json and re-run "descix app init" to create a v2.1 workspace.'
       );
     }
+
+    return new WorkspaceConfig(parsed, workspaceRoot);
   }
-  
+
   /**
    * Try to load workspace configuration, return null if not found
    * Useful for commands that need to check if workspace exists
-   * 
+   *
+   * RETURNS NULL FOR ABSENT, THROWS FOR UNREADABLE. "There is no workspace here" and "the
+   * workspace here is damaged" are different answers and only the first one is a soft no.
+   * Swallowing the second made a corrupt workspace look like a fresh directory, which is how a
+   * damaged workspace silently fell back to the DEFAULT (prod) origin instead of stopping.
+   *
    * @param {string} startDir - Directory to start searching from
-   * @returns {Promise<WorkspaceConfig|null>}
+   * @returns {Promise<WorkspaceConfig|null>} config, or null when no workspace.json exists
+   * @throws {WorkspaceUnreadableError} when one exists and cannot be read or parsed
    */
   static async tryLoad(startDir = process.cwd()) {
     try {
       return await WorkspaceConfig.load(startDir);
-    } catch {
+    } catch (error) {
+      if (error instanceof WorkspaceUnreadableError) throw error;
       return null;
     }
   }

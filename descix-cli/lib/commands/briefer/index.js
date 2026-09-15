@@ -218,16 +218,19 @@ export async function runBriefer(options = {}) {
   let workspaceConfig = null;
   try {
     workspaceConfig = await WorkspaceConfig.tryLoad(cwd);
-  } catch {
-    // tryLoad returns null on missing workspace; an exception here means the
-    // workspace.json file exists but is invalid. Hard-fail per philosophy —
-    // do NOT proceed with a guessed default workspace.
+  } catch (error) {
+    // tryLoad returns null on a MISSING workspace; it throws only when workspace.json EXISTS
+    // and cannot be read. Hard-fail per philosophy — do NOT proceed with a guessed default.
+    //
+    // The recovery text is the loader's own, not a second opinion invented here: it used to say
+    // "run `descix init` to regenerate", which prescribes overwriting the very file that could
+    // not be read, and which also contradicts the standing rule against hand-editing it.
     throw new BrieferExtractorError({
       code: BRIEFER_ERROR_CODES.PARSE_FAIL,
       section: 'briefer entry',
       source: '.descix/workspace.json',
       expected: 'valid v2.1 workspace JSON',
-      recovery: 'Fix the workspace.json or run `descix init` to regenerate.'
+      recovery: error.message
     });
   }
 
