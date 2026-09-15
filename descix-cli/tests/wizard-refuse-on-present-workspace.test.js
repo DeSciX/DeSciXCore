@@ -15,6 +15,12 @@
  *     calls requireAuth BEFORE it dynamically imports the wizard, and this suite holds no
  *     credentials, so it cannot drive the CLI binary past auth. That wiring is verified
  *     separately and statically by the reachability test at the bottom of this file.
+ *   FIXTURE VALIDITY, ENFORCED IN CODE: GATE B3b is B1's NEGATIVE CONTROL, and B1 REFUSES TO
+ *     REPORT PASS while B3b is red. B3b proves this harness can still PROCEED AND CREATE when
+ *     there is no workspace up-tree, which is what makes B1's refusal attributable to the PARENT
+ *     WORKSPACE rather than to the mere fact of being run in a subdirectory. On 2026-09-15 B3b
+ *     went red and B1 kept reporting GREEN, vacuously. A comment saying "B3b is the control" did
+ *     not reach the reader of that green; the only surface a citer of B1 reliably touches is B1.
  *   AUTH IS STUBBED: a local throwaway HTTP server answers validate_session/fetch_my_purchases.
  *     No platform call leaves this machine and no account state is touched.
  *   RUN BY: `npm test` in descix-cli (node --test "tests/*.test.js"). Nothing else runs it.
@@ -154,7 +160,52 @@ function refused(r, { wantVersion = null } = {}) {
   return { namesRefusal, namesPath, namesVersion, ok: namesRefusal && namesPath && namesVersion };
 }
 
-before(() => {
+// ===========================================================================================
+// FIXTURE-VALIDITY COUPLING — GATE B3b (negative control) GOVERNS GATE B1 (discriminator).
+//
+// B1 discriminates on a REFUSAL plus an ABSENCE: the wizard exits non-zero and leaves no nested
+// workspace.json. Both readings are attributable to the PARENT WORKSPACE only if this harness,
+// run in the same subdirectory with NOTHING up-tree, would instead PROCEED AND CREATE. That is
+// exactly what B3b measures. While B3b is red, every subdirectory run refuses and creates
+// nothing whatever the cause, so B1 cannot tell the guard from an unrelated refusal and MUST NOT
+// REPORT PASS.
+//
+// Measured ONCE here so the verdict exists before any gate reads it, independently of
+// declaration order or runner concurrency, and at no extra harness run: B3b consumes this same
+// measurement and asserts exactly what it always did.
+//
+// FAIL-CLOSED: every state that is not an observed PASS (NOT-RUN, a throw, a timeout) blocks B1.
+// ===========================================================================================
+let controlB3b = { state: 'NOT-RUN', why: 'the negative control has not been run yet', run: null };
+
+/**
+ * Called FIRST by GATE B1. Returns silently only when B3b was observed to PASS; otherwise fails
+ * B1 with a message naming the CONTROL as the thing to debug.
+ */
+function requireControlB3b(gate) {
+  if (controlB3b.state === 'PASS') return;
+  assert.fail([
+    `${gate} CANNOT REPORT PASS: its negative control GATE B3b is ${controlB3b.state}.`,
+    '',
+    `  WHY B3b GOVERNS ${gate}: ${gate} reads a REFUSAL and the ABSENCE of a nested`,
+    '    .descix/workspace.json, and attributes both to the PARENT WORKSPACE. That attribution',
+    '    holds only if the same harness, in the same subdirectory with NOTHING up-tree, would',
+    '    PROCEED AND CREATE instead. GATE B3b is that proof. With B3b red, every subdirectory run',
+    '    refuses and creates nothing whatever the cause, so a green here would be VACUOUS: it',
+    '    would read as coverage of a real, shipped, destructive defect (a wizard clobbering a',
+    '    healthy workspace / creating a nested one that SHADOWS its parent) while being unable',
+    '    to fail.',
+    '',
+    `  CONTROL STATE  : ${controlB3b.state}`,
+    `  CONTROL REASON : ${controlB3b.why}`,
+    '',
+    '  DEBUG THE CONTROL, NOT THIS GATE. This gate is making no claim about the product right',
+    '  now; it is refusing to report a result it cannot attribute. Fix GATE B3b (the harness must',
+    '  be able to proceed and create again) and this gate will discriminate once more.'
+  ].join('\n'));
+}
+
+before(async () => {
   console.log([
     '',
     '=== COVERAGE BOUNDARY (printed on GREEN as well as RED) ===',
@@ -167,10 +218,35 @@ before(() => {
     '           bin -> mcp.js -> wizard wiring is covered STATICALLY by the last test only.',
     'STUBBED  : auth/entitlements answered by a local throwaway server. Nothing leaves the',
     '           machine; no account state is touched.',
+    'COUPLED  : B1 is COUPLED TO B3b IN CODE. While B3b is red, B1 reports FAIL and names B3b as',
+    '           the thing to debug. B1 CANNOT emit a green its own control has not earned.',
     'RUN BY   : npm test (node --test "tests/*.test.js"). Nothing else runs it.',
     '==========================================================',
     ''
   ].join('\n'));
+
+  // Measure the negative control ONCE, before any gate reads its verdict.
+  try {
+    const r = await runWizard({ workspaceContent: null, stdinData: 'n\n', subdir: 'packages/inner' });
+    controlB3b.run = r;
+    if (r.timedOut) {
+      controlB3b = { ...controlB3b, state: 'FAIL', why: 'the control run TIMED OUT (the harness hung)' };
+    } else if (!r.nestedCreated) {
+      controlB3b = { ...controlB3b, state: 'FAIL',
+        why: 'THE FIXTURE IS INERT — with NO workspace up-tree the wizard still created nothing '
+           + `where it was invoked (child exit=${r.code}). Tail:\n` + r.combined.slice(-600) };
+    } else if (/Refusing/i.test(r.combined)) {
+      controlB3b = { ...controlB3b, state: 'FAIL',
+        why: 'the wizard REFUSED merely for being in a subdirectory, so a refusal in B1 cannot be '
+           + 'attributed to the parent workspace' };
+    } else {
+      controlB3b = { ...controlB3b, state: 'PASS',
+        why: `the harness proceeded and created a workspace where invoked (child exit=${r.code})` };
+    }
+  } catch (e) {
+    controlB3b = { state: 'FAIL', why: 'the control run THREW: ' + (e && e.message), run: null };
+  }
+  console.log(`[CONTROL B3b] state=${controlB3b.state} :: ${controlB3b.why.split('\n')[0]}`);
 });
 
 describe('quickstart wizard must not clobber a present workspace', () => {
@@ -258,6 +334,8 @@ describe('quickstart wizard must not clobber a present workspace', () => {
   // parent for every later resolution.
   for (const pass of [1, 2]) {
     test(`GATE B1 (pass ${pass}): a SUBDIRECTORY of an existing workspace REFUSES; no nested file created`, async () => {
+      // THE COUPLING. B1 may not report a green its own negative control has not earned.
+      requireControlB3b(`GATE B1 (pass ${pass})`);
       const r = await runWizard({ workspaceContent: HEALTHY, stdinData: 'n\n', subdir: 'packages/inner' });
       console.log(`[B1 p${pass}] runDir=${r.runDir}`);
       console.log(`[B1 p${pass}] exit=${r.code} timedOut=${r.timedOut} nestedCreated=${r.nestedCreated}`);
@@ -283,7 +361,10 @@ describe('quickstart wizard must not clobber a present workspace', () => {
   // This is the fixture that proves B1 refuses because of the PARENT WORKSPACE and not merely
   // because it was run in a subdirectory.
   test('GATE B3b (negative control for B1): a subdirectory with NO workspace up-tree still proceeds', async () => {
-    const r = await runWizard({ workspaceContent: null, stdinData: 'n\n', subdir: 'packages/inner' });
+    // Consumes the ONE control measurement taken in before(); asserts exactly what it always did.
+    const r = controlB3b.run;
+    console.log(`[B3b] state=${controlB3b.state}`);
+    assert.ok(r !== null, 'the negative control did not run at all: ' + controlB3b.why);
     console.log(`[B3b] exit=${r.code} timedOut=${r.timedOut} created-in-subdir=${r.nestedCreated}`);
     assert.equal(r.timedOut, false, 'wizard must not hang');
     assert.ok(r.nestedCreated,
