@@ -5072,7 +5072,13 @@ program
       }
     } else {
       console.log(chalk.cyan('\n📋 Initialize Workspace\n'));
-      await runInit({ path: workspaceRoot });
+      // runInit's signature is (apiClient, options). Passing a single object put it in the
+      // apiClient slot and left options defaulting to {}, so `path` was silently discarded and
+      // runInit fell back to process.cwd(). It was MASKED here only because workspaceRoot IS
+      // process.cwd() in this action — the argument was in the wrong slot regardless, and would
+      // have written the workspace to the wrong directory the moment that stopped being true.
+      // This action has no apiClient of its own; null is passed explicitly rather than implied.
+      await runInit(null, { path: workspaceRoot });
     }
 
     // EVERY REMAINING STEP TARGETS THE RESOLVED ROOT, not the directory the command was typed in.

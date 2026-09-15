@@ -1,10 +1,23 @@
 /**
  * Meta-test: anti-regression guard for removed WorkspaceConfig methods.
  *
- * This test greps the entire descix-cli/lib and descix-cli/bin trees (excluding
- * tests/) for any call to methods that were removed in WS-CLI-V2.1-PURGE.
- * Any non-zero match means a caller of a removed method has been (re-)introduced
- * and the build must fail before it ships.
+ * This test scans the entire descix-cli/lib and descix-cli/bin trees (excluding
+ * tests/) for TEXTUAL `.methodName(` call sites of methods that were removed.
+ * Any match means a caller of a removed method has been (re-)introduced and the
+ * build must fail before it ships.
+ *
+ * WHAT IT MATCHES, STATED HONESTLY, BECAUSE THE ONLY SURFACE A READER OF A GREEN
+ * RELIABLY TOUCHES IS THIS FILE. It matches the literal source text `.method(`.
+ * It therefore DOES NOT catch a reintroduction through a computed member access
+ * (`const m = 'listProducts'; cfg[m]()`), through destructuring, through a
+ * re-exported alias, or through any dynamically built name. It reads SOURCE TEXT,
+ * not the module graph, so it also says nothing about whether a matched line is
+ * reachable. It is a cheap tripwire for the ordinary way a deleted method comes
+ * back -- someone types the call -- and it is not a proof of absence.
+ *
+ * Proven to DISCRIMINATE by tampering a real site rather than by inspecting the
+ * pattern: appending a genuine `.registerProduct(...)` call into lib/ takes this
+ * to exit 1 naming the file and line; removing it returns exit 0.
  *
  * Removed methods guarded:
  *   .getApp(            — removed in PR #7; all call sites migrated in Batch 4
@@ -14,6 +27,14 @@
  *   .unregisterApp(     — removed in Batch 2
  *   .registerCommunity( — removed in Batch 2
  *   .unregisterCommunity( — removed in Batch 2
+ *   .registerProduct(   — removed with the legacy this.products map; it also silently
+ *                         DOWNGRADED a v2.1 workspace to version '2.0' on every write
+ *   .unregisterProduct( — removed with the legacy this.products map
+ *   .getProduct(        — removed with the legacy this.products map
+ *   .listProducts(      — removed with the legacy this.products map
+ *   .computeAbsolutePaths( — removed with it: its entire body read that map, it had ZERO
+ *                         callers, and its own doc comment claimed save() called it — save()
+ *                         never did
  *
  * Design: uses Node.js fs + regex scan — no shell exec, no external tools.
  * Operates on absolute paths so it is CI-safe regardless of cwd.
@@ -38,6 +59,11 @@ const REMOVED_METHOD_PATTERNS = [
   /\.unregisterApp\(/,
   /\.registerCommunity\(/,
   /\.unregisterCommunity\(/,
+  /\.registerProduct\(/,
+  /\.unregisterProduct\(/,
+  /\.getProduct\(/,
+  /\.listProducts\(/,
+  /\.computeAbsolutePaths\(/,
 ];
 
 /**
