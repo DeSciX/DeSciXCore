@@ -24,6 +24,7 @@ import inquirer from 'inquirer';
 import { DeSciXApiClient } from '../api-client.js';
 import { ENV_ORIGINS } from '@descix/app-sdk/dev';
 import { requireAuth, isAuthenticated } from '../auth-guard.js';
+import { WorkspaceConfig } from '../workspace-config.js';
 import * as authCommands from '../commands/auth.js';
 import * as fs from 'fs/promises';
 import * as path from 'path';
@@ -179,12 +180,73 @@ function getMcpServerConfig() {
   };
 }
 
+/**
+ * Refuse to run when a workspace already exists here.
+ *
+ * quickstart CREATES a workspace. It has no migration or merge semantics, so running it over a
+ * present one can only destroy information. This is a REFUSAL and deliberately NOT a prompt:
+ * an agent caller hangs forever on a question, and a refusal is machine-readable where a
+ * question is not.
+ *
+ * Presence and version are read from the target path directly rather than through
+ * WorkspaceConfig.load(), because load() reports a present-but-unreadable file as "not
+ * configured" — which would make a CORRUPT workspace look ABSENT here and let it be clobbered,
+ * the exact case this guard exists to stop. When load() learns to distinguish absent from
+ * unreadable, this should consume it instead of reading the path itself.
+ *
+ * @param {string} workspaceRoot - directory the wizard would write into
+ * @throws {Error} naming the path and what was found, when a workspace is already present
+ */
+async function refuseIfWorkspacePresent(workspaceRoot) {
+  const configPath = path.join(workspaceRoot, '.descix', 'workspace.json');
+
+  let raw;
+  try {
+    raw = await fs.readFile(configPath, 'utf-8');
+  } catch (err) {
+    if (err.code === 'ENOENT') return; // the ordinary first run — nothing to protect
+    throw new Error(
+      `Refusing to run quickstart: ${configPath} exists but could not be read (${err.message}).\n` +
+      'Quickstart will not write over a file it cannot inspect.'
+    );
+  }
+
+  let found;
+  try {
+    const parsed = JSON.parse(raw);
+    const version = parsed && parsed.version ? parsed.version : 'no version field';
+    found = `version ${version}`;
+  } catch (err) {
+    found = `unparseable JSON (${err.message})`;
+  }
+
+  throw new Error(
+    `Refusing to overwrite ${configPath} — a workspace is already configured here (${found}).\n` +
+    '\nquickstart CREATES a workspace; it does not migrate or merge an existing one, and ' +
+    'writing over this file would destroy whatever it holds.\n' +
+    '\nTo change the workspace you already have, use the verbs that own it:\n' +
+    '  descix config show                 # what is configured right now\n' +
+    '  descix config set-env <env>        # retarget the environment\n' +
+    '  descix config set-url <url>        # retarget the API origin\n' +
+    '  descix config set-gateway-port <n> # change the gateway port\n' +
+    '  descix app init                    # register another app in this workspace\n'
+  );
+}
+
 // ============ Main Wizard ============
 
 /**
  * Run the interactive setup wizard
  */
 export async function runSetupWizard(options = {}) {
+  // ONE derivation of the workspace root, shared by the guard and the write it protects.
+  const workspaceRoot = process.cwd();
+
+  // BEFORE the banner and before every side effect: this wizard also writes
+  // .cursor/mcp.json and pulls SDK assets, so a guard placed further down would
+  // refuse only after those had already landed.
+  await refuseIfWorkspacePresent(workspaceRoot);
+
   console.log(chalk.cyan('\n┌─────────────────────────────────────────────────┐'));
   console.log(chalk.cyan('│        Welcome to DeSciX CLI/MCP Setup          │'));
   console.log(chalk.cyan('├─────────────────────────────────────────────────┤'));
@@ -200,7 +262,6 @@ export async function runSetupWizard(options = {}) {
   console.log(chalk.cyan('│  configure your workspace folders.              │'));
   console.log(chalk.cyan('└─────────────────────────────────────────────────┘\n'));
 
-  const workspaceRoot = process.cwd();
   const spinner = ora('Initializing...').start();
 
   try {
@@ -437,27 +498,19 @@ export async function runSetupWizard(options = {}) {
     // Step 5: Create workspace config
     spinner.start('Creating workspace configuration...');
     
-    const config = {
-      version: '2.0',
-      primaryCommunity,
-      directoryMappings: {},  // Empty - AI agent will configure after setup
-      additionalContexts: [],
-      defaultContext: {
-        communityId: primaryCommunity,
-        appId: 'daita',
-        kbId: 'General'
-      },
-      apiUrl: apiUrl,
-      environment: apiUrl.includes('localhost') ? 'development' : 'production',
-      _setupStatus: 'mcp_ready',
-      _needsAgentSetup: true,  // Flag for AI agent to help with workspace config
-      _sdkVersion: SDK_VERSION
-    };
-    
-    const descixDir = path.join(workspaceRoot, '.descix');
-    await fs.mkdir(descixDir, { recursive: true });
-    const configPath = path.join(descixDir, 'workspace.json');
-    await fs.writeFile(configPath, JSON.stringify(config, null, 2));
+    // The SHAPE of this file is owned by WorkspaceConfig and it is written ONLY via save().
+    // This used to build a config literal and call fs.writeFile directly — no existence check,
+    // no parse check, no save() — which both clobbered present workspaces and stamped a
+    // version '2.0' shape on a v2.1 platform. The version is the owner's concern now.
+    //
+    // The env NAME comes from the owner's own ENV_MAP rather than being re-derived from the URL
+    // here; an origin the owner does not know is recorded as DEV carrying its explicit URL,
+    // because inventing a label at this call site would be a second derivation of one fact.
+    const envName = (Object.entries(WorkspaceConfig.ENV_MAP)
+      .find(([, entry]) => entry.url === apiUrl) || ['dev'])[0];
+
+    const workspace = new WorkspaceConfig({ type: 'workspace' }, workspaceRoot);
+    const { configPath } = await workspace.setEnvironment(envName, apiUrl);
     
     spinner.succeed('Workspace configured');
     console.log(chalk.gray(`  Created: .descix/workspace.json\n`));
