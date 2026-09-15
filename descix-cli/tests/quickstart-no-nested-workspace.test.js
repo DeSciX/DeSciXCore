@@ -29,6 +29,11 @@
  *     runInit to a successful WRITE, so that C1's absence of a file is attributable to the guard
  *     and not to a fixture that could never have produced one. Without C2, C1 passes on a broken
  *     fixture — which is exactly how this gate was nearly built.
+ *   AND THE COUPLING IS ENFORCED IN CODE, NOT DESCRIBED IN THIS COMMENT: C1 REFUSES TO REPORT
+ *     PASS while C2 is red. It was described here first and that was not enough — on 2026-09-15
+ *     C2 went red and C1 kept reporting GREEN, vacuously, because nothing could create a
+ *     workspace through this harness any more. A comment does not reach the reader of a green;
+ *     the only surface a citer of C1 reliably touches is C1.
  *   NO NETWORK, NO CREDENTIAL: the wallet is shape-only and disposable; no platform call is made
  *     and no account state is touched.
  *   RUN BY: `npm test` in descix-cli (node --test "tests/*.test.js"). Nothing else runs it.
@@ -129,7 +134,49 @@ async function runQuickstart({ withParentWorkspace }) {
   };
 }
 
-before(() => {
+// ===========================================================================================
+// FIXTURE-VALIDITY COUPLING — GATE C2 (positive control) GOVERNS GATE C1 (discriminator).
+//
+// C1 discriminates on an ABSENCE: that no nested .descix/workspace.json was created. An absence
+// is evidence ONLY if this harness could have produced a PRESENCE. C2 is the proof that it could.
+// While C2 is red, C1's absence is UNATTRIBUTABLE — indistinguishable from a harness that creates
+// nothing under any conditions — so C1 must report FAIL, never pass.
+//
+// The control is measured ONCE here rather than inside the C2 test so that the verdict exists
+// before ANY gate reads it, independently of declaration order or runner concurrency. It costs no
+// extra harness run: C2 consumes this same measurement and asserts exactly what it always did.
+//
+// FAIL-CLOSED: every state that is not an observed PASS (NOT-RUN, a throw, a timeout) blocks C1.
+// ===========================================================================================
+let controlC2 = { state: 'NOT-RUN', why: 'the positive control has not been run yet', run: null };
+
+/**
+ * Called FIRST by GATE C1. Returns silently only when C2 was observed to PASS; otherwise fails
+ * C1 with a message that names the CONTROL as the thing to debug — a refusal that does not name
+ * its cause sends the next reader to debug the wrong gate.
+ */
+function requireControlC2(gate) {
+  if (controlC2.state === 'PASS') return;
+  assert.fail([
+    `${gate} CANNOT REPORT PASS: its positive control GATE C2 is ${controlC2.state}.`,
+    '',
+    `  WHY C2 GOVERNS ${gate}: ${gate} discriminates on the ABSENCE of a nested`,
+    '    .descix/workspace.json. An absence is evidence ONLY if this harness could have produced',
+    '    a PRESENCE. GATE C2 is the proof that it could. With C2 red, the fixture CANNOT BE SHOWN',
+    '    able to produce the write this gate discriminates on, so a green here would be VACUOUS:',
+    '    it would read as coverage of a real, shipped, destructive defect (a quickstart creating a',
+    '    nested workspace that silently SHADOWS its parent) while being unable to fail.',
+    '',
+    `  CONTROL STATE  : ${controlC2.state}`,
+    `  CONTROL REASON : ${controlC2.why}`,
+    '',
+    '  DEBUG THE CONTROL, NOT THIS GATE. This gate is making no claim about the product right',
+    '  now; it is refusing to report a result it cannot attribute. Fix GATE C2 (the harness must',
+    '  be able to create a workspace again) and this gate will discriminate once more.'
+  ].join('\n'));
+}
+
+before(async () => {
   console.log([
     '',
     '=== COVERAGE BOUNDARY (printed on GREEN as well as RED) ===',
@@ -142,11 +189,32 @@ before(() => {
     '           nested case — they run in cwd as before; re-pointing them is a separate decision.',
     'FIXTURE  : C2 is a POSITIVE CONTROL proving the stdin script really drives runInit to a',
     '           WRITE. Without it, C1 would pass on a fixture that could never create a file.',
+    'COUPLED  : C1 is COUPLED TO C2 IN CODE. While C2 is red, C1 reports FAIL and names C2 as',
+    '           the thing to debug. C1 CANNOT emit a green its own control has not earned.',
     'NO NET   : shape-only disposable wallet; no platform call, no account state touched.',
     'RUN BY   : npm test (node --test "tests/*.test.js"). Nothing else runs it.',
     '==========================================================',
     ''
   ].join('\n'));
+
+  // Measure the positive control ONCE, before any gate reads its verdict.
+  try {
+    const r = await runQuickstart({ withParentWorkspace: false });
+    controlC2.run = r;
+    if (r.timedOut) {
+      controlC2 = { ...controlC2, state: 'FAIL', why: 'the control run TIMED OUT (the harness hung)' };
+    } else if (!r.nestedCreated) {
+      controlC2 = { ...controlC2, state: 'FAIL',
+        why: 'THE FIXTURE IS INERT — with NOTHING above it the harness still created no '
+           + `workspace.json (child exit=${r.code}). Tail:\n` + r.combined.slice(-600) };
+    } else {
+      controlC2 = { ...controlC2, state: 'PASS',
+        why: `the harness drove runInit to a real write (child exit=${r.code})` };
+    }
+  } catch (e) {
+    controlC2 = { state: 'FAIL', why: 'the control run THREW: ' + (e && e.message), run: null };
+  }
+  console.log(`[CONTROL C2] state=${controlC2.state} :: ${controlC2.why.split('\n')[0]}`);
 });
 
 describe('descix quickstart must not create a nested workspace', () => {
@@ -154,6 +222,8 @@ describe('descix quickstart must not create a nested workspace', () => {
   // GATE C1 — THE DISCRIMINATOR. Run twice.
   for (const pass of [1, 2]) {
     test(`GATE C1 (pass ${pass}): in a SUBDIRECTORY of an existing workspace, creates NO nested workspace`, async () => {
+      // THE COUPLING. C1 may not report a green its own positive control has not earned.
+      requireControlC2(`GATE C1 (pass ${pass})`);
       const r = await runQuickstart({ withParentWorkspace: true });
       console.log(`[C1 p${pass}] subdir=${r.subdir}`);
       console.log(`[C1 p${pass}] exit=${r.code} timedOut=${r.timedOut} nestedCreated=${r.nestedCreated}`);
@@ -178,7 +248,10 @@ describe('descix quickstart must not create a nested workspace', () => {
   // GATE C2 — POSITIVE CONTROL for C1's fixture. Proves the harness CAN produce a workspace.json,
   // so C1's absence of one is attributable to the guard and not to an inert fixture.
   test('GATE C2 (positive control): with NO workspace up-tree the SAME harness DOES create one', async () => {
-    const r = await runQuickstart({ withParentWorkspace: false });
+    // Consumes the ONE control measurement taken in before(); asserts exactly what it always did.
+    const r = controlC2.run;
+    console.log(`[C2] state=${controlC2.state}`);
+    assert.ok(r !== null, 'the positive control did not run at all: ' + controlC2.why);
     console.log(`[C2] exit=${r.code} timedOut=${r.timedOut} created=${r.nestedCreated}`);
     assert.equal(r.timedOut, false, 'quickstart must not hang');
     assert.ok(r.nestedCreated,
