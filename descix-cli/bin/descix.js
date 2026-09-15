@@ -5036,29 +5036,49 @@ program
       await authCommands.loginDevice(loginOptions);
     }
 
-    // Step 2: Workspace init — create workspace.json if missing
-    const wsConfigPath = path.join(workspaceRoot, '.descix', 'workspace.json');
-    let hasWorkspace = false;
-    try {
-      await fs.access(wsConfigPath);
-      hasWorkspace = true;
+    // Step 2: Workspace init — create workspace.json only when there is none ANYWHERE UP THE TREE.
+    //
+    // WHERE THE WORKSPACE ROOT IS has ONE OWNER: WorkspaceConfig.findWorkspaceRoot, which walks UP
+    // exactly as load() does. This step used to derive it a THIRD time with fs.access on the target
+    // path only (the wizard guard was the second). Run from a SUBDIRECTORY of an existing
+    // workspace, that check saw nothing, runInit created a NESTED workspace.json whose
+    // workspaceRoot pointed at the subdirectory, and it SHADOWED the parent for every later
+    // resolution — silently, with "Quickstart complete!" and exit 0.
+    //
+    // quickstart is an ONBOARDING flow: a user who asked to be set up and already IS set up has
+    // SUCCEEDED, so this SKIPS and REPORTS and continues. `descix mcp quickstart` refuses non-zero
+    // on the same fact because it was asked specifically to CREATE a workspace and cannot honour
+    // that. Different verbs, different contracts, ONE OWNER for the underlying fact.
+    const existingRoot = await WorkspaceConfig.findWorkspaceRoot(workspaceRoot);
+    if (existingRoot) {
       console.log(chalk.green('✓ Workspace already initialized'));
-    } catch { /* missing */ }
-
-    if (!hasWorkspace) {
+      if (path.resolve(existingRoot) !== path.resolve(workspaceRoot)) {
+        console.log(chalk.gray(`  Workspace root: ${existingRoot}`));
+        console.log(chalk.gray(`  You are in a subdirectory of it. Not creating a second workspace`));
+        console.log(chalk.gray(`  here — a nested one would shadow the root for every command run`));
+        console.log(chalk.gray(`  from this directory.`));
+      }
+    } else {
       console.log(chalk.cyan('\n📋 Initialize Workspace\n'));
       await runInit({ path: workspaceRoot });
     }
 
+    // EVERY REMAINING STEP TARGETS THE RESOLVED ROOT, not the directory the command was typed in.
+    // They read the workspace to learn the app, community and origin they must state, so pointing
+    // them at a subdirectory that deliberately has no workspace.json makes them hard-fail on the
+    // absence this command just chose to preserve. Resolving the root once and ferrying it is the
+    // same one-owner rule that fixed the check above.
+    const targetRoot = existingRoot || workspaceRoot;
+
     // Step 3: Generate agent instruction files
     console.log(chalk.cyan('\n📋 Generating Agent Instructions\n'));
-    const written = await generateAgentFiles(workspaceRoot);
+    const written = await generateAgentFiles(targetRoot);
     for (const f of written) {
       console.log(chalk.green(`  ✓ ${f}`));
     }
 
     // Step 4: Generate .vscode/mcp.json (skipped if DeSciX extension handles MCP)
-    const mcpWritten = await generateMcpConfig(workspaceRoot);
+    const mcpWritten = await generateMcpConfig(targetRoot);
     if (mcpWritten) {
       console.log(chalk.green('  ✓ .vscode/mcp.json'));
     } else {
@@ -5068,7 +5088,7 @@ program
     // Step 5: Copy SDK assets
     try {
       const { pullSdkAssets } = await import('../lib/wizard/setup.js');
-      const pulled = await pullSdkAssets(workspaceRoot);
+      const pulled = await pullSdkAssets(targetRoot);
       if (pulled) console.log(chalk.green('  ✓ .descix/sdk-assets/'));
     } catch { /* setup.js pullSdkAssets may not be exported — skip */ }
 
