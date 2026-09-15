@@ -11,7 +11,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { DeSciXApiClient } from '../lib/api-client.js';
 import { requireAuth } from '../lib/auth-guard.js';
-import { WorkspaceConfig, unmappedAppMessage } from '../lib/workspace-config.js';
+import { WorkspaceConfig, unmappedAppMessage, resolveWorkspacePath } from '../lib/workspace-config.js';
 import { CLI_VERSION } from '../lib/cli-version.js';
 import { recordInvocationOrigin } from '../lib/origin.js';
 // Chat session pointer + the ONE rule for when a dead pointer may be self-healed.
@@ -1742,26 +1742,43 @@ appCommand
       const newPath = options.path;
 
       const workspaceConfig = await WorkspaceConfig.load();
-      const appConfig = workspaceConfig.getAppByAppId(appId);
-      if (!appConfig) {
-        throw new Error(`App '${appId}' is not mapped. Run 'descix app init -a ${appId}' first.`);
-      }
+      const wsRoot = workspaceConfig.workspaceRoot || process.cwd();
 
-      // Hard-fail if path doesn't exist or is not a directory
+      // Read the RAW registry entry, never the RESOLVED one. getAppByAppId() resolves the stored
+      // localPath through resolveWorkspacePath, so on a workspace that already carries a rejected
+      // value it throws here — before any write is even attempted. That is what made this verb
+      // refuse exactly when it was needed, while the rejection it threw told the user to fix it
+      // with the config verb and never by hand. This command is about to REPLACE that value; it
+      // has no business resolving it.
+      const current = workspaceConfig.getAppEntry(appId);
+      if (!current) {
+        throw new Error(unmappedAppMessage(appId));
+      }
+      const oldPath = current.localPath;
+
+      // VALIDATE AT THE WRITE, through the LOADER'S OWN resolver — not a second copy of its rules.
+      // If resolveWorkspacePath would reject this value on the next read, it is rejected now, and
+      // nothing reaches disk. Writing a value the loader will refuse is what bricks a workspace.
+      const absPath = resolveWorkspacePath(wsRoot, newPath, appId);
+
+      // Hard-fail if path doesn't exist or is not a directory — checked at the path the LOADER
+      // will resolve to, not at a CWD-relative path that only exists from where you happened to
+      // be standing when you typed it.
       let stat;
       try {
-        stat = await fs.stat(newPath);
+        stat = await fs.stat(absPath);
       } catch {
-        throw new Error(`Path does not exist: ${newPath}`);
+        throw new Error(
+          `Path does not exist: ${absPath}\n` +
+          `  (localPath '${newPath}' resolved against workspace root ${wsRoot})`
+        );
       }
       if (!stat.isDirectory()) {
-        throw new Error(`Path is not a directory: ${newPath}`);
+        throw new Error(
+          `Path is not a directory: ${absPath}\n` +
+          `  (localPath '${newPath}' resolved against workspace root ${wsRoot})`
+        );
       }
-
-      // Update the localPath in workspace.json
-      const wsRoot = workspaceConfig.workspaceRoot || process.cwd();
-      const oldPath = appConfig.localPath;
-      appConfig.localPath = newPath;
 
       // Update env.products entry
       const products = workspaceConfig.env?.products || [];
