@@ -155,9 +155,6 @@ export class WorkspaceConfig {
     this.environment = config.environment;
     this.directoryMappings = config.directoryMappings || {};
 
-    // V2.1 Product tracking (Unified Registry)
-    this.products = config.products || {};
-
     // app_id → localPath map from env.platform + env.products (Unified Registry)
     this._appIdToConfig = this._buildAppIdMap(config);
     
@@ -527,23 +524,6 @@ export class WorkspaceConfig {
     return configPath;
   }
   
-  /**
-   * Compute and store absolute paths for all communities and apps
-   * Called automatically by save() to ensure paths are pre-computed
-   * 
-   * @param {string} workspaceRoot - Workspace root directory
-   */
-  computeAbsolutePaths(workspaceRoot) {
-    const absWorkspaceRoot = path.resolve(workspaceRoot);
-
-    // Compute absolute paths for products
-    for (const [productId, product] of Object.entries(this.products || {})) {
-      if (product.localPath) {
-        product.absolutePath = resolveWorkspacePath(absWorkspaceRoot, product.localPath, productId);
-      }
-    }
-  }
-  
   // ============ App Registration Methods ============
 
   /**
@@ -560,6 +540,14 @@ export class WorkspaceConfig {
     if (!appId || !appConfig.localPath) {
       throw new Error('appId and localPath are required');
     }
+
+    // Validate through THE LOADER'S OWN RESOLVER — the same owner setLocalPath consumes, never a
+    // second copy of its rules. Three writers persisted a localPath and only ONE validated it, so
+    // `descix app init -p /abs` wrote an absolute value, created directories at that arbitrary
+    // absolute location, printed success, and bricked the workspace on the NEXT read — the loader
+    // refused the value for every command including the repair verbs, while the refusal forbade
+    // hand-editing. A path this CLI accepts must be honoured, or refused before anything is written.
+    resolveWorkspacePath(this.workspaceRoot, appConfig.localPath, appId);
 
     if (!this.env) this.env = {};
     if (!Array.isArray(this.env.products)) this.env.products = [];
@@ -590,58 +578,6 @@ export class WorkspaceConfig {
     return true;
   }
   
-  /**
-   * Register a product (Unified Registry)
-   * @param {string} productId - Global product identifier
-   * @param {Object} productConfig - Product configuration
-   * @returns {boolean} Success status
-   */
-  registerProduct(productId, productConfig) {
-    if (!productId || !productConfig.localPath) {
-      throw new Error('productId and localPath are required');
-    }
-    
-    this.products[productId] = {
-      type: productConfig.type || 'APP',
-      localPath: productConfig.localPath,
-      context: productConfig.context || {},
-      registeredAt: new Date().toISOString()
-    };
-    
-    this.version = '2.0';
-    return true;
-  }
-
-  /**
-   * Get product configuration
-   * @param {string} productId 
-   * @returns {Object|null}
-   */
-  getProduct(productId) {
-    return this.products[productId] || null;
-  }
-
-  /**
-   * List all registered products
-   * @returns {Array} Array of product IDs
-   */
-  listProducts() {
-    return Object.keys(this.products);
-  }
-
-  /**
-   * Remove a product registration
-   * @param {string} productId 
-   * @returns {boolean}
-   */
-  unregisterProduct(productId) {
-    if (this.products[productId]) {
-      delete this.products[productId];
-      return true;
-    }
-    return false;
-  }
-
   /**
    * Resolve context based on file path
    * 
@@ -698,23 +634,6 @@ export class WorkspaceConfig {
             kbId: cfg.kbId || 'General'
           };
         }
-      }
-    }
-    
-    // products object (legacy)
-    for (const [productId, product] of Object.entries(this.products || {})) {
-      let productPath = product.absolutePath;
-      if (!productPath && product.localPath && wsRoot) {
-        productPath = resolveWorkspacePath(wsRoot, product.localPath, productId);
-      }
-
-      if (productPath && cwd.startsWith(productPath)) {
-        return {
-          productId,
-          communityId: product.context?.community || null,
-          appId: product.context?.app || productId,
-          kbId: product.kbId || 'General'
-        };
       }
     }
     
