@@ -28,6 +28,8 @@
  */
 
 import fs from 'fs';
+// "May I prompt?" has ONE OWNER. This site holds no TTY check of its own.
+import { requireInteractive } from '../interactive.js';
 import readline from 'readline';
 import chalk from 'chalk';
 import { DeSciXApiClient } from '../api-client.js';
@@ -65,6 +67,14 @@ export function readSignerPkFromFile(path) {
  * @returns {Promise<string>} Validated PK in `0x` + 64 hex form.
  */
 export async function promptSignerPkInteractive({ stdin = process.stdin, stdout = process.stdout } = {}) {
+    // Gate FIRST: a non-TTY here previously hung forever holding a secret prompt open. This site
+    // keeps its own readline because it must disable terminal echo so the PK is never displayed;
+    // the DECISION of whether prompting is allowed is still the owner's alone.
+    requireInteractive({
+        what: 'descix airdrop',
+        question: 'signer private key',
+        nonInteractiveForm: ['descix airdrop --signer-pk-file <path>   # reads the key from a file, never echoed']
+    });
     return await new Promise((resolve, reject) => {
         const rl = readline.createInterface({ input: stdin, output: stdout, terminal: true });
         // Disable echo so the PK isn't visible while typing.

@@ -29,6 +29,8 @@ import * as buyCommands from '../lib/commands/buy.js';
 import * as creditsCommands from '../lib/commands/credits.js';
 import * as airdropCommands from '../lib/commands/airdrop.js';
 import { runInit } from '../lib/commands/init.js';
+// "May I prompt?" has ONE OWNER. No command in this file derives it.
+import { createPromptSession } from '../lib/interactive.js';
 import * as updateCommands from '../lib/commands/update.js';
 import { registerAllRetiredKbSync, refuseRetiredKbSync, CANONICAL_KB_SYNC } from '../lib/commands/retired-kb-sync.js';
 import { runStatus } from '../lib/commands/status.js';
@@ -612,11 +614,12 @@ communityCommand
       console.log(chalk.white(`  Network:         Polygon (live)\n`));
 
       if (!options.yes) {
-        const readline = await import('readline');
-        const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-        const answer = await new Promise(resolve => {
-          rl.question(chalk.yellow(`  Create community "${options.name}" with token ${tokenSymbol} on live Polygon? [y/N] `), resolve);
+        const rl = createPromptSession({
+          what: 'descix community create',
+          destructive: true,
+          nonInteractiveForm: ['descix community create ... --yes   # deploys a REAL token contract on live Polygon']
         });
+        const answer = await rl.askRaw(chalk.yellow(`  Create community "${options.name}" with token ${tokenSymbol} on live Polygon? [y/N] `));
         rl.close();
         if (answer.toLowerCase() !== 'y') {
           console.log(chalk.gray('\n  Aborted.\n'));
@@ -713,11 +716,15 @@ communityCommand
 
       // Confirmation prompt (unless --yes)
       if (!options.yes && hardDelete) {
-        const readline = await import('readline');
-        const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-        const answer = await new Promise(resolve => {
-          rl.question(chalk.yellow(`\n  Permanently delete community "${manifest.community_name}" and all ${manifest.app_count} app(s)? This cannot be undone. [y/N] `), resolve);
+        const rl = createPromptSession({
+          what: 'descix community delete',
+          destructive: true,
+          nonInteractiveForm: [
+            'Re-run with --dry-run to see the plan without changing anything.',
+            'descix community delete ... --yes   # PERMANENTLY deletes the community and every app in it'
+          ]
         });
+        const answer = await rl.askRaw(chalk.yellow(`\n  Permanently delete community "${manifest.community_name}" and all ${manifest.app_count} app(s)? This cannot be undone. [y/N] `));
         rl.close();
         if (answer.toLowerCase() !== 'y') {
           console.log(chalk.gray('\n  Aborted.\n'));
@@ -803,12 +810,15 @@ communityCommand
       }
 
       if (!options.yes) {
-        const readline = await import('readline');
-        const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-        const answer = await new Promise(resolve => rl.question(
-          chalk.yellow(`\n  Execute rename ${oldId} -> ${newId}? Re-tags ${plan.pinecone.matched} vector(s) and deletes Community/${oldId} after verifying Community/${newId}. [y/N] `),
-          resolve
-        ));
+        const rl = createPromptSession({
+          what: 'descix community rename',
+          destructive: true,
+          nonInteractiveForm: [
+            'Re-run with --dry-run to see the plan without changing anything.',
+            'descix community rename ... --yes   # re-tags vectors and DELETES the old community doc'
+          ]
+        });
+        const answer = await rl.askRaw(chalk.yellow(`\n  Execute rename ${oldId} -> ${newId}? Re-tags ${plan.pinecone.matched} vector(s) and deletes Community/${oldId} after verifying Community/${newId}. [y/N] `));
         rl.close();
         if (answer.toLowerCase() !== 'y') {
           console.log(chalk.gray('\n  Aborted.\n'));
@@ -1608,11 +1618,15 @@ appCommand
 
       // Confirmation prompt (unless --yes)
       if (!options.yes && hardDelete) {
-        const readline = await import('readline');
-        const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-        const answer = await new Promise(resolve => {
-          rl.question(chalk.yellow(`\n  Permanently delete ${appId}? This cannot be undone. [y/N] `), resolve);
+        const rl = createPromptSession({
+          what: 'descix app delete',
+          destructive: true,
+          nonInteractiveForm: [
+            'Re-run with --dry-run to see the plan without changing anything.',
+            `descix app delete -a ${appId} --hard --yes   # PERMANENTLY deletes the app`
+          ]
         });
+        const answer = await rl.askRaw(chalk.yellow(`\n  Permanently delete ${appId}? This cannot be undone. [y/N] `));
         rl.close();
         if (answer.toLowerCase() !== 'y') {
           console.log(chalk.gray('\n  Aborted.\n'));
@@ -3062,15 +3076,13 @@ siteCommand
       }
       
       if (!options.confirm) {
-        const readline = await import('readline');
-        const rl = readline.createInterface({
-          input: process.stdin,
-          output: process.stdout
+        const rl = createPromptSession({
+          what: 'descix site delete',
+          destructive: true,
+          nonInteractiveForm: [`descix site delete -c ${communityId} -a ${appId} --confirm   # deletes the uploaded site files`]
         });
-        
-        const answer = await new Promise(resolve => {
-          rl.question(chalk.yellow(`\n⚠️  Delete site for ${communityId}/${appId}${options.preview ? ' (preview)' : ''}? (y/N) `), resolve);
-        });
+
+        const answer = await rl.askRaw(chalk.yellow(`\n⚠️  Delete site for ${communityId}/${appId}${options.preview ? ' (preview)' : ''}? (y/N) `));
         rl.close();
         
         if (answer.toLowerCase() !== 'y') {

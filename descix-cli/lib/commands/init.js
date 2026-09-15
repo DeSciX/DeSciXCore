@@ -5,7 +5,6 @@
  */
 
 import chalk from 'chalk';
-import readline from 'readline';
 import path from 'path';
 import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
@@ -17,48 +16,11 @@ import { generateAgentFiles } from '../agent-files.js';
 // spelled here is a second derivation of the same fact, and the removed verb this replaced
 // reached a developer who had done everything right.
 import { CANONICAL_KB_SYNC } from './retired-kb-sync.js';
+// "May I prompt?" has ONE OWNER. init does not derive it, and holds no TTY check of its own.
+import { createPromptSession } from '../interactive.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-
-/**
- * Create readline interface for interactive prompts
- */
-function createPrompt() {
-  return readline.createInterface({
-    input: process.stdin,
-    output: process.stdout
-  });
-}
-
-/**
- * Ask for text input with optional default
- */
-function askInput(rl, question, defaultValue = '') {
-  return new Promise((resolve) => {
-    const prompt = defaultValue ? `${question} [${defaultValue}]: ` : `${question}: `;
-    rl.question(prompt, (answer) => {
-      resolve(answer.trim() || defaultValue);
-    });
-  });
-}
-
-/**
- * Ask a yes/no question
- */
-function askYesNo(rl, question, defaultYes = true) {
-  return new Promise((resolve) => {
-    const suffix = defaultYes ? '(Y/n)' : '(y/N)';
-    rl.question(`${question} ${suffix}: `, (answer) => {
-      const trimmed = answer.trim().toLowerCase();
-      if (trimmed === '') {
-        resolve(defaultYes);
-      } else {
-        resolve(trimmed === 'y' || trimmed === 'yes');
-      }
-    });
-  });
-}
 
 /**
  * Run the init command
@@ -66,7 +28,17 @@ function askYesNo(rl, question, defaultYes = true) {
  * @param {Object} options - Command options
  */
 export async function runInit(apiClient, options = {}) {
-  const rl = createPrompt();
+  // The session is GATED AT CONSTRUCTION: under a non-TTY this throws NonInteractiveError,
+  // which bin/descix.js's init action prints and exits 1 on. It can no longer hang on an open
+  // pipe/FIFO, nor exit 0 writing nothing on /dev/null.
+  const rl = createPromptSession({
+    what: 'descix init',
+    nonInteractiveForm: [
+      'descix init has no non-interactive form today. Run it in a terminal.',
+      '',
+      'Nothing has been changed. An existing .descix/workspace.json is left as it is.'
+    ]
+  });
   const projectPath = options.path ? path.resolve(options.path) : process.cwd();
 
   // If --from-invite provided, resolve the invite first to pre-fill context
@@ -134,7 +106,7 @@ export async function runInit(apiClient, options = {}) {
     }
 
     if (hasExisting && !options.force) {
-      const overwrite = await askYesNo(rl, chalk.yellow('Workspace already initialized. Overwrite?'), false);
+      const overwrite = await rl.askYesNo(chalk.yellow('Workspace already initialized. Overwrite?'), false);
       if (!overwrite) {
         console.log(chalk.gray('\nInitialization cancelled.\n'));
         rl.close();
@@ -160,7 +132,7 @@ export async function runInit(apiClient, options = {}) {
           // ignore
         }
       }
-      communityId = await askInput(rl, chalk.white('Community ID'));
+      communityId = await rl.ask(chalk.white('Community ID'));
       if (!communityId) {
         console.log(chalk.red('\n❌ Community ID is required.\n'));
         rl.close();
@@ -171,7 +143,7 @@ export async function runInit(apiClient, options = {}) {
     const defaultAppName = path.basename(projectPath).toLowerCase().replace(/[^a-z0-9]/g, '_');
     let appName = options.app;
     if (!appName) {
-      appName = await askInput(rl, chalk.white('App name'), defaultAppName);
+      appName = await rl.ask(chalk.white('App name'), defaultAppName);
       if (!appName) {
         console.log(chalk.red('\n❌ App name is required.\n'));
         rl.close();
@@ -185,7 +157,7 @@ export async function runInit(apiClient, options = {}) {
     console.log(chalk.white(`  Community: ${communityId}`));
     console.log(chalk.white(`  App:       ${appName} (${appId})`));
 
-    const proceed = await askYesNo(rl, chalk.white('\nProceed?'), true);
+    const proceed = await rl.askYesNo(chalk.white('\nProceed?'), true);
     if (!proceed) {
       console.log(chalk.gray('\nCancelled.\n'));
       rl.close();
