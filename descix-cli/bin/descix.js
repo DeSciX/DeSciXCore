@@ -4838,8 +4838,12 @@ program
           const { WorkspaceConfig } = await import('../lib/workspace-config.js');
           wsConfig = await WorkspaceConfig.load(process.cwd());
         } catch (e) {
-          console.error(chalk.yellow(`⚠️  Could not read .descix/workspace.json for project scope`));
-          console.error(chalk.gray(`    Run 'descix init' first, or use --scope entitlements`));
+          // RELAY the loader's own diagnosis; do not re-derive a remedy here. This site used to
+          // print "Run 'descix init' first" for EVERY failure, including a corrupt-but-present
+          // workspace.json — prescribing an overwrite of the file it had just failed to read,
+          // and discarding the loader's message that said exactly what was wrong.
+          console.error(chalk.red(e.message));
+          console.error(chalk.gray(`    Or use --scope entitlements, which needs no workspace.`));
           process.exit(1);
         }
         const appIds = new Set();
