@@ -1,7 +1,7 @@
 // ---------- [./DeSciX_PWA/src/util/AppData.jsx] ----------
 
 
-import { resolveAgainstCurrentOrigin } from './productUrl.js';
+import { resolveAgainstCurrentOrigin, assertProductPresent, hasStoredSitePath } from './productUrl.js';
 
 const queryParams = new URLSearchParams(window.location.search);
 // isEmbedded is strictly for Discord embedded apps (where .proxy/ prefix is needed)
@@ -62,10 +62,27 @@ export class AppData {
    * that is the point of it, and `descix serve` routes through it.
    */
   static getProductUrl(product) {
+    assertProductPresent(product, 'AppData.getProductUrl');
     if (AppData._workspaceProducts && AppData._workspaceProducts[product.app_id]) {
       return AppData._workspaceProducts[product.app_id];
     }
     return resolveAgainstCurrentOrigin(product.ip_site_gcs_path_url);
+  }
+
+  /**
+   * Does this product have a code site to show? THE predicate every consumer asks before
+   * calling getProductUrl — published here so the "is there a site" rule has one owner instead
+   * of five hand-written copies. The dev workspaceProducts map wins, exactly as it does in
+   * getProductUrl, so an app being developed behind its own dev server reports true even when
+   * its record carries no stored path.
+   *
+   * Total over a missing product: false means "no site", which is an answer, not a silence. The
+   * caller still owes the user a visible empty state — a false here must never render nothing.
+   */
+  static hasProductSite(product) {
+    if (product === null || product === undefined) return false;
+    if (AppData._workspaceProducts && AppData._workspaceProducts[product.app_id]) return true;
+    return hasStoredSitePath(product);
   }
 
   static reset() {
