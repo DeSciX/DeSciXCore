@@ -326,15 +326,21 @@ function resolveRef(manifest, cliRef) {
  * @returns {Promise<boolean>}
  */
 async function confirmYesNo(prompt) {
-  const readline = await import('readline');
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise(resolve => {
-    rl.question(`${prompt} [y/N] `, answer => {
-      rl.close();
-      const a = (answer || '').trim().toLowerCase();
-      resolve(a === 'y' || a === 'yes');
-    });
+  // Gated at construction by the ONE owner of "may I prompt". Under a non-TTY this throws a
+  // loud NonInteractiveError instead of hanging (open pipe/FIFO) or resolving nothing (/dev/null).
+  const { createPromptSession } = await import('../interactive.js');
+  const rl = createPromptSession({
+    what: 'descix kb corpus',
+    destructive: true,
+    nonInteractiveForm: ['descix kb corpus ... --yes   # skips this confirmation']
   });
+  try {
+    const answer = await rl.askRaw(`${prompt} [y/N] `);
+    const a = (answer || '').trim().toLowerCase();
+    return a === 'y' || a === 'yes';
+  } finally {
+    rl.close();
+  }
 }
 
 /**

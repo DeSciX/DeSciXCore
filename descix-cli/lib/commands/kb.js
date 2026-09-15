@@ -22,6 +22,8 @@ import ora from 'ora';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import inquirer from 'inquirer';
+// "May I prompt?" has ONE OWNER. --interactive is an opt-IN, not a guarantee a human is there.
+import { requireInteractive } from '../interactive.js';
 import { WorkspaceConfig } from '../workspace-config.js';
 import { hydrateKb, pushStaging, checkStagingFiles } from '../core/Hydrator.js';
 import { processKb } from '../core/Chunker.js';
@@ -176,6 +178,11 @@ export async function runKbPush(apiClient, options) {
     // Create conflict prompt callback for interactive mode
     const onConflictPrompt = options.interactive ? async (fileName, fileInfo) => {
       spinner.stop();
+      requireInteractive({
+        what: 'descix kb push --interactive',
+        question: `File "${fileName}" exists in Drive. Overwrite or skip?`,
+        nonInteractiveForm: ['descix kb push   # without --interactive, conflicts resolve without a prompt']
+      });
       const { action } = await inquirer.prompt([{
         type: 'list',
         name: 'action',
