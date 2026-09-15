@@ -188,25 +188,40 @@ function getMcpServerConfig() {
  * an agent caller hangs forever on a question, and a refusal is machine-readable where a
  * question is not.
  *
- * Presence and version are read from the target path directly rather than through
- * WorkspaceConfig.load(), because load() reports a present-but-unreadable file as "not
- * configured" — which would make a CORRUPT workspace look ABSENT here and let it be clobbered,
- * the exact case this guard exists to stop. When load() learns to distinguish absent from
- * unreadable, this should consume it instead of reading the path itself.
+ * WHERE THE WORKSPACE ROOT IS has ONE OWNER: WorkspaceConfig.findWorkspaceRoot, which walks UP
+ * from the start directory exactly as load() does. This guard CONSUMES it. It used to derive the
+ * answer a SECOND time by reading the TARGET PATH ONLY, and the two derivations disagreed in the
+ * case that matters: run from a SUBDIRECTORY of an existing workspace, the target-path check saw
+ * nothing, the wizard proceeded, and it wrote a NESTED workspace.json that SHADOWS the parent for
+ * every later load() — because load() walks up and stops at the FIRST one it finds. The second
+ * derivation is DELETED, not left beside the owner.
  *
- * @param {string} workspaceRoot - directory the wizard would write into
- * @throws {Error} naming the path and what was found, when a workspace is already present
+ * A nested workspace is not an unsupported topology, it is the BUG: because resolution walks UP,
+ * a nested file is unreachable by design from below EXCEPT by shadowing its parent. There is no
+ * escape hatch here and no flag to request one.
+ *
+ * findWorkspaceRoot stats the file, so a PRESENT-BUT-UNREADABLE workspace is still FOUND and still
+ * refused — the corrupt-looks-absent case this guard exists to stop is preserved.
+ *
+ * @param {string} startDir - directory the wizard was invoked in
+ * @throws {Error} naming the root it found and what is there, when a workspace exists at or ABOVE
+ *                 startDir
  */
-async function refuseIfWorkspacePresent(workspaceRoot) {
+async function refuseIfWorkspacePresent(startDir) {
+  const workspaceRoot = await WorkspaceConfig.findWorkspaceRoot(startDir);
+  if (!workspaceRoot) return; // ordinary first run — nothing up the tree to protect
+
   const configPath = path.join(workspaceRoot, '.descix', 'workspace.json');
+  const nested = path.resolve(workspaceRoot) !== path.resolve(startDir);
 
   let raw;
   try {
     raw = await fs.readFile(configPath, 'utf-8');
   } catch (err) {
-    if (err.code === 'ENOENT') return; // the ordinary first run — nothing to protect
+    if (err.code === 'ENOENT') return; // stat'd a moment ago; it vanished in between
     throw new Error(
       `Refusing to run quickstart: ${configPath} exists but could not be read (${err.message}).\n` +
+      (nested ? `It is the workspace root for ${workspaceRoot}, which CONTAINS ${startDir}.\n` : '') +
       'Quickstart will not write over a file it cannot inspect.'
     );
   }
@@ -221,10 +236,18 @@ async function refuseIfWorkspacePresent(workspaceRoot) {
   }
 
   throw new Error(
-    `Refusing to overwrite ${configPath} — a workspace is already configured here (${found}).\n` +
-    '\nquickstart CREATES a workspace; it does not migrate or merge an existing one, and ' +
-    'writing over this file would destroy whatever it holds.\n' +
-    '\nTo change the workspace you already have, use the verbs that own it:\n' +
+    (nested
+      ? `Refusing to create a workspace here — ${startDir} is already INSIDE the workspace ` +
+        `rooted at ${workspaceRoot}.\n` +
+        `  Existing workspace: ${configPath} (${found})\n` +
+        '\nCreating a second workspace.json in this subdirectory would SHADOW that one: workspace ' +
+        'resolution walks UP and stops at the FIRST file it finds, so every later command run from ' +
+        'here would silently use the new file instead of the real one.\n'
+      : `Refusing to overwrite ${configPath} — a workspace is already configured here (${found}).\n` +
+        '\nquickstart CREATES a workspace; it does not migrate or merge an existing one, and ' +
+        'writing over this file would destroy whatever it holds.\n') +
+    '\nTo change the workspace you already have, use the verbs that own it' +
+    (nested ? ` (run them from ${workspaceRoot}):\n` : ':\n') +
     '  descix config show                 # what is configured right now\n' +
     '  descix config set-env <env>        # retarget the environment\n' +
     '  descix config set-url <url>        # retarget the API origin\n' +

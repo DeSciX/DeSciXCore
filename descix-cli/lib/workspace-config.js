@@ -64,6 +64,35 @@ const NOT_CONFIGURED_MESSAGE =
   'Run "npx descix init" first to initialize your workspace.';
 
 /**
+ * THE ONE OWNER of the "move it aside, do not delete it" remedy.
+ *
+ * TWO different diagnoses reach this SAME remedy: a workspace.json that cannot be READ
+ * (WorkspaceUnreadableError) and one that reads fine but carries the retired v1 schema
+ * (load()'s v1 branch). Each used to hand-write its own remedy and THEY DISAGREED - the v1
+ * branch prescribed DELETING the file outright, while its sibling forty lines above it in this
+ * same file told the user their contents are lost only if they delete it. Two derivations of
+ * one fact drift silently; this is the extracted owner both now consume.
+ *
+ * A REFUSAL MUST NEVER PRESCRIBE A REMEDY THAT DESTROYS THE THING IT IS DIAGNOSING. That rule
+ * was ALREADY WRITTEN IN THIS FILE, as prose, a few lines above the branch that violated it -
+ * and it still shipped. A rule stated beside code does not enforce itself, and proximity may
+ * even hurt: a reader who sees the rule assumes it is in force. So it is expressed here as a
+ * FUNCTION every refusal must CALL, rather than a comment every author must NOTICE.
+ *
+ * @param {string} configPath - absolute path to the workspace.json being refused
+ * @param {string} initVerb - the verb that creates a fresh workspace once this file is aside
+ * @returns {string} the remedy block (no trailing newline)
+ */
+export function moveAsideRemedy(configPath, initVerb) {
+  return (
+    `  • Recover it: restore ${path.basename(configPath)} from version control or a backup.\n` +
+    `  • If you do not need its contents, move it aside first\n` +
+    `    (mv "${configPath}" "${configPath}.broken") and then run "${initVerb}".\n` +
+    `    Its contents are lost only if you delete it.`
+  );
+}
+
+/**
  * THE ONE OWNER of "this workspace.json EXISTS and I could not read it".
  *
  * ABSENT and UNREADABLE are two different facts about the world and they need two different
@@ -94,10 +123,7 @@ export class WorkspaceUnreadableError extends Error {
       `\n` +
       `This file is still on disk and has NOT been modified. Do NOT run "descix init" here —\n` +
       `that command is for a workspace that is ABSENT, and this one is DAMAGED.\n` +
-      `  • Recover it: restore ${path.basename(configPath)} from version control or a backup.\n` +
-      `  • If you do not need its contents, move it aside first\n` +
-      `    (mv "${configPath}" "${configPath}.broken") and then run "descix init".\n` +
-      `    Its contents are lost only if you delete it.`
+      moveAsideRemedy(configPath, 'descix init')
     );
     this.name = 'WorkspaceUnreadableError';
     this.code = 'WORKSPACE_UNREADABLE';
@@ -397,7 +423,12 @@ export class WorkspaceConfig {
     if (parsed.communities && !parsed.env) {
       throw new Error(
         'v1 workspace format is not supported. Migrate to v2.1.\n' +
-        'Delete .descix/workspace.json and re-run "descix app init" to create a v2.1 workspace.'
+        `  File:   ${configPath}\n` +
+        '\n' +
+        'This file is still on disk and has NOT been modified. There is no automatic v1 → v2.1\n' +
+        'migration: no surviving code reads the v1 layout, so its contents cannot be converted\n' +
+        'for you — but they are still readable BY YOU, and this file is the only copy of them.\n' +
+        moveAsideRemedy(configPath, 'descix app init')
       );
     }
 
