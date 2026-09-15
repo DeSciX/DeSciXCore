@@ -144,6 +144,66 @@ test('set-localpath — hard-fail: a file is not a directory', async (t) => {
   assert.equal(await sha256(wsFile(wsRoot)), before, 'nothing may be written on a refusal');
 });
 
+/**
+ * env.platform coverage. `set-localpath` used to walk env.products[] only, so every case below
+ * either wrote nothing while printing success, or — once the resolving read was removed —
+ * printed success on a workspace it had not repaired. A loud failure became a silent lie at the
+ * one entry that matters most: the caller gets a ✓ and goes to debug something else.
+ */
+async function makePlatformWorkspace(t, localPath = 'cloud') {
+  const wsRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'descix-test-plat-'));
+  await fs.mkdir(path.join(wsRoot, 'cloud'), { recursive: true });
+  await fs.mkdir(path.join(wsRoot, 'other'), { recursive: true });
+  await fs.mkdir(path.join(wsRoot, '.descix'), { recursive: true });
+  await fs.writeFile(
+    path.join(wsRoot, '.descix', 'workspace.json'),
+    JSON.stringify(
+      { version: '2.1', type: 'workspace', env: { platform: { appId: 'daita', localPath, kbId: 'General' }, products: [] } },
+      null, 2
+    )
+  );
+  t.after(async () => { await fs.rm(wsRoot, { recursive: true, force: true }); });
+  return { wsRoot, appId: 'daita' };
+}
+
+const platformLocalPath = async (wsRoot) =>
+  JSON.parse(await fs.readFile(wsFile(wsRoot), 'utf-8')).env.platform.localPath;
+
+test('set-localpath — env.platform: a BRICKED platform app is actually repaired, not just reported repaired', async (t) => {
+  const { wsRoot, appId } = await makePlatformWorkspace(t, path.join(os.tmpdir(), 'somewhere-absolute'));
+
+  const { code, stderr } = await runCli(wsRoot, ['app', 'set-localpath', '-a', appId, '-p', 'cloud']);
+
+  assert.equal(code, 0, `must repair the platform app (stderr: ${stderr})`);
+  assert.equal(
+    await platformLocalPath(wsRoot),
+    'cloud',
+    'SILENT LIE GUARD: exit 0 and a ✓ banner mean nothing if env.platform.localPath did not move'
+  );
+});
+
+test('set-localpath — env.platform: a healthy platform app is actually written (no silent no-op)', async (t) => {
+  const { wsRoot, appId } = await makePlatformWorkspace(t);
+
+  const { code } = await runCli(wsRoot, ['app', 'set-localpath', '-a', appId, '-p', 'other']);
+
+  assert.equal(code, 0);
+  assert.equal(await platformLocalPath(wsRoot), 'other', 'the platform entry must actually change');
+});
+
+test('set-localpath — env.platform: an absolute path is refused and nothing is written', async (t) => {
+  const { wsRoot, appId } = await makePlatformWorkspace(t);
+  const before = await sha256(wsFile(wsRoot));
+
+  const { code, stderr } = await runCli(wsRoot, [
+    'app', 'set-localpath', '-a', appId, '-p', path.join(wsRoot, 'other')
+  ]);
+
+  assert.notEqual(code, 0, 'the platform entry gets the same refusal as a product entry');
+  assert.match(stderr, /absolute path/);
+  assert.equal(await sha256(wsFile(wsRoot)), before, 'workspace.json must be byte-identical');
+});
+
 test('set-localpath — hard-fail: unmapped app uses the canonical one-owner message', async (t) => {
   const { wsRoot } = await makeTestWorkspace(t);
 

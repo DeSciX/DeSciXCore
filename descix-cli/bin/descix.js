@@ -1745,16 +1745,16 @@ appCommand
       const wsRoot = workspaceConfig.workspaceRoot || process.cwd();
 
       // Read the RAW registry entry, never the RESOLVED one. getAppByAppId() resolves the stored
-      // localPath through resolveWorkspacePath, so on a workspace that already carries a rejected
-      // value it throws here — before any write is even attempted. That is what made this verb
-      // refuse exactly when it was needed, while the rejection it threw told the user to fix it
-      // with the config verb and never by hand. This command is about to REPLACE that value; it
-      // has no business resolving it.
-      const current = workspaceConfig.getAppEntry(appId);
-      if (!current) {
-        throw new Error(unmappedAppMessage(appId));
-      }
-      const oldPath = current.localPath;
+      // localPath, so on a workspace already carrying a rejected value it throws here — before
+      // any write is attempted. That is what made this verb refuse exactly when it was needed,
+      // while the rejection told the user to fix it with the config verb and never by hand.
+      // This command is about to REPLACE that value; it has no business resolving it.
+      //
+      // Display value only. setLocalPath() is the SINGLE authority on whether the app is mapped
+      // and refuses if it is not — deciding that here as well would be two derivations of one
+      // fact, and they would not even agree: _buildAppIdMap (behind getAppEntry) requires BOTH
+      // appId and localPath, while the live-entry walk matches on appId alone.
+      const oldPath = workspaceConfig.getAppEntry(appId)?.localPath;
 
       // VALIDATE AT THE WRITE, through the LOADER'S OWN resolver — not a second copy of its rules.
       // If resolveWorkspacePath would reject this value on the next read, it is rejected now, and
@@ -1780,15 +1780,11 @@ appCommand
         );
       }
 
-      // Update env.products entry
-      const products = workspaceConfig.env?.products || [];
-      for (const product of products) {
-        if (product.appId === appId || product.app_id === appId) {
-          product.localPath = newPath;
-          break;
-        }
-      }
-      await workspaceConfig.save(wsRoot);
+      // Write through the canonical setter, which covers env.platform AND env.products[]. The
+      // loop this replaces walked env.products ONLY: on the platform app it matched nothing,
+      // wrote nothing, and still printed success — a loud failure turned into a silent lie at
+      // the one entry that matters most.
+      await workspaceConfig.setLocalPath(appId, newPath);
 
       console.log(chalk.green(`\n✓ ${appId} local path updated`));
       console.log(chalk.gray(`  ${oldPath} → ${newPath}\n`));

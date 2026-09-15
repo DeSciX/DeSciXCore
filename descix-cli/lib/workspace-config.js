@@ -173,6 +173,67 @@ export class WorkspaceConfig {
   }
 
   /**
+   * THE ONE OWNER of "find the LIVE env entry for this app, or hard-fail".
+   *
+   * Live means the actual object inside this.env — mutate it and save() persists the mutation.
+   * getAppByAppId() and getAppEntry() both return copies and are useless for writing.
+   *
+   * This existed as three byte-identical copies (setSitePort, setMicroservicePort,
+   * setStaticSite) and `set-localpath` hand-rolled a FOURTH variant in bin/descix.js that
+   * walked env.products ONLY. That omission is the whole reason the platform app silently
+   * failed: the loop found nothing, wrote nothing, and the command still printed success.
+   * A fourth copy here would have reproduced the same class of bug, so there is now one.
+   *
+   * @param {string} appId - App identifier
+   * @returns {Object} the live env.platform or env.products[] entry
+   * @throws if appId is not mapped
+   */
+  _liveEnvEntry(appId) {
+    let entry = null;
+    if (this.env?.platform?.appId === appId) {
+      entry = this.env.platform;
+    } else if (Array.isArray(this.env?.products)) {
+      entry = this.env.products.find(p => p.appId === appId) || null;
+    }
+    if (!entry) {
+      throw new Error(unmappedAppMessage(appId));
+    }
+    return entry;
+  }
+
+  /**
+   * Update an app's localPath in env.platform or env.products[].
+   *
+   * The canonical write path for localPath, and the sibling that was missing while
+   * setSitePort/setMicroservicePort/setStaticSite all existed. Backs `descix app set-localpath`.
+   *
+   * localPath MUST be workspace-root-relative. It is validated here through
+   * resolveWorkspacePath — the LOADER'S OWN resolver, not a second copy of its rules — so a
+   * value the loader will refuse on the next read is refused now, before anything is written.
+   * Writing a value the loader rejects is what bricked workspaces: every subsequent command
+   * threw, including the repair verbs, while the rejection forbade hand-editing.
+   *
+   * Persists via save() — same auto-save pattern as its siblings.
+   * Hard-fails if appId is not mapped in env.platform or env.products.
+   *
+   * @param {string} appId - App identifier (must exist in env.platform or env.products)
+   * @param {string} localPath - New path, relative to the workspace root
+   * @returns {Promise<string>} Path to saved config (from save())
+   */
+  async setLocalPath(appId, localPath) {
+    if (!appId) throw new Error('appId is required');
+    if (!localPath) throw new Error('localPath is required');
+
+    const entry = this._liveEnvEntry(appId);
+
+    // Validate through the loader's own resolver. Throws on an absolute path.
+    resolveWorkspacePath(this.workspaceRoot, localPath, appId);
+
+    entry.localPath = localPath;
+    return this.save();
+  }
+
+  /**
    * Get the absolute path to an app's site/ directory
    * @param {string} appId - App identifier
    * @returns {string|null} Absolute path to site/ or null if app not mapped
@@ -709,19 +770,7 @@ export class WorkspaceConfig {
   async setSitePort(appId, port) {
     if (!appId) throw new Error('appId is required');
 
-    // Find the live env entry (platform or products[]) — not a copy
-    let entry = null;
-    if (this.env?.platform?.appId === appId) {
-      entry = this.env.platform;
-    } else if (Array.isArray(this.env?.products)) {
-      entry = this.env.products.find(p => p.appId === appId) || null;
-    }
-
-    if (!entry) {
-      throw new Error(
-        unmappedAppMessage(appId)
-      );
-    }
+    const entry = this._liveEnvEntry(appId);
 
     if (port === null || port === undefined) {
       // Remove site.port; clean up empty site.{}
@@ -758,19 +807,7 @@ export class WorkspaceConfig {
   async setMicroservicePort(appId, port) {
     if (!appId) throw new Error('appId is required');
 
-    // Find the live env entry (platform or products[]) — not a copy
-    let entry = null;
-    if (this.env?.platform?.appId === appId) {
-      entry = this.env.platform;
-    } else if (Array.isArray(this.env?.products)) {
-      entry = this.env.products.find(p => p.appId === appId) || null;
-    }
-
-    if (!entry) {
-      throw new Error(
-        unmappedAppMessage(appId)
-      );
-    }
+    const entry = this._liveEnvEntry(appId);
 
     if (port === null || port === undefined) {
       // Remove microservice.port; clean up empty microservice.{}
@@ -813,19 +850,7 @@ export class WorkspaceConfig {
     if (!appId) throw new Error('appId is required');
     if (!fields || typeof fields !== 'object') throw new Error('fields object is required');
 
-    // Find the live env entry (platform or products[]) — not a copy
-    let entry = null;
-    if (this.env?.platform?.appId === appId) {
-      entry = this.env.platform;
-    } else if (Array.isArray(this.env?.products)) {
-      entry = this.env.products.find(p => p.appId === appId) || null;
-    }
-
-    if (!entry) {
-      throw new Error(
-        unmappedAppMessage(appId)
-      );
-    }
+    const entry = this._liveEnvEntry(appId);
 
     if (!entry.site) entry.site = {};
 
