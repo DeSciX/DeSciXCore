@@ -52,3 +52,28 @@ export async function fetchAppBinding(options = {}) {
     if (timer) clearTimeout(timer);
   }
 }
+
+/**
+ * The app frame's URL for a shell opened at an app's own direct link ({appId}.{env}.descix.net, or
+ * the local gateway serving that binding). The top-level query and hash pass through to the app,
+ * so an inbound link such as `https://egpt-frqtl.descix.net/?notebook=qft#cell-3` reaches the app
+ * as `<appUrl>?notebook=qft#cell-3`. A top-level parameter overrides the same parameter on appUrl;
+ * a top-level hash replaces appUrl's. The store (no binding) never calls this.
+ *
+ * @param {string} appUrl - the binding's appUrl (absolute or origin-relative)
+ * @param {{search?: string, hash?: string}} topLocation - the shell's window.location
+ * @returns {string}
+ */
+export function appFrameUrl(appUrl, topLocation) {
+  if (!appUrl) return appUrl;
+  const search = topLocation?.search || '';
+  const hash = topLocation?.hash || '';
+  if (search.length <= 1 && hash.length <= 1) return appUrl;
+
+  const PLACEHOLDER = 'https://app-frame.invalid';
+  const absolute = /^[a-z][a-z0-9+.-]*:\/\//i.test(appUrl);
+  const url = new URL(appUrl, PLACEHOLDER);
+  for (const [key, value] of new URLSearchParams(search)) url.searchParams.set(key, value);
+  if (hash.length > 1) url.hash = hash;
+  return absolute ? url.href : url.href.slice(PLACEHOLDER.length);
+}
