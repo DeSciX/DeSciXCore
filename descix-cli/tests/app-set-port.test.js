@@ -1,11 +1,10 @@
 /**
  * Tests for `WorkspaceConfig.setMicroservicePort()` — the method that backs
- * `descix app set-port`. Parallel to setSitePort()/site-servelocal.test.js.
+ * `descix app set-port`.
  *
  * Closes WS-CLI-MESH-ROUTING-GAP: this is the canonical write path for the
  * microservice port that `descix microservice init` reads (and hard-fails on
- * if missing). Mirrors site-servelocal.test.js exactly, operating on
- * microservice.{} instead of site.{}.
+ * if missing).
  *
  * Coverage:
  *  - happy path: set port → workspace.json env.products[<app>].microservice.port persisted

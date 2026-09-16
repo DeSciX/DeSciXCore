@@ -263,11 +263,9 @@ export class WorkspaceConfig {
    * Live means the actual object inside this.env — mutate it and save() persists the mutation.
    * getAppByAppId() and getAppEntry() both return copies and are useless for writing.
    *
-   * This existed as three byte-identical copies (setSitePort, setMicroservicePort,
-   * setStaticSite) and `set-localpath` hand-rolled a FOURTH variant in bin/descix.js that
-   * walked env.products ONLY. That omission is the whole reason the platform app silently
-   * failed: the loop found nothing, wrote nothing, and the command still printed success.
-   * A fourth copy here would have reproduced the same class of bug, so there is now one.
+   * The one lookup every entry setter (setMicroservicePort, setStaticSite, setLocalPath) uses. A
+   * private walk of env.products ONLY misses the platform app, finds nothing, writes nothing and
+   * still reports success.
    *
    * @param {string} appId - App identifier
    * @returns {Object} the live env.platform or env.products[] entry
@@ -289,8 +287,7 @@ export class WorkspaceConfig {
   /**
    * Update an app's localPath in env.platform or env.products[].
    *
-   * The canonical write path for localPath, and the sibling that was missing while
-   * setSitePort/setMicroservicePort/setStaticSite all existed. Backs `descix app set-localpath`.
+   * The canonical write path for localPath. Backs `descix app set-localpath`.
    *
    * localPath MUST be workspace-root-relative. It is validated here through
    * resolveWorkspacePath — the LOADER'S OWN resolver, not a second copy of its rules — so a
@@ -808,47 +805,15 @@ export class WorkspaceConfig {
   }
 
   /**
-   * Update an app's site.port in env.products[] (or env.platform if it is the platform app).
-   *
-   * Pass `null` to remove site.port; if site.{} becomes empty, site.{} is also deleted.
-   * Persists via save() at the end — same auto-save pattern as setEnvironment().
-   * Hard-fails if appId is not mapped in env.platform or env.products.
-   *
-   * @param {string} appId - App identifier (must exist in env.platform or env.products)
-   * @param {number|string|null} port - Port number to set, or null to remove site.port
-   * @returns {Promise<string>} Path to saved config (from save())
-   */
-  async setSitePort(appId, port) {
-    if (!appId) throw new Error('appId is required');
-
-    const entry = this._liveEnvEntry(appId);
-
-    if (port === null || port === undefined) {
-      // Remove site.port; clean up empty site.{}
-      if (entry.site) {
-        delete entry.site.port;
-        if (Object.keys(entry.site).length === 0) {
-          delete entry.site;
-        }
-      }
-    } else {
-      if (!entry.site) entry.site = {};
-      entry.site.port = port;
-    }
-
-    return this.save();
-  }
-
-  /**
    * Update an app's microservice.port in env.products[] (or env.platform if it is the platform app).
    *
-   * Parallel to setSitePort(), but operates on the entry's microservice.{} slot.
+   * Operates on the entry's microservice.{} slot.
    * This is the canonical write path for the microservice port that `descix microservice init`
    * reads (and hard-fails on if missing). Backs the `descix app set-port` command, closing
    * WS-CLI-MESH-ROUTING-GAP without hand-editing workspace.json.
    *
    * Pass `null` to remove microservice.port; if microservice.{} becomes empty, it is also deleted.
-   * Persists via save() at the end — same auto-save pattern as setSitePort()/setEnvironment().
+   * Persists via save() at the end — same auto-save pattern as setEnvironment().
    * Hard-fails if appId is not mapped in env.platform or env.products.
    *
    * @param {string} appId - App identifier (must exist in env.platform or env.products)
@@ -879,7 +844,7 @@ export class WorkspaceConfig {
   /**
    * Update an app's site config in env.products[] (or env.platform if it is the platform app).
    *
-   * Parallel to setSitePort()/setMicroservicePort(), but operates on the entry's site.{} slot's
+   * Parallel to setMicroservicePort(), but operates on the entry's site.{} slot's
    * static-site fields. This is the canonical write path for site.static — the relative path the
    * dev gateway's staticSitePlugin serves at /p/{appId}/ (see createViteProxyConfig:
    * site.static is resolved against the app's localPath; "." means the localPath itself).
@@ -888,7 +853,7 @@ export class WorkspaceConfig {
    *
    * Mutates site.static and/or site.port. Pass static === null to remove site.static; pass
    * port === null to remove site.port. If site.{} becomes empty after removals it is deleted.
-   * Persists via save() at the end — same auto-save pattern as setSitePort()/setMicroservicePort().
+   * Persists via save() at the end — same auto-save pattern as setMicroservicePort().
    * Hard-fails if appId is not mapped in env.platform or env.products.
    *
    * @param {string} appId - App identifier (must exist in env.platform or env.products)
@@ -914,7 +879,7 @@ export class WorkspaceConfig {
       }
     }
 
-    // site.port — set or remove (parallel to setSitePort, for static+devCommand sites)
+    // site.port — set or remove (for static+devCommand sites)
     if ('port' in fields) {
       if (fields.port === null || fields.port === undefined) {
         delete entry.site.port;

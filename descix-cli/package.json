@@ -1,6 +1,6 @@
 {
   "name": "@descix/cli",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "DeSciX CLI and MCP Server - Unified command-line interface for DeSciX platform",
   "repository": {
     "type": "git",
@@ -16,7 +16,8 @@
   "scripts": {
     "test": "node --test \"tests/*.test.js\"",
     "pack": "npm pack",
-    "check:doc-paths": "node scripts/check-doc-paths.js"
+    "check:doc-paths": "node scripts/check-doc-paths.js",
+    "briefer": "node scripts/briefer/run.mjs"
   },
   "keywords": [
     "descix",

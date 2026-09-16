@@ -21,8 +21,8 @@ import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 
-import { resolveOutPath, resolveCliPaths, DEFAULT_OUT_RELATIVE } from '../lib/commands/briefer/index.js';
-import { BrieferExtractorError, BRIEFER_ERROR_CODES } from '../lib/commands/briefer/errors.js';
+import { resolveOutPath, resolveCliPaths, DEFAULT_OUT_RELATIVE } from '../scripts/briefer/index.js';
+import { BrieferExtractorError, BRIEFER_ERROR_CODES } from '../scripts/briefer/errors.js';
 
 function fakeCliPaths() {
   // Mimics what resolveCliPaths() returns. The actual value doesn't matter
@@ -83,7 +83,7 @@ test('briefer: the DOUBLE-DeSciX bug specifically does not regress', () => {
     descixCoreRoot: '/U/DeSciX/DeSciX_Core',
     desciXRoot:    '/U/DeSciX',
     // This is the "off-by-one" repoRoot that USED to be used as a fallback —
-    // resolving from descix-cli/lib/commands/briefer/index.js four levels up
+    // resolving from descix-cli/scripts/briefer/index.js three levels up
     // landed inside DeSciX/, not at the Unkamon repo root. The old code would
     // have produced /U/DeSciX/DeSciX/V2_docs/... here.
     repoRoot:      '/U/DeSciX'

@@ -125,18 +125,6 @@ test('I2: the `sync` command GROUP is gone (no syncCommand, no `sync kb`)', () =
   );
 });
 
-test('I2: `update kb` refuses instead of dispatching to a sync implementation', () => {
-  assert.ok(
-    !/case 'kb':\s*\n\s*(return )?await updateCommands\.updateKB/.test(SRC),
-    'the `update kb` dispatcher branch was restored'
-  );
-  assert.match(
-    SRC,
-    /refuseRetiredKbSync\('descix update kb'/,
-    '`update kb` must fail loud naming the canonical surface, via the one owner'
-  );
-});
-
 test('I2: bin/descix.js names NO retired verb itself — it iterates the owner list', () => {
   // The one-owner claim is only true if the entrypoint cannot register a surface that is
   // absent from RETIRED_KB_SYNC_SURFACES. Hand-typed registerRetiredKbSync(parent,'chunk',...)
@@ -152,10 +140,9 @@ test('I2: bin/descix.js names NO retired verb itself — it iterates the owner l
 test('I2 CONFORMANCE: every surface in the owner list actually refuses at runtime', () => {
   // Driven off the exported list, not a hand-copy: adding a surface to the list without
   // wiring it fails HERE. This runs the real CLI, so it measures the executing artifact.
-  const registered = RETIRED_KB_SYNC_SURFACES.filter((s) => s.registered);
-  assert.ok(registered.length >= 4, `fixture: expected >=4 registered surfaces, saw ${registered.length}`);
+  assert.ok(RETIRED_KB_SYNC_SURFACES.length >= 4, `fixture: expected >=4 retired surfaces, saw ${RETIRED_KB_SYNC_SURFACES.length}`);
 
-  for (const surface of [...registered, ...RETIRED_KB_SYNC_SURFACES.filter((s) => !s.registered)]) {
+  for (const surface of RETIRED_KB_SYNC_SURFACES) {
     const argv = surface.invocation.replace(/^descix /, '').split(' ');
     const r = spawnSync(process.execPath, [ENTRY, ...argv], { encoding: 'utf-8' });
     const out = `${r.stdout}${r.stderr}`;
@@ -169,8 +156,8 @@ test('I2 CONFORMANCE: every surface in the owner list actually refuses at runtim
 
 test('I2 CONFORMANCE: the canonical and kept verbs still succeed', () => {
   // The negative half. Without this the suite would pass if the change deleted everything.
-  for (const argv of [['kb', 'corpus', 'sync', '--help'], ['kb', 'create', '--help'],
-                      ['kb', 'doctor', '--help'], ['update', '--help'], ['drive', 'pull', '--help']]) {
+  for (const argv of [['kb', 'corpus', 'sync', '--help'], ['app', 'init', '--help'],
+                      ['kb', 'doctor', '--help'], ['drive', 'pull', '--help']]) {
     const r = spawnSync(process.execPath, [ENTRY, ...argv], { encoding: 'utf-8' });
     assert.equal(r.status, 0, `descix ${argv.join(' ')} must still succeed (got ${r.status})`);
   }
@@ -207,16 +194,8 @@ test('I3: runKbPull/runKbPush SURVIVE — `descix drive pull|push` still call th
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// I4 — `kb create` is KEPT and is what the corpus refusal names.
+// I4 — the corpus refusal names the verb that creates a KB.
 // ─────────────────────────────────────────────────────────────────────────────
-
-test('I4: `kb create` is still registered', () => {
-  assert.match(
-    SRC,
-    /kbCommand\s*\n\s*\.command\('create'\)/,
-    '`kb create` is the corpus dependency and must be KEPT'
-  );
-});
 
 test('I4: the unregistered-KB refusal names the verb that actually creates a KB', () => {
   const corpus = fs.readFileSync(path.join(CLI_ROOT, 'lib', 'commands', 'corpus.js'), 'utf-8');
@@ -232,11 +211,8 @@ test('I4: the unregistered-KB refusal names the verb that actually creates a KB'
     corpus.indexOf('// 4. Process each manifest')
   );
   assert.ok(kbRefusal.length > 50, 'fixture: the KB refusal block must be located');
-  // MEASURED, and it reverses an earlier instruction: `descix kb create` invokes
-  // create_skeleton_kb (bin/descix.js:2087) and FAILS on a git-mode app with
-  // "no Drive folder". `descix app init` invokes init_git_mode_kb (:1163) and works.
-  // The refusal must name the verb that actually repairs the state it reports.
-  assert.match(kbRefusal, /descix app init/, 'the KB refusal must name `descix app init`');
+  // `descix app init --kb` invokes init_git_mode_kb, the verb that creates a KB.
+  assert.match(kbRefusal, /descix app init -a \$\{appId\} --kb/, 'the KB refusal must name `descix app init --kb`');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

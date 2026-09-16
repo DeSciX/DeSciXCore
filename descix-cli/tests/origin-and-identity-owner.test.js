@@ -235,14 +235,11 @@ const ALLOWED_ORIGIN_WRITES = new Set([
     // deliberate: a fully generated list passes by construction and carries no assurance, while
     // a hand-typed list fails on invisible whitespace. The assurance is in the reasons.
     //
-    // Tally: 7 entries. THREE construct a non-DeSciX address (Google Firestore, GitHub, a health
-    // probe target). TWO are placeholder prose inside help/remediation text. TWO write a real
-    // DeSciX origin, and BOTH are reached only after the developer explicitly named it.
+    // Tally: 5 entries. TWO construct a non-DeSciX address (GitHub, a health probe target). TWO
+    // are placeholder prose inside help/remediation text. ONE writes a real DeSciX origin, reached
+    // only after the developer explicitly named it.
     // NONE is a fallback on a resolver miss. NONE writes an origin nobody chose.
 
-    // Google Firestore's REST endpoint, used by the briefer's source reader. A third-party
-    // service address, not a DeSciX API origin — the developer never chooses it.
-    'lib/commands/briefer/util/source-reader.js::const url = `https://firestore.googleapis.com/v1/projects/descix/databases/${dbPath}${qs}`;',
     // `descix health` probe target. `host` is parameterised by the --env the developer passed;
     // probing that host IS the command, not a fallback for an unset origin.
     'lib/commands/health.js::const url = `https://${host}/`;',
@@ -251,10 +248,6 @@ const ALLOWED_ORIGIN_WRITES = new Set([
     // PLACEHOLDER PROSE inside ORIGIN_REMEDY. The `https://...` is a literal ellipsis shown to a
     // human; it cannot resolve to an origin.
     "lib/origin.js::'  export DESCIX_API_URL=https://...       (this shell only)';",
-    // The interactive setup wizard, reached ONLY after the developer picks "Local Development
-    // (localhost:4000)" from a menu (lib/wizard/setup.js:221). A menu selection is the developer
-    // naming an origin — the opposite of the silent default this contract removed.
-    "lib/wizard/setup.js::apiUrl = 'https://localhost:4000';",
     // `config set-env <custom-name>`: reached ONLY when a developer TYPES an environment name
     // that is not dev/demo/prod, so the host derives from the name they chose. An explicit
     // --url still wins via the `apiUrl ||`.
@@ -476,7 +469,7 @@ test('GATE I1-tarball: the packed artifact resolves the prod origin only in pros
     walk(path.join(out, 'package', 'lib'));
     walk(path.join(out, 'package', 'bin'));
 
-    assert.ok(scanned > 50,
+    assert.ok(scanned > 40,
         `FIXTURE INVALID: only ${scanned} packed .js files scanned — the tarball did not extract as expected`);
     assert.deepEqual(offenders, [],
         `the PUBLISHED artifact states the production origin as a value:\n${offenders.join('\n')}`);

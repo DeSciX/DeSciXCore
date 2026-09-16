@@ -75,7 +75,7 @@ function renderCitationTrail(citations) {
  *
  * @param {object} args
  * @param {string} args.env                Target env (dev|demo|prod).
- * @param {string} args.mechanism          Mechanism description (e.g., "descix briefer v1.0 (M1 scaffold)").
+ * @param {string} args.mechanism          Mechanism description (e.g., "briefer v1.0 (M2 — code-grounded extractors)").
  * @param {string} args.regenBy            Who triggered the regen (e.g., wallet email).
  * @param {Array<{section, extract}>} args.sections
  *                                          Per-section results: section metadata + extract output.

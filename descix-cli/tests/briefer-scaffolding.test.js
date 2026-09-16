@@ -2,8 +2,8 @@
  * WS-DESCIX-BRIEFER-CLI M1 — scaffolding tests.
  *
  * Coverage (per M1 AC):
- *  (a) subcommand registration in bin/descix.js
- *  (b) help text surfaces `descix briefer` with the documented flags
+ *  (a) the briefer is absent from the published CLI
+ *  (b) scripts/briefer/run.mjs --help documents its flags
  *  (c) error class shape (BrieferExtractorError: code, source, expected, recovery)
  *  (d) extractor scaffolds all import the shared error class and expose SECTION + extract()
  *  (e) failing extractors → known-expected failures with clear messages
@@ -26,14 +26,14 @@ import { fileURLToPath } from 'url';
 const execFileAsync = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLI_BIN = path.resolve(__dirname, '..', 'bin', 'descix.js');
-const BRIEFER_DIR = path.resolve(__dirname, '..', 'lib', 'commands', 'briefer');
+const BRIEFER_DIR = path.resolve(__dirname, '..', 'scripts', 'briefer');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // (c) — BrieferExtractorError shape
 // ─────────────────────────────────────────────────────────────────────────────
 test('BrieferExtractorError — valid construction surfaces all fields', async () => {
   const { BrieferExtractorError, BRIEFER_ERROR_CODES } =
-    await import('../lib/commands/briefer/errors.js');
+    await import('../scripts/briefer/errors.js');
 
   const err = new BrieferExtractorError({
     code: BRIEFER_ERROR_CODES.SRC_NOT_FOUND,
@@ -52,7 +52,7 @@ test('BrieferExtractorError — valid construction surfaces all fields', async (
 });
 
 test('BrieferExtractorError — missing code is itself a hard-fail (no silent default)', async () => {
-  const { BrieferExtractorError } = await import('../lib/commands/briefer/errors.js');
+  const { BrieferExtractorError } = await import('../scripts/briefer/errors.js');
 
   assert.throws(() => {
     new BrieferExtractorError({
@@ -66,7 +66,7 @@ test('BrieferExtractorError — missing code is itself a hard-fail (no silent de
 
 test('BrieferExtractorError — missing source/expected/recovery all hard-fail', async () => {
   const { BrieferExtractorError, BRIEFER_ERROR_CODES } =
-    await import('../lib/commands/briefer/errors.js');
+    await import('../scripts/briefer/errors.js');
 
   assert.throws(() => new BrieferExtractorError({
     code: BRIEFER_ERROR_CODES.SRC_NOT_FOUND, expected: 'x', recovery: 'y'
@@ -82,7 +82,7 @@ test('BrieferExtractorError — missing source/expected/recovery all hard-fail',
 });
 
 test('BRIEFER_ERROR_CODES — all documented codes present and frozen', async () => {
-  const { BRIEFER_ERROR_CODES } = await import('../lib/commands/briefer/errors.js');
+  const { BRIEFER_ERROR_CODES } = await import('../scripts/briefer/errors.js');
   const expected = [
     'SRC_NOT_FOUND',
     'GCLOUD_AUTH',
@@ -122,7 +122,7 @@ test('Extractor scaffolds — all 7 source files exist', async () => {
 
 test('Extractor scaffolds — each exports SECTION { number, heading, sourceFiles } and extract()', async () => {
   for (const f of EXPECTED_EXTRACTORS) {
-    const mod = await import(`../lib/commands/briefer/sources/${f}`);
+    const mod = await import(`../scripts/briefer/sources/${f}`);
     assert.ok(mod.SECTION, `${f}: missing SECTION export`);
     assert.equal(typeof mod.SECTION.number, 'number', `${f}: SECTION.number not a number`);
     assert.equal(typeof mod.SECTION.heading, 'string', `${f}: SECTION.heading not a string`);
@@ -133,7 +133,7 @@ test('Extractor scaffolds — each exports SECTION { number, heading, sourceFile
 
 test('Extractor scaffolds — extract() rejects missing env (NOT_IMPLEMENTED hard-fail)', async () => {
   for (const f of EXPECTED_EXTRACTORS) {
-    const mod = await import(`../lib/commands/briefer/sources/${f}`);
+    const mod = await import(`../scripts/briefer/sources/${f}`);
     await assert.rejects(
       () => mod.extract({}),
       (err) => err.code === 'BRIEFER-NOT-IMPLEMENTED' || err.name === 'BrieferExtractorError',
@@ -154,7 +154,7 @@ test('Extractor scaffolds — extract({env}) returns {markdown, citations[]}', a
     repoRoot: path.resolve(__dirname, '..', '..', '..', '..')
   };
   for (const f of EXPECTED_EXTRACTORS) {
-    const mod = await import(`../lib/commands/briefer/sources/${f}`);
+    const mod = await import(`../scripts/briefer/sources/${f}`);
     const result = await mod.extract({ env: 'demo', cliPaths });
     assert.equal(typeof result.markdown, 'string', `${f}: markdown not a string`);
     assert.ok(result.markdown.length > 0, `${f}: markdown must be non-empty`);
@@ -175,7 +175,7 @@ test('Extractor scaffolds — extract({env}) returns {markdown, citations[]}', a
 // (g) — Stitcher composes a non-empty doc with citation trail
 // ─────────────────────────────────────────────────────────────────────────────
 test('Stitcher — buildBrieferDoc + stitchBriefer produce a coherent doc', async () => {
-  const briefer = await import('../lib/commands/briefer/index.js');
+  const briefer = await import('../scripts/briefer/index.js');
   // M2: real repo paths so extractors can read source files. Use --env=demo
   // because routing.js hard-rejects dev (per scope §2.1).
   const cliPaths = {
@@ -207,7 +207,7 @@ test('Stitcher — buildBrieferDoc + stitchBriefer produce a coherent doc', asyn
 });
 
 test('Stitcher — extractCitationTrail reads only the hidden citations', async () => {
-  const { extractCitationTrail } = await import('../lib/commands/briefer/stitcher.js');
+  const { extractCitationTrail } = await import('../scripts/briefer/stitcher.js');
   const trail = extractCitationTrail([
     '# Title',
     'Body line.',
@@ -223,22 +223,17 @@ test('Stitcher — extractCitationTrail reads only the hidden citations', async 
 // ─────────────────────────────────────────────────────────────────────────────
 // (b) + (h) — CLI subcommand registration and --help wiring
 // ─────────────────────────────────────────────────────────────────────────────
-test('CLI — `descix --help` lists the briefer subcommand', async () => {
-  const { stdout, code } = await execFileAsync('node', [CLI_BIN, '--help'])
-    .then(r => ({ ...r, code: 0 }))
-    .catch(e => ({ stdout: e.stdout, stderr: e.stderr, code: e.code }));
-  // Commander exits 0 for --help by default.
-  assert.equal(code, 0, '--help should exit 0');
-  assert.match(stdout, /\bbriefer\b/, '`briefer` must appear in top-level help');
+test('the briefer is NOT a CLI verb — it ships in no package', async () => {
+  const { stdout } = await execFileAsync('node', [CLI_BIN, '--help']);
+  assert.doesNotMatch(stdout, /\bbriefer\b/, '`briefer` must not appear in the published CLI help');
 });
 
-test('CLI — `descix briefer --help` shows documented flags', async () => {
-  const { stdout } = await execFileAsync('node', [CLI_BIN, 'briefer', '--help']);
+test('`scripts/briefer/run.mjs --help` shows documented flags', async () => {
+  const { stdout } = await execFileAsync('node', [path.join(BRIEFER_DIR, 'run.mjs'), '--help']);
   assert.match(stdout, /--env/,   '--env documented');
   assert.match(stdout, /--out/,   '--out documented');
   assert.match(stdout, /--check/, '--check documented');
   assert.match(stdout, /-v.*verbose|--verbose/i, '--verbose documented');
-  // Description must reference the briefer's purpose.
   assert.match(stdout, /briefer|drift|gcloud|code-grounded|HARD-FAIL/i,
     'description should reference briefer regen / drift / gcloud / HARD-FAIL');
 });

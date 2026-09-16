@@ -37,7 +37,7 @@ const cliPaths = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 test('identifiers.extract({env, cliPaths}) returns code-grounded markdown + non-null SHAs', async () => {
-  const mod = await import('../lib/commands/briefer/sources/identifiers.js');
+  const mod = await import('../scripts/briefer/sources/identifiers.js');
   const result = await mod.extract({ env: 'demo', cliPaths });
   assert.ok(result.markdown.length > 500, 'markdown should be substantial');
   // The host pattern from provision-platform-lb.js:120 must appear verbatim
@@ -58,7 +58,7 @@ test('identifiers.extract({env, cliPaths}) returns code-grounded markdown + non-
 });
 
 test('identifiers.extract HARD-FAILS with BRIEFER-SRC-NOT-FOUND if the source moves', async () => {
-  const mod = await import('../lib/commands/briefer/sources/identifiers.js');
+  const mod = await import('../scripts/briefer/sources/identifiers.js');
   // Point cliPaths at a non-existent root.
   const badPaths = { ...cliPaths, repoRoot: '/nonexistent-briefer-test-root' };
   await assert.rejects(
@@ -93,7 +93,7 @@ test('identifiers.extract HARD-FAILS with PARSE_FAIL if the host construct moves
     await fs.copyFile(path.join(realRoot, rel), dst);
   }
 
-  const mod = await import('../lib/commands/briefer/sources/identifiers.js');
+  const mod = await import('../scripts/briefer/sources/identifiers.js');
   await assert.rejects(
     () => mod.extract({ env: 'demo', cliPaths: { ...cliPaths, repoRoot: tmp } }),
     (err) => err.code === 'BRIEFER-PARSE-FAIL' &&
@@ -106,7 +106,7 @@ test('identifiers.extract HARD-FAILS with PARSE_FAIL if the host construct moves
 // ─────────────────────────────────────────────────────────────────────────────
 
 test('routing.extract({env=demo}) returns code-grounded markdown with verbatim pathRules', async () => {
-  const mod = await import('../lib/commands/briefer/sources/routing.js');
+  const mod = await import('../scripts/briefer/sources/routing.js');
   const result = await mod.extract({ env: 'demo', cliPaths });
   assert.ok(result.markdown.length > 500);
   // The verbatim pathRules block must appear.
@@ -121,7 +121,7 @@ test('routing.extract({env=demo}) returns code-grounded markdown with verbatim p
 });
 
 test('routing.extract HARD-REJECTS --env=dev (per scope §2.1 — DEV has no LB URL map)', async () => {
-  const mod = await import('../lib/commands/briefer/sources/routing.js');
+  const mod = await import('../scripts/briefer/sources/routing.js');
   await assert.rejects(
     () => mod.extract({ env: 'dev', cliPaths }),
     (err) => err.code === 'BRIEFER-PARSE-FAIL' &&
@@ -141,7 +141,7 @@ test('routing.extract HARD-FAILS if ensureCoreNeg is missing from provision-plat
   ].join('\n');
   await fs.writeFile(path.join(meshPath, 'provision-platform-lb.js'), broken);
 
-  const mod = await import('../lib/commands/briefer/sources/routing.js');
+  const mod = await import('../scripts/briefer/sources/routing.js');
   await assert.rejects(
     () => mod.extract({ env: 'demo', cliPaths: { ...cliPaths, repoRoot: tmp } }),
     (err) => err.code === 'BRIEFER-SRC-NOT-FOUND' &&
@@ -154,7 +154,7 @@ test('routing.extract HARD-FAILS if ensureCoreNeg is missing from provision-plat
 // ─────────────────────────────────────────────────────────────────────────────
 
 test('citation SHAs are deterministic for unchanged source', async () => {
-  const mod = await import('../lib/commands/briefer/sources/identifiers.js');
+  const mod = await import('../scripts/briefer/sources/identifiers.js');
   const r1 = await mod.extract({ env: 'demo', cliPaths });
   const r2 = await mod.extract({ env: 'demo', cliPaths });
   const shas1 = r1.citations.map(c => `${c.file}@${c.lines}@${c.sha}`).sort();
@@ -167,7 +167,7 @@ test('citation SHAs are deterministic for unchanged source', async () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 test('AC-7 — no @google-cloud/firestore or @pinecone-database/pinecone imports in briefer M2 code', async () => {
-  const root = path.resolve(__dirname, '..', 'lib', 'commands', 'briefer');
+  const root = path.resolve(__dirname, '..', 'scripts', 'briefer');
   // Match REAL import/require statements only — names appearing in doc-comments
   // ("NOT @google-cloud/firestore") are intentional and don't bypass the API.
   const importRe = /(?:^|\n)\s*(?:import\b[^\n]*from\s*['"]@google-cloud\/firestore['"]|import\b[^\n]*from\s*['"]@pinecone-database\/pinecone['"]|require\s*\(\s*['"]@google-cloud\/firestore['"]\s*\)|require\s*\(\s*['"]@pinecone-database\/pinecone['"]\s*\))/;

@@ -206,15 +206,6 @@ export async function runStatus(options = {}) {
     console.log(`Service Key:        ${chalk.gray('None')} (dev-overrides.json)`);
   }
 
-  // Check for MCP rules
-  const rulesPath = path.join(checkDir, '.cursor', 'rules', 'descix_mcp.mdc');
-  try {
-    await fs.access(rulesPath);
-    console.log(`MCP Rules:          ${chalk.green('Deployed')} (.cursor/rules/descix_mcp.mdc)`);
-  } catch {
-    console.log(`MCP Rules:          ${chalk.gray('Not Deployed')}`);
-  }
-
   // Check gcloud
   const gcloudStatus = await checkGcloud();
   if (gcloudStatus.installed) {

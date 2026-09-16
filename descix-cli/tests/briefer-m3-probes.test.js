@@ -71,7 +71,7 @@ test('M3-AC-1: probeGcloudJson SUCCESS yields citation with source=gcloud and 12
   const { dir } = await makeGcloudStub({ stdout: stubJson });
 
   await withPath(dir, async () => {
-    const mod = await import('../lib/commands/briefer/util/source-reader.js?ac1=1');
+    const mod = await import('../scripts/briefer/util/source-reader.js?ac1=1');
     const res = await mod.probeGcloudJson({
       command: ['compute', 'url-maps', 'describe', 'descix-discord-app-lb', '--format=json'],
       env: 'demo',
@@ -95,7 +95,7 @@ test('M3-AC-2: probeGcloudJson FAILURE on env=demo HARD-FAILS with BRIEFER-GCLOU
   const { dir } = await makeGcloudStub({ stdout: '', exitCode: 1, stderr: 'ERROR: not authenticated' });
 
   await withPath(dir, async () => {
-    const mod = await import('../lib/commands/briefer/util/source-reader.js?ac2=1');
+    const mod = await import('../scripts/briefer/util/source-reader.js?ac2=1');
     await assert.rejects(
       () => mod.probeGcloudJson({
         command: ['compute', 'url-maps', 'describe', 'descix-discord-app-lb', '--format=json'],
@@ -117,7 +117,7 @@ test('M3-AC-2b: probeGcloudJson empty stdout on env=demo HARD-FAILS with BRIEFER
   const { dir } = await makeGcloudStub({ stdout: '', exitCode: 0 });
 
   await withPath(dir, async () => {
-    const mod = await import('../lib/commands/briefer/util/source-reader.js?ac2b=1');
+    const mod = await import('../scripts/briefer/util/source-reader.js?ac2b=1');
     await assert.rejects(
       () => mod.probeGcloudJson({
         command: ['functions', 'list', '--gen2', '--format=json'],
@@ -136,7 +136,7 @@ test('M3-AC-2b: probeGcloudJson empty stdout on env=demo HARD-FAILS with BRIEFER
 // ─────────────────────────────────────────────────────────────────────────────
 test('M3-AC-3: probeGcloudJson on env=dev returns null (skipped)', async () => {
   // Even without a stub, env=dev short-circuits BEFORE invoking gcloud.
-  const mod = await import('../lib/commands/briefer/util/source-reader.js?ac3=1');
+  const mod = await import('../scripts/briefer/util/source-reader.js?ac3=1');
   const res = await mod.probeGcloudJson({
     command: ['compute', 'url-maps', 'describe', 'descix-discord-app-lb', '--format=json'],
     env: 'dev',
@@ -147,7 +147,7 @@ test('M3-AC-3: probeGcloudJson on env=dev returns null (skipped)', async () => {
 });
 
 test('M3-AC-3b: §2 environments.extract(env=dev) emits "DEV: gcloud probes skipped" stanza', async () => {
-  const mod = await import('../lib/commands/briefer/sources/environments.js?ac3b=1');
+  const mod = await import('../scripts/briefer/sources/environments.js?ac3b=1');
   const r = await mod.extract({ env: 'dev', cliPaths });
   assert.match(r.markdown, /DEV: gcloud probes skipped/);
   // No probe citations should be present for dev.
@@ -156,7 +156,7 @@ test('M3-AC-3b: §2 environments.extract(env=dev) emits "DEV: gcloud probes skip
 });
 
 test('M3-AC-3c: §4 microservice-deploy.extract(env=dev) emits skipped stanza', async () => {
-  const mod = await import('../lib/commands/briefer/sources/microservice-deploy.js?ac3c=1');
+  const mod = await import('../scripts/briefer/sources/microservice-deploy.js?ac3c=1');
   const r = await mod.extract({ env: 'dev', cliPaths });
   assert.match(r.markdown, /DEV: gcloud probes skipped/);
   const probeC = r.citations.filter(c => c.source === 'gcloud' || c.source === 'firestore-rest');
@@ -164,7 +164,7 @@ test('M3-AC-3c: §4 microservice-deploy.extract(env=dev) emits skipped stanza', 
 });
 
 test('M3-AC-3d: §5 entitlements.extract(env=dev) emits skipped stanza', async () => {
-  const mod = await import('../lib/commands/briefer/sources/entitlements.js?ac3d=1');
+  const mod = await import('../scripts/briefer/sources/entitlements.js?ac3d=1');
   const r = await mod.extract({ env: 'dev', cliPaths });
   assert.match(r.markdown, /DEV: Firestore probe skipped/);
   const probeC = r.citations.filter(c => c.source === 'gcloud' || c.source === 'firestore-rest');
@@ -180,7 +180,7 @@ test('M3-AC-4: citation SHA changes when gcloud output changes', async () => {
 
   let shaA, shaB;
   await withPath(dirA, async () => {
-    const mod = await import('../lib/commands/briefer/util/source-reader.js?ac4a=1');
+    const mod = await import('../scripts/briefer/util/source-reader.js?ac4a=1');
     const r = await mod.probeGcloudJson({
       command: ['compute', 'url-maps', 'describe', 'descix-discord-app-lb', '--format=json'],
       env: 'demo',
@@ -190,7 +190,7 @@ test('M3-AC-4: citation SHA changes when gcloud output changes', async () => {
     shaA = r.citation.sha;
   });
   await withPath(dirB, async () => {
-    const mod = await import('../lib/commands/briefer/util/source-reader.js?ac4b=1');
+    const mod = await import('../scripts/briefer/util/source-reader.js?ac4b=1');
     const r = await mod.probeGcloudJson({
       command: ['compute', 'url-maps', 'describe', 'descix-discord-app-lb', '--format=json'],
       env: 'demo',
@@ -209,7 +209,7 @@ test('M3-AC-4b: citation SHA stable when gcloud output unchanged (determinism)',
   const { dir } = await makeGcloudStub({ stdout: JSON.stringify({ fingerprint: 'STABLE', hostRules: [], pathMatchers: [] }) });
   let s1, s2;
   await withPath(dir, async () => {
-    const mod = await import('../lib/commands/briefer/util/source-reader.js?ac4b1=1');
+    const mod = await import('../scripts/briefer/util/source-reader.js?ac4b1=1');
     const r1 = await mod.probeGcloudJson({
       command: ['compute', 'url-maps', 'describe', 'descix-discord-app-lb', '--format=json'],
       env: 'demo',
@@ -232,7 +232,7 @@ test('M3-AC-4b: citation SHA stable when gcloud output unchanged (determinism)',
 // AC-7 anti-regression repeated for M3 surface (probes do NOT bypass via NPM SDK).
 // ─────────────────────────────────────────────────────────────────────────────
 test('AC-7 (M3 surface) — no @google-cloud/firestore or @pinecone-database/pinecone imports in briefer code', async () => {
-  const root = path.resolve(__dirname, '..', 'lib', 'commands', 'briefer');
+  const root = path.resolve(__dirname, '..', 'scripts', 'briefer');
   const importRe = /(?:^|\n)\s*(?:import\b[^\n]*from\s*['"]@google-cloud\/firestore['"]|import\b[^\n]*from\s*['"]@pinecone-database\/pinecone['"]|require\s*\(\s*['"]@google-cloud\/firestore['"]\s*\)|require\s*\(\s*['"]@pinecone-database\/pinecone['"]\s*\))/;
   const walk = async (dir) => {
     const out = [];

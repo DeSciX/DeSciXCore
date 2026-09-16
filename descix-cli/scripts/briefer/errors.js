@@ -1,5 +1,5 @@
 /**
- * BrieferExtractorError — canonical hard-fail surface for the `descix briefer` CLI.
+ * BrieferExtractorError — canonical hard-fail surface for the briefer (scripts/briefer/run.mjs).
  *
  * Per WS-DESCIX-BRIEFER-CLI scope doc §2.3 ("Hard-fail philosophy"), every data
  * source has exactly one extraction method and exactly one failure mode:

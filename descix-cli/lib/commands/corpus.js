@@ -452,16 +452,13 @@ export async function runCorpusSync(apiClient, options) {
     const missingKbNames = requestedKbNames.filter(name => !registeredKbNames.has(name));
     if (missingKbNames.length > 0) {
       // Hard-fail: every KB we are about to sync into must already be registered in Firestore.
-      // No hardcoded fallback. `app init` is the verb that actually creates a KB on a
-      // git-mode app (init_git_mode_kb, bin/descix.js:1163). `kb create` is Drive-mode
-      // wired (create_skeleton_kb, :2087) and fails here — filed as its own defect.
+      // No hardcoded fallback. `app init --kb` is the verb that creates a KB (init_git_mode_kb).
       spinner.fail(`Unregistered KB(s) for app "${appId}"`);
       throw new Error(
         `KnowledgeBase document(s) missing in Firestore for app "${appId}": ${missingKbNames.join(', ')}.\n` +
         `Registered KBs for this app: ${[...registeredKbNames].join(', ') || '(none)'}.\n` +
         `Syncing vectors into Pinecone without a matching KB doc would orphan them (chat queries hard-fail).\n` +
-        `Fix: run \`descix app init -a ${appId}\` — it creates the KB via init_git_mode_kb and needs no Drive folder.\n` +
-        `(\`descix kb create\` currently routes through create_skeleton_kb and FAILS on a git-mode app.)`
+        `Fix: run \`descix app init -a ${appId} --kb <kb_name>\` for each missing KB — it creates the KB and needs no Drive folder.`
       );
     }
 

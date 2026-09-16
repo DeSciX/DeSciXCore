@@ -2,7 +2,7 @@
  * WS-DESCIX-BRIEFER-CLI M5 — CI `--check` gate semantics.
  *
  * The M5 deliverable adds `.github/workflows/briefer-check.yml` as a path-filtered
- * PR gate. The workflow runs `descix briefer --check --env=demo` and fails the
+ * PR gate. The workflow runs `node scripts/briefer/run.mjs --check --env demo` and fails the
  * PR if the canonical briefer is out of sync with the 6 watched source files:
  *
  *   1. DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/provision-platform-lb.js
@@ -87,7 +87,7 @@ async function withConsoleStubs(fn) {
 
 /**
  * Build a minimal BrieferDoc-shaped fixture. The shape matches the JSDoc
- * @typedef in lib/commands/briefer/index.js and is the contract runCheckMode
+ * @typedef in scripts/briefer/index.js and is the contract runCheckMode
  * depends on. Citations are embedded as HTML comments matching the regex in
  * extractCitationTrail().
  */
@@ -123,7 +123,7 @@ function makeFixtureDoc({ env = 'demo', extraLine = '' } = {}) {
 // Test (1): sync case — canonical equals regen → in-sync, no exit.
 // ─────────────────────────────────────────────────────────────────────────────
 test('(1) runCheckMode SYNC: canonical matches regen → drift:false, no process.exit', async () => {
-  const { runCheckMode } = await import('../lib/commands/briefer/index.js');
+  const { runCheckMode } = await import('../scripts/briefer/index.js');
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'briefer-ci-check-sync-'));
   const outPath = path.join(tmpDir, 'platform-must-know-briefer.md');
 
@@ -145,7 +145,7 @@ test('(1) runCheckMode SYNC: canonical matches regen → drift:false, no process
 // Test (2): drift case — canonical differs → exit 1 + BRIEFER-DRIFT-DETECTED.
 // ─────────────────────────────────────────────────────────────────────────────
 test('(2) runCheckMode DRIFT: canonical differs → process.exit(1) + BRIEFER-DRIFT-DETECTED in stderr', async () => {
-  const { runCheckMode } = await import('../lib/commands/briefer/index.js');
+  const { runCheckMode } = await import('../scripts/briefer/index.js');
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'briefer-ci-check-drift-'));
   const outPath = path.join(tmpDir, 'platform-must-know-briefer.md');
 
@@ -169,7 +169,7 @@ test('(2) runCheckMode DRIFT: canonical differs → process.exit(1) + BRIEFER-DR
 // Test (3): missing canonical → exit 2 + clear error.
 // ─────────────────────────────────────────────────────────────────────────────
 test('(3) runCheckMode MISSING-CANONICAL: file absent → process.exit(2) + clear stderr', async () => {
-  const { runCheckMode } = await import('../lib/commands/briefer/index.js');
+  const { runCheckMode } = await import('../scripts/briefer/index.js');
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'briefer-ci-check-missing-'));
   const missingPath = path.join(tmpDir, 'nonexistent.md');
 
@@ -180,7 +180,7 @@ test('(3) runCheckMode MISSING-CANONICAL: file absent → process.exit(2) + clea
 
   assert.equal(exitCode, 2, 'missing-canonical must process.exit(2)');
   assert.match(stderr, /canonical briefer not found/, 'stderr must explain the missing file');
-  assert.match(stderr, /descix briefer/, 'stderr must suggest the recovery command');
+  assert.match(stderr, /scripts\/briefer\/run\.mjs/, 'stderr must suggest the recovery command');
   await fs.rm(tmpDir, { recursive: true, force: true });
 });
 
@@ -190,7 +190,7 @@ test('(3) runCheckMode MISSING-CANONICAL: file absent → process.exit(2) + clea
 // invariant scope §3 calls out as "highest scrutiny" for routing).
 // ─────────────────────────────────────────────────────────────────────────────
 test('(4) runCheckMode DETECTS citation-SHA drift even when prose is unchanged', async () => {
-  const { runCheckMode } = await import('../lib/commands/briefer/index.js');
+  const { runCheckMode } = await import('../scripts/briefer/index.js');
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'briefer-ci-check-shadrift-'));
   const outPath = path.join(tmpDir, 'platform-must-know-briefer.md');
 
