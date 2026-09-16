@@ -9,6 +9,8 @@ import chalk from 'chalk';
 import * as path from 'path';
 import { WorkspaceConfig } from '../workspace-config.js';
 import { environmentNameFor } from '../environment-report.js';
+import { resolveEffectiveOrigin } from '../api-client.js';
+import { normalizeOrigin } from '../origin.js';
 
 /**
  * Show current configuration
@@ -20,15 +22,17 @@ export async function show() {
 
     console.log(chalk.cyan('\n📋 DeSciX Workspace Configuration:\n'));
     console.log(chalk.white(`   Workspace:     ${workspaceRoot}`));
-    // Under (A', contract rev 2) getApiUrl() ALWAYS yields an origin — a workspace that named
-    // none resolves to the declared default. The "(not configured)" branch is therefore
-    // unreachable and was DELETED, not fenced.
-    const configuredOrigin = workspaceConfig.getApiUrl();
-    console.log(chalk.white(`   API URL:       ${configuredOrigin}`));
-    // The environment NAME comes from the ONE owner that derives it from the origin. It used to
-    // read a separate `env.environment` key and fall back to the literal 'production' — a second
-    // derivation of the same fact, which could disagree with the origin printed one line above.
-    console.log(chalk.white(`   Environment:   ${environmentNameFor(configuredOrigin)}`));
+    // The origin every command in this shell will USE, and who chose it — not the file's value
+    // alone. An inherited DESCIX_API_URL outranks the workspace pin; showing only the pin made
+    // `config show` say dev while commands ran against production.
+    const effective = await resolveEffectiveOrigin(workspaceConfig.env?.apiUrl);
+    console.log(chalk.white(`   API URL:       ${effective.origin}`));
+    console.log(chalk.white(`   Environment:   ${environmentNameFor(effective.origin)}`));
+    console.log(chalk.white(`   Chosen by:     ${effective.source}`));
+    const pinned = workspaceConfig.env?.apiUrl;
+    if (pinned && normalizeOrigin(pinned) !== effective.origin) {
+      console.log(chalk.yellow(`   ⚠ This workspace pins ${normalizeOrigin(pinned)} (${environmentNameFor(pinned)}), but ${effective.source} overrides it for this shell.`));
+    }
 
     // Show mapped apps (v2.1 env.products)
     const platform = workspaceConfig.env?.platform;
