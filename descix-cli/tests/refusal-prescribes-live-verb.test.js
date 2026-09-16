@@ -77,10 +77,19 @@ function censusOfPrescriptions() {
   return found;
 }
 
-/** The CLI's registered command tree, read from its own help listings. */
+/**
+ * The CLI's registered command tree, read from its own help listings.
+ *
+ * `--admin` ALWAYS: the CLI now hides admin-only verbs from the DEFAULT `--help` listing
+ * (lib/command-visibility.js). Hiding is a listing convenience, never a deletion — a hidden
+ * verb is exactly as REGISTERED (and exactly as valid a prescription target) as a visible one.
+ * Without `--admin` this gate loses "microservice list" and everything under "drive" the moment
+ * they're admin-hidden, and flags their real, working prescriptions as dead. `--admin` also
+ * skips the network surface-fetch entirely (see bin/descix.js), so this stays offline.
+ */
 function registeredCommands() {
   const listing = (args) => {
-    const out = execFileSync(process.execPath, [CLI, ...args, '--help'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    const out = execFileSync(process.execPath, [CLI, '--admin', ...args, '--help'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
     const section = out.split(/^Commands:$/m)[1];
     if (!section) return [];
     return [...section.matchAll(/^\s{2}([a-z][a-z0-9-]*)/gm)].map(m => m[1]).filter(n => n !== 'help');

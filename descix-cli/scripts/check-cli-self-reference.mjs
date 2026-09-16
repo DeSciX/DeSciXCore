@@ -50,9 +50,21 @@ const CLI = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BIN = path.join(CLI, 'bin/descix.js');
 const die = (m) => { console.error(`check-cli-self-reference: ${m}`); process.exit(2); };
 
+/**
+ * `--admin` ALWAYS, for every truth-set call this script makes. The CLI now hides admin-only
+ * verbs from the DEFAULT `--help` listing (lib/command-visibility.js) — hiding is a listing
+ * convenience, never a deletion, so an admin-hidden command's own usage line and flags are just
+ * as real as any other command's. A truth set built from the filtered default view would lose
+ * visibility of THOSE commands' flags (their `.option(...)` declarations are only ever parsed
+ * out of a `--help` page this script itself requests), producing FALSE POSITIVES for strings
+ * like `--soft` / `--confirm` that exist only on now-hidden leaves (`community delete`,
+ * `app delete`, `site delete`) — measured the moment default-hiding shipped. `--admin` makes
+ * this script's own truth set match "does it exist", which is the property it has always judged
+ * — never "is it in the default listing", a different property this script does not own.
+ */
 const help = (argv) => {
     try {
-        return execFileSync(process.execPath, [BIN, ...argv, '--help'],
+        return execFileSync(process.execPath, [BIN, '--admin', ...argv, '--help'],
             { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30000 });
     } catch (e) { return String(e.stdout || ''); }
 };
