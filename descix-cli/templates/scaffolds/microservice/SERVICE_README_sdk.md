@@ -112,7 +112,7 @@ descix tell-me-how --scope discovery "What AI training tools exist?"
 ### descix app init
 
 **Description:** Create (if needed) and initialize an app: platform record + default KB + local workspace registration and scaffold. Idempotent.
-**Use when:** Starting a new project or hydrating an existing app. This is the single canonical path — the old two-step `app create` then `app init` is deleted; `descix app create` now hard-fails naming this replacement.
+**Use when:** Starting a new project or hydrating an existing app. This is the one command that creates an app.
 **Options:**
 - `-a, --app <app_id>` (required): App ID. With `-c` this is the app NAME to create.
 - `-c, --community <id>`: Community ID — required to create an app that does not exist yet

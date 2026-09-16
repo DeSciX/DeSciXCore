@@ -2787,7 +2787,7 @@ siteCommand
 
       if (!options.preview) {
         console.log(chalk.gray(`\n  For local development, run:`));
-        console.log(chalk.cyan(`    descix site servelocal <port>\n`));
+        console.log(chalk.cyan(`    descix serve --app ${appId}\n`));
       }
       console.log('');
 

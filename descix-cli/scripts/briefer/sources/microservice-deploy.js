@@ -168,21 +168,6 @@ export async function extract({ env, cliPaths } = {}) {
   }
   const registerMatch = { lineNumber: registerLine };
 
-  // KNOWN GAP toggle: scan for `.command('deploy')` whose preceding 3 lines
-  // contain a `microserviceCommand` anchor (mirror the register-detect pattern).
-  // If found, the gap is closed; if absent, gap text is rendered.
-  let gapToggleClosed = false;
-  for (let i = 1; i < cli.lines.length; i++) {
-    if (/\.command\(['"]deploy['"]\)/.test(cli.lines[i])) {
-      for (let j = i - 1; j >= Math.max(0, i - 3); j--) {
-        if (/microserviceCommand/.test(cli.lines[j])) {
-          gapToggleClosed = true;
-          break;
-        }
-      }
-      if (gapToggleClosed) break;
-    }
-  }
 
   // ── M3: live Cloud Run probe (HARD-FAIL on demo/prod, skipped on dev) ──
   const probeCitations = [];
@@ -212,7 +197,7 @@ export async function extract({ env, cliPaths } = {}) {
   const lines = [
     `Today (regen target: \`${env}\`), per-app microservice deploy is **2 steps** (broker-first — no NEG for non-core apps):`,
     ``,
-    `**Step 1.** \`gcloud run deploy {app}-{env} ...\` — deploys the Cloud Run service (via \`deploy-service-env.sh\` → \`lib/cloud-run-deploy.js\`; CLI: \`descix microservice deploy\`). This is now the SOLE deploy path for **both** apps — Powch's own \`deploy.sh\` was retired to a hard-fail deprecation stub (WS-DEPLOY-HARDENING item 6) that points callers at this canonical path.`,
+    `**Step 1.** \`gcloud run deploy {app}-{env} ...\` — deploys the Cloud Run service (via \`deploy-service-env.sh\` → \`lib/cloud-run-deploy.js\`; the CLI has no deploy verb). This is now the SOLE deploy path for **both** apps — Powch's own \`deploy.sh\` was retired to a hard-fail deprecation stub (WS-DEPLOY-HARDENING item 6) that points callers at this canonical path.`,
     `- Reference (Cloud canonical — sole source of the \`gcloud run deploy\` fact): \`${CLOUD_RUN_LIB}:${cloudRun.lineNumber}\``,
     `- Reference (Powch retirement stub, not a second deploy path): \`${POWCH_DEPLOY}:${powchRun.lineNumber}\``,
     ``,
@@ -228,15 +213,6 @@ export async function extract({ env, cliPaths } = {}) {
     ``
   ];
 
-  if (gapToggleClosed) {
-    lines.push(
-      `**GAP CLOSED:** \`descix microservice deploy\` exists in the CLI as of this regen — it chains the three steps above. (Detected via grep on \`bin/descix.js\`.)`
-    );
-  } else {
-    lines.push(
-      `**KNOWN GAP:** there is NO \`descix microservice deploy\` command that chains all three. Step 2 today is a manual admin-script invocation, not a CLI subcommand. Closing this gap is part of WS-DESCIX-BRIEFER-CLI scope (or a sibling workstream). _Detected dynamically: grep on \`bin/descix.js\` returned no \`microserviceCommand.command('deploy')\` declaration._`
-    );
-  }
   if (runProbeNote) lines.push(runProbeNote);
 
   const markdown = lines.join('\n');

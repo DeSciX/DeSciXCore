@@ -334,7 +334,7 @@ This folder doesn't appear to be configured as a DeSciX app.
 
 Options:
 1. Run `descix init` to configure this folder as a new app
-2. Run `descix mcp quickstart` to configure the entire workspace
+2. Run `descix quickstart` to configure the entire workspace
 3. Check if this is the correct folder
 
 Which would you like to do?

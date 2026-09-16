@@ -82,16 +82,14 @@ One `env.products[]` entry, written by `descix app init` and `descix app set-por
 # 1. Create microservice scaffold
 descix microservice init
 
-# 2. Add SSR routes to your service
+# 2. Add SSR routes to your service, run it locally behind the gateway
+descix serve
 
-# 3. Deploy to Cloud Run  (ADMIN/LOCAL ONLY — see note below)
-descix microservice deploy
-
-# 4. Register and vectorize
+# 3. Register and vectorize (after the service is deployed — see Deployment)
 descix microservice register
 descix microservice vectorize
 
-# 5. Sync KB
+# 4. Sync KB
 descix kb corpus sync -c <community> -a <app>
 ```
 
@@ -124,13 +122,6 @@ descix kb corpus sync -c <community> -a <app>
 
 Dynamic sites deploy to Google Cloud Run as a single container. The service handles both API requests and page rendering.
 
-```bash
-# Deploy the microservice (includes site)  — ADMIN/LOCAL ONLY
-descix microservice deploy
-```
-
-> **`descix microservice deploy` is not open to every developer yet.** Its own help
-> marks it `[ADMIN/LOCAL]` — it shells out to the platform deploy script — and the
-> CLI states that public MCP deploy is "coming soon". If you are not a platform
-> admin, expect this step to fail on permissions rather than on your code. Build and
-> run locally with `descix serve` until the public path lands.
+> **Public microservice deploy is not open.** The CLI has no deploy verb for developers; a
+> microservice reaches Cloud Run only through the platform team. Build and run it locally
+> with `descix serve`.

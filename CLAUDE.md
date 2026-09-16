@@ -62,9 +62,6 @@ Before any change, state which package boundary is being touched and confirm no 
 
 ### Complete (WS-CLI-V2.1-PURGE Batch 4)
 - `WorkspaceConfig.getApp(communityId, appId)` was removed in PR #7 but 6 call sites were missed. All 6 migrated or refactored ✓
-- `WorkspaceConfig.setSitePort(appId, port)` added — mutates live `env.products[]`/`env.platform` entry and auto-saves ✓
-- `descix site servelocal` and `update.js` port handler refactored to use `setSitePort` (eliminates stale-copy mutation) ✓
-- `descix update kb` v1 community-keyed fallback block (`if (!appConfig && ctx.communityId)`) deleted entirely ✓
 - Error message for unmapped app now references both `descix app init` and `descix app set-localpath` ✓
 - Meta-test `removed-methods-anti-regression.test.js` guards against future re-introduction of removed methods ✓
 
@@ -76,16 +73,16 @@ Before any change, state which package boundary is being touched and confirm no 
 - Anti-regression meta-test extended in `removed-methods-anti-regression.test.js` to verify scaffold dir exists at runtime ✓
 
 ### Complete (WS-CLI-MESH-ROUTING-GAP — `descix app set-port`)
-- `WorkspaceConfig.setMicroservicePort(appId, port)` added — parallel to `setSitePort()`; mutates the live `env.products[]`/`env.platform` entry's `microservice.port`, auto-saves; pass `null` to remove (empty `microservice.{}` cleaned up); hard-fails with the canonical "not mapped in workspace.json" error for an unmapped app ✓
+- `WorkspaceConfig.setMicroservicePort(appId, port)` added — mutates the live `env.products[]`/`env.platform` entry's `microservice.port`, auto-saves; pass `null` to remove (empty `microservice.{}` cleaned up); hard-fails with the canonical "not mapped in workspace.json" error for an unmapped app ✓
 - `descix app set-port -a <id> -p <port>` command added (`bin/descix.js`, in the `app` group next to `set-localpath`/`unmap`) — wired to `setMicroservicePort`; validates port 1-65535; accepts `-p n` to remove; hard-fails clearly on unmapped app / bad port ✓
 - This is the canonical write path for the `microservice.port` that `descix microservice init` reads — no more hand-editing workspace.json ✓
-- Test coverage in `tests/app-set-port.test.js` (mirrors `site-servelocal.test.js`: happy path, disable/cleanup, disable-no-op, unmapped hard-fail, platform-app, plus a method-exists anti-regression assertion) ✓
+- Test coverage in `tests/app-set-port.test.js` (happy path, disable/cleanup, disable-no-op, unmapped hard-fail, platform-app, plus a method-exists anti-regression assertion) ✓
 
 ### Complete (WS-SSGPOD — `descix app set-site` closes the site.static gap)
-- `WorkspaceConfig.setStaticSite(appId, { static, port })` added — parallel to `setSitePort()`/`setMicroservicePort()`; mutates the live `env.products[]`/`env.platform` entry's `site.{}` slot, auto-saves; pass `static: null` / `port: null` to remove a field (empty `site.{}` cleaned up); hard-fails with the canonical "not mapped in workspace.json" error for an unmapped app ✓
+- `WorkspaceConfig.setStaticSite(appId, { static, port })` added — parallel to `setMicroservicePort()`; mutates the live `env.products[]`/`env.platform` entry's `site.{}` slot, auto-saves; pass `static: null` / `port: null` to remove a field (empty `site.{}` cleaned up); hard-fails with the canonical "not mapped in workspace.json" error for an unmapped app ✓
 - `descix app set-site -a <id> --static <path>` command added (`bin/descix.js`, in the `app` group next to `set-port`/`set-localpath`/`unmap`) — wired to `setStaticSite`; also accepts `--port <n>` (1-65535) and `--unset` to clear `site.{}`; hard-fails clearly on unmapped app / bad port / nothing-to-set ✓
 - This is the canonical write path for `site.static` — the relative path (under the app's `localPath`; `.` = the localPath itself) that the dev gateway's `staticSitePlugin` serves at `/p/{appId}/`. It closes the `site.static` workspace gap the same way `set-port` closed `microservice.port`: no more hand-editing workspace.json (the org rule forbids it; CEO-D-2026-06-02-SSGPOD-SITE-PREPROD) ✓
-- NOT to be confused with `set-codesite` (which writes the Firestore `ip_site_gcs_path_url` — a prod concern). `set-site` writes ONLY the local workspace.json `site.{}` slot ✓
+- `set-site` writes ONLY the local workspace.json `site.{}` slot ✓
 - Test coverage in `tests/app-set-site.test.js` (mirrors `app-set-port.test.js`: happy path, static+port combined, disable/cleanup, disable-no-op, port-preservation, unmapped hard-fail, platform-app, plus a method-exists anti-regression assertion) ✓
 
 ### Complete (WS-SSGPOD — workspace product-map live-refresh (HMR) + `descix app open`)
@@ -104,12 +101,12 @@ Two platform/SDK/CLI deliverables under CEO-D-2026-06-02-EVP-NO-APPDEV-CLI-PLUS-
 - **Tested** in `descix-cli/tests/app-open.test.js` (temp workspace): static, dev-server, platform, custom gateway port, unmapped hard-fail, no-site hard-fail, missing-workspace hard-fail. ✓
 
 ### WorkspaceConfig — additional canonical method (v2.1)
-- **`workspaceConfig.env`** — raw `env` object from workspace.json. Use for reading `env.platform.microservice.port` / `env.products[i].microservice.port` when injecting port into scaffold files. Do not mutate directly — use `setSitePort()` for site port mutations, `setStaticSite()` for `site.static` (static-site) mutations, and `setMicroservicePort()` for microservice port mutations.
+- **`workspaceConfig.env`** — raw `env` object from workspace.json. Use for reading `env.platform.microservice.port` / `env.products[i].microservice.port` when injecting port into scaffold files. Do not mutate directly — use `setStaticSite()` for `site.static` and `site.port` mutations, and `setMicroservicePort()` for microservice port mutations.
 
 ### Pending (other)
 - ~~`descix-cli/bin/mcp-server.js`: imports non-existent `vendor/mcp/tools.js`~~ — CLOSED (stale, WS-V1-PURGE Phase 2): `mcp-server.js` imports `@modelcontextprotocol/sdk` directly; no `DeSciXMCPServer`/`vendor/mcp/tools.js` exists.
 - ~~`descix-cli/tests/mcp-flow.test.js`~~ — CLOSED (stale, WS-V1-PURGE Phase 2): no file imports `vendor/mcp/mcp-server.js`; the test is gone.
-- **Port-allocation policy gap (`WS-CLI-MESH-ROUTING-GAP`) — RESOLVED:** `microservice init` requires a `microservice.port` in workspace.json. The canonical way to set one is now `descix app set-port -a <id> -p <port>` (backed by `WorkspaceConfig.setMicroservicePort`, parallel to `setSitePort`). Explicit-only — there is no auto-allocation (a possible future enhancement once port constants are canonical). Hand-editing workspace.json is no longer needed.
+- **Port-allocation policy gap (`WS-CLI-MESH-ROUTING-GAP`) — RESOLVED:** `microservice init` requires a `microservice.port` in workspace.json. The canonical way to set one is now `descix app set-port -a <id> -p <port>` (backed by `WorkspaceConfig.setMicroservicePort`). Explicit-only — there is no auto-allocation (a possible future enhancement once port constants are canonical). Hand-editing workspace.json is no longer needed.
 
 ---
 
@@ -128,16 +125,15 @@ After `descix login` / bootstrap, all testing must use `node DeSciX_Core/descix-
 
 ### WorkspaceConfig — canonical methods (v2.1)
 - **`getAppByAppId(appId)`** — primary app lookup. Returns `{ localPath, absolutePath, communityId, kbId }` or `null`. Use this everywhere.
-- **`setSitePort(appId, port)`** — mutates the live `env.products[]` (or `env.platform`) entry and calls `save()`. Pass `null` to remove `site.port`; empty `site.{}` is cleaned up. Hard-fails if `appId` is not mapped. Always use this (not direct mutation of `getAppByAppId()` return value, which is a constructed copy).
+- **`setStaticSite(appId, { static, port })`** — mutates the live `env.products[]` (or `env.platform`) entry's `site.{}` and calls `save()`. Pass `null` for a field to remove it; empty `site.{}` is cleaned up. Hard-fails if `appId` is not mapped. Always use this (not direct mutation of `getAppByAppId()` return value, which is a constructed copy).
 - **`getSitePath(appId)`** / **`getMicroservicePath(appId)`** — convenience wrappers returning `absolutePath/site` and `absolutePath/microservice` respectively.
 - **`setEnvironment(envName)`** — canonical way to persist environment to workspace.json.
 - **NEVER call `getApp(communityId, appId)`** — this method was removed in WS-CLI-V2.1-PURGE PR #7. `getAppByAppId(appId)` is the replacement. The meta-test `removed-methods-anti-regression.test.js` enforces this.
 
 ### KB Mode — ONE sync surface
 - `descix kb corpus sync` is the ONLY KB sync surface: corpus manifest → chunks → Pinecone.
-- `descix kb create` creates the KB and is `kb corpus sync`'s dependency — `kb corpus sync` refuses and names it when the KB is not registered.
-- `descix kb chunk`, `descix kb sync`, `descix sync kb` and `descix update kb` are REMOVED. Each exits non-zero naming `descix kb corpus sync`. There is no alias and no fallback flag.
-- `descix update` covers app and site only. `update all` does app+site and skips the KB; `update auto` REFUSES with a non-zero exit naming `descix kb corpus sync` when run from the app's `kb/` directory, because that is where it would previously have synced a KB.
+- `descix app init -a <app_id> --kb <kb_name>` creates a KB and is `kb corpus sync`'s dependency — `kb corpus sync` refuses and names it when the KB is not registered.
+- `descix kb chunk`, `descix kb sync` and `descix sync kb` are REMOVED. Each exits non-zero naming `descix kb corpus sync`. There is no alias and no fallback flag.
 - Drive Mode (Drive → GCS → Pinecone) is server-side only for PWA users; never add Drive pipeline calls to CLI commands
 - `descix drive pull/push` manage the Drive source IPDoc store — they are the correct commands for Drive content authoring
 

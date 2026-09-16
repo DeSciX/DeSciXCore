@@ -38,7 +38,7 @@ is the schema and the verb that owns each key.
 | `env.siteUrl` | the App Shell origin the gateway proxies `/` to (optional; default is the API origin) | `descix config set-site-url <url>` |
 | `env.products[]` | one entry per app in this workspace, see below | `descix app init`, `app set-site`, `app set-port`, `app set-localpath`, `app unmap` |
 | `env.platform` | the platform shell's own entry — platform contributors only; an app developer has none | platform runbook |
-| `driveConfig.base_folder_id` | the Drive base folder for `descix drive pull/push` | `descix mcp quickstart` |
+| `driveConfig.base_folder_id` | the Drive base folder for `descix drive pull/push` | no verb; set it in `.descix/workspace.json` |
 
 A product entry:
 
@@ -135,7 +135,7 @@ gcloud auth application-default login \
 |-------|-------|--------|
 | "Could not load default credentials" | ADC not configured | `gcloud auth application-default login` |
 | "Drive authentication failed" | scopes missing | re-run with the Drive scopes above |
-| "base_folder_id missing" | Drive not registered | `descix mcp quickstart` |
+| "Drive is not linked" | `driveConfig.base_folder_id` unset | set `driveConfig.base_folder_id` in `.descix/workspace.json`, or pass `--folder <id>` to `descix drive pull` |
 
 The git path (`descix kb corpus sync`) needs none of this.
 

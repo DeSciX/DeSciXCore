@@ -49,7 +49,7 @@ Does the user need a public website?
 ### Dynamic Site
 - SSR app where microservice serves the site
 - Everything in `microservice/` (no separate `site/`)
-- Commands: `descix microservice deploy` (ADMIN/LOCAL only — public deploy is not open yet)
+- Commands: `descix microservice init`, `descix serve` locally; public microservice deploy is not open
 
 ## Two-Tier Template System
 
