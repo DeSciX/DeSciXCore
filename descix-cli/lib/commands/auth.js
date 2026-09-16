@@ -264,7 +264,19 @@ export async function loginDevice(options = {}) {
     }
 
     const walletPath = WalletFileManager.getProjectWalletPath(workspaceRoot);
-    await WalletFileManager.saveWalletFile(walletPath, walletData);
+    try {
+      await WalletFileManager.saveWalletFile(walletPath, walletData);
+    } catch (saveErr) {
+      spinner.fail(chalk.red('Login did not complete'));
+      // The browser ceremony succeeded, but the platform returned no usable CLI credential for this
+      // account (e.g. an empty wallet signature). Say so plainly: nothing was written, and this
+      // workspace is NOT logged in on this environment.
+      throw Object.assign(new Error(
+        `The platform completed the browser sign-in but returned an unusable CLI credential (${saveErr.message}). ` +
+        `Nothing was saved and you are NOT logged in on ${apiClient.baseUrl}. ` +
+        `This is a platform defect, not something you can fix locally; report it with this message.`
+      ), { code: 'UNUSABLE_CLI_CREDENTIAL' });
+    }
 
     spinner.succeed(chalk.green('Login successful!'));
     if (walletData.oauth) {
@@ -319,7 +331,9 @@ export async function loginDevice(options = {}) {
     spinner.fail(chalk.red('Login failed'));
     console.error(chalk.red(error.message));
     
-    if (error.message.includes('expired')) {
+    if (error.code === 'UNUSABLE_CLI_CREDENTIAL') {
+      // The message above is the whole diagnosis; connectivity tips would misdirect.
+    } else if (error.message.includes('expired')) {
       diag(chalk.yellow('💡 Tip: Device codes expire after 15 minutes.'));
       diag(chalk.yellow('   Run the login command again to get a new code.\n'));
     } else {
