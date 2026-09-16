@@ -155,45 +155,41 @@ async function chunkCorpusFile(fileEntry, context) {
 }
 
 /**
- * Read the previously-synced chunk total out of sync state.
+ * Read the previously-synced chunk total out of sync state, for REPORTING only.
  *
  * Three states must not be conflated:
  *   no sync state at all      -> 0, a fact about US (we have never synced), not the store
  *   total_chunks is a number  -> that number, INCLUDING a legitimate 0
- *   total_chunks null/absent  -> UNKNOWN. The previous run could not state its total,
- *                                so no delta computed from it can be trusted.
+ *   total_chunks null/absent  -> null: UNKNOWN, and said so. It is never coerced to 0.
+ *
+ * The file delta is computed from blob SHAs, never from this number, so an unknown
+ * previous total blocks nothing. The total is re-established on every clean sync by the
+ * store's own live read-back (`liveTotalFromReconcile`), never by arithmetic on it.
  *
  * @param {Object|null} previousState - the loaded sync state, or null on first sync
- * @param {string} kbName - for the error message
- * @returns {number}
- * @throws {Error} when a sync state exists but carries no usable chunk total
+ * @returns {number|null}
  */
-export function readPreviousChunkCount(previousState, kbName = 'this KB') {
+export function readPreviousChunkCount(previousState) {
   if (!previousState) return 0;
-  if (Number.isFinite(previousState.total_chunks)) return previousState.total_chunks;
-  throw new Error(
-    `Sync state for ${kbName} carries no chunk total (total_chunks is ` +
-    `${JSON.stringify(previousState.total_chunks)}), so the previous run's total is UNKNOWN. ` +
-    `Coercing it to 0 would silently understate the store and corrupt every later delta. ` +
-    `Re-run with --rebuild to re-establish a known total.`
-  );
+  return Number.isFinite(previousState.total_chunks) ? previousState.total_chunks : null;
 }
 
 /**
- * Compute the chunk total to PERSIST, preserving unknown-ness.
+ * The chunk total to PERSIST: the store's MEASURED live count from the post-sync
+ * reconcile (`get_kb_rag_status {reconcile:true}` → `reconcileAfter`), or null when the
+ * store reported none. This is the ONE owner of `total_chunks`.
  *
- * Returns null — not a number — when either component is unreportable, because a
- * sync state is read by later runs and a fabricated integer there outlives the
- * console line that produced it.
+ * Why not previous + upserted − deleted: the server's `kb_sync_chunks` answers
+ * `upserted_count: null` by ruling (Pinecone's upsert API returns no count) and publishes
+ * the measured `rag_vector_count` instead. An arithmetic total built on that null was null
+ * on every sync, including `--rebuild` (measured 2026-09-16: reconcile read 6882 live and
+ * the state still said unknown), so the "re-run with --rebuild" remedy was a loop.
  *
- * @param {number} previousChunkCount
- * @param {number} upserted - a store count or UNREPORTED_COUNT
- * @param {number} deleted - a store count or UNREPORTED_COUNT
+ * @param {Object|null|undefined} rec - the reconcile response's message
  * @returns {number|null}
  */
-export function computeTotalChunks(previousChunkCount, upserted, deleted) {
-  if (!isReportedCount(upserted) || !isReportedCount(deleted)) return null;
-  return previousChunkCount + upserted - deleted;
+export function liveTotalFromReconcile(rec) {
+  return Number.isFinite(rec?.reconcileAfter) ? rec.reconcileAfter : null;
 }
 
 /**
@@ -655,10 +651,10 @@ export async function runCorpusSync(apiClient, options) {
         previousState = null;
       }
       const previousBlobShas = new Set(previousState?.synced_blob_shas || []);
-      const previousChunkCount = readPreviousChunkCount(previousState, kbName);
+      const previousChunkCount = readPreviousChunkCount(previousState);
 
       if (previousBlobShas.size > 0) {
-        console.log(chalk.gray(`  Previous sync: ${previousBlobShas.size} files, ${previousChunkCount} chunks`));
+        console.log(chalk.gray(`  Previous sync: ${previousBlobShas.size} files, ${previousChunkCount ?? 'an unknown number of'} chunks`));
       } else {
         console.log(chalk.gray('  First sync (no previous state)'));
       }
@@ -854,7 +850,37 @@ export async function runCorpusSync(apiClient, options) {
         }
       }
 
-      // 3f. Save sync state with blob SHAs for future delta computation
+      // 3f. AUTO-RECONCILE the cached rag_vector_count to the TRUE live Pinecone
+      // count after a COMPLETED, clean sync (no batch failures). This keeps the
+      // doctor's fast cached read truthful after every clean run, so drift only
+      // ever appears mid-flight (on interruption). Skipped if any batch failed
+      // (the run is partial — reconciling would bake in the partial state and the
+      // re-run will reconcile once complete). Non-fatal: a reconcile hiccup must
+      // not fail an otherwise-successful sync — but then the persisted total is
+      // null, honestly, because nothing measured it.
+      let liveTotal = null;
+      if (syncFailures.length === 0) {
+        try {
+          const recRes = await apiClient.invoke('get_kb_rag_status', {
+            app_id: appId, kb_id: kbName, reconcile: true
+          }, { allowGuest: false });
+          const rec = recRes.message || recRes;
+          liveTotal = liveTotalFromReconcile(rec);
+          if (liveTotal !== null) {
+            const d = rec.reconcileAfter - rec.reconcileBefore;
+            console.log(chalk.gray(
+              `  ⟳ Reconciled live count: cached ${rec.reconcileBefore} → live ${rec.reconcileAfter}` +
+              (d === 0 ? ' (already truthful)' : ` (${d >= 0 ? '+' : ''}${d})`)
+            ));
+          } else {
+            console.log(chalk.yellow('  ⚠ Reconcile reported no live count; total_chunks stays unknown'));
+          }
+        } catch (recErr) {
+          console.log(chalk.yellow(`  ⚠ Auto-reconcile skipped (non-fatal): ${recErr.message}`));
+        }
+      }
+
+      // 3g. Save sync state with blob SHAs for future delta computation
       const allSyncedBlobShas = [...localBlobShas]; // All current files
       await saveSyncState(appRoot, kbName, {
         last_sync_commit: commitSha,
@@ -863,9 +889,9 @@ export async function runCorpusSync(apiClient, options) {
         // synced — the resolved sha is, and it stays exact after the branch moves.
         sources_provenance: provenance,
         synced_files_count: files.length,
-        // null, never a fabricated integer: this file is read by later runs, so a
-        // wrong number here outlives the console line that produced it.
-        total_chunks: computeTotalChunks(previousChunkCount, upserted, deleted),
+        // The store's measured live count, or null — never a fabricated integer: this file
+        // is read by later runs, so a wrong number here outlives the console line.
+        total_chunks: liveTotal,
         timestamp: new Date().toISOString(),
         files_upserted: newOrChangedFiles.length,
         files_unchanged: unchangedCount,
@@ -873,31 +899,6 @@ export async function runCorpusSync(apiClient, options) {
         chunks_deleted: isReportedCount(deleted) ? deleted : null,
         synced_blob_shas: allSyncedBlobShas
       });
-
-      // 3g. AUTO-RECONCILE the cached rag_vector_count to the TRUE live Pinecone
-      // count after a COMPLETED, clean sync (no batch failures). This keeps the
-      // doctor's fast cached read truthful after every clean run, so drift only
-      // ever appears mid-flight (on interruption). Skipped if any batch failed
-      // (the run is partial — reconciling would bake in the partial state and the
-      // re-run will reconcile once complete). Non-fatal: a reconcile hiccup must
-      // not fail an otherwise-successful sync.
-      if (syncFailures.length === 0) {
-        try {
-          const recRes = await apiClient.invoke('get_kb_rag_status', {
-            app_id: appId, kb_id: kbName, reconcile: true
-          }, { allowGuest: false });
-          const rec = recRes.message || recRes;
-          if (rec && typeof rec.reconcileAfter === 'number') {
-            const d = rec.reconcileAfter - rec.reconcileBefore;
-            console.log(chalk.gray(
-              `  ⟳ Reconciled live count: cached ${rec.reconcileBefore} → live ${rec.reconcileAfter}` +
-              (d === 0 ? ' (already truthful)' : ` (${d >= 0 ? '+' : ''}${d})`)
-            ));
-          }
-        } catch (recErr) {
-          console.log(chalk.yellow(`  ⚠ Auto-reconcile skipped (non-fatal): ${recErr.message}`));
-        }
-      }
 
       totalFilesProcessed += newOrChangedFiles.length;
       totalFilesSkipped += unchangedCount;
@@ -1022,7 +1023,7 @@ export async function runCorpusStatus(apiClient, options) {
       console.log(chalk.white(
         `  Chunks in store: ${Number.isFinite(syncState.total_chunks)
           ? syncState.total_chunks
-          : 'unknown (the last sync could not obtain a count; re-run with --rebuild)'}`
+          : 'unknown (the last sync reported no live count)'}`
       ));
 
       // Quick change detection: walk and compare blob SHAs

@@ -15,7 +15,7 @@ import assert from 'node:assert/strict';
 
 import {
   readPreviousChunkCount,
-  computeTotalChunks,
+  liveTotalFromReconcile,
   renderCount
 } from '../lib/commands/corpus.js';
 import { listRemoteFileIds, UNREPORTED_COUNT } from '../lib/core/Syncer.js';
@@ -87,56 +87,56 @@ test('previous count: an ordinary number is returned as-is', () => {
   assert.equal(readPreviousChunkCount({ total_chunks: 137 }), 137);
 });
 
-test('previous count: a NULL total THROWS instead of silently becoming 0', () => {
-  // This is the landing site for the null that honest counting now writes.
-  assert.throws(
-    () => readPreviousChunkCount({ total_chunks: null }, 'General'),
-    err => {
-      assert.match(err.message, /UNKNOWN/);
-      assert.match(err.message, /--rebuild/);
-      assert.match(err.message, /General/);
-      return true;
-    },
-    'a null chunk total was coerced to 0'
-  );
+test('previous count: a NULL total reads as null — unknown, said so, never coerced to 0', () => {
+  // The landing site for the null that honest counting writes. The file delta is computed
+  // from blob SHAs, so an unknown previous total blocks nothing and demands no --rebuild
+  // (a rebuild could not re-establish it either: measured 2026-09-16, live 6882, state null).
+  assert.equal(readPreviousChunkCount({ total_chunks: null }), null);
+  assert.notEqual(readPreviousChunkCount({ total_chunks: null }), 0, 'a null chunk total was coerced to 0');
 });
 
-test('previous count: an ABSENT total THROWS too (legacy state is not zero state)', () => {
-  assert.throws(() => readPreviousChunkCount({ last_sync_commit: 'abc' }));
+test('previous count: an ABSENT total reads as null too (legacy state is not zero state)', () => {
+  assert.equal(readPreviousChunkCount({ last_sync_commit: 'abc' }), null);
 });
 
-test('previous count: a non-numeric total THROWS rather than coercing', () => {
+test('previous count: a non-numeric total reads as null rather than coercing', () => {
   for (const bad of [{ total_chunks: 'many' }, { total_chunks: NaN }, { total_chunks: {} }]) {
-    assert.throws(() => readPreviousChunkCount(bad));
+    assert.equal(readPreviousChunkCount(bad), null);
   }
 });
 
 // ---------------------------------------------------------------------------
-// 3. FLAG-3 — what gets PERSISTED. null, never a fabricated integer.
+// 3. FLAG-3 — what gets PERSISTED. The store's MEASURED live count (the reconcile's
+//    reconcileAfter) is the ONE owner of total_chunks; null when it reported none.
+//    Never previous + upserted − deleted: the server answers upserted_count null by
+//    ruling, so that arithmetic was null on every sync, --rebuild included.
 // ---------------------------------------------------------------------------
 
-test('persisted total: all components reported -> the arithmetic is performed', () => {
-  assert.equal(computeTotalChunks(100, 20, 5), 115);
-  assert.equal(computeTotalChunks(0, 0, 0), 0, 'an all-zero run is a real answer, not unknown');
+test('persisted total: the reconcile\'s live count is the total, including a legitimate zero', () => {
+  assert.equal(liveTotalFromReconcile({ reconcileBefore: 100, reconcileAfter: 6882 }), 6882);
+  assert.equal(liveTotalFromReconcile({ reconcileBefore: 5, reconcileAfter: 0 }), 0, 'an empty store is a real answer, not unknown');
 });
 
-test('persisted total: an unreportable UPSERT makes the total null, not a wrong integer', () => {
-  assert.equal(computeTotalChunks(100, UNREPORTED_COUNT, 5), null);
-  // The specific corruption being prevented: 100 + (-1) - 5 would persist 94.
-  assert.notEqual(computeTotalChunks(100, UNREPORTED_COUNT, 5), 94);
+test('persisted total: a reconcile that reports no live count persists null, not a wrong integer', () => {
+  assert.equal(liveTotalFromReconcile({ reconcileBefore: 100 }), null);
+  assert.equal(liveTotalFromReconcile({ reconcileAfter: 'many' }), null);
+  assert.equal(liveTotalFromReconcile({ reconcileAfter: NaN }), null);
+  assert.equal(liveTotalFromReconcile(null), null);
+  assert.equal(liveTotalFromReconcile(undefined), null);
 });
 
-test('persisted total: an unreportable DELETE makes the total null', () => {
-  assert.equal(computeTotalChunks(100, 20, UNREPORTED_COUNT), null);
-  assert.notEqual(computeTotalChunks(100, 20, UNREPORTED_COUNT), 121);
+test('persisted total: the request-derived figure is never the total (negative control)', () => {
+  // upserted/deleted counts do not enter the persisted total at all — the corruption the
+  // old arithmetic produced (100 + (-1) - 5 = 94) has no path to the file any more.
+  const rec = { reconcileBefore: 100, reconcileAfter: 100, upserted_count: null, requested_count: 20 };
+  assert.equal(liveTotalFromReconcile(rec), 100);
+  assert.notEqual(liveTotalFromReconcile(rec), 94);
+  assert.notEqual(liveTotalFromReconcile(rec), 120);
 });
 
-test('persisted total: null round-trips into the reader as a LOUD failure, not a zero', () => {
-  // The two halves of option (a) meeting: what we write must be what the next run
-  // refuses to guess at. This is the relocation check.
-  const persisted = computeTotalChunks(100, UNREPORTED_COUNT, 5);
-  assert.equal(persisted, null);
-  assert.throws(() => readPreviousChunkCount({ total_chunks: persisted }, 'General'));
+test('persisted total: null round-trips into the reader as null, and a number as itself', () => {
+  assert.equal(readPreviousChunkCount({ total_chunks: liveTotalFromReconcile({}) }), null);
+  assert.equal(readPreviousChunkCount({ total_chunks: liveTotalFromReconcile({ reconcileAfter: 42 }) }), 42);
 });
 
 // ---------------------------------------------------------------------------
