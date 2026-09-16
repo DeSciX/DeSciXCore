@@ -68,7 +68,6 @@ export function readIdentity(config = {}) {
     const resolved = resolveOrigin({
         envVar: process.env.DESCIX_API_URL,
         workspaceEnvApiUrl: env.apiUrl,
-        legacyApiUrl: config.apiUrl,
     });
 
     return {

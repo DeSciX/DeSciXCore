@@ -79,15 +79,16 @@ export const ORIGIN_SOURCE_LABELS = {
     flagEnv: '--env flag',
     envVar: 'DESCIX_API_URL environment variable',
     workspaceEnvApiUrl: '.descix/workspace.json env.apiUrl',
-    legacyApiUrl: '.descix/workspace.json apiUrl (legacy)',
     globalApiUrl: '~/.descix/config.json api_url',
 };
 
 /**
  * The resolution order, most explicit first. The ORDER is the contract; this array is the only
  * place it is written down. Labels come from ORIGIN_SOURCE_LABELS, never from a second literal.
+ * The workspace names its origin at `env.apiUrl` and nowhere else — a top-level `apiUrl` is a
+ * retired v1 key that `WorkspaceConfig.load()` refuses by name.
  */
-const PRECEDENCE = ['envVar', 'workspaceEnvApiUrl', 'legacyApiUrl', 'globalApiUrl'];
+const PRECEDENCE = ['envVar', 'workspaceEnvApiUrl', 'globalApiUrl'];
 
 /**
  * What this invocation's FLAGS named, if anything: `{ origin, sourceKey }`.
@@ -181,7 +182,6 @@ function isUsableOrigin(value) {
  * @param {object} sources
  * @param {string|null} [sources.envVar]              process.env.DESCIX_API_URL
  * @param {string|null} [sources.workspaceEnvApiUrl]  workspace.json env.apiUrl
- * @param {string|null} [sources.legacyApiUrl]        workspace.json top-level apiUrl
  * @param {string|null} [sources.globalApiUrl]        ~/.descix/config.json api_url
  * @returns {{ origin: string, source: string, isDefault: boolean }} the origin AND which source
  *          supplied it — the source is returned because "where did this come from" is the

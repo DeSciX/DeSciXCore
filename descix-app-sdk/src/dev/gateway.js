@@ -32,31 +32,11 @@ import { assertVitePin } from './vitePin.js';
 import { resolveServeBinding, appBindingPlugin, APP_BINDING_PATH } from './serveBinding.js';
 import { resolvePowchUrl } from './powchUrl.js';
 import { resolveDevCertOptions } from './devCerts.js';
+import { localUpstreamOrigin } from './localOrigin.js';
+import { findWorkspaceRoot, readWorkspaceConfig, workspaceFilePath } from './workspaceFile.js';
 
-/**
- * Find the workspace root by walking up from startDir looking for .descix/workspace.json.
- * @param {string} startDir
- * @returns {string|null}
- */
-function findWorkspaceRoot(startDir) {
-  let dir = path.resolve(startDir);
-  while (true) {
-    if (fs.existsSync(path.join(dir, '.descix', 'workspace.json'))) return dir;
-    const parent = path.dirname(dir);
-    if (parent === dir) return null;
-    dir = parent;
-  }
-}
-
-/**
- * Read workspace config from .descix/workspace.json.
- * @param {string} workspaceRoot
- * @returns {Object}
- */
-function readWorkspaceConfig(workspaceRoot) {
-  const configPath = path.join(workspaceRoot, '.descix', 'workspace.json');
-  return JSON.parse(fs.readFileSync(configPath, 'utf8'));
-}
+// findWorkspaceRoot / readWorkspaceConfig live in their ONE owner, ./workspaceFile.js — the
+// harness and the CLI walk up to the same file this gateway does.
 
 /**
  * Build the Vite `define` map from workspace config.
@@ -134,7 +114,7 @@ export async function runGateway(options = {}) {
     ? findWorkspaceRoot(options.workspaceRoot) || options.workspaceRoot
     : findWorkspaceRoot(process.cwd());
 
-  if (!workspaceRoot || !fs.existsSync(path.join(workspaceRoot, '.descix', 'workspace.json'))) {
+  if (!workspaceRoot || !fs.existsSync(workspaceFilePath(workspaceRoot))) {
     // Name the flag the CALLERS actually expose. `--workspace-root` was named here and on no
     // bin: `descix serve` and `descix-app serve` both spell it `-w, --workspace`, so the one
     // instruction this message existed to give sent the reader to a flag that does not parse.
@@ -281,7 +261,7 @@ export async function runGateway(options = {}) {
     });
 
     await listenOrFailLoud(server, port, portSource);
-    log(`\n  Gateway restarted on https://localhost:${port}  (app ${newBinding.appId})\n`);
+    log(`\n  Gateway restarted on ${gatewayOrigin(port)}  (app ${newBinding.appId})\n`);
   });
 
   process.on('SIGINT', () => { watcher.close(); server.close(); process.exit(0); });
@@ -334,6 +314,7 @@ async function discoverServices(config, log) {
     services.push({
       name: platform.appId || 'platform',
       port: platform.microservice.port,
+      protocol: platform.microservice.protocol,
     });
   }
 
@@ -344,6 +325,7 @@ async function discoverServices(config, log) {
       services.push({
         name: p.appId,
         port: p.microservice.port,
+        protocol: p.microservice.protocol,
       });
     }
   }
@@ -364,7 +346,8 @@ async function discoverServices(config, log) {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 5000);
 
-      const res = await fetch(`https://localhost:${svc.port}/manifest`, {
+      // The service's origin — scheme included — comes from the ONE owner (localOrigin.js).
+      const res = await fetch(`${localUpstreamOrigin(svc, `env.*[${svc.name}].microservice`)}/manifest`, {
         signal: controller.signal,
       });
       clearTimeout(timeout);

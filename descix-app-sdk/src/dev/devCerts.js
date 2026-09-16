@@ -21,6 +21,7 @@
  */
 import fs from 'fs';
 import path from 'path';
+import { workspaceFilePath } from './workspaceFile.js';
 
 /**
  * Read `.descix/workspace.json` if it is there. Absence is normal — an app dev
@@ -31,7 +32,7 @@ import path from 'path';
  */
 function readWorkspace(workspaceRoot) {
   if (!workspaceRoot) return null;
-  const p = path.join(workspaceRoot, '.descix', 'workspace.json');
+  const p = workspaceFilePath(workspaceRoot);
   if (!fs.existsSync(p)) return null;
   try {
     return JSON.parse(fs.readFileSync(p, 'utf8'));

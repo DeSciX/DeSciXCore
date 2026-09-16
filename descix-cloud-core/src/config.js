@@ -295,6 +295,17 @@ class CloudConfig {
         this.__port = process.env.PORT || this.LOCAL_PORT || this.DEFAULT_PORT;
         this.PORT = this.__port;
         console.log("[Config] PORT:", this.__port);
+        // A dev service with no port would go on to `listen(undefined)` and log "running on port
+        // undefined" while bound to nothing (measured 2026-09-16). Cloud Run always sets PORT, so
+        // this can only be a local misconfiguration — say so, and name what was consulted.
+        if (!this.__port && this.DEPLOY_ENV === 'dev') {
+            throw new CloudConfigFatalError(
+                '[CloudConfig] FATAL: no port for this dev service. process.env.PORT and LOCAL_PORT are unset, ' +
+                `and the workspace auto-detect matched no entry for ${this.__appDir}. A service must never bind ` +
+                'on "undefined": register this service\'s microservice.port in .descix/workspace.json ' +
+                '(`descix app set-port`), or set LOCAL_PORT.'
+            );
+        }
     }
 
     /**
@@ -428,10 +439,26 @@ class CloudConfig {
 
                     // Auto-detect port from workspace apps (v2.1 format)
                     this._autoDetectPort(workspace);
+                } else if (workspace.env?.environment) {
+                    // Any other token used to be a SILENT no-op: DEPLOY_ENV stayed unset, the
+                    // port auto-detect never ran, and the service reached initialize() with
+                    // "DEPLOY_ENV not set" — a true message that named the wrong cause and left
+                    // Powch logging "running on port undefined" (measured 2026-09-16 after
+                    // `descix config set-env local`). A workspace token this file cannot consume
+                    // is a misconfiguration, and it is named as one.
+                    throw new CloudConfigFatalError(
+                        `[CloudConfig] FATAL: .descix/workspace.json env.environment is "${workspace.env.environment}" ` +
+                        `(${workspacePath}). A local service derives DEPLOY_ENV, its secret name and its port only ` +
+                        'from a DEV workspace; a deployed environment sets DEPLOY_ENV explicitly and never reads ' +
+                        'workspace.json. Run `descix config init --env dev` for local development, or set DEPLOY_ENV ' +
+                        'explicitly if you really mean another environment.'
+                    );
                 }
             }
         } catch (e) {
-            // Ignore errors in production/CI where workspace.json might be missing
+            // A misconfiguration named above must reach the operator; only the ordinary
+            // "no workspace.json here" case (production/CI) is silent.
+            if (e instanceof CloudConfigFatalError) throw e;
         }
     }
 
@@ -929,7 +956,20 @@ class CloudConfig {
         }
 
         const auth = new GoogleAuth();
-        this.GOOGLE_PROJECT_ID = await auth.getProjectId();
+        try {
+            this.GOOGLE_PROJECT_ID = await auth.getProjectId();
+        } catch (err) {
+            // A project id that cannot be resolved is a MISCONFIGURATION, not a transient fault:
+            // no retry will make ADC name a project. This used to surface as a generic Error and
+            // fall into initializeCloudConfig's backoff loop forever ("Retrying in 16 seconds...")
+            // — measured 2026-09-16 on a machine with ADC present but no project attached.
+            throw new CloudConfigFatalError(
+                '[CloudConfig] FATAL: cannot resolve the GCP project id. Set GOOGLE_CLOUD_PROJECT=<project> ' +
+                'in the service\'s environment (local dev), or attach a project to the ADC credentials ' +
+                '(gcloud auth application-default set-quota-project <project>). ' +
+                `Underlying: ${err.message}`
+            );
+        }
         console.error("***** INITIALIZING Project ID: ", this.GOOGLE_PROJECT_ID);
 
         if (!this.GEMINI_API_KEY && this.CONFIG_SECRET_NAME) {

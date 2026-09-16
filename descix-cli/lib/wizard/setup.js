@@ -251,8 +251,8 @@ async function refuseIfWorkspacePresent(startDir) {
     '\nTo change the workspace you already have, use the verbs that own it' +
     (nested ? ` (run them from ${workspaceRoot}):\n` : ':\n') +
     '  descix config show                 # what is configured right now\n' +
-    '  descix config set-env <env>        # retarget the environment\n' +
-    '  descix config set-url <url>        # retarget the API origin\n' +
+    '  descix config init --env <env>     # retarget to a known environment (dev|demo|prod)\n' +
+    '  descix config set-env <name> --url <origin>  # a custom API origin under your own env name\n' +
     '  descix config set-gateway-port <n> # change the gateway port\n' +
     '  descix app init                    # register another app in this workspace\n'
   );

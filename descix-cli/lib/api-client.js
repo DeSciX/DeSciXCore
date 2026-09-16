@@ -112,7 +112,6 @@ export class DeSciXApiClient {
     return resolveOrigin({
       envVar: process.env.DESCIX_API_URL,
       workspaceEnvApiUrl: this._workspaceConfig?.env?.apiUrl,
-      legacyApiUrl: this._workspaceConfig?.apiUrl,
       globalApiUrl,
     });
   }

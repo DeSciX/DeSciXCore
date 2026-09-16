@@ -11,7 +11,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { DeSciXApiClient } from '../lib/api-client.js';
 import { requireAuth } from '../lib/auth-guard.js';
-import { WorkspaceConfig, unmappedAppMessage, resolveWorkspacePath } from '../lib/workspace-config.js';
+import { WorkspaceConfig, unmappedAppMessage, resolveWorkspacePath, TOP_LEVEL_API_URL_REMEDY } from '../lib/workspace-config.js';
 import { CLI_VERSION } from '../lib/cli-version.js';
 import { recordInvocationOrigin } from '../lib/origin.js';
 // Chat session pointer + the ONE rule for when a dead pointer may be self-healed.
@@ -293,7 +293,9 @@ program
       // --env=demo is supplied (because the subcommand owns its own flag space).
       const parentEnv = program.opts().env || null;
       const env = options.env || parentEnv || 'dev';
-      await runHealth({ ...options, env });
+      const result = await runHealth({ ...options, env });
+      // A health check that reports an unhealthy service and exits 0 is not a gate.
+      if (result && result.all_healthy === false) process.exitCode = 1;
     } catch (error) {
       console.error(chalk.red(`\nHealth check error: ${error.message}\n`));
       process.exit(1);
@@ -4367,17 +4369,22 @@ configCommand
     }
   });
 
+// `config set-url` is RETIRED, and it is retired LOUDLY rather than deleted outright: a deleted
+// subcommand only earns commander's "unknown command", which names no replacement. It used to
+// assign a top-level `apiUrl` that save() never serialized, then print a success banner over a
+// value that landed nowhere — the file was re-stamped and the origin never moved. Hidden from
+// --help; any invocation exits non-zero naming the three surfaces that actually set the origin.
 configCommand
-  .command('set-url')
-  .description('Set API URL')
-  .argument('<url>', 'API URL (e.g., https://localhost:4000)')
-  .option('-g, --global', 'Save to global config (~/.descixrc)')
-  .action(async (url, options) => {
-    try {
-      await configCommands.setUrl(url, options);
-    } catch (error) {
-      fail(error);
-    }
+  .command('set-url', { hidden: true })
+  .description('retired — see error text')
+  .argument('[url]')
+  .allowUnknownOption()
+  .action(() => {
+    fail(new Error(
+      '"descix config set-url" is retired: it never wrote the origin it reported (a retired top-level\n' +
+      'key that nothing reads). Set the API origin where it is read, env.apiUrl, with one of:\n' +
+      `  ${TOP_LEVEL_API_URL_REMEDY}`
+    ));
   });
 
 configCommand
