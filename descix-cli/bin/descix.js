@@ -4748,10 +4748,12 @@ program
 const rawArgv = process.argv.slice(2);
 const adminMode = rawArgv.includes('--admin') || process.env.DESCIX_ADMIN === '1';
 
-/** Read `--flag <value>` out of raw argv, pre-parse — Commander has not run yet at this point. */
+/** Read `--flag <value>` or `--flag=<value>` out of raw argv, pre-parse — Commander has not run yet at this point. */
 function rawFlagValue(argv, flag) {
   const i = argv.indexOf(flag);
-  return i === -1 ? undefined : argv[i + 1];
+  if (i !== -1) return argv[i + 1];
+  const joined = argv.find((tok) => tok.startsWith(`${flag}=`));
+  return joined === undefined ? undefined : joined.slice(flag.length + 1);
 }
 
 if (!adminMode && isHelpInvocation(program, rawArgv, { valueFlags: ['--env', '--api-url'], booleanFlags: ['--admin'] })) {
