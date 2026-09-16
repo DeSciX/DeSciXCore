@@ -25,7 +25,7 @@
 # package's package.json version.
 #
 # WHAT STILL FAIL-CLOSES BEHIND ALL OF THAT:
-#   · the `npm-publish` environment's deployment branch policy (`main` only) and CODEOWNERS on
+#   · the `npm-publish` environment's deployment policy (branch `main` plus each package's release tag pattern) and CODEOWNERS on
 #     this file path;
 #   · the dependency-satisfiability refusal below, which asks the REGISTRY whether every @descix
 #     range this package declares can actually be resolved, and refuses the publish if not;
