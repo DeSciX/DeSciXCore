@@ -1625,7 +1625,7 @@ appCommand
           destructive: true,
           nonInteractiveForm: [
             'Re-run with --dry-run to see the plan without changing anything.',
-            `descix app delete -a ${appId} --hard --yes   # PERMANENTLY deletes the app`
+            `descix app delete -a ${appId} --yes   # PERMANENTLY deletes the app (hard delete is the default; --soft only hides it)`
           ]
         });
         const answer = await rl.askRaw(chalk.yellow(`\n  Permanently delete ${appId}? This cannot be undone. [y/N] `));
