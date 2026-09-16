@@ -19,20 +19,14 @@ import { createHash } from 'crypto';
 // ─── JSDoc Parsing ───────────────────────────────────────────────────────────
 
 /**
- * Parse a JSDoc comment block to extract description and visibility directives.
- *
- * Recognized tags:
- *   @admin          → visibility: "admin"
- *   @deprecated X   → visibility: "deprecated", deprecatedBy: X
- *   @internal       → visibility: "internal"
- *   @param {Type} name - desc  → inputSchema hint
- *   (no tag)        → visibility: "public"
+ * Parse a JSDoc comment block for the command's description and @param hints. Every other tag is
+ * skipped. A command's visibility is not read from JSDoc: the service states it (visibilityOf).
  *
  * @param {string} jsdoc — raw JSDoc string (with leading * stripped)
- * @returns {{ description: string, visibility: string, deprecatedBy?: string, params: Array }}
+ * @returns {{ description: string, params: Array }}
  */
 function parseJSDoc(jsdoc) {
-    if (!jsdoc) return { description: '', visibility: 'public', params: [] };
+    if (!jsdoc) return { description: '', params: [] };
 
     const lines = jsdoc
         .split('\n')
@@ -40,28 +34,9 @@ function parseJSDoc(jsdoc) {
         .filter(Boolean);
 
     let description = '';
-    let visibility = 'public';
-    let deprecatedBy = null;
     const params = [];
 
     for (const line of lines) {
-        // @admin
-        if (/^@admin\b/.test(line)) {
-            visibility = 'admin';
-            continue;
-        }
-        // @deprecated [replacement]
-        const deprecMatch = line.match(/^@deprecated\s*(.*)/);
-        if (deprecMatch) {
-            visibility = 'deprecated';
-            deprecatedBy = deprecMatch[1]?.trim() || null;
-            continue;
-        }
-        // @internal
-        if (/^@internal\b/.test(line)) {
-            visibility = 'internal';
-            continue;
-        }
         // @param {Type} name - description
         const paramMatch = line.match(/^@param\s+\{(\w+)\}\s+(\w+)\s*-?\s*(.*)/);
         if (paramMatch) {
@@ -86,9 +61,7 @@ function parseJSDoc(jsdoc) {
         }
     }
 
-    const result = { description: description.trim(), visibility, params };
-    if (deprecatedBy) result.deprecatedBy = deprecatedBy;
-    return result;
+    return { description: description.trim(), params };
 }
 
 /**
@@ -151,6 +124,11 @@ function escapeRegExp(str) {
  * @param {Object} config.handlers      — { command_name: 'handlerFile.js', ... } from registry.js
  * @param {string} config.handlerDir    — absolute path to commandHandlers/ directory
  * @param {Set<string>} [config.guestCommands] — set of guest-allowed command names
+ * @param {(command: string) => 'public'|'admin'} config.visibilityOf — REQUIRED. The service's
+ *        own answer to "may an ordinary caller use this command": 'admin' when only community or
+ *        platform administrators are admitted, else 'public'. Discovery (tell_me_how) hides
+ *        'admin' commands from non-admins. Derived by the service from its permission owner;
+ *        a value outside the two is refused.
  * @param {Object} [config.metaOverlay] — { command: { description, inputSchema, mcp, mutating } }
  *        per-command meta (from handler commandMeta exports). Authoritative over JSDoc.
  * @returns {Promise<Object>} — standard manifest object
@@ -162,6 +140,7 @@ export async function buildManifestFromHandlers(config) {
         debugPort, community_id, app_id,
         handlers, handlerDir,
         guestCommands = new Set(),
+        visibilityOf,
         // WS-MCP-SSOT-TIER2: per-command meta from each handler's commandMeta export
         // (aggregated by the consuming service). When a command has meta, its
         // description + inputSchema are AUTHORITATIVE over the JSDoc-parsed values, and
@@ -169,6 +148,17 @@ export async function buildManifestFromHandlers(config) {
         // back to JSDoc (incremental migration — audit §5.B-3).
         metaOverlay = {}
     } = config;
+
+    if (typeof visibilityOf !== 'function') {
+        throw new Error(`buildManifestFromHandlers(${name}): config.visibilityOf is required — the service states each command's visibility from its permission owner.`);
+    }
+    const visibilityFor = (cmd) => {
+        const v = visibilityOf(cmd);
+        if (v !== 'public' && v !== 'admin') {
+            throw new Error(`buildManifestFromHandlers(${name}): visibilityOf('${cmd}') returned ${JSON.stringify(v)}; expected 'public' or 'admin'.`);
+        }
+        return v;
+    };
 
     // Group commands by handler file to minimize file reads
     const fileCommands = {};
@@ -193,7 +183,7 @@ export async function buildManifestFromHandlers(config) {
                 commands[cmd] = {
                     description: '',
                     guestAllowed: guestCommands.has(cmd),
-                    visibility: 'public'
+                    visibility: visibilityFor(cmd)
                 };
             }
             continue;
@@ -206,12 +196,8 @@ export async function buildManifestFromHandlers(config) {
             const entry = {
                 description: parsed.description || '',
                 guestAllowed: guestCommands.has(cmd),
-                visibility: parsed.visibility
+                visibility: visibilityFor(cmd)
             };
-
-            if (parsed.deprecatedBy) {
-                entry.deprecatedBy = parsed.deprecatedBy;
-            }
 
             // Build a minimal inputSchema from @param annotations if present
             if (parsed.params.length > 0) {
