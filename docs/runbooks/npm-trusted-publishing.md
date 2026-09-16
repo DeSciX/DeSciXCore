@@ -33,8 +33,8 @@ run and bound to this repo + this workflow file + this environment.
    trusted-publisher binding. That check is fail-closed, and only the CEO's npm account can change
    the binding.
 
-Behind all four: the `npm-publish` environment's deployment branch policy is `main` only, and
-CODEOWNERS guards the workflow file path.
+Behind all four: the `npm-publish` environment admits only branch `main` and the five release tag
+patterns `<package-directory>-v*` (one per package), and CODEOWNERS guards the workflow file path.
 
 **The one human act that remains** is Step 1 below — the once-per-package trusted-publisher
 binding on npmjs.com, which lives in the CEO's npm account and cannot be automated away.
@@ -183,7 +183,10 @@ The workflow declares `environment: npm-publish`, and it must keep doing so: **t
 includes the environment name in the OIDC claim**, so removing it would break publishing.
 
 The repository is **public** (`DeSciX/DeSciXCore`, 2026-08-22). The environment's deployment
-branch policy is `main` only, so nothing published from a branch can mint a token. No human
+policy admits branch `main` and the tags `descix-app-sdk-v*`, `descix-cli-v*`, `descix-cloud-core-v*`,
+`descix-platform-api-v*` and `descix-sdk-v*`, so nothing published from another branch or tag can
+mint a token. A package added to this repository needs its tag pattern added there too, or its
+release run is refused at the environment. No human
 reviewer stands on it — publishing is domain authority under the contract that grants it, and
 the guard, the dependency refusal and npm's own binding are the boundary.
 
