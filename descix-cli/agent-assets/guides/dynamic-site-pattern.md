@@ -61,24 +61,20 @@ Keeping the scaffold's shape is what lets the service keep inheriting platform b
 
 ## Configuration (`workspace.json`)
 
+One `env.products[]` entry, written by `descix app init` and `descix app set-port` (never by hand):
+
 ```json
 {
-  "communities": {
-    "my-community": {
-      "apps": {
-        "my-dynamic-app": {
-          "localPath": "my-community/my-dynamic-app",
-          "sync_mode": "git",
-          "service": {
-            "port": 4000,
-            "devCommand": "npm run dev"
-          }
-        }
-      }
-    }
-  }
+  "appId": "my-community-my-dynamic-app",
+  "communityId": "my-community",
+  "localPath": "my-dynamic-app",
+  "kbId": "General",
+  "microservice": { "port": 4001 }
 }
 ```
+
+`descix microservice init` refuses to run until `microservice.port` is set: the gateway routes
+`/s/<app_id>` to that port and the service must start on it.
 
 ## CLI Workflow
 

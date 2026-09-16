@@ -41,7 +41,7 @@ All core SDK logic resides in `DeSciX_Core/descix-cli/lib/core/`.
 
 | Function | Description |
 |----------|-------------|
-| `hydrateWorkspace(root, config, driveConfig, options)` | Full workspace setup with folder creation and Drive sync |
+| `copyScaffold(type, appPath, options)` | Copy the `site` or `microservice` scaffold into an app (`descix site init` / `descix microservice init`) |
 | `hydrateApp(config, options)` | Pull entire app from Drive |
 | `hydrateKb(config, options)` | Pull and convert KB files from Drive |
 | `pushStaging(config, options)` | Upload files from `kb/staging/` to Drive |
@@ -146,32 +146,29 @@ All core SDK logic resides in `DeSciX_Core/descix-cli/lib/core/`.
 
 ```json
 {
-  "version": "2.0",
-  "communities": {
-    "daita": {
-      "apps": {
-        "agent": {
-          "localPath": "daita/agent",
-          "kbId": "General",
-          "absolutePath": "/path/to/workspace/daita/agent",
-          "site": {
-            "port": 3000,
-            "devCommand": "npm run docs:dev"
-          },
-          "service": {
-            "port": 4001,
-            "devCommand": "npm run start"
-          }
-        }
+  "version": "2.1",
+  "type": "workspace",
+  "workspaceRoot": "/path/to/workspace",
+  "env": {
+    "environment": "DEV",
+    "apiUrl": "https://dev.descix.net",
+    "gateway": { "port": 5599 },
+    "products": [
+      {
+        "appId": "daita-agent",
+        "communityId": "daita",
+        "localPath": "daita/agent",
+        "kbId": "General",
+        "site": { "port": 3000 },
+        "microservice": { "port": 4001 }
       }
-    }
+    ]
   },
-  "driveConfig": {
-    "base_folder_id": "1ABC...",
-    "base_folder_name": "DeSciX"
-  }
+  "driveConfig": { "base_folder_id": "1ABC..." }
 }
 ```
+
+Every key is written by a CLI verb (`descix config init --env …`, `descix app init`, `descix app set-site`, `descix app set-port`, …) — see `workspace-config.md` for the key → verb table. A `communities` block without `env` (the v1 shape) is refused on load.
 
 **Note:** `.descix.app/context.json` files are no longer used. All app configuration is stored in `workspace.json`. The CLI auto-detects app context from the current working directory by matching against registered app paths.
 
@@ -191,7 +188,7 @@ These commands auto-detect app context from `workspace.json` based on the curren
 | `descix app sync-assets` | Sync app assets (icon, description, instructions) to Drive |
 | `descix kb corpus sync` | Full three-stage sync (Local → Drive → GCS → Pinecone) |
 | `descix site upload` | Deploy CodeSite to GCS |
-| ~~`descix update all`~~ | **Deleted.** There is no single all-resources verb. Run the three canonical commands: `descix app sync-assets`, `descix kb corpus sync`, `descix site upload`. |
+| `descix update all` | App assets + site in sequence. It does **not** touch the knowledge base (`update kb` is removed): run `descix kb corpus sync` for that. |
 
 ### 4.2 KB Processing Commands (`descix kb`)
 

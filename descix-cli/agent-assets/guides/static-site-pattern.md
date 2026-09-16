@@ -45,24 +45,21 @@ my-site/
 
 ## Configuration (`workspace.json`)
 
+One `env.products[]` entry, written by `descix app init` and `descix app set-site` (never by hand):
+
 ```json
 {
-  "communities": {
-    "my-community": {
-      "apps": {
-        "my-site": {
-          "localPath": "my-community/my-site",
-          "sync_mode": "git",
-          "site": {
-            "port": 3000,
-            "devCommand": "npm run docs:dev"
-          }
-        }
-      }
-    }
-  }
+  "appId": "my-community-my-site",
+  "communityId": "my-community",
+  "localPath": "my-site",
+  "kbId": "General",
+  "site": { "static": "site" }
 }
 ```
+
+For a framework dev server instead of files on disk, `descix app set-site -a <app_id> --port 3000`
+writes `"site": { "port": 3000 }`; the gateway proxies `/p/<app_id>` to it without rewriting paths,
+so the framework's base path must be `/p/<app_id>/`.
 
 ## CLI Workflow
 
@@ -116,4 +113,4 @@ This copies the site template with:
 
 ## Deployment
 
-Static files are deployed to Google Cloud Storage and served via signed URLs. The site URL is available in the app's metadata.
+`descix site upload -a <app_id>` uploads the files (delta) to the app's site prefix in Google Cloud Storage and records the deploy manifest. The app is then served on its own host, `https://<app_id>.dev.descix.net/` on DEV and `https://<app_id>.descix.net/` on PROD; `descix site status -c <community> -a <app_id>` shows the deployed manifest.
