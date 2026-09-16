@@ -2492,8 +2492,7 @@ siteCommand
   .option('-a, --app <id>', 'App ID (auto-detects from context)')
   .option('-p, --path <localPath>', 'Local directory to deploy (ignored when site manifest exists)', './site')
   .option('--preview', 'Deploy to preview path')
-  .option('--full', 'Force full upload (ignore delta)')
-  .option('--dry-run', 'Show what would be deployed')
+  .option('--dry-run', 'Show what would be uploaded and which server files would be removed')
   .option('--no-cache', 'Set Cache-Control: no-cache')
   .action(async (options) => {
     try {
@@ -2666,94 +2665,76 @@ siteCommand
 
       const { signed_urls, upload_headers, existing_manifest, token_id, site_url } = tokenResponse.message;
 
-      // 3. Determine delta
-      let filesToUpload = fileList;
-      // Files the server holds that this build does not. Upload NEVER removes them: nothing on this
-      // path sends a deletion, so the receipt names them as left in place rather than deleted.
-      let serverOnlyFiles = [];
-
-      if (!options.full && existing_manifest) {
-        const delta = gitUtils.compareSyncState(localFiles, existing_manifest);
-        filesToUpload = fileList.filter(f =>
-          delta.added.includes(f.path) || delta.modified.includes(f.path)
-        );
-        serverOnlyFiles = delta.deleted;
-
-        console.log(chalk.gray(`  Delta: ${delta.added.length} added, ${delta.modified.length} modified, ${delta.unchanged.length} unchanged, ${delta.deleted.length} on the server only (left in place)`));
-      }
+      // 3. A deploy REPLACES the site: every file of this build is uploaded, and on confirm the
+      // server deletes every site file this build does not contain (confirm_site_deploy).
+      const filesToUpload = fileList;
 
       if (options.dryRun) {
         console.log(chalk.yellow('\n  Dry run - would upload:'));
-        if (filesToUpload.length === 0) {
-          console.log(chalk.gray('  (no files to upload)'));
-        } else {
-          filesToUpload.forEach(f => console.log(chalk.gray(`  + ${f.path} (${(f.size / 1024).toFixed(1)}KB)`)));
-        }
-        if (serverOnlyFiles.length > 0) {
-          console.log(chalk.yellow('\nOn the server only — upload leaves these in place:'));
-          serverOnlyFiles.forEach(f => console.log(chalk.gray(`  = ${f}`)));
+        filesToUpload.forEach(f => console.log(chalk.gray(`  + ${f.path} (${(f.size / 1024).toFixed(1)}KB)`)));
+        // The server's last deploy manifest names what it holds; the confirm step lists the
+        // storage prefix itself, so this preview is the manifest's view of what would go.
+        const lastDeployed = Object.keys(existing_manifest?.files || {});
+        const wouldRemove = lastDeployed.filter(p => !(p in localFiles)).sort();
+        if (wouldRemove.length > 0) {
+          console.log(chalk.yellow('\n  Would remove from the server (in the last deploy, not in this build):'));
+          wouldRemove.forEach(f => console.log(chalk.gray(`  - ${f}`)));
         }
         console.log(chalk.gray(`\n  Site URL: ${site_url}\n`));
         return;
       }
 
-      if (filesToUpload.length === 0) {
-        console.log(chalk.green('\n  Site already up to date on GCS.'));
-        console.log(chalk.gray('  Ensuring app metadata is synchronized...'));
-        // Fall through to confirm_site_deploy to ensure DB is updated
-      } else {
-        // 4. Upload files directly to GCS using signed URLs
-        console.log(chalk.gray(`\n  Uploading ${filesToUpload.length} files...`));
+      // 4. Upload files directly to GCS using signed URLs
+      console.log(chalk.gray(`\n  Uploading ${filesToUpload.length} files...`));
 
-        let uploadedCount = 0;
-        let uploadErrors = [];
+      let uploadedCount = 0;
+      let uploadErrors = [];
 
-        for (const file of filesToUpload) {
-          const signedUrl = signed_urls[file.path];
-          if (!signedUrl) {
-            uploadErrors.push(`No signed URL for: ${file.path}`);
-            continue;
-          }
+      for (const file of filesToUpload) {
+        const signedUrl = signed_urls[file.path];
+        if (!signedUrl) {
+          uploadErrors.push(`No signed URL for: ${file.path}`);
+          continue;
+        }
 
-          try {
-            const content = await fs.readFile(file._absolutePath);
+        try {
+          const content = await fs.readFile(file._absolutePath);
 
-            // Canonical contract (WS-DEPLOY-HARDENING item 4): the server binds Cache-Control
-            // into the v4 signed URL signature (generateSiteUploadUrls/siteAssetCacheControl).
-            // Ferry the exact header bag the server minted — never re-derive the policy
-            // client-side. A mismatched header (including a client-side --no-cache override)
-            // makes GCS return 403 signature-mismatch, so once the server ferries a bound
-            // header for this path, --no-cache is a no-op for it (falls back to legacy
-            // Content-Type-only behavior for paths the server didn't ferry a header for).
-            const ferriedHeaders = upload_headers && upload_headers[file.path];
-            const headers = ferriedHeaders || {
-              'Content-Type': file.content_type,
-              ...(options.noCache ? { 'Cache-Control': 'no-cache' } : {})
-            };
+          // Canonical contract (WS-DEPLOY-HARDENING item 4): the server binds Cache-Control
+          // into the v4 signed URL signature (generateSiteUploadUrls/siteAssetCacheControl).
+          // Ferry the exact header bag the server minted — never re-derive the policy
+          // client-side. A mismatched header (including a client-side --no-cache override)
+          // makes GCS return 403 signature-mismatch, so once the server ferries a bound
+          // header for this path, --no-cache is a no-op for it (falls back to legacy
+          // Content-Type-only behavior for paths the server didn't ferry a header for).
+          const ferriedHeaders = upload_headers && upload_headers[file.path];
+          const headers = ferriedHeaders || {
+            'Content-Type': file.content_type,
+            ...(options.noCache ? { 'Cache-Control': 'no-cache' } : {})
+          };
 
-            const response = await fetch(signedUrl, {
-              method: 'PUT',
-              headers,
-              body: content
-            });
+          const response = await fetch(signedUrl, {
+            method: 'PUT',
+            headers,
+            body: content
+          });
 
-            if (!response.ok) {
-              uploadErrors.push(`Failed to upload ${file.path}: ${response.status} ${response.statusText}`);
-              console.log(chalk.red(`  x ${file.path}`));
-            } else {
-              uploadedCount++;
-              console.log(chalk.green(`  + ${file.path}`));
-            }
-          } catch (err) {
-            uploadErrors.push(`Error uploading ${file.path}: ${err.message}`);
+          if (!response.ok) {
+            uploadErrors.push(`Failed to upload ${file.path}: ${response.status} ${response.statusText}`);
             console.log(chalk.red(`  x ${file.path}`));
+          } else {
+            uploadedCount++;
+            console.log(chalk.green(`  + ${file.path}`));
           }
+        } catch (err) {
+          uploadErrors.push(`Error uploading ${file.path}: ${err.message}`);
+          console.log(chalk.red(`  x ${file.path}`));
         }
+      }
 
-        if (uploadErrors.length > 0) {
-          console.log(chalk.yellow(`\n  ${uploadErrors.length} errors during upload:`));
-          uploadErrors.forEach(e => console.log(chalk.red(`  - ${e}`)));
-        }
+      if (uploadErrors.length > 0) {
+        uploadErrors.forEach(e => console.log(chalk.red(`  - ${e}`)));
+        throw new Error(`${uploadErrors.length} of ${filesToUpload.length} files failed to upload. The deploy was not confirmed and nothing was removed from the server.`);
       }
 
       // 5. Confirm deployment (ALWAYS call this to ensure DB is updated)
@@ -2780,6 +2761,12 @@ siteCommand
       console.log(chalk.green(`\n  Site uploaded successfully!\n`));
       console.log(chalk.cyan(`  URL: ${result.site_url}`));
       console.log(chalk.gray(`  Files: ${result.files_count}`));
+      const pruned = Array.isArray(result.pruned_files) ? result.pruned_files : null;
+      if (pruned === null) {
+        throw new Error('confirm_site_deploy returned no pruned_files list: this server does not replace the site on deploy, so files from earlier builds may still be served.');
+      }
+      console.log(chalk.gray(`  Removed from the server: ${pruned.length}`));
+      pruned.forEach(f => console.log(chalk.gray(`    - ${f}`)));
       console.log(chalk.gray(`  Deployed: ${result.deployed_at}`));
       if (result.preview) {
         console.log(chalk.yellow(`  Mode: PREVIEW`));
