@@ -241,19 +241,13 @@ const result = await execute_remote_command({
 descix mcp quickstart
        │
        ▼
-   Prerequisites Check (gcloud, ADC)
+   Requires a prior `descix login` (refuses and names it otherwise)
        │
        ▼
-   Device Login (browser)
+   Setup wizard (lib/wizard/setup.js)
        │
        ▼
-   Workspace Builder (PWA)
-       │
-       ▼
-   Hydration (Hydrator module)
-       │
-       ▼
-   Credentials Saved (.descix/wallet.json)
+   .cursor/rules/descix_mcp.mdc deployed
        │
        ▼
    ✓ Ready for agent interaction
@@ -290,18 +284,17 @@ When `--scope project` is used:
 4. Returns focused recommendations
 
 ```javascript
-// workspace.json
+// workspace.json (v2.1)
 {
-  "communities": {
-    "daita": {
-      "apps": {
-        "agent": { "localPath": ".", "sync_mode": "git" }
-      }
-    }
+  "env": {
+    "apiUrl": "https://dev.descix.net",
+    "products": [
+      { "appId": "daita-agent", "communityId": "daita", "localPath": ".", "kbId": "General" }
+    ]
   }
 }
 
-// tell_me_how with project scope only searches within descix/agent
+// tell_me_how with project scope only searches within daita-agent
 ```
 
 ---
@@ -319,12 +312,11 @@ descix tell-me-how "How do I sync my knowledge base?"
 
 ### 6.2 workspace.json from Hydration
 
-The `Hydrator` module creates `workspace.json` during setup:
+`descix config init --env …` creates `workspace.json`; `descix app init` adds the app's `env.products[]` entry; `descix mcp quickstart` fills `driveConfig.base_folder_id`:
 
 ```javascript
-// Created by Hydrator.hydrateWorkspace()
 {
-  "communities": { ... },
+  "env": { "apiUrl": "https://dev.descix.net", "products": [ /* one entry per app */ ] },
   "driveConfig": {
     "base_folder_id": "..."  // For tell_me_how project scope
   }

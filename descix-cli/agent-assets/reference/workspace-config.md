@@ -1,249 +1,108 @@
 # Workspace Configuration Guide
 
-**Status:** Implemented  
-**Version:** 2.0  
-**Last Updated:** January 2026
-
-This document describes how DeSciX workspaces are configured, including workspace modes, configuration files, and sync modes.
+`.descix/workspace.json` is the CLI's only local configuration file. It is **version 2.1**, it is
+written **only by CLI verbs**, and the loader refuses the shapes that hand edits produce. This page
+is the schema and the verb that owns each key.
 
 ---
 
-## 1. Workspace Modes
-
-The DeSciX CLI supports three workspace modes, determined by the structure of `workspace.json`.
-
-### 1.1 Single App Mode
-
-**Use Case:** Dedicated repository for a single app.
+## 1. Format (v2.1 — the only format)
 
 ```json
 {
-  "communities": {
-    "daita": {
-      "apps": {
-        "agent": {
-          "localPath": ".",
-          "sync_mode": "git"
-        }
-      }
-    }
-  }
+  "version": "2.1",
+  "type": "workspace",
+  "workspaceRoot": "/path/to/workspace",
+  "env": {
+    "environment": "DEV",
+    "apiUrl": "https://dev.descix.net",
+    "gateway": { "port": 5599 },
+    "devCerts": { "dir": "/Users/you/.descix/dev-certs-san" },
+    "powchUrl": "https://powch.dev.descix.net",
+    "products": [
+      { "appId": "egpt-mydocs", "communityId": "egpt", "localPath": ".", "kbId": "General", "site": { "static": "site" } },
+      { "appId": "egpt-tool", "communityId": "egpt", "localPath": "tool", "kbId": "General", "site": { "port": 5174 }, "microservice": { "port": 4001 } }
+    ]
+  },
+  "driveConfig": { "base_folder_id": "1ABC..." }
 }
 ```
 
-**Characteristics:**
-- Workspace root IS the app folder
-- No community subfolder created
-- Simplest structure for focused development
+| Key | Meaning | Owned by |
+|---|---|---|
+| `env.environment` | `DEV`, `DEMO` or `PROD` | `descix config init --env dev\|demo\|prod` |
+| `env.apiUrl` | the API origin this workspace talks to | `descix config init --env …` (known envs) / `descix config set-env <name> --url <origin>` (custom) |
+| `env.gateway.port` | the port `descix serve` listens on | `descix config set-gateway-port <port>` |
+| `env.devCerts` | `dir`, or `cert` + `key` — the TLS pair for the gateway and every app behind it | `descix config set-dev-certs --dir\|--cert\|--key\|--clear` |
+| `env.powchUrl` | Powch's own origin (optional; Powch is cross-origin from the shell by design) | `descix config set-powch-url <url>` |
+| `env.siteUrl` | the App Shell origin the gateway proxies `/` to (optional; default is the API origin) | `descix config set-site-url <url>` |
+| `env.products[]` | one entry per app in this workspace, see below | `descix app init`, `app set-site`, `app set-port`, `app set-localpath`, `app unmap` |
+| `env.platform` | the platform shell's own entry — platform contributors only; an app developer has none | platform runbook |
+| `driveConfig.base_folder_id` | the Drive base folder for `descix drive pull/push` | `descix mcp quickstart` |
 
-**Folder Structure:**
-```
-[workspace-root]/
-├── .descix/
-│   └── workspace.json
-├── assets/
-├── kb/
-├── site/
-└── microservice/
-```
+A product entry:
 
-### 1.2 Single Community Mode
+| Field | Meaning | Written by |
+|---|---|---|
+| `appId` | the platform app id (`<community>-<short>`) | `descix app init` |
+| `communityId` | the app's community; stored so context detection can name it | `descix app init` |
+| `localPath` | the app directory, relative to `workspaceRoot` (`.` when the workspace root is the app) | `descix app init -p`, `descix app set-localpath` |
+| `kbId` | the default knowledge base (default `General`) | `descix app init --kb` |
+| `site.static` | a directory under `localPath` served from disk at `/p/<appId>/` | `descix app set-site --static <dir>` |
+| `site.port` | a framework dev server the gateway proxies `/p/<appId>` to (no path rewrite) | `descix app set-site --port <n>` |
+| `microservice.port` | the local port the gateway proxies `/s/<appId>` to; `descix microservice init` requires it | `descix app set-port -p <n>` |
 
-**Use Case:** Multiple apps within one community.
+Sites and services are started by you (or your framework); the CLI does not store or run a dev command.
 
-```json
-{
-  "communities": {
-    "daita": {
-      "apps": {
-        "agent": { "localPath": "agent", "sync_mode": "git" },
-        "docs": { "localPath": "docs", "sync_mode": "git" }
-      }
-    }
-  }
-}
-```
+### Refused shapes
 
-**Folder Structure:**
-```
-[workspace-root]/
-├── .descix/
-│   └── workspace.json
-├── agent/
-│   ├── assets/
-│   └── kb/
-└── docs/
-    ├── assets/
-    └── kb/
-```
-
-### 1.3 Multi-Community Mode
-
-**Use Case:** Working across multiple communities.
-
-```json
-{
-  "communities": {
-    "daita": {
-      "apps": {
-        "agent": { "localPath": "daita/agent", "sync_mode": "git" }
-      }
-    },
-    "myorg": {
-      "apps": {
-        "assistant": { "localPath": "myorg/assistant", "sync_mode": "git" }
-      }
-    }
-  }
-}
-```
-
-**Folder Structure:**
-```
-[workspace-root]/
-├── .descix/
-│   └── workspace.json
-├── descix/
-│   └── agent/
-│       ├── assets/
-│       └── kb/
-└── myorg/
-    └── assistant/
-        ├── assets/
-        └── kb/
-```
+- A `communities` block with no `env` block — the v1 format — fails on load: `v1 workspace format is
+  not supported. Migrate to v2.1.` The file is left untouched; re-create it with `descix config init
+  --env …` and `descix app init`.
+- A top-level `apiUrl` key is refused by name; the origin lives at `env.apiUrl` and nowhere else.
 
 ---
 
-## 2. Configuration Files
+## 2. Other files under `.descix/`
 
-### 2.1 `.descix/workspace.json`
-
-**Location:** `[workspace-root]/.descix/workspace.json`  
-**Purpose:** Workspace-level configuration
-
-**Schema:**
-```json
-{
-  "communities": {
-    "[community_id]": {
-      "apps": {
-        "[app_id]": {
-          "localPath": "path/to/app",
-          "sync_mode": "git"
-        }
-      }
-    }
-  },
-  "driveConfig": {
-    "base_folder_id": "1ABC..."
-  },
-  "environment": "development",
-  "apiUrl": "https://localhost:4000"
-}
-```
-
-**Fields:**
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `communities` | Yes | Map of community IDs to their configuration |
-| `communities.[id].apps` | Yes | Map of app IDs to their configuration |
-| `communities.[id].apps.[id].localPath` | Yes | Relative path from workspace root |
-| `communities.[id].apps.[id].kbId` | No | Default KB folder name (default: `"General"`) |
-| `communities.[id].apps.[id].absolutePath` | No | Absolute path to app (auto-set during init) |
-| `communities.[id].apps.[id].site.port` | No | Local dev server port for CodeSite |
-| `communities.[id].apps.[id].service.port` | No | Local dev server port for Microservice |
-| `driveConfig.base_folder_id` | Yes | User's Drive base folder ID |
-| `environment` | No | `"development"` or `"production"` |
-| `apiUrl` | No | Override API URL (dev mode) |
-
-### 2.2 `.descix/wallet.json`
-
-**Location:** `[workspace-root]/.descix/wallet.json`  
-**Purpose:** Authentication credentials (Git-ignored)
-
-**Schema:**
-```json
-{
-  "walletAddress": "0x...",
-  "signature": "...",
-  "tokenSymbol": "DAITA",
-  "communityId": "daita",
-  "userId": "user_...",
-  "email": "user@example.com",
-  "sessionToken": "...",
-  "expiresAt": "2026-01-28T00:00:00.000Z"
-}
-```
-
-**Security:** This file is automatically added to `.gitignore` during setup.
+| File | Written by | Notes |
+|---|---|---|
+| `.descix/wallet.json` | `descix login` — always at `{workspaceRoot}/.descix/wallet.json` | credentials. `descix clone` appends `.descix/wallet.json` and `.descix/repo_key` to the clone's `.gitignore`; `descix login` and `descix init` do **not** touch `.gitignore` — add the entry yourself before the first commit |
+| `.descix/manifests/<KB>.json` | you | corpus manifest: the sources `descix kb corpus sync` walks (paths relative to the repository root, at a git ref) |
+| `.descix/manifests/site.json` | you (optional) | site manifest consumed by `descix site upload` |
+| `.descix/sync-state/<KB>.json` | `descix kb corpus sync` | last sync commit, synced blob SHAs, `total_chunks` (the store's measured live count) |
 
 ---
 
 ## 3. Sync Modes
 
-DeSciX supports two sync modes, determined by how the app is managed:
+### 3.1 Git Mode (CLI developers)
 
-### 3.1 Git Mode (CLI Developers)
+**Source of truth:** the git repository. **Tool:** the CLI.
 
-**Source of Truth:** Local Git repository  
-**Versioning:** Git  
-**Tool:** CLI (`descix kb *` commands)
+1. Author markdown in the repo (or pull Drive documents as markdown with `descix drive pull`).
+2. Commit.
+3. Name the folder(s) in `.descix/manifests/<KB>.json`.
+4. `descix kb corpus sync -a <app>` — walks the manifest's sources at the git ref (`main` unless
+   `--ref`), chunks what changed, purges what was deleted, upserts to Pinecone.
+5. `descix kb corpus status -a <app> -k <KB>` — files tracked, last sync commit, chunk total.
 
-**Workflow:**
-1. User creates/edits documents in Google Drive
-2. User runs `descix drive pull` to get text-converted content
-3. User edits text files locally (Git version control)
-4. User runs `descix kb corpus sync` to generate chunks
-5. User runs `descix kb corpus sync` to push chunks to Pinecone
-6. User commits changes to Git
+### 3.2 Drive Mode (PWA users)
 
-**When to Use:**
-- Developers with local development environment
-- Need for Git version control
-- Offline development capability
-- Code review workflows
-- CodeSite or Microservice development
+**Source of truth:** Google Drive. **Tool:** the PWA; the backend's three-stage pipeline
+(Drive → GCS → Pinecone) runs server-side. The CLI never triggers it.
 
-### 3.2 Drive Mode (PWA Users)
+### 3.3 Mode determination
 
-**Source of Truth:** Google Drive  
-**Versioning:** GCS/Firestore  
-**Tool:** PWA only (no CLI)
-
-**Workflow:**
-1. User edits files in Drive or PWA
-2. Backend automatically syncs to GCS/Pinecone
-3. No local CLI involvement
-
-**When to Use:**
-- Non-technical users
-- Browser-based editing
-- Real-time collaboration
-- No local tooling required
-- Knowledge-base-only apps (no CodeSite or Microservice)
-
-### 3.3 Mode Determination
-
-**Important:** The CLI only supports git-mode operations. If you're using the CLI, you're in git-mode.
-
-| Tool | Mode | Configuration |
-|------|------|---------------|
-| CLI | Git mode only | `workspace.json` |
-| PWA | Drive mode | Automatic (backend handles) |
-
-There is no CLI command to switch modes - the mode is determined by which tool you use.
+The CLI only performs git-mode operations. If you are using the CLI, you are in git mode; there is no
+switch.
 
 ---
 
 ## 4. Drive Configuration
 
-### 4.1 Base Folder ID
+`driveConfig.base_folder_id` is the root of all DeSciX content in the user's Drive:
 
-The `base_folder_id` is the root of all DeSciX content in the user's Drive.
-
-**Structure in Drive:**
 ```
 [User's Base Folder]/
 ├── [community_id]/
@@ -257,159 +116,57 @@ The `base_folder_id` is the root of all DeSciX content in the user's Drive.
 └── [other_community]/
 ```
 
-**Folder Navigation:**
-```javascript
-// Template-based navigation
-const kbPath = `${communityId}/${appId}/kb/${kbId}`;
-const folderId = await findFolderByPath(baseFolderId, kbPath);
-```
-
-### 4.2 Template-Based Navigation
-
-The SDK navigates Drive using predictable template paths:
-
-| Content | Drive Path |
-|---------|------------|
-| App folder | `{community}/{app}/` |
-| KB folder | `{community}/{app}/kb/{kb_name}/` |
-| Assets | `{community}/{app}/assets/` |
-| Site | `{community}/{app}/site/` |
+The SDK navigates Drive by template path: app `{community}/{app}/`, KB `{community}/{app}/kb/{kb}/`,
+assets `{community}/{app}/assets/`, site `{community}/{app}/site/`.
 
 ---
 
-## 5. ADC Authentication
+## 5. ADC Authentication (Drive verbs only)
 
-### Requirements
+`descix drive pull` / `descix drive push` need Google Cloud Application Default Credentials with Drive
+scopes:
 
-Google Cloud ADC (Application Default Credentials) is required for Drive access.
-
-**Setup:**
 ```bash
 gcloud auth application-default login \
   --scopes=https://www.googleapis.com/auth/drive.file,https://www.googleapis.com/auth/drive
 ```
 
-### Verification
+| Error | Cause | Remedy |
+|-------|-------|--------|
+| "Could not load default credentials" | ADC not configured | `gcloud auth application-default login` |
+| "Drive authentication failed" | scopes missing | re-run with the Drive scopes above |
+| "base_folder_id missing" | Drive not registered | `descix mcp quickstart` |
 
-The CLI verifies ADC before operations:
-
-```javascript
-// google-storage-adc.js
-async function verifyDriveAuth() {
-  const auth = new google.auth.GoogleAuth({
-    scopes: ['https://www.googleapis.com/auth/drive']
-  });
-  const drive = google.drive({ version: 'v3', auth });
-  const response = await drive.about.get({ fields: 'user' });
-  return response.data.user;
-}
-```
-
-### Error Messages
-
-| Error | Cause | Solution |
-|-------|-------|----------|
-| "Could not load default credentials" | ADC not configured | Run `gcloud auth application-default login` |
-| "Drive authentication failed" | Scopes missing | Re-run with Drive scopes |
-| "base_folder_id missing" | Not setup | Run `descix mcp quickstart` |
+The git path (`descix kb corpus sync`) needs none of this.
 
 ---
 
-## 6. Workspace Detection
+## 6. CLI Context Resolution
 
-### Algorithm
+`WorkspaceConfig.detectContext()` matches your current directory against every product's resolved
+`localPath` (longest match wins) and returns `{ communityId, appId, kbId }` from that entry —
+`communityId` is `null` for an entry registered by a CLI that did not yet store it.
+`resolveContextWithOptions()` lets explicit `-c` / `-a` / `-k` flags win over detection.
 
-```javascript
-function detectWorkspaceMode(workspaceConfig) {
-  const communities = Object.keys(workspaceConfig.communities || {});
-  
-  if (communities.length === 0) {
-    throw new Error('No communities configured');
-  }
-  
-  if (communities.length === 1) {
-    const apps = Object.keys(workspaceConfig.communities[communities[0]].apps);
-    if (apps.length === 1) {
-      const app = workspaceConfig.communities[communities[0]].apps[apps[0]];
-      if (app.localPath === '.' || app.localPath === '') {
-        return 'single_app';
-      }
-    }
-    return 'single_community';
-  }
-  
-  return 'multi_community';
-}
-```
-
-### Mode-Specific Behavior
-
-| Mode | Community Folder | App Folder | Context Inference |
-|------|-----------------|------------|-------------------|
-| single_app | Workspace root | Workspace root | Full (community + app) |
-| single_community | Workspace root | `./[app]/` | Community only |
-| multi_community | `./[community]/` | `./[community]/[app]/` | None |
-
----
-
-## 7. CLI Context Resolution
-
-The CLI auto-detects app context from the current working directory:
-
-```javascript
-// WorkspaceConfig.detectContext() matches cwd against registered app paths
-detectContext(startDir = process.cwd()) {
-  const cwd = path.resolve(startDir);
-  for (const [commId, comm] of Object.entries(this.communities || {})) {
-    for (const [appId, app] of Object.entries(comm.apps || {})) {
-      if (app.absolutePath && cwd.startsWith(app.absolutePath)) {
-        return { communityId: commId, appId, kbId: app.kbId || 'General' };
-      }
-    }
-  }
-  return null;
-}
-
-// resolveContextWithOptions() combines CLI flags with autodiscovery
-resolveContextWithOptions(options = {}) {
-  // 1. Try explicit flags first
-  if (options.community && options.app) {
-    return { communityId: options.community, appId: options.app, ... };
-  }
-  
-  // 2. Fall back to autodiscovery from cwd
-  const detected = this.detectContext();
-  if (detected) {
-    return {
-      communityId: options.community || detected.communityId,
-      appId: options.app || detected.appId,
-      kbId: options.kb || detected.kbId
-    };
-  }
-  
-  return null;
-}
-```
-
-**Usage Pattern:**
 ```bash
-# From within an app directory - auto-detects community/app
-cd descix/appsdk
-descix kb corpus sync           # Works without -c/-a flags
+# From inside an app directory — detected
+cd my-app
+descix kb corpus sync
 
-# From workspace root - requires flags
-cd /workspace
-descix kb corpus sync -c descix -a appsdk
+# From anywhere — flags
+descix kb corpus sync -a egpt-mydocs
+descix site status -c egpt -a egpt-mydocs      # site status/list need both when the entry has no communityId
 ```
 
 ---
 
-## 8. File References
+## 7. File References
 
 | Component | Path | Description |
 |-----------|------|-------------|
-| WorkspaceConfig | `DeSciX_Core/descix-cli/lib/workspace-config.js` | Sole configuration class for CLI |
-| GlobalConfig | `DeSciX_Core/descix-cli/lib/global-config.js` | User-level settings (~/.descix) |
-| Workspace Utils | `DeSciX_Core/descix-cli/lib/workspace-utils.js` | Helper utilities |
-| Setup Command | `DeSciX_Core/descix-cli/lib/wizard/setup.js` | Initial workspace setup |
-| Config Commands | `DeSciX_Core/descix-cli/lib/commands/config.js` | Configuration management |
+| WorkspaceConfig | `DeSciX_Core/descix-cli/lib/workspace-config.js` | the loader, the v2.1 writer, `registerApp`, `detectContext` |
+| Origin resolution | `DeSciX_Core/descix-cli/lib/origin.js` | flag → `DESCIX_API_URL` → `env.apiUrl` → default |
+| GlobalConfig | `DeSciX_Core/descix-cli/lib/global-config.js` | user-level settings (`~/.descixrc`) |
+| Config commands | `DeSciX_Core/descix-cli/lib/commands/config.js` | `config init/set-env/set-*` |
+| Wallet file | `DeSciX_Core/descix-cli/lib/wallet-file.js` | `.descix/wallet.json` location |
+| Corpus sync | `DeSciX_Core/descix-cli/lib/commands/corpus.js` | manifests, sync-state |

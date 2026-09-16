@@ -38,18 +38,15 @@ my-docs/
 
 ## Configuration (`workspace.json`)
 
+One `env.products[]` entry, written by `descix app init` (never by hand); no `site` and no
+`microservice` slot:
+
 ```json
 {
-  "communities": {
-    "my-community": {
-      "apps": {
-        "my-docs": {
-          "localPath": "my-community/my-docs",
-          "sync_mode": "git"
-        }
-      }
-    }
-  }
+  "appId": "my-community-my-docs",
+  "communityId": "my-community",
+  "localPath": "my-docs",
+  "kbId": "General"
 }
 ```
 
@@ -68,12 +65,11 @@ descix drive push -c <community> -a <app>
 # 4. Pull converted text back
 descix drive pull -c <community> -a <app>
 
-# 5. Chunk for RAG
-descix kb corpus sync -c <community> -a <app>
-
-# 6. Sync to Pinecone
-descix kb corpus sync -c <community> -a <app>
+# 5. Commit the pulled markdown, name its folder in .descix/manifests/<KB>.json, then chunk + sync to Pinecone in one pass
+descix kb corpus sync -a <app>
 ```
+
+The git path needs no Drive at all: commit markdown, name it in the manifest, run step 5.
 
 ## Capabilities
 

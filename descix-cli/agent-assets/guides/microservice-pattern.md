@@ -85,24 +85,22 @@ out until something depends on the difference.
 
 ## Configuration (`workspace.json`)
 
+One `env.products[]` entry, written by `descix app init`, `descix app set-port` and (for the optional
+frontend) `descix app set-site` — never by hand:
+
 ```json
 {
-  "communities": {
-    "my-community": {
-      "apps": {
-        "my-service": {
-          "localPath": "my-community/my-service",
-          "sync_mode": "git",
-          "service": {
-            "port": 4000,
-            "devCommand": "npm run start"
-          }
-        }
-      }
-    }
-  }
+  "appId": "my-community-my-service",
+  "communityId": "my-community",
+  "localPath": "my-service",
+  "kbId": "General",
+  "site": { "static": "site" },
+  "microservice": { "port": 4001 }
 }
 ```
+
+`descix microservice init` refuses to run until `microservice.port` is set: the gateway routes
+`/s/<app_id>` to that port and the service must start on it.
 
 ## CLI Workflow
 

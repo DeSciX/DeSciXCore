@@ -4,16 +4,17 @@
 **Version:** 2.0  
 **Last Updated:** January 2026
 
-This document describes how apps and communities are created and hydrated in the DeSciX platform.
+This document describes how apps and communities are created in the DeSciX platform and how the local workspace for an app is set up.
 
 ---
 
 ## 1. Core Philosophy
 
-**"PWA for Provisioning, CLI for Development"**
+**"One path to an app"**
 
-- **Provisioning:** All apps and communities are created through the PWA. This enforces entitlement checks (NFTs, subscriptions) and ensures consistent folder structures via Drive templates.
-- **Development:** The CLI is the primary tool for hydrating the local workspace, managing content, and syncing to the cloud. The CLI does not create apps directly.
+- **Apps:** `descix app init -a <name> -c <community> -p <dir>` creates the app on the platform (`create_app_for_community`, which composes the id `<community>-<short>` and guarantees the default KB) and registers it in the local workspace in one idempotent step. The PWA creates apps too; both reach the same server command. Entitlement checks run server-side either way.
+- **Communities:** created by platform admins only (`descix community create` is `[ADMIN]` and writes live Polygon). A developer builds inside an existing community.
+- **Development:** the CLI is the tool for the local workspace, content, and syncing to the cloud.
 
 **Important Distinction:**
 
@@ -128,7 +129,7 @@ the file to open first.
 
 ### Adding Scaffolds to Apps
 
-After an app is created via PWA, add code scaffolds via CLI:
+After `descix app init` (or PWA creation), add code scaffolds via CLI:
 
 ```bash
 # Add site scaffold
@@ -213,96 +214,29 @@ sequenceDiagram
 
 ---
 
-## 4. Workspace Builder
+## 4. Local Workspace
 
-The PWA Workspace Builder allows users to configure which apps to sync to their local workspace.
+There is no PWA "workspace builder" hand-off and no hydration step. The local workspace is built by
+CLI verbs, each writing one part of `.descix/workspace.json` (v2.1 — see `workspace-config.md`):
 
-### Flow
-
-1. User completes device login (`descix login --setup`)
-2. PWA opens with Workspace Builder
-3. User selects/creates apps to include
-4. PWA returns `workspace_config` to CLI
-5. CLI hydrates local folders
-
-### Workspace Config Response
-
-```json
-{
-  "workspace_config": {
-    "communities": {
-      "daita": {
-        "apps": {
-          "agent": {
-            "localPath": "daita/agent",
-            "sync_mode": "git"
-          }
-        }
-      }
-    }
-  },
-  "drive_config": {
-    "base_folder_id": "1ABC..."
-  }
-}
+```bash
+descix config init --env dev                        # creates .descix/workspace.json, pins env.apiUrl
+descix login                                        # .descix/wallet.json (add it to .gitignore yourself)
+descix app init -a <name> -c <community> -p .       # env.products[] entry + site/ microservice/ assets/ + default KB
+descix app set-site -a <app_id> --static site       # what the gateway serves at /p/<app_id>
+descix app set-port -a <app_id> -p 4001             # required before descix microservice init
 ```
+
+`descix app init` creates `site/`, `microservice/` and `assets/` (with starter
+`system_instructions.md` and `app_description.md`) under the app directory. Knowledge-base content
+is whatever your corpus manifest names (`.descix/manifests/<KB>.json`); Drive content arrives via
+`descix drive pull -c <community> -a <app_id>` into `kb/<KB>/` and goes back via `descix drive push`.
+The CLI auto-detects the app from the directory you are standing in; `-c`/`-a` flags win over
+detection.
 
 ---
 
-## 5. CLI Hydration
-
-### Setup Command
-
-```bash
-descix mcp quickstart
-```
-
-**Flow:**
-1. Check prerequisites (gcloud CLI, ADC)
-2. Verify Drive access
-3. Open browser for device login
-4. Receive workspace config from PWA
-5. Call `Hydrator.hydrateWorkspace()`
-6. Create local folder structure
-7. Pull content from Drive
-
-### Hydration Process
-
-The `Hydrator` module handles all folder creation and content sync:
-
-```javascript
-// Hydrator.hydrateWorkspace() creates:
-[workspace]/
-├── .descix/
-│   └── workspace.json       # Workspace configuration (sole config file)
-├── [community]/[app]/
-│   ├── assets/
-│   ├── kb/
-│   │   ├── staging/         # For local files to push to Drive
-│   │   ├── General/         # Converted text from Drive
-│   │   └── chunks/          # Generated chunk files
-│   ├── site/                # Optional: for CodeSite
-│   └── microservice/        # Optional: for backend service
-└── .gitignore               # Updated with .descix/wallet.json
-```
-
-**Note:** App configuration is stored in `workspace.json`, not in per-app `context.json` files. The CLI auto-detects app context based on the current working directory.
-
-### Hydrating Individual Apps
-
-After initial setup, users can hydrate specific apps:
-
-```bash
-# Pull entire app from Drive
-descix drive pull -c community -a app
-
-# Or use the build command for full pipeline
-descix kb corpus sync
-```
-
----
-
-## 6. Folder Structure Standards
+## 5. Folder Structure Standards
 
 ### App Folders
 
@@ -328,7 +262,7 @@ descix kb corpus sync
 
 ---
 
-## 7. Entitlement Checks
+## 6. Entitlement Checks
 
 App creation requires appropriate entitlements:
 
@@ -343,7 +277,7 @@ The PWA and backend enforce these checks before template copying.
 
 ---
 
-## 8. Key Backend Functions
+## 7. Key Backend Functions
 
 ### Template Copying
 
@@ -366,28 +300,29 @@ async function copyFolderRecursive(sourceFolderId, destParentId, newName) {
 
 ---
 
-## 9. CLI Commands
+## 8. CLI Commands
 
-### App Management (via PWA)
+### App Creation
 
-The CLI does not create apps directly. Users should:
+```bash
+descix config init --env dev                       # pin the environment first (no default)
+descix login                                       # device-code sign-in
+descix app init -a <name> -c <community> -p .      # create on the platform + register locally + default KB
+```
 
-1. Go to PWA dashboard
-2. Create app/community
-3. Run `descix mcp quickstart` or `descix login --setup` to hydrate
+An app created in the PWA is initialized locally with the same verb, minus `-c`:
+`descix app init -a <app_id> -p .`.
 
 ### Post-Creation Commands
 
 ```bash
-# After app is created via PWA:
-descix mcp quickstart                  # Hydrate workspace (first time)
-descix kb corpus sync               # Pull, chunk, sync KB
-descix site upload -a app   # Deploy static site
+descix kb corpus sync -a <app_id>      # chunk + sync the manifest's sources to Pinecone
+descix site upload -a <app_id>         # deploy the static site
 ```
 
 ---
 
-## 10. File References
+## 9. File References
 
 | Component | Path | Description |
 |-----------|------|-------------|
@@ -397,7 +332,7 @@ descix site upload -a app   # Deploy static site
 | Template Config | `DeSciX_Cloud/microservice/defaults-config.json` | Template folder IDs |
 | Drive Templates | `DeSciX_Core/descix-cli/templates/drive/` | Content templates |
 | Git Scaffolds | `DeSciX_Core/descix-cli/templates/scaffolds/` | Code scaffolds |
-| Hydrator | `DeSciX_Core/descix-cli/lib/core/Hydrator.js` | Workspace hydration |
+| Hydrator | `DeSciX_Core/descix-cli/lib/core/Hydrator.js` | `copyScaffold` — copies the site / microservice scaffold into an app |
 | WorkspaceConfig | `DeSciX_Core/descix-cli/lib/workspace-config.js` | CLI configuration |
 | Setup Command | `DeSciX_Core/descix-cli/lib/wizard/setup.js` | Initial setup |
 | Scaffold Command | `DeSciX_Core/descix-cli/bin/descix.js` | CLI scaffolds |
