@@ -4,7 +4,7 @@ import { Api } from '../util/api';
 import { useAppContext } from '../AppContext';
 import { DiscordSDK, DiscordSDKMock, patchUrlMappings } from '@discord/embedded-app-sdk';
 import ErrorBoundary from './ErrorBoundary';
-import { fetchAppBinding } from './appBinding';
+import { fetchAppBinding, appFrameUrl } from './appBinding';
 
 // Module-level flag for SYNCHRONOUS OAuth detection (prevents race condition)
 let oauthCallbackDetected = false;
@@ -247,7 +247,8 @@ const SdkInitializer = ({ children, standalone = false, appId = null }) => {
         const servedBinding = declaredAppId ? null : await fetchAppBinding();
 
         const standaloneAppId = servedBinding?.appId || declaredAppId;
-        const standaloneAppUrl = servedBinding?.appUrl || null;
+        // An app's direct link hands its query and hash to the app (appFrameUrl).
+        const standaloneAppUrl = servedBinding?.appUrl ? appFrameUrl(servedBinding.appUrl, window.location) : null;
         const bindingSource = servedBinding ? `served (${servedBinding.source || 'binding'})` : 'declared by the app';
 
         // --- Deep Link Detection ---
