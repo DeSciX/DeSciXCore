@@ -105,6 +105,7 @@ const GUEST_ALLOWED_COMMANDS = [
     'powch_write_wallet_begin', 'powch_send_verification_code', 'powch_verify_code',
     'powch_check_verification_proof', 'check_onboarding_status', 'register_powch_wallet_address',
     'get_token_price',
+    'get_command_surface',
     'authenticate_by_signature',
     'get_crypto_price', 'get_all_crypto_prices', 'get_supported_chains', 'crypto_to_usd',
     'usd_to_crypto', 'create_crypto_quote', 'get_quote_status', 'get_claim_details',
