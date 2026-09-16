@@ -179,9 +179,9 @@ export async function runKbPush(apiClient, options) {
     const onConflictPrompt = options.interactive ? async (fileName, fileInfo) => {
       spinner.stop();
       requireInteractive({
-        what: 'descix kb push --interactive',
+        what: 'descix drive push --interactive',
         question: `File "${fileName}" exists in Drive. Overwrite or skip?`,
-        nonInteractiveForm: ['descix kb push   # without --interactive, conflicts resolve without a prompt']
+        nonInteractiveForm: ['descix drive push   # without --interactive, conflicts resolve without a prompt']
       });
       const { action } = await inquirer.prompt([{
         type: 'list',

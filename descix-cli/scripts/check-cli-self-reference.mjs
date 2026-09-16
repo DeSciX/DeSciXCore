@@ -81,11 +81,13 @@ function parseHelp(text) {
 
 // ── TRUTH SET from the executing binary ──────────────────────────────────────────────────────
 const commandFlags = new Map();   // "app init" -> Set(flags)
+const commandChildren = new Map(); // "site" -> Set(subcommand names); absent for a leaf
 const globalFlags = new Set();
 (function walk(prefix, depth) {
     const { cmds, flags } = parseHelp(help(prefix));
     const key = prefix.join(' ');
     commandFlags.set(key, flags);
+    if (cmds.length) commandChildren.set(key, new Set(cmds));
     if (key === '') for (const f of flags) globalFlags.add(f);
     if (depth >= 3) return;
     for (const c of cmds) walk([...prefix, c], depth + 1);
@@ -122,6 +124,44 @@ if (!tgz) die('npm pack produced no tarball');
 execFileSync('tar', ['xzf', tgz], { cwd: out, stdio: ['ignore', 'pipe', 'pipe'] });
 const pkg = path.join(out, 'package');
 
+/**
+ * Judge one `descix …` token run. A GROUP followed by a word that is not one of its subcommands is
+ * a violation: `descix site servelocal` resolved to the real `site` plus an argument and passed
+ * while `servelocal` did not exist (measured 2026-09-16). Returns the violation text or null.
+ */
+function judgeTokens(toks) {
+    let best = '';
+    for (let n = toks.length; n > 0; n--) {
+        const cand = toks.slice(0, n).join(' ');
+        if (commandPaths.has(cand)) { best = cand; break; }
+    }
+    if (!best) {
+        if (topLevelExists(toks[0])) return { best: null, violation: null };   // hidden/retired but registered
+        return { best: null, violation: `names \`descix ${toks[0]}\` — no such command` };
+    }
+    const next = toks[best.split(' ').length];
+    const children = commandChildren.get(best);
+    if (children && next && !children.has(next) && !subcommandExists(best, next)) {
+        return { best, violation: `names \`descix ${best} ${next}\` — \`descix ${best}\` has no subcommand \`${next}\`` };
+    }
+    return { best, violation: null };
+}
+
+/** A hidden-but-registered subcommand (a retired refusal) exists: its --help is not the group's. */
+function subcommandExists(group, name) {
+    const key = `${group} ${name}`;
+    if (probeCache.has(key)) return probeCache.get(key);
+    const groupUsage = (help(group.split(' ')).split('\n')[0] || '').trim();
+    const out = (help([...group.split(' '), name]).split('\n')[0] || '').trim();
+    const exists = out !== groupUsage;
+    probeCache.set(key, exists);
+    return exists;
+}
+
+// The subcommand check must be able to fail before its silence means anything.
+if (!judgeTokens(['site', 'servelocal']).violation) die('control: `descix site servelocal` was not flagged — the subcommand check cannot fail');
+if (judgeTokens(['site', 'upload']).violation) die('control: `descix site upload` was flagged — the subcommand check rejects a real command');
+
 const violations = [];
 let refCount = 0, envControl = 0, scanned = 0;
 const walkFiles = (dir) => {
@@ -149,17 +189,10 @@ const walkFiles = (dir) => {
                 const toks = m[1].trim().split(/\s+/);
                 // Longest known command path wins; a bare `descix` with no known verb is a claim
                 // about the FIRST token, which is where a nonexistent command shows up.
-                let best = '';
-                for (let n = toks.length; n > 0; n--) {
-                    const cand = toks.slice(0, n).join(' ');
-                    if (commandPaths.has(cand)) { best = cand; break; }
-                }
                 refCount++;
-                if (!best) {
-                    if (topLevelExists(toks[0])) continue;   // hidden/retired but registered
-                    violations.push(`${rel}:${i + 1}: names \`descix ${toks[0]}\` — no such command`);
-                    continue;
-                }
+                const { best, violation } = judgeTokens(toks);
+                if (violation) { violations.push(`${rel}:${i + 1}: ${violation}`); continue; }
+                if (!best) continue;
                 // A flag is judged on whether it EXISTS IN THE CLI AT ALL, not on whether it
                 // belongs to the command named on the same line. Attribution by proximity was
                 // measured wrong twice here: init.js:71 names `descix login` while carrying
