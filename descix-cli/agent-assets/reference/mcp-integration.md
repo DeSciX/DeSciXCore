@@ -138,9 +138,9 @@ tell_me_how({
 
 ### 3.5 Integration with SDK V2 Setup
 
-After `descix mcp quickstart` completes:
+After `descix quickstart` completes:
 
-1. `workspace.json` is created with community/app mappings
+1. `.descix/workspace.json` exists (created when none was found up the tree)
 2. Credentials are saved to `.descix/wallet.json`
 3. `tell_me_how --scope project` now filters by configured apps
 4. Agent can discover project-specific tools
@@ -238,16 +238,22 @@ const result = await execute_remote_command({
 ### 5.1 Initial Setup Phase
 
 ```
-descix mcp quickstart
+descix quickstart
        │
        ▼
-   Requires a prior `descix login` (refuses and names it otherwise)
+   Device login (skipped when .descix/wallet.json holds a valid session)
        │
        ▼
-   Setup wizard (lib/wizard/setup.js)
+   .descix/workspace.json created (skipped when one exists up the tree)
        │
        ▼
-   .cursor/rules/descix_mcp.mdc deployed
+   CLAUDE.md, .github/copilot-instructions.md, .cursorrules, .clinerules written
+       │
+       ▼
+   .vscode/mcp.json written (skipped when the DeSciX extension handles MCP)
+       │
+       ▼
+   .descix/sdk-assets/ copied (fails loud if the package's assets are missing)
        │
        ▼
    ✓ Ready for agent interaction
@@ -312,7 +318,7 @@ descix tell-me-how "How do I sync my knowledge base?"
 
 ### 6.2 workspace.json from Hydration
 
-`descix config init --env …` creates `workspace.json`; `descix app init` adds the app's `env.products[]` entry; `descix mcp quickstart` fills `driveConfig.base_folder_id`:
+`descix config init --env …` creates `workspace.json`; `descix app init` adds the app's `env.products[]` entry; no verb writes `driveConfig.base_folder_id` — set it in `.descix/workspace.json` when you use `descix drive pull/push`:
 
 ```javascript
 {
@@ -366,7 +372,7 @@ if (tools.recommended_tools.length > 0) {
 
 **Pattern: Project-Scoped Operations**
 ```javascript
-// Only works after descix mcp quickstart
+// Only works inside a workspace (descix quickstart or descix config init)
 const tools = await tell_me_how({ 
   question: "How do I update this app?",
   scope: "project"  // Uses workspace.json
@@ -393,7 +399,7 @@ descix microservice vectorize -r SERVICE_README.md
 **Solution:**
 ```bash
 # Run setup first
-descix mcp quickstart
+descix quickstart
 
 # Or ensure you're in the workspace root
 cd /path/to/workspace

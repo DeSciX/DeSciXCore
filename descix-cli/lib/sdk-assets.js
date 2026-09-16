@@ -1,5 +1,5 @@
 /**
- * The SDK's agent assets (instructions, guides, reference, rules) ship inside this package at
+ * The SDK's agent assets (instructions, guides, reference) ship inside this package at
  * agent-assets/. `pullSdkAssets` copies them into a workspace at .descix/sdk-assets/ so a local AI
  * agent can read them. A missing source is a broken install and throws; it is never skipped.
  */

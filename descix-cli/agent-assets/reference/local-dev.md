@@ -136,12 +136,7 @@ Check before you write: `--dry-run` enumerates would-be upserts and purges with 
 writes (exit 0 = no drift, 1 = drift), and `--show-walk` prints the resolved ref and the walked
 files. `descix kb corpus status` shows files, chunks, last sync and resolved ref.
 
-**Only `.md` is ingested.** The corpus walk takes Markdown; a `.mdc` file is shipped and read
-from disk but never enters a knowledge base. That matters for
-`agent-assets/rules/descix_mcp.template.mdc`, which agents read as a file and which no amount of
-KB querying will surface. If you fix something there, the fix reaches readers of the file and
-nobody asking the KB — so do not assume KB coverage for a surface that has none. This is a known
-boundary, not a defect.
+**Only text extensions are ingested.** The corpus walk takes `.md .txt .js .mjs .cjs .ts .tsx .jsx .py .rs .go .sol .lean .json .jsonl .yaml .yml .toml .csv .tex .sh .bash` (`PROCESSABLE_EXTENSIONS` in `lib/core/CorpusWalker.js`); any other file in a manifest source, `.mdc` included, never enters a knowledge base.
 
 #### What you put in a KB changes what comes out of it
 

@@ -176,32 +176,27 @@ Every key is written by a CLI verb (`descix config init --env …`, `descix app 
 
 ## 4. CLI Commands
 
-The DeSciX CLI provides two primary ways to manage content: **Context-Aware Updates** (for high-level sync) and **KB Processing Commands** (for low-level control).
+The DeSciX CLI publishes content with one verb per plane. Each command resolves app context from `workspace.json` based on the current working directory, or takes `-a <app_id>` explicitly.
 
-### 4.1 Context-Aware Updates (`descix update`)
-
-These commands auto-detect app context from `workspace.json` based on the current working directory.
+### 4.1 Publish Commands
 
 | Command | Description |
 |---------|-------------|
-| `descix update` | Auto-detect what to update based on current folder |
-| `descix app sync-assets` | Sync app assets (icon, description, instructions) to Drive |
-| `descix kb corpus sync` | Full three-stage sync (Local → Drive → GCS → Pinecone) |
-| `descix site upload` | Deploy CodeSite to GCS |
-| `descix update all` | App assets + site in sequence. It does **not** touch the knowledge base (`update kb` is removed): run `descix kb corpus sync` for that. |
+| `descix app sync-assets` | Sync app assets (`system_instructions.md`, `app_description.md`, `icon.png`) to the platform |
+| `descix kb corpus sync` | Sync a knowledge base from the git files its manifest names to Pinecone |
+| `descix site upload` | Deploy the site to GCS and record its path on the app |
 
-### 4.2 KB Processing Commands (`descix kb`)
-
-These commands provide granular control over the V2 local-first pipeline.
+### 4.2 KB Commands (`descix kb`, `descix drive`)
 
 | Command | Description |
 |---------|-------------|
-| `descix drive pull` | Download from Drive, convert to text in `kb/General/` |
-| `descix drive push` | Upload files from `kb/staging/` to Drive |
-| `descix kb corpus sync` | Generate JSON chunks from `kb/General/` to `kb/chunks/` |
-| `descix kb corpus sync` | Push chunks to Pinecone via backend API |
-| `descix kb corpus sync` | Convenience: pull → chunk → sync |
-| `descix kb corpus status` | Show sync status (local vs Pinecone) |
+| `descix app init -a <app_id> --kb <kb_name>` | Create a knowledge base on the app |
+| `descix kb corpus sync` | Sync the manifest's git files to Pinecone |
+| `descix kb corpus status` | Show corpus sync state (files, chunks, last sync, resolved ref) |
+| `descix kb list` | List knowledge bases for an app |
+| `descix kb delete` | Delete a knowledge base (refuses a non-empty KB unless `--force`) |
+| `descix drive pull` | Pull content from Drive and convert to local markdown |
+| `descix drive push` | Push staging files to Drive |
 
 ### Scaffold Commands
 
@@ -209,7 +204,7 @@ These commands provide granular control over the V2 local-first pipeline.
 |---------|-------------|
 | `descix site init` | Copy site template to current app's `site/` folder |
 | `descix site upload` | Deploy site to GCS |
-| `descix site servelocal [port]` | Register local dev server port |
+| `descix app set-site -a <app_id> --port <port>` | Register the local dev-server port for the app's site (`env.products[].site.port`) |
 | `descix microservice init` | Copy microservice template to current app's `microservice/` folder |
 | `descix microservice register` | Register microservice with gateway |
 | `descix microservice vectorize` | Vectorize README for discovery |
@@ -228,14 +223,15 @@ These commands provide granular control over the V2 local-first pipeline.
 ### Setup Command
 
 ```bash
-descix mcp quickstart
+descix quickstart
 ```
 
 Flow:
-1. Check prerequisites (gcloud CLI, ADC credentials)
-2. Open browser for device login + workspace configuration
-3. Hydrate local workspace from PWA selection
-4. Create folder structure with new KB layout
+1. Device login in the browser (skipped when `.descix/wallet.json` holds a valid session)
+2. Create `.descix/workspace.json` (skipped when a workspace already exists up the tree)
+3. Write agent instruction files (`CLAUDE.md`, `.github/copilot-instructions.md`, `.cursorrules`, `.clinerules`)
+4. Write `.vscode/mcp.json` (skipped when the DeSciX extension handles MCP)
+5. Copy the SDK agent assets to `.descix/sdk-assets/` (fails loud if the package's assets are missing)
 
 ---
 
@@ -344,7 +340,6 @@ gcloud auth application-default login \
 ```
 
 **Verification:**
-- `descix mcp quickstart` checks ADC before proceeding
 - `Hydrator` calls `verifyDriveAuth()` before operations
 
 ### Backend Authentication

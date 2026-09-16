@@ -75,7 +75,7 @@ now exit non-zero and name this replacement.
 
 1.  **Create** the knowledge base (once per KB):
     ```bash
-    descix kb create -c <community_id> -a <app_id> -k <kb_name>
+    descix app init -a <app_id> --kb <kb_name>
     ```
 2.  **Author** a corpus manifest at `.descix/manifests/<kb_name>.json` describing the sources to sync.
 3.  **Sync** the corpus to the platform (Pinecone):

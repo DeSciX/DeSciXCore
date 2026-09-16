@@ -11,7 +11,7 @@
  *  (2) No runtime Firestore lookup for routing — grep provision-platform-lb.js for CacheFirestore/admin.firestore
  *  (3) No per-app DNS provisioning — grep for `gcloud dns` / `domain-mappings` (recent CRUFT-8 fix)
  *  (4) No per-app TLS cert — verify wildcard cert config in provision-platform-lb.js
- *  (5) No `descix microservice deploy` CLI (TOGGLE) — grep bin/descix.js
+ *  (5) No CLI deploy verb for microservices — cite bin/descix.js
  *  (6) No descix-chain runtime lookup for routing — grep provision-platform-lb.js for descix-chain
  *  (7) No path rewriting in `descix serve` for product sites — cite createViteProxyConfig.js
  *  (8) No `--env` flag for the MCP server — toggle, grep mcp-server.js
@@ -128,24 +128,12 @@ export async function extract({ env, cliPaths } = {}) {
     }
   }
 
-  // (5) TOGGLE: no `descix microservice deploy` (yet) — grep CLI.
+  // (5) the CLI source, cited for the deploy statement below.
   const cli = await readSourceFile({
     cliPaths,
     relPath: CLI_FILE,
     section: `§${SECTION.number} ${SECTION.heading}`
   });
-  let microserviceDeployFound = false;
-  for (let i = 1; i < cli.lines.length; i++) {
-    if (/\.command\(['"]deploy['"]\)/.test(cli.lines[i])) {
-      for (let j = i - 1; j >= Math.max(0, i - 3); j--) {
-        if (/microserviceCommand/.test(cli.lines[j])) {
-          microserviceDeployFound = true;
-          break;
-        }
-      }
-      if (microserviceDeployFound) break;
-    }
-  }
 
   // (6) HARD: no descix-chain runtime lookup for routing — grep mesh.
   for (let i = 0; i < mesh.lines.length; i++) {
@@ -196,11 +184,7 @@ export async function extract({ env, cliPaths } = {}) {
     `- **No per-app DNS provisioning.** Wildcard \`*.{env}.descix.net\` cert + wildcard A record cover all apps. Adding an app does NOT touch DNS.${dnsMatches.length > 0 ? ` _(${dnsMatches.length} \`gcloud dns\`/\`domain-mappings\` reference(s) detected in deploy scripts — manually verify these are wildcard-cert touches, not per-app DNS.)_` : ''}`,
     `- **No per-app TLS cert.** Same wildcard cert covers everything. _Verified: grep on \`${MESH_FILE}\` for \`ssl-certificates create|managedCert\` → 0 matches._`
   ];
-  if (microserviceDeployFound) {
-    lines.push(`- ~~No \`descix microservice deploy\` CLI command~~ — **GAP CLOSED** at this regen. \`descix microservice deploy\` is present in \`${CLI_FILE}\`.`);
-  } else {
-    lines.push(`- **No \`descix microservice deploy\` CLI command (yet).** \`descix microservice register\` does Firestore-manifest-registration only. _Detected: grep on \`${CLI_FILE}\` for \`microserviceCommand.command('deploy')\` → 0 matches._`);
-  }
+  lines.push(`- **No CLI deploy verb for microservices.** Platform services deploy with \`deploy-service-env.sh\`; \`descix microservice register\` registers the manifest. — \`${CLI_FILE}\``);
   lines.push(
     `- **No central \`descix-chain\` runtime lookup for routing.** \`descix-chain\` Firestore is the canonical token/contract registry, read for contract addresses (e.g., \`getContractAddressBySymbol()\`); never for request routing. _Verified: grep on \`${MESH_FILE}\` for \`descix-chain\` → 0 matches._`,
     `- **No path rewriting for product sites in \`descix serve\` (local dev).** Each app sets its own framework base path. — \`${PROXY_CONFIG}\``
@@ -215,7 +199,7 @@ export async function extract({ env, cliPaths } = {}) {
 
   const citations = [
     makeCitation({ file: MESH_FILE, lines: '1-' + mesh.lines.length, anchor: 'no runtime Firestore / TLS / chain in LB wiring', fileLines: mesh.lines }),
-    makeCitation({ file: CLI_FILE, lines: '1-' + cli.lines.length, anchor: 'descix microservice deploy toggle', fileLines: cli.lines }),
+    makeCitation({ file: CLI_FILE, lines: '1-' + cli.lines.length, anchor: 'no CLI microservice deploy verb', fileLines: cli.lines }),
     makeCitation({ file: PROXY_CONFIG, lines: '1-' + proxyConfig.lines.length, anchor: 'no path rewriting in descix serve', fileLines: proxyConfig.lines })
   ];
 

@@ -159,7 +159,7 @@ To see your app in a browser:
 | Goal | Command |
 |------|---------|
 | Serve `site/` locally | `npx serve site/` or `python3 -m http.server -d site/` on any port |
-| Register port with DeSciX | `descix site servelocal <port> -c <community> -a <app>` |
+| Register a framework dev-server port with DeSciX | `descix app set-site -a <app> --port <port>` (writes `env.products[].site.port`) |
 | Run your app on the DeSciX gateway | `cd <app dir> && descix serve` — one HTTPS origin, the shell opens ON your app (**standalone** = initial view, not a reduced mode — platform views stay reachable) |
 
 A plain static server is enough to look at your HTML. `descix serve` is what you
@@ -257,8 +257,6 @@ Every app has three parts:
 
 - `descix status` may report "No workspace found" even when `.descix/workspace.json`
   exists. This is a known bug — continue with explicit flags.
-- `descix status` may suggest `descix setup` — that command doesn't exist. Use
-  `descix init -c <community> -a <app> -p .` instead.
 
 ## Cloud Brain Alignment
 

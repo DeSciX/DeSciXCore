@@ -44,8 +44,8 @@ Add any static assets (images, fonts, additional JS/CSS) to this folder. All fil
 
 ## Local Development
 
-To test your site within the DeSciX PWA, use the `servelocal` command:
+To test your site inside the platform shell, serve it through the local gateway and open the gateway root:
 
 ```bash
-descix site servelocal 3000
+descix serve --app <app_id>
 ```

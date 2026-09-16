@@ -13,8 +13,7 @@ Run this sequence ONCE to stand up a microservice that can call the mesh
 `/apifront` broker:
 
 ```bash
-descix app create   -c {community} -a {app}     # create the app (or hydrate an existing one)
-descix app init      -a {community}-{app}        # scaffold site/ kb/ microservice/
+descix app init      -c {community} -a {app}     # create the app (or hydrate an existing one) and scaffold it
 descix app set-port  -a {community}-{app} -p {port}   # assign the microservice's loopback port in workspace.json
 descix microservice register                     # register the service manifest with the Core gateway
 # then: cp dev-overrides.example.json dev-overrides.json  and fill in the developer credential
@@ -117,7 +116,7 @@ descix microservice register                     # register the service manifest
 **Example:**
 ```bash
 # Using the CLI
-descix service call {command_name} --param1 value
+descix mcp execute --tool {command_name} --params '{"param1": "value"}'
 
 # Or via tell_me_how
 tell_me_how("I want to {describe the workflow goal}")
