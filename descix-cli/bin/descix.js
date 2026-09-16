@@ -39,6 +39,7 @@ import * as kbCommands from '../lib/commands/kb.js';
 import { kbVectorCell, kbCountSource } from '../lib/commands/kb-list-render.js';
 import * as corpusCommands from '../lib/commands/corpus.js';
 import * as modelConfigCommands from '../lib/commands/model-config.js';
+import { isHelpInvocation, getCommandSurface, applyVisibility } from '../lib/command-visibility.js';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
@@ -97,7 +98,8 @@ program
   .description('DeSciX CLI - Unified command-line interface')
   .version(CLI_VERSION)
   .option('--env <name>', 'Target environment: dev, demo, prod (overrides API URL)')
-  .option('--api-url <url>', 'Direct API URL override (e.g., https://demo.descix.net)');
+  .option('--api-url <url>', 'Direct API URL override (e.g., https://demo.descix.net)')
+  .option('--admin', 'Show every command in --help, including admin-only ones (also: DESCIX_ADMIN=1). Hiding is a listing convenience only — a hidden command still runs; the server is the real gate.');
 
 // ============ Global Environment Override ============
 // Maps --env flag to DESCIX_API_URL before any command runs.
@@ -114,24 +116,27 @@ const ENV_URL_MAP = Object.fromEntries(
 // stays; the provenance is now RECORDED alongside it, in the same breath, so the owner can name
 // the actual source. Recording it here rather than deriving it in the owner keeps one owner of
 // the fact: the only code that knows a flag was passed is the code that read the flag.
-program.hook('preAction', (thisCommand) => {
-  // Read from the ROOT program, not from the action command. `--env` and `--api-url` are
-  // declared ONCE, globally, and Commander binds them to the root — an identically-named option
-  // redeclared on a subcommand is shadowed and silently never populated (measured on 1.0.4:
-  // `descix config init --env dev` reached its action with `{}` and rejected its own advertised
-  // flag). One declaration, read from where Commander actually puts it.
-  const opts = program.opts();
-
+//
+// ONE OWNER of "apply --api-url / --env to DESCIX_API_URL", called from TWO sites: the
+// `preAction` hook below (which only ever fires before an ACTION runs — never for `--help`,
+// since Commander short-circuits help before reaching any action), and the help-time admin-
+// surface bootstrap near the bottom of this file (which runs BEFORE `program.parseAsync()`, so
+// `program.opts()` is not populated yet and the two flags are read off raw argv instead). Without
+// this second call site, `descix --api-url https://X --help` silently queried the DEFAULT origin
+// for the admin-listing surface while claiming to target X — the same class of misreport
+// `resolveEffectiveOrigin` exists to end, just newly reachable through the one invocation shape
+// (`--help`) that never runs an action.
+function applyGlobalOriginOverride({ apiUrl, env }) {
   // --api-url takes highest priority
-  if (opts.apiUrl) {
-    process.env.DESCIX_API_URL = opts.apiUrl;
-    recordInvocationOrigin(opts.apiUrl, 'flagApiUrl');
+  if (apiUrl) {
+    process.env.DESCIX_API_URL = apiUrl;
+    recordInvocationOrigin(apiUrl, 'flagApiUrl');
     return;
   }
 
   // --env maps to known URLs
-  if (opts.env) {
-    const envName = opts.env.toLowerCase();
+  if (env) {
+    const envName = env.toLowerCase();
     if (!(envName in ENV_URL_MAP)) {
       // THE REFUSAL CARRIES THE CUSTOM-ENVIRONMENT PATH. This validator runs BEFORE any command
       // action, so it is now the only thing a developer typing `--env staging` ever sees — the
@@ -140,7 +145,7 @@ program.hook('preAction', (thisCommand) => {
       // names would strand every self-hosted or port-forwarded gateway with no next step, which
       // is the same dead end as a remedy string for a command that does not run.
       console.error(chalk.red(
-        `Unknown environment: ${opts.env}. Known environments: ${Object.keys(ENV_URL_MAP).join(', ')}.\n\n` +
+        `Unknown environment: ${env}. Known environments: ${Object.keys(ENV_URL_MAP).join(', ')}.\n\n` +
         'For a self-hosted or port-forwarded gateway, name it with its origin instead:\n' +
         `  descix config set-env ${envName} --url https://...`
       ));
@@ -151,6 +156,16 @@ program.hook('preAction', (thisCommand) => {
     process.env.DESCIX_API_URL = ENV_URL_MAP[envName];
     recordInvocationOrigin(ENV_URL_MAP[envName], 'flagEnv');
   }
+}
+
+program.hook('preAction', (thisCommand) => {
+  // Read from the ROOT program, not from the action command. `--env` and `--api-url` are
+  // declared ONCE, globally, and Commander binds them to the root — an identically-named option
+  // redeclared on a subcommand is shadowed and silently never populated (measured on 1.0.4:
+  // `descix config init --env dev` reached its action with `{}` and rejected its own advertised
+  // flag). One declaration, read from where Commander actually puts it.
+  const opts = program.opts();
+  applyGlobalOriginOverride({ apiUrl: opts.apiUrl, env: opts.env });
 });
 
 // ============ Authentication Commands (No Auth Required) ============
@@ -405,7 +420,7 @@ creditsCommand
 
 creditsCommand
   .command('grant')
-  .description('ADMIN: grant AI credits to a user')
+  .description('Grant AI credits to a user')
   .requiredOption('--user <user_id>', 'Target user id')
   .requiredOption('--usd <amount>', 'USD amount to grant')
   .requiredOption('--reason <text>', 'Audit reason')
@@ -419,7 +434,7 @@ creditsCommand
 
 creditsCommand
   .command('refund')
-  .description('ADMIN: remove AI credits from a user (e.g. after a Stripe refund)')
+  .description('Remove AI credits from a user (e.g. after a Stripe refund)')
   .requiredOption('--user <user_id>', 'Target user id')
   .requiredOption('--usd <amount>', 'USD amount to remove')
   .requiredOption('--reason <text>', 'Audit reason')
@@ -565,7 +580,7 @@ communityCommand
 
 communityCommand
   .command('create')
-  .description('[ADMIN] Create a new community with token contract (requires platform admin, deploys to live Polygon)')
+  .description('Create a new community with token contract (requires platform admin, deploys to live Polygon)')
   .requiredOption('-n, --name <name>', 'Community display name (e.g. "SMILE")')
   .requiredOption('-t, --token <symbol>', 'Token symbol (e.g. SMILE)')
   .option('--icon <url>', 'Icon URL for the community')
@@ -633,7 +648,7 @@ communityCommand
 
 communityCommand
   .command('delete')
-  .description('[ADMIN] Delete a community with full cascade cleanup (all apps, KBs, vectors, GCS)')
+  .description('Delete a community with full cascade cleanup (all apps, KBs, vectors, GCS)')
   .requiredOption('-n, --name <community_id>', 'Community ID to delete')
   .option('--dry-run', 'Preview what would be deleted without executing')
   .option('--soft', 'Soft delete only (mark as hidden, no cascade)')
@@ -742,7 +757,7 @@ communityCommand
 
 communityCommand
   .command('rename')
-  .description('[ADMIN] Rename a community_id across all surfaces (Firestore, Products, Pinecone metadata, ServiceManifests, descix-chain registry). On-chain contract + token symbol are UNTOUCHED. Dry-run first.')
+  .description('Rename a community_id across all surfaces (Firestore, Products, Pinecone metadata, ServiceManifests, descix-chain registry). On-chain contract + token symbol are UNTOUCHED. Dry-run first.')
   .argument('<old_community_id>', 'Current community_id (e.g. unkamon)')
   .argument('<new_community_id>', 'New canonical community_id (e.g. unk)')
   .option('--dry-run', 'Preview the full cascade plan without executing')
@@ -3455,7 +3470,7 @@ microserviceCommand
 // microservice reload - Reload manifests (admin)
 microserviceCommand
   .command('reload')
-  .description('Reload microservice manifests (admin only)')
+  .description('Reload microservice manifests')
   .action(async () => {
     try {
       const apiClient = new DeSciXApiClient();
@@ -4722,11 +4737,67 @@ program
     }
   });
 
+// ============ Public-vs-admin help listing (CEO ruling, see lib/command-visibility.js) ============
+//
+// The class comes from the server (`get_command_surface`, guest-allowed) at the moment help is
+// about to render — never a committed table. Only a help-rendering invocation pays the network
+// cost: isHelpInvocation() is a fast, offline, syntactic check (no parsing, no I/O) so every
+// ordinary command keeps running at today's speed. `--admin` / `DESCIX_ADMIN=1` skip this
+// entirely, which is what "show everything" means — nothing is ever hidden unless this block
+// explicitly hides it.
+const rawArgv = process.argv.slice(2);
+const adminMode = rawArgv.includes('--admin') || process.env.DESCIX_ADMIN === '1';
+
+/** Read `--flag <value>` out of raw argv, pre-parse — Commander has not run yet at this point. */
+function rawFlagValue(argv, flag) {
+  const i = argv.indexOf(flag);
+  return i === -1 ? undefined : argv[i + 1];
+}
+
+if (!adminMode && isHelpInvocation(program, rawArgv, { valueFlags: ['--env', '--api-url'], booleanFlags: ['--admin'] })) {
+  // Apply --api-url / --env BEFORE constructing the client. The `preAction` hook above does the
+  // same thing but only ever fires before an ACTION runs — Commander short-circuits straight to
+  // help output without one, so for a help-rendering invocation this is the only place that
+  // ever applies these flags. Without it, `descix --api-url https://X --help` silently asked
+  // the DEFAULT origin (not X) whether each command is admin.
+  applyGlobalOriginOverride({ apiUrl: rawFlagValue(rawArgv, '--api-url'), env: rawFlagValue(rawArgv, '--env') });
+
+  // BOUNDED, regardless of what the underlying HTTP client's own timeout is: "help must stay
+  // fast" is a promise about THIS invocation, not about how patient axios feels like being
+  // against an origin that accepts the TCP connection and then never answers.
+  const SURFACE_FETCH_TIMEOUT_MS = 5000;
+  let timeoutHandle;
+  try {
+    const apiClient = new DeSciXApiClient();
+    await apiClient.ensureInitialized();
+    const { commands } = await Promise.race([
+      getCommandSurface(apiClient.baseUrl, apiClient),
+      new Promise((_, reject) => {
+        timeoutHandle = setTimeout(
+          () => reject(new Error(`timed out after ${SURFACE_FETCH_TIMEOUT_MS}ms`)),
+          SURFACE_FETCH_TIMEOUT_MS
+        );
+        timeoutHandle.unref?.(); // never itself the reason the process stays alive
+      }),
+    ]);
+    applyVisibility(program, commands);
+  } catch (error) {
+    // FAIL LOUD ABOUT THE DEGRADATION, NEVER SILENTLY: help must still render (everything
+    // visible, the safe default) — offline, an old server without the command, or any other
+    // fetch failure is not a reason to hang or crash `--help`.
+    console.error(chalk.gray(
+      `(admin-only commands could not be filtered from this listing: ${error.message}. Showing everything. Use --admin to always see everything.)`
+    ));
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
+}
+
 // Parse arguments
-program.parse();
+await program.parseAsync(process.argv);
 
 // Show help if no command provided
-if (!process.argv.slice(2).length) {
+if (!rawArgv.length) {
   program.outputHelp();
 }
 

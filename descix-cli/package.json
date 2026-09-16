@@ -42,6 +42,9 @@
     "ora": "^9.0.0",
     "@descix/platform-api": "^2.0.0"
   },
+  "devDependencies": {
+    "acorn": "^8.18.0"
+  },
   "files": [
     "bin",
     "lib",

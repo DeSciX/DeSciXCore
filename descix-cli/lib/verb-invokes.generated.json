@@ -1,0 +1,233 @@
+{
+  "admin-login": [
+    "admin_bootstrap_login"
+  ],
+  "airdrop execute-queue": [
+    "airdrop_execute_queue"
+  ],
+  "app delete": [
+    "delete_app"
+  ],
+  "app init": [
+    "create_app_for_community",
+    "get_product_context",
+    "init_git_mode_kb"
+  ],
+  "app invite": [
+    "create_app_invite"
+  ],
+  "app list": [
+    "fetch_my_purchases"
+  ],
+  "app media-upload": [
+    "get_asset_upload_token"
+  ],
+  "app open": [],
+  "app set-api-url": [
+    "update_app_metadata"
+  ],
+  "app set-default-model": [
+    "clear_app_default_model",
+    "set_app_default_model"
+  ],
+  "app set-listed": [
+    "update_app"
+  ],
+  "app set-localpath": [],
+  "app set-name": [
+    "update_app"
+  ],
+  "app set-port": [],
+  "app set-price": [
+    "update_app_metadata"
+  ],
+  "app set-repo": [
+    "set_app_repo"
+  ],
+  "app set-site": [],
+  "app sync-assets": [
+    "sync_app_assets"
+  ],
+  "app unmap": [],
+  "buy chains": [],
+  "buy poll": [
+    "get_quote_status"
+  ],
+  "buy quote": [
+    "create_crypto_quote"
+  ],
+  "buy status": [
+    "get_quote_status"
+  ],
+  "chat": [
+    "ask_multiple_apps",
+    "ask_question_to_app"
+  ],
+  "clone": [
+    "get_repo_credentials"
+  ],
+  "community check-token": [
+    "check_token_symbol_available"
+  ],
+  "community contract": [
+    "get_contract_details"
+  ],
+  "community create": [
+    "create_community_skeleton"
+  ],
+  "community delete": [
+    "delete_community"
+  ],
+  "community deploy-token": [
+    "deploy_contract"
+  ],
+  "community info": [
+    "get_community"
+  ],
+  "community link-token": [
+    "link_contract_to_community"
+  ],
+  "community list": [
+    "find_communities"
+  ],
+  "community rename": [
+    "rename_community"
+  ],
+  "config init": [],
+  "config set-dev-certs": [],
+  "config set-env": [],
+  "config set-gateway-port": [],
+  "config set-powch-url": [],
+  "config set-site-url": [],
+  "config set-url": [],
+  "config show": [],
+  "credits balance": [
+    "get_credit_balance"
+  ],
+  "credits buy": [
+    "create_stripe_checkout_session"
+  ],
+  "credits grant": [
+    "grant_credits"
+  ],
+  "credits history": [
+    "get_credit_history"
+  ],
+  "credits refund": [
+    "refund_credits"
+  ],
+  "doctor": [],
+  "drive pull": [],
+  "drive push": [],
+  "health": [],
+  "init": [
+    "find_communities",
+    "resolve_invite"
+  ],
+  "kb clear-override-model": [
+    "clear_kb_model_override"
+  ],
+  "kb corpus status": [],
+  "kb corpus sync": [
+    "get_kb_rag_status",
+    "get_product_context",
+    "kb_delete_chunks",
+    "kb_list_file_ids",
+    "kb_sync_chunks",
+    "list_knowledge_bases"
+  ],
+  "kb delete": [
+    "delete_knowledge_base"
+  ],
+  "kb doctor": [
+    "get_kb_rag_status"
+  ],
+  "kb list": [
+    "list_knowledge_bases"
+  ],
+  "kb set-override-model": [
+    "set_kb_model_override"
+  ],
+  "login": [
+    "device_check_status",
+    "device_request_login",
+    "sync_auto_purchases"
+  ],
+  "logout": [],
+  "mcp execute": [],
+  "mcp-serve": [],
+  "microservice health": [
+    "service_health_check"
+  ],
+  "microservice init": [],
+  "microservice list": [
+    "list_services"
+  ],
+  "microservice register": [
+    "register_service"
+  ],
+  "microservice register-delegate": [
+    "fetch_my_purchases",
+    "register_delegate"
+  ],
+  "microservice reload": [
+    "reload_service_manifests"
+  ],
+  "microservice restart": [],
+  "microservice vectorize": [
+    "vectorize_service_readme"
+  ],
+  "new-chat": [],
+  "purchases": [
+    "fetch_my_purchases"
+  ],
+  "quickstart": [
+    "device_check_status",
+    "device_request_login",
+    "find_communities",
+    "resolve_invite",
+    "sync_auto_purchases"
+  ],
+  "reconnect": [
+    "reconnect_by_wallet"
+  ],
+  "referral create": [
+    "generate_referral_code"
+  ],
+  "role create": [
+    "create_role"
+  ],
+  "serve": [],
+  "site delete": [
+    "delete_site_files"
+  ],
+  "site init": [],
+  "site list": [
+    "list_site_files"
+  ],
+  "site status": [
+    "get_site_manifest"
+  ],
+  "site upload": [
+    "confirm_site_deploy",
+    "get_site_build_config",
+    "get_site_deploy_token"
+  ],
+  "stats": [
+    "get_user_community_stats"
+  ],
+  "status": [],
+  "store generate-summary": [
+    "generate_entity_summary"
+  ],
+  "store search": [
+    "search_store"
+  ],
+  "tell-me-how": [
+    "tell_me_how"
+  ],
+  "whoami": [
+    "fetch_my_purchases",
+    "validate_session"
+  ]
+}
