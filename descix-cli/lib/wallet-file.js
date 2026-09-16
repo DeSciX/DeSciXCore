@@ -68,30 +68,23 @@ export class WalletFileManager {
    * @returns {Promise<boolean>} Success status
    */
   static async saveWalletFile(walletPath, walletData) {
-    try {
-      // Validate before saving
-      if (!this.validateWalletFile(walletData)) {
-        throw new Error('Invalid wallet data structure');
-      }
-
-      // WS-HEADLESS-MVP-A1 §2.5 — keep the API_KEY alias mirrored to the canonical
-      // signature so the on-disk file self-documents the alias (alias-only rename).
-      if (walletData.signature) {
-        walletData.API_KEY = walletData.signature;
-      }
-
-      // Ensure directory exists
-      const dir = path.dirname(walletPath);
-      await fs.mkdir(dir, { recursive: true });
-
-      // Write file with restricted permissions (600)
-      await fs.writeFile(walletPath, JSON.stringify(walletData, null, 2), { mode: 0o600 });
-
-      return true;
-    } catch (error) {
-      console.error(`[WalletFile] Error saving wallet file: ${error.message}`);
-      return false;
+    // THROWS on any failure, never returns false. Every caller used to await this and ignore the
+    // boolean, so `descix login` printed "Login successful!" and a "saved to" path for a file that
+    // was never written (measured on PROD 2026-09-16). A save that did not happen must stop the
+    // caller.
+    const problems = this.walletFileProblems(walletData);
+    if (problems.length > 0) {
+      throw new Error(`refusing to write ${walletPath}: ${problems.join('; ')}`);
     }
+
+    // WS-HEADLESS-MVP-A1 §2.5 — keep the API_KEY alias mirrored to the canonical
+    // signature so the on-disk file self-documents the alias (alias-only rename).
+    walletData.API_KEY = walletData.signature;
+
+    await fs.mkdir(path.dirname(walletPath), { recursive: true });
+    // Write file with restricted permissions (600)
+    await fs.writeFile(walletPath, JSON.stringify(walletData, null, 2), { mode: 0o600 });
+    return true;
   }
 
   /**
@@ -100,25 +93,31 @@ export class WalletFileManager {
    * @returns {boolean} True if valid
    */
   static validateWalletFile(walletData) {
-    if (!walletData || typeof walletData !== 'object') {
-      return false;
-    }
+    return this.walletFileProblems(walletData).length === 0;
+  }
 
-    // Required fields for authentication
-    // Note: tokenSymbol and communityId are optional (may be absent in multi-community mode)
-    const required = ['walletAddress', 'signature'];
-    for (const field of required) {
+  /**
+   * Every reason `walletData` is not a usable credential, named by FIELD, never by value — the
+   * messages are printed, and a signature is a credential. Empty array = valid.
+   * tokenSymbol and communityId are optional (may be absent in multi-community mode).
+   * @param {Object} walletData
+   * @returns {string[]}
+   */
+  static walletFileProblems(walletData) {
+    if (!walletData || typeof walletData !== 'object') {
+      return ['the credential is not an object'];
+    }
+    const problems = [];
+    for (const field of ['walletAddress', 'signature']) {
       if (!walletData[field] || typeof walletData[field] !== 'string') {
-        return false;
+        problems.push(`${field} is empty`);
       }
     }
-
-    // Validate wallet address format (basic check - should be hex string)
-    if (!/^0x[a-fA-F0-9]{40}$/.test(walletData.walletAddress)) {
-      return false;
+    if (typeof walletData.walletAddress === 'string' && walletData.walletAddress
+        && !/^0x[a-fA-F0-9]{40}$/.test(walletData.walletAddress)) {
+      problems.push('walletAddress is not a 0x-prefixed 40-hex-digit address');
     }
-
-    return true;
+    return problems;
   }
 
   /**
@@ -237,8 +236,8 @@ export class WalletFileManager {
    */
   static async createWalletFile(walletData, preferredPath = null) {
     const walletPath = preferredPath || this.getDefaultWalletPath();
-    const success = await this.saveWalletFile(walletPath, walletData);
-    return success ? walletPath : null;
+    await this.saveWalletFile(walletPath, walletData);
+    return walletPath;
   }
 }
 
