@@ -174,7 +174,7 @@ export function applyVisibility(program, surfaceCommands) {
  * Is this invocation one that will render `--help` output? Only these fetch the network — every
  * other invocation must stay fast and offline-safe.
  *
- * Recognizes: `-h` / `--help` / `help` anywhere, a bare invocation (no positional tokens once
+ * Recognizes: `-h` / `--help` anywhere, `help` in subcommand position, a bare invocation (no positional tokens once
  * global flags are stripped), and a "bare group" invocation (the resolved command has children
  * but no action handler of its own — e.g. `descix app` with no subcommand, which commander
  * renders as help even though the CLI never called outputHelp() itself).
@@ -187,13 +187,13 @@ export function applyVisibility(program, surfaceCommands) {
 export function isHelpInvocation(program, argv, globalFlags = {}) {
   if (argv.length === 0) return true;
   if (argv.includes('-h') || argv.includes('--help')) return true;
+  if (argv.includes('-V') || argv.includes('--version')) return false; // prints a version, renders no listing
 
   const valueFlags = new Set(globalFlags.valueFlags || []);
   const booleanFlags = new Set(globalFlags.booleanFlags || []);
   const positional = [];
   for (let i = 0; i < argv.length; i++) {
     const tok = argv[i];
-    if (tok === 'help') return true;
     if (valueFlags.has(tok)) { i++; continue; }
     if (booleanFlags.has(tok)) continue;
     if (tok.startsWith('-')) continue; // an option belonging to whatever command it turns out to be
@@ -204,6 +204,7 @@ export function isHelpInvocation(program, argv, globalFlags = {}) {
   let cmd = program;
   for (const tok of positional) {
     if (cmd._actionHandler) break; // reached a leaf; remaining tokens are ITS args, not subcommands
+    if (tok === 'help') return true; // commander's help subcommand, only in subcommand position
     const next = (cmd.commands || []).find((c) => c.name() === tok || (c.aliases && c.aliases().includes(tok)));
     if (!next) return false; // unresolvable path — commander's own error path, not ours to fetch for
     cmd = next;
