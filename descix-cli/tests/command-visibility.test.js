@@ -209,3 +209,16 @@ test('isHelpInvocation: --env <value> is stripped as a value flag, not mistaken 
   const globalFlags = { valueFlags: ['--env', '--api-url'], booleanFlags: ['--admin'] };
   assert.equal(isHelpInvocation(program, ['--env', 'dev', 'app', 'list'], globalFlags), false);
 });
+
+test('isHelpInvocation: --version / -V is NOT a help trigger (it prints a version and exits, no listing)', () => {
+  const program = buildRealShapedProgram();
+  const globalFlags = { valueFlags: ['--env', '--api-url'], booleanFlags: ['--admin'] };
+  assert.equal(isHelpInvocation(program, ['--version'], globalFlags), false);
+  assert.equal(isHelpInvocation(program, ['-V'], globalFlags), false);
+});
+
+test('isHelpInvocation: the word "help" as a leaf verb\'s ARGUMENT is not a help trigger; as a subcommand it is', () => {
+  const program = buildRealShapedProgram();
+  assert.equal(isHelpInvocation(program, ['app', 'list', 'help']), false, '"help" after a leaf is that leaf\'s argument');
+  assert.equal(isHelpInvocation(program, ['app', 'help']), true, '"help" in subcommand position of a group renders help');
+});
