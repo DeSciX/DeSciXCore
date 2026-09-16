@@ -297,7 +297,7 @@ export async function runSetupWizard(options = {}) {
     let apiUrl = options.url || process.env.DESCIX_API_URL;
     
     if (!apiUrl) {
-      requireInteractive({ what: 'descix setup', question: 'which environment?', nonInteractiveForm: ['descix setup is an interactive wizard and has no non-interactive form. Run it in a terminal.'] });
+      requireInteractive({ what: 'descix mcp quickstart', question: 'which environment?', nonInteractiveForm: ['descix mcp quickstart is an interactive wizard and has no non-interactive form. Run it in a terminal.'] });
       const { environment } = await inquirer.prompt([
         {
           type: 'list',
@@ -317,7 +317,7 @@ export async function runSetupWizard(options = {}) {
       } else if (environment === 'local') {
         apiUrl = 'https://localhost:4000';
       } else {
-        requireInteractive({ what: 'descix setup', question: 'custom API URL?', nonInteractiveForm: ['descix setup is an interactive wizard and has no non-interactive form. Run it in a terminal.'] });
+        requireInteractive({ what: 'descix mcp quickstart', question: 'custom API URL?', nonInteractiveForm: ['descix mcp quickstart is an interactive wizard and has no non-interactive form. Run it in a terminal.'] });
         const { customUrl } = await inquirer.prompt([
           {
             type: 'input',
@@ -353,7 +353,7 @@ export async function runSetupWizard(options = {}) {
     if (!isAuth) {
       console.log(chalk.yellow('⚠️  Authentication is required to use DeSciX CLI/MCP.\n'));
       
-      requireInteractive({ what: 'descix setup', question: 'which authentication method?', nonInteractiveForm: ['descix setup is an interactive wizard and has no non-interactive form. Run it in a terminal.'] });
+      requireInteractive({ what: 'descix mcp quickstart', question: 'which authentication method?', nonInteractiveForm: ['descix mcp quickstart is an interactive wizard and has no non-interactive form. Run it in a terminal.'] });
       const { authMethod } = await inquirer.prompt([
         {
           type: 'list',
@@ -446,7 +446,7 @@ export async function runSetupWizard(options = {}) {
     // Step 4: MCP Configuration
     console.log(chalk.cyan('\n📋 Step 4: MCP Configuration\n'));
     
-    requireInteractive({ what: 'descix setup', question: 'configure MCP now?', nonInteractiveForm: ['descix setup is an interactive wizard and has no non-interactive form. Run it in a terminal.'] });
+    requireInteractive({ what: 'descix mcp quickstart', question: 'configure MCP now?', nonInteractiveForm: ['descix mcp quickstart is an interactive wizard and has no non-interactive form. Run it in a terminal.'] });
     const { setupMCP } = await inquirer.prompt([
       {
         type: 'confirm',
