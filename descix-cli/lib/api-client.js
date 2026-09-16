@@ -13,6 +13,35 @@ import { resolveOrigin } from './origin.js';
 import { reportEnvironment, EXPLICIT_ORIGIN_SOURCE } from './environment-report.js';
 import { diag } from './diagnostic-log.js';
 
+/**
+ * THE effective API origin for this invocation, with the source that chose it: the environment
+ * variable (which the --api-url / --env flags fold into), then the workspace's env.apiUrl, then
+ * ~/.descix/config.json, then the declared default. Every surface that SHOWS or USES the origin
+ * consumes this — `config show` used to print the workspace file's value while every command
+ * used the environment variable's, so an inherited DESCIX_API_URL silently pointed commands at
+ * production while `config show` said dev (JARVIS-FRAQTL, 2026-09-16).
+ *
+ * Never returns null and never throws for an ABSENT configuration (nothing configured is the
+ * declared default, carrying `source: default`, which the caller prints). Throws
+ * OriginInvalidError when a source named an origin that cannot be used.
+ *
+ * @param {string|null|undefined} workspaceEnvApiUrl - the loaded workspace's env.apiUrl
+ * @returns {Promise<{origin: string, source: string, isDefault: boolean}>}
+ */
+export async function resolveEffectiveOrigin(workspaceEnvApiUrl) {
+  let globalApiUrl = null;
+  try {
+    const { GlobalConfig } = await import('./global-config.js');
+    const gc = await GlobalConfig.load();
+    globalApiUrl = gc.api_url || null;
+  } catch {}
+  return resolveOrigin({
+    envVar: process.env.DESCIX_API_URL,
+    workspaceEnvApiUrl,
+    globalApiUrl,
+  });
+}
+
 export class DeSciXApiClient {
   constructor(options = {}) {
     this.baseUrl = options.baseUrl || null; // Will be loaded async
@@ -93,27 +122,7 @@ export class DeSciXApiClient {
    * @returns {Promise<{origin: string, source: string, isDefault: boolean}>}
    */
   async detectApiUrl() {
-    // Every branch of this function used to be able to yield the production origin without the
-    // developer having chosen it, and the `!== PRODUCTION_URL` comparisons made it WORSE than a
-    // plain fallback: a workspace that had deliberately set prod was treated as if it had set
-    // nothing and skipped, so "chosen" and "unconfigured" were provably indistinguishable. The
-    // precedence and the fail-loud now live in the one origin owner.
-    let globalApiUrl = null;
-    try {
-      const { GlobalConfig } = await import('./global-config.js');
-      const gc = await GlobalConfig.load();
-      globalApiUrl = gc.api_url || null;
-    } catch {}
-
-    // Never returns null and never throws for an ABSENT configuration: nothing configured is
-    // the declared default (PROD), carrying `source: default`, which the caller prints. It DOES
-    // throw OriginInvalidError when a source named an origin that cannot be used — silently
-    // discarding what the developer typed is the same defect from the other direction.
-    return resolveOrigin({
-      envVar: process.env.DESCIX_API_URL,
-      workspaceEnvApiUrl: this._workspaceConfig?.env?.apiUrl,
-      globalApiUrl,
-    });
+    return resolveEffectiveOrigin(this._workspaceConfig?.env?.apiUrl);
   }
 
   /**
