@@ -1,7 +1,6 @@
 /**
  * Tests for `WorkspaceConfig.setStaticSite()` — the method that backs
- * `descix app set-site`. Parallel to setSitePort()/setMicroservicePort()
- * and app-set-port.test.js.
+ * `descix app set-site`. Parallel to setMicroservicePort() and app-set-port.test.js.
  *
  * Closes the site.static workspace gap (WS-SSGPOD, CEO-D-2026-06-02-SSGPOD-SITE-PREPROD):
  * this is the canonical write path for the `site.static` relative path that the dev
@@ -124,9 +123,9 @@ test('setStaticSite — disable case: static:null + port:null on app with no sit
 test('setStaticSite — preserves existing site.port when only static is set', async (t) => {
   const { wsRoot, productAppId } = await makeTestWorkspace(t);
 
-  // Set a port first (via the parallel setter)
+  // Set a port first
   const wc = await WorkspaceConfig.load(wsRoot);
-  await wc.setSitePort(productAppId, 5599);
+  await wc.setStaticSite(productAppId, { port: 5599 });
 
   // Now set static only — must not clobber the existing port
   const wc2 = await WorkspaceConfig.load(wsRoot);

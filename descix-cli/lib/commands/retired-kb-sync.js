@@ -19,20 +19,17 @@
 export const CANONICAL_KB_SYNC = 'descix kb corpus sync';
 
 /** The verb that creates a KB — `kb corpus sync`'s dependency (I4). */
-export const CANONICAL_KB_CREATE = 'descix kb create';
+export const CANONICAL_KB_CREATE = 'descix app init --kb <kb_name>';
 
 /**
  * Every KB-sync surface retired by ws-devplane-cli-kb-surface-single-canonical-sync.
  * `invocation` is what a user types; `parent` is the commander parent it hung off.
  */
 export const RETIRED_KB_SYNC_SURFACES = [
-  { id: 'sync',      parent: 'program', name: 'sync',  invocation: 'descix sync',      registered: true  },
-  { id: 'sync.kb',   parent: 'sync',    name: 'kb',    invocation: 'descix sync kb',   registered: true  },
-  { id: 'kb.chunk',  parent: 'kb',      name: 'chunk', invocation: 'descix kb chunk',  registered: true  },
-  { id: 'kb.sync',   parent: 'kb',      name: 'sync',  invocation: 'descix kb sync',   registered: true  },
-  // registered:false -- `update` survives for app/site, so this one is a dispatcher branch
-  // inside the live `update` command rather than a commander registration of its own.
-  { id: 'update.kb', parent: 'update',  name: 'kb',    invocation: 'descix update kb', registered: false },
+  { id: 'sync',      parent: 'program', name: 'sync',  invocation: 'descix sync' },
+  { id: 'sync.kb',   parent: 'sync',    name: 'kb',    invocation: 'descix sync kb' },
+  { id: 'kb.chunk',  parent: 'kb',      name: 'chunk', invocation: 'descix kb chunk' },
+  { id: 'kb.sync',   parent: 'kb',      name: 'sync',  invocation: 'descix kb sync' },
 ];
 
 /** Implementations deleted with those surfaces. No exported symbol survives without a caller (I3). */
@@ -59,24 +56,6 @@ export function retiredKbSyncMessage(invocation) {
     `path could not do. If the KB does not exist yet, create it first with ` +
     `\`${CANONICAL_KB_CREATE}\`.`
   );
-}
-
-/**
- * Refuse a retired invocation LOUDLY and exit non-zero.
- *
- * MEASURED, not assumed: a `throw` from updateAuto is NOT swallowed — updateAuto's own catch
- * prints the message before rethrowing, so both forms reach the user and exit 1. This exists
- * for two smaller, real reasons: (1) ONE owner for the refusal, so the dispatcher branch and
- * updateAuto's kb branch cannot drift into different wording or different exit codes; and
- * (2) a deliberate retirement is not a crash, so it should not be framed as "✖ Update failed".
- *
- * @param {string} invocation - the retired invocation, e.g. 'descix update kb'
- * @param {(s:string)=>string} red - chalk.red or equivalent
- * @returns {never}
- */
-export function refuseRetiredKbSync(invocation, red) {
-  console.error(red(`\n❌ ${retiredKbSyncMessage(invocation)}\n`));
-  process.exit(1);
 }
 
 /**
@@ -120,7 +99,6 @@ export function registerRetiredKbSync(parent, name, invocation, red) {
 export function registerAllRetiredKbSync(roots, red) {
   const byId = { ...roots };
   for (const s of RETIRED_KB_SYNC_SURFACES) {
-    if (!s.registered) continue;
     const parent = byId[s.parent];
     if (!parent) {
       throw new Error(

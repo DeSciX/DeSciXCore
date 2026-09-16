@@ -1,9 +1,9 @@
 /**
- * `descix briefer` — main entry point.
+ * The briefer — main entry point (scripts/briefer/run.mjs).
  *
  * Per WS-DESCIX-BRIEFER-CLI scope doc §2 (Architecture / Option A):
  *
- *   descix briefer [--env=dev|demo|prod] [--out=PATH] [--check]
+ *   node scripts/briefer/run.mjs [--env dev|demo|prod] [--out PATH] [--check]
  *
  * Reads the per-section data sources defined in scope doc §2.2, dispatches to
  * the per-section extractors in ./sources/*.js, and emits a structured
@@ -47,7 +47,7 @@ import * as entitlements from './sources/entitlements.js';
 import * as whatIsNot from './sources/what-is-not.js';
 import * as canonicalSources from './sources/canonical-sources.js';
 
-import { WorkspaceConfig } from '../../workspace-config.js';
+import { WorkspaceConfig } from '../../lib/workspace-config.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Extractor dispatch table (scope doc §2.2 ordering)
@@ -68,7 +68,7 @@ export const VALID_ENVS = Object.freeze(['dev', 'demo', 'prod']);
 // via WorkspaceConfig.getWorkspaceRoot() — never a hardcoded absolute path.
 export const DEFAULT_OUT_RELATIVE = 'DeSciX/V2_docs/architecture/platform-must-know-briefer.md';
 
-const MECHANISM_TAG = 'descix briefer v1.0 (M2 — code-grounded extractors)';
+const MECHANISM_TAG = 'briefer v1.0 (M2 — code-grounded extractors)';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -79,7 +79,7 @@ export function resolveCliPaths() {
   // DeSciX_Core and the parent repo. M2/M3 extractors that read source files
   // will need these to anchor file reads.
   const here = path.dirname(fileURLToPath(import.meta.url));
-  const descixCliRoot = path.resolve(here, '../../..');                // .../descix-cli
+  const descixCliRoot = path.resolve(here, '../..');                   // .../descix-cli
   const descixCoreRoot = path.resolve(descixCliRoot, '..');             // .../DeSciX_Core
   const desciXRoot = path.resolve(descixCoreRoot, '..');                // .../DeSciX
   const repoRoot = path.resolve(desciXRoot, '..');                      // .../Unkamon
@@ -283,7 +283,7 @@ export async function runCheckMode({ doc, outPath, verbose }) {
   } catch (err) {
     if (err.code === 'ENOENT') {
       console.error(chalk.red(`\n❌ --check failed: canonical briefer not found at ${outPath}\n`));
-      console.error(chalk.gray('   Run `descix briefer` (without --check) to create it.\n'));
+      console.error(chalk.gray('   Run `node scripts/briefer/run.mjs` (without --check) from descix-cli to create it.\n'));
       process.exit(2);
     }
     throw err;
@@ -316,7 +316,7 @@ export async function runCheckMode({ doc, outPath, verbose }) {
   }
 
   // M2: drift means a source-of-truth file changed shape since last regen.
-  // Caller should regenerate (run `descix briefer` without --check) and commit
+  // Caller should regenerate (run `node scripts/briefer/run.mjs` without --check) and commit
   // the updated canonical briefer.
   process.exit(1);
 }

@@ -240,7 +240,6 @@ describe('one owner for the control predicate', () => {
     // NEW rival predicate beside the delegation, so that is made mechanically detectable here.
     const CONSUMERS = [
         { file: 'quickstart-no-nested-workspace.test.js', control: 'controlC2', gate: 'GATE C2' },
-        { file: 'wizard-refuse-on-present-workspace.test.js', control: 'controlB3b', gate: 'GATE B3b' },
     ];
 
     /** Extract a `test('<gate> ...', ...)` call's body by brace matching, not by line offset. */

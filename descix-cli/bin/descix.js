@@ -31,8 +31,7 @@ import * as airdropCommands from '../lib/commands/airdrop.js';
 import { runInit } from '../lib/commands/init.js';
 // "May I prompt?" has ONE OWNER. No command in this file derives it.
 import { createPromptSession } from '../lib/interactive.js';
-import * as updateCommands from '../lib/commands/update.js';
-import { registerAllRetiredKbSync, refuseRetiredKbSync, CANONICAL_KB_SYNC } from '../lib/commands/retired-kb-sync.js';
+import { registerAllRetiredKbSync, CANONICAL_KB_SYNC } from '../lib/commands/retired-kb-sync.js';
 import { runStatus } from '../lib/commands/status.js';
 import { runDoctor } from '../lib/commands/doctor.js';
 import { runHealth } from '../lib/commands/health.js';
@@ -40,7 +39,6 @@ import * as kbCommands from '../lib/commands/kb.js';
 import { kbVectorCell, kbCountSource } from '../lib/commands/kb-list-render.js';
 import * as corpusCommands from '../lib/commands/corpus.js';
 import * as modelConfigCommands from '../lib/commands/model-config.js';
-import * as brieferCommand from '../lib/commands/briefer/index.js';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
@@ -302,32 +300,6 @@ program
     }
   });
 
-// ============ Briefer Command (Code-Grounded Mental Model Regen) ============
-// WS-DESCIX-BRIEFER-CLI M1: CLI scaffolding + extractor contract.
-// See DeSciX/DeSciX_Core/descix-cli/lib/commands/briefer/ for implementation.
-// Scope doc: docs/design/ws-descix-briefer-cli.md
-// Briefer target: DeSciX/V2_docs/architecture/platform-must-know-briefer.md
-
-program
-  .command('briefer')
-  .description('Regenerate platform-must-know-briefer.md from live code + gcloud + Firestore (HARD-FAIL on drift)')
-  .option('--env <name>', 'Target environment: dev|demo|prod (also accepted at the top level: descix --env=demo briefer ...)')
-  .option('--out <path>', 'Override output path (default: workspace-root/DeSciX/V2_docs/architecture/platform-must-know-briefer.md)')
-  .option('--check', 'Drift-detection mode: regen to memory, diff against canonical, non-zero exit on drift')
-  .option('-v, --verbose', 'Print per-source paths, citations, and timings')
-  .action(async (options) => {
-    try {
-      // Resolve --env in priority order: subcommand explicit > program parent > 'dev'.
-      // Commander would otherwise silently default to 'dev' even when the parent
-      // --env=demo is supplied (because the subcommand owns its own flag space).
-      const parentEnv = program.opts().env || null;
-      const env = options.env || parentEnv || 'dev';
-      await brieferCommand.runBriefer({ ...options, env });
-    } catch (error) {
-      console.error(chalk.red(`\n❌ Briefer command failed: ${error.message}\n`));
-      process.exit(1);
-    }
-  });
 
 // ============ Buy Commands (Crypto Payments) ============
 
@@ -1207,26 +1179,6 @@ appCommand
     }
   });
 
-appCommand
-  .command('create')
-  // DELETED SURFACE (CEO-D-2026-08-14, SUPER-DRY: delete the old path, fail loud, no compat
-  // fence). `app create` created the platform record and STOPPED, leaving the caller to
-  // remember `app init` — two commands for one outcome. That is how apps ended up half-made
-  // with no knowledge base at all. `app init` now creates AND initializes in one path.
-  .description('[REMOVED] Use `descix app init -a <name> -c <community>` — it creates and initializes in one step.')
-  // Swallow whatever the old invocation passed so the caller always gets the pointer below
-  // rather than a generic commander arity error that names no replacement.
-  .allowUnknownOption(true)
-  .argument('[ignored...]')
-  .action(() => {
-    console.error(chalk.red('\n❌ `descix app create` has been removed.\n'));
-    console.error(chalk.white('   Use the single canonical path, which creates AND initializes:\n'));
-    console.error(chalk.cyan('     descix app init -a <app-name> -c <community> [-s <short>]\n'));
-    console.error(chalk.gray('   It registers the app (Products + Firestore + entitlement), guarantees'));
-    console.error(chalk.gray('   the default knowledge base, then registers and scaffolds it locally.'));
-    console.error(chalk.gray('   Creating an app without a default KB is no longer possible.\n'));
-    process.exit(1);
-  });
 
 // descix app media-upload — upload media/asset files to an app's GCS assets prefix via the
 // API surface (WS-V1-PURGE Phase 1, item 2; media-via-API-surface PLATFORM half).
@@ -1361,45 +1313,6 @@ appCommand
     }
   });
 
-appCommand
-  .command('set-codesite')
-  .description('Set CodeSite URL/path for an app (use "descix site servelocal" for local dev port)')
-  .option('-c, --community <id>', 'Community ID (uses context if not provided)')
-  .option('-a, --app <id>', 'App ID (uses context if not provided)')
-  .requiredOption('-u, --url <url>', 'CodeSite URL (GCS path or HTTPS URL)')
-  .action(async (options) => {
-    try {
-      const apiClient = new DeSciXApiClient();
-      await requireAuth(apiClient);
-      
-      // Load workspace context
-      const workspaceConfig = await WorkspaceConfig.load();
-      const ctx = workspaceConfig.resolveContextWithOptions(options);
-      
-      const communityId = ctx.communityId;
-      const appId = ctx.appId;
-      
-      if (!communityId || !appId) {
-        console.error(chalk.red('\n❌ Community and App ID required.'));
-        console.log(chalk.gray('  Either provide -c and -a flags, or cd into an app directory\n'));
-        process.exit(1);
-      }
-      
-      const response = await apiClient.invoke('update_app_metadata', {
-        community_id: communityId,
-        app_id: appId,
-        ip_site_gcs_path_url: options.url
-      });
-      const result = response.message || response;
-      
-      console.log(chalk.green('\n✅ CodeSite URL updated!\n'));
-      console.log(chalk.cyan(`  App: ${communityId}/${appId}`));
-      console.log(chalk.gray(`  CodeSite URL: ${options.url}\n`));
-    } catch (error) {
-      console.error(chalk.red(error.message));
-      process.exit(1);
-    }
-  });
 
 appCommand
   .command('set-price')
@@ -1454,6 +1367,43 @@ appCommand
       console.log(chalk.green('\n✅ App display name updated!\n'));
       console.log(chalk.cyan(`  App: ${options.community}/${options.app}`));
       console.log(chalk.gray(`  Name: ${options.name}\n`));
+    } catch (error) {
+      console.error(chalk.red(error.message));
+      process.exit(1);
+    }
+  });
+
+appCommand
+  .command('set-listed')
+  .description('List or unlist your app in the app store (on: shown in the public store; off: not shown to non-admin visitors)')
+  .argument('<state>', 'on or off')
+  .requiredOption('-c, --community <id>', 'Community ID')
+  .requiredOption('-a, --app <id>', 'App ID')
+  .action(async (state, options) => {
+    try {
+      const wanted = { on: true, off: false }[String(state).toLowerCase()];
+      if (wanted === undefined) {
+        throw new Error(`set-listed takes 'on' or 'off', not '${state}'.`);
+      }
+      const apiClient = new DeSciXApiClient();
+      await requireAuth(apiClient);
+
+      const response = await apiClient.invoke('update_app', {
+        community_id: options.community,
+        app_id: options.app,
+        listed: wanted
+      });
+      const result = response.message || response;
+      // The receipt is the value the SERVER holds after the write, never the value requested.
+      const stored = result?.app?.listed;
+      if (stored !== wanted) {
+        throw new Error(`update_app returned listed=${JSON.stringify(stored)} for ${options.app}; expected ${wanted}. The store listing did not change.`);
+      }
+
+      console.log(chalk.green(`\n✅ App ${stored ? 'listed' : 'unlisted'}.\n`));
+      console.log(chalk.cyan(`  App: ${options.community}/${options.app}`));
+      console.log(chalk.gray(`  listed: ${stored}`));
+      console.log(chalk.gray('  The store view is cached for up to 5 minutes, so the change can take that long to show.\n'));
     } catch (error) {
       console.error(chalk.red(error.message));
       process.exit(1);
@@ -1848,7 +1798,7 @@ appCommand
 // Canonical write path for an app's microservice.port in workspace.json.
 // `descix microservice init` READS env.products[<app>].microservice.port and hard-fails
 // if it is missing; this command is how that port is set, without hand-editing workspace.json.
-// Backed by WorkspaceConfig.setMicroservicePort (parallel to setSitePort).
+// Backed by WorkspaceConfig.setMicroservicePort.
 appCommand
   .command('set-port')
   .description('Set the microservice port for a mapped app (writes env.products[<app>].microservice.port). Pass "n" to remove.')
@@ -1893,10 +1843,8 @@ appCommand
 // the app's localPath; "." means the localPath itself). Optionally sets site.port for
 // dev-server sites. Parallel to `descix app set-port` (microservice.port); closes the
 // site.static gap so workspace.json never needs hand-editing (CEO-D-2026-06-02-SSGPOD-SITE-PREPROD).
-// Backed by WorkspaceConfig.setStaticSite (parallel to setSitePort/setMicroservicePort).
-//
-// NOTE: This is NOT `set-codesite` — that writes the Firestore ip_site_gcs_path_url (a prod
-// concern). set-site writes ONLY the local workspace.json site.{} slot.
+// Backed by WorkspaceConfig.setStaticSite (parallel to setMicroservicePort).
+// It writes ONLY the local workspace.json site.{} slot.
 appCommand
   .command('set-site')
   .description("Set a mapped app static-site config (writes env.products[<app>].site.static, the relative dir served at /p/<app>/). Optionally --port; --unset clears site.{}.")
@@ -2119,32 +2067,6 @@ KB's vectors by id-prefix). The Source column shows how each count was obtained:
     }
   });
 
-kbCommand
-  .command('create')
-  .description('Create a new knowledge base in an app')
-  .requiredOption('-c, --community <id>', 'Community ID')
-  .requiredOption('-a, --app <id>', 'App ID')
-  .requiredOption('-k, --kb <id>', 'Knowledge Base ID')
-  .action(async (options) => {
-    try {
-      const apiClient = new DeSciXApiClient();
-      await requireAuth(apiClient);
-      
-      const response = await apiClient.invoke('create_skeleton_kb', {
-        community_id: options.community,
-        app_id: options.app,
-        kb_name: options.kb
-      });
-      const result = response.message || response;
-      
-      console.log(chalk.green('\n✅ Knowledge Base created successfully!\n'));
-      console.log(chalk.cyan(`  KB ID: ${options.kb}`));
-      console.log(chalk.gray(`  App: ${options.community}/${options.app}`));
-    } catch (error) {
-      console.error(chalk.red(error.message));
-      process.exit(1);
-    }
-  });
 
 kbCommand
   .command('delete')
@@ -2514,7 +2436,7 @@ driveCommand
 
 const siteCommand = program
   .command('site')
-  .description('Site lifecycle management: init, upload, servelocal');
+  .description('Site lifecycle management: init, upload, status, list, delete');
 
 // site init - Copy scaffold to app
 siteCommand
@@ -2746,16 +2668,18 @@ siteCommand
 
       // 3. Determine delta
       let filesToUpload = fileList;
-      let filesToDelete = [];
+      // Files the server holds that this build does not. Upload NEVER removes them: nothing on this
+      // path sends a deletion, so the receipt names them as left in place rather than deleted.
+      let serverOnlyFiles = [];
 
       if (!options.full && existing_manifest) {
         const delta = gitUtils.compareSyncState(localFiles, existing_manifest);
         filesToUpload = fileList.filter(f =>
           delta.added.includes(f.path) || delta.modified.includes(f.path)
         );
-        filesToDelete = delta.deleted;
+        serverOnlyFiles = delta.deleted;
 
-        console.log(chalk.gray(`  Delta: ${delta.added.length} added, ${delta.modified.length} modified, ${delta.unchanged.length} unchanged, ${delta.deleted.length} deleted`));
+        console.log(chalk.gray(`  Delta: ${delta.added.length} added, ${delta.modified.length} modified, ${delta.unchanged.length} unchanged, ${delta.deleted.length} on the server only (left in place)`));
       }
 
       if (options.dryRun) {
@@ -2765,9 +2689,9 @@ siteCommand
         } else {
           filesToUpload.forEach(f => console.log(chalk.gray(`  + ${f.path} (${(f.size / 1024).toFixed(1)}KB)`)));
         }
-        if (filesToDelete.length > 0) {
-          console.log(chalk.yellow('\nWould delete:'));
-          filesToDelete.forEach(f => console.log(chalk.gray(`  - ${f}`)));
+        if (serverOnlyFiles.length > 0) {
+          console.log(chalk.yellow('\nOn the server only — upload leaves these in place:'));
+          serverOnlyFiles.forEach(f => console.log(chalk.gray(`  = ${f}`)));
         }
         console.log(chalk.gray(`\n  Site URL: ${site_url}\n`));
         return;
@@ -2873,75 +2797,6 @@ siteCommand
     }
   });
 
-// site servelocal - Register local dev server port
-siteCommand
-  .command('servelocal [port]')
-  .description('Register local dev server port (or "n" to disable)')
-  .option('-c, --community <id>', 'Community ID (auto-detects from context)')
-  .option('-a, --app <id>', 'App ID (auto-detects from context)')
-  .action(async (port, options) => {
-    try {
-      const workspaceConfig = await WorkspaceConfig.load();
-      const ctx = workspaceConfig.resolveContextWithOptions(options);
-
-      const appId = ctx.appId;
-
-      if (!appId) {
-        console.error(chalk.red('\n❌ App ID required.'));
-        console.log(chalk.gray('  Either provide -a flag, or cd into an app directory\n'));
-        process.exit(1);
-      }
-
-      // Handle disable case — setSitePort(appId, null) removes site.port / cleans site.{}
-      if (port === 'n' || port === 'N') {
-        await workspaceConfig.setSitePort(appId, null);
-        console.log(chalk.green(`\n✅ Local site server disabled for ${appId}\n`));
-        return;
-      }
-
-      // Handle status query (no port argument)
-      if (!port) {
-        const appConfig = workspaceConfig.getAppByAppId(appId);
-        if (!appConfig) {
-          console.error(chalk.red(`\n❌ ${unmappedAppMessage(appId)}\n`));
-          process.exit(1);
-        }
-        // Read site.port from the live env entry (not from the constructed copy)
-        let liveEntry = null;
-        if (workspaceConfig.env?.platform?.appId === appId) {
-          liveEntry = workspaceConfig.env.platform;
-        } else if (Array.isArray(workspaceConfig.env?.products)) {
-          liveEntry = workspaceConfig.env.products.find(p => p.appId === appId) || null;
-        }
-        const currentPort = liveEntry?.site?.port;
-        if (currentPort) {
-          console.log(chalk.cyan(`\n📍 Local site server: port ${currentPort}`));
-          console.log(chalk.gray(`  App: ${appId}\n`));
-        } else {
-          console.log(chalk.yellow(`\n⚠️  No local site server configured.`));
-          console.log(chalk.gray(`  Usage: descix site servelocal <port>\n`));
-        }
-        return;
-      }
-
-      const portNum = parseInt(port);
-      if (isNaN(portNum) || portNum < 1 || portNum > 65535) {
-        console.error(chalk.red('\n❌ Invalid port number.\n'));
-        process.exit(1);
-      }
-
-      // setSitePort mutates the live env entry and saves — no stale-copy problem
-      await workspaceConfig.setSitePort(appId, portNum);
-      console.log(chalk.green(`\n✅ Local site server registered!`));
-      console.log(chalk.cyan(`  Port: ${portNum}`));
-      console.log(chalk.gray(`  App: ${appId}`));
-      console.log(chalk.gray(`\n  The gateway will proxy /p/${appId}/* to localhost:${portNum}\n`));
-
-    } catch (error) {
-      console.error(chalk.red(`\n❌ ${error.message}\n`));
-      process.exit(1);
-    }
-  });
 
 // site list - List deployed files (context-aware)
 siteCommand
@@ -3270,127 +3125,6 @@ microserviceCommand
     }
   });
 
-// microservice deploy - Cloud Run deploy (broker-first; no per-app LB for non-core apps)
-// WS-MCP-SURFACE-SPLIT §4b: this is the REAL Admin/local deploy (Admin SDK) — it stays fully
-// functional for operator/CI use (EVP/COS deploy runbooks invoke it). It is intentionally NOT
-// advertised over MCP (not mcp:true), so the PUBLIC surface sees no deploy tool. The public
-// "microservice deploy" is "coming soon" (a no-op) — satisfied here by absence from the MCP
-// listing, NOT by neutering this admin path. Do not stub this out.
-microserviceCommand
-  .command('deploy')
-  .description('[ADMIN/LOCAL] Deploy microservice to Cloud Run (uses deploy-service-env.sh; powch re-provisions platform NEG only). Public MCP deploy is coming soon; this real deploy is Admin/local-only.')
-  .option('-c, --community <id>', 'Community ID (auto-detects from context)')
-  .option('-a, --app <id>', 'App ID (auto-detects from context)')
-  .option('--env <env>', 'Target environment: dev|demo|prod')
-  .option('--dry-run', 'Print deploy plan without executing gcloud')
-  .option('--skip-register', 'Skip manifest registration after deploy (service may self-register on boot)')
-  .action(async (options, command) => {
-    try {
-      const apiClient = new DeSciXApiClient();
-      await requireAuth(apiClient);
-
-      const workspaceConfig = await WorkspaceConfig.load();
-      const ctx = workspaceConfig.resolveContextWithOptions(options);
-      const appId = ctx.appId;
-
-      if (!appId) {
-        console.error(chalk.red('\n❌ App ID required.'));
-        console.log(chalk.gray('  cd into an app directory, or use -a flag\n'));
-        process.exit(1);
-      }
-
-      const parentEnv = command?.parent?.opts?.()?.env;
-      const deployEnv = (options.env || parentEnv || workspaceConfig.env?.environment)?.toLowerCase();
-      if (!deployEnv || !['dev', 'demo', 'prod'].includes(deployEnv)) {
-        console.error(chalk.red('\n❌ --env is required (dev|demo|prod).'));
-        console.log(chalk.gray('  Example: descix --env demo microservice deploy -a powch\n'));
-        process.exit(1);
-      }
-
-      const workspaceRoot = workspaceConfig.getWorkspaceRoot();
-      if (!workspaceRoot) {
-        throw new Error('Could not resolve workspace root (.descix/workspace.json not found)');
-      }
-
-      const deployScript = path.join(
-        workspaceRoot,
-        'DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/deploy-service-env.sh'
-      );
-
-      try {
-        await fs.access(deployScript);
-      } catch {
-        throw new Error(`Deploy script not found: ${deployScript}`);
-      }
-
-      console.log(chalk.cyan(`\n🚀 Deploying microservice: ${appId} (${deployEnv})\n`));
-      if (options.dryRun) {
-        console.log(chalk.yellow('  Dry run — gcloud deploy will not execute\n'));
-      }
-
-      const { spawnSync } = await import('child_process');
-      const result = spawnSync('bash', [deployScript, appId, deployEnv], {
-        cwd: path.dirname(deployScript),
-        env: {
-          ...process.env,
-          ECHO_MODE: options.dryRun ? 'true' : 'false'
-        },
-        stdio: 'inherit'
-      });
-
-      if (result.status !== 0) {
-        process.exit(result.status || 1);
-      }
-
-      if (options.skipRegister) {
-        console.log(chalk.gray('\n  Skipped manifest registration (--skip-register).\n'));
-        return;
-      }
-
-      const microserviceDir = workspaceConfig.getMicroservicePath(appId);
-      if (!microserviceDir) {
-        console.log(chalk.yellow('\n⚠️  Deploy complete. Run descix microservice register to register manifest.\n'));
-        return;
-      }
-
-      const manifestPath = path.join(microserviceDir, 'manifest.json');
-      try {
-        await fs.access(manifestPath);
-      } catch {
-        console.log(chalk.yellow('\n⚠️  Deploy complete. No manifest.json — run descix microservice register when ready.\n'));
-        return;
-      }
-
-      console.log(chalk.cyan('\n📦 Registering microservice manifest...\n'));
-      const registerArgs = [
-        process.argv[1],
-        'microservice',
-        'register',
-        '-m', manifestPath,
-        '-a', appId
-      ];
-      if (ctx.communityId) {
-        registerArgs.push('-c', ctx.communityId);
-      }
-
-      const registerResult = spawnSync(process.execPath, registerArgs, {
-        cwd: process.cwd(),
-        stdio: 'inherit',
-        env: process.env
-      });
-
-      if (registerResult.status !== 0) {
-        console.log(chalk.yellow('\n⚠️  Cloud Run deploy succeeded but manifest registration failed.'));
-        console.log(chalk.gray(`  Retry: descix microservice register -m ${manifestPath} -a ${appId}\n`));
-        process.exit(registerResult.status || 1);
-      }
-
-      console.log(chalk.green('\n✅ Microservice deploy complete (Cloud Run + manifest registration).\n'));
-    } catch (error) {
-      console.error(chalk.red(`\n❌ Deploy failed: ${error.message}\n`));
-      process.exit(1);
-    }
-  });
 
 // microservice register - Register with gateway
 microserviceCommand
@@ -4004,45 +3738,6 @@ program
     }
   });
 
-const repCommand = program
-  .command('rep')
-  .description('Reputation operations');
-
-repCommand
-  .command('grant')
-  .description('Grant REP points to a user (admin/dev only)')
-  .requiredOption('-c, --community <id>', 'Community ID')
-  .requiredOption('-u, --user <id>', 'User ID')
-  .requiredOption('-a, --amount <amount>', 'REP amount to grant')
-  .option('--reason <text>', 'Reason for granting REP')
-  .action(async (options) => {
-    try {
-      const apiClient = new DeSciXApiClient();
-      await requireAuth(apiClient);
-      
-      const amount = parseInt(options.amount);
-      if (isNaN(amount) || amount <= 0) {
-        throw new Error('Amount must be a positive integer');
-      }
-      
-      const response = await apiClient.invoke('increment_rep', {
-        community_id: options.community,
-        user_id: options.user,
-        amount: amount,
-        reason: options.reason || 'CLI grant'
-      });
-      const result = response.message || response;
-      
-      console.log(chalk.green('\n✅ REP granted!\n'));
-      console.log(chalk.cyan(`  User: ${options.user}`));
-      console.log(chalk.gray(`  Community: ${options.community}`));
-      console.log(chalk.gray(`  Amount: +${amount} REP`));
-      console.log(chalk.gray(`  New Total: ${result.new_total || result.rep || 'N/A'}\n`));
-    } catch (error) {
-      console.error(chalk.red(error.message));
-      process.exit(1);
-    }
-  });
 
 // ============ Chat Commands ============
 
@@ -4693,57 +4388,12 @@ program
 
 // ============ MCP Commands ============
 
-import * as mcpCommands from '../lib/commands/mcp.js';
 import { runClone } from '../lib/commands/clone.js';
 
 const mcpCommand = program
   .command('mcp')
   .description('MCP server operations');
 
-mcpCommand
-  .command('init')
-  .description('Initialize MCP server for this workspace')
-  .action(async () => {
-    try {
-      await mcpCommands.init();
-    } catch (error) {
-      fail(error);
-    }
-  });
-
-mcpCommand
-  .command('test')
-  .description('Test MCP server with a sample query')
-  .option('-q, --query <text>', 'Test query', 'What is this knowledge base about?')
-  .action(async (options) => {
-    try {
-      await mcpCommands.test(options);
-    } catch (error) {
-      fail(error);
-    }
-  });
-
-mcpCommand
-  .command('config')
-  .description('Show current workspace configuration')
-  .action(async () => {
-    try {
-      await mcpCommands.config();
-    } catch (error) {
-      fail(error);
-    }
-  });
-
-mcpCommand
-  .command('quickstart')
-  .description('One-command setup: authenticate, configure, and test')
-  .action(async () => {
-    try {
-      await mcpCommands.quickstart();
-    } catch (error) {
-      fail(error);
-    }
-  });
 
 mcpCommand
   .command('execute')
@@ -4948,55 +4598,6 @@ program
     }
   });
 
-// ============ Update Commands (Context-Driven) ============
-
-const updateCommand = program
-  .command('update')
-  // `update kb` is REMOVED — kb sync has exactly one surface, `descix kb corpus sync`.
-  // `update app` and `update site` are NOT kb-sync surfaces and are untouched, so the
-  // `update` verb itself stays registered. `update all`/`auto` keep doing app and site and
-  // no longer touch the KB; they print where kb sync went rather than failing, because
-  // failing them would delete non-kb functionality this change never targeted.
-  .description('Context-driven resource sync for app and site (auto-detects from workspace). For knowledge bases use `descix kb corpus sync`.')
-  .argument('[type]', 'Update type: app, site, all (auto-detects if not specified)')
-  .option('-c, --community <id>', 'Community ID (optional; app_id sufficient for Unified Registry)')
-  .option('-a, --app <id>', 'App ID (globally unique; required if not in app directory)')
-  .option('--preview', 'Site: Deploy to preview URL')
-  .option('--build <cmd>', 'Site: Run build command first')
-  .option('--full', 'Force full sync (ignore delta)')
-  .option('--port <number>', 'Site: Register local dev server port')
-  .action(async (type, options) => {
-    try {
-      switch (type) {
-        case 'app':
-          await updateCommands.updateApp(options);
-          break;
-        case 'kb':
-          refuseRetiredKbSync('descix update kb', chalk.red);
-          break;
-        case 'site':
-          await updateCommands.updateSite({ 
-            ...options,
-            port: options.port ? parseInt(options.port) : undefined
-          });
-          break;
-        case 'all':
-          console.log(chalk.gray(`  (knowledge bases are not included: use \`${CANONICAL_KB_SYNC}\`)`));
-          await updateCommands.updateAll(options);
-          break;
-        default:
-          // Auto-detect. NO blanket "KBs are excluded" line here: auto resolves to exactly
-          // one target, and if that target is the KB the user gets the refusal by name.
-          // Printing the advisory first would announce an exclusion and then refuse for
-          // that exact reason — an advisory that fires on correct behaviour trains people
-          // to ignore advisories.
-          await updateCommands.updateAuto(options);
-      }
-    } catch (error) {
-      fail(error);
-    }
-  });
-
 // ============ Local Gateway Command ============
 
 program
@@ -5065,9 +4666,7 @@ program
     // resolution — silently, with "Quickstart complete!" and exit 0.
     //
     // quickstart is an ONBOARDING flow: a user who asked to be set up and already IS set up has
-    // SUCCEEDED, so this SKIPS and REPORTS and continues. `descix mcp quickstart` refuses non-zero
-    // on the same fact because it was asked specifically to CREATE a workspace and cannot honour
-    // that. Different verbs, different contracts, ONE OWNER for the underlying fact.
+    // SUCCEEDED, so this SKIPS and REPORTS and continues.
     const existingRoot = await WorkspaceConfig.findWorkspaceRoot(workspaceRoot);
     if (existingRoot) {
       console.log(chalk.green('✓ Workspace already initialized'));
@@ -5111,11 +4710,9 @@ program
     }
 
     // Step 5: Copy SDK assets
-    try {
-      const { pullSdkAssets } = await import('../lib/wizard/setup.js');
-      const pulled = await pullSdkAssets(targetRoot);
-      if (pulled) console.log(chalk.green('  ✓ .descix/sdk-assets/'));
-    } catch { /* setup.js pullSdkAssets may not be exported — skip */ }
+    const { pullSdkAssets } = await import('../lib/sdk-assets.js');
+    await pullSdkAssets(targetRoot);
+    console.log(chalk.green('  ✓ .descix/sdk-assets/'));
 
     // Done
     console.log(chalk.green('\n✅ Quickstart complete!\n'));

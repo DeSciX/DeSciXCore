@@ -318,7 +318,7 @@ export async function probeGcloudJson({ command, env, section, anchor, expected,
       section,
       source: 'gcloud',
       expected: expected || `successful response from: ${probeStr}`,
-      recovery: recovery || `Run 'gcloud auth login' or 'gcloud config set project descix', then re-run \`descix briefer --env=${env}\`. If the auth is fine but the resource doesn't exist for env=${env}, that is a real platform-state issue — investigate before regenerating the briefer.`,
+      recovery: recovery || `Run 'gcloud auth login' or 'gcloud config set project descix', then re-run \`node scripts/briefer/run.mjs --env ${env}\`. If the auth is fine but the resource doesn't exist for env=${env}, that is a real platform-state issue — investigate before regenerating the briefer.`,
       detail: `probe: ${probeStr}\n  env: ${env}\n  ${timedOut ? 'timed out after ' + GCLOUD_TIMEOUT_MS + 'ms' : 'failed: ' + (err.stderr || err.message || String(err)).split('\n')[0].slice(0, 240)}`
     });
   }
