@@ -50,28 +50,6 @@ export async function show() {
 }
 
 /**
- * Set API URL
- */
-export async function setUrl(url, options = {}) {
-  try {
-    const workspaceConfig = await WorkspaceConfig.load();
-    const workspaceRoot = workspaceConfig.getWorkspaceRoot();
-
-    workspaceConfig.apiUrl = url;
-    workspaceConfig.environment = url.includes('localhost') ? 'development' : 'production';
-    const configPath = await workspaceConfig.save(workspaceRoot);
-
-    console.log(chalk.green('\n✅ Configuration updated!\n'));
-    console.log(chalk.white(`   API URL: ${url}`));
-    console.log(chalk.gray(`   Saved to: ${configPath}\n`));
-
-  } catch (error) {
-    console.error(chalk.red('Error updating config:', error.message));
-    throw error;
-  }
-}
-
-/**
  * Initialize config for environment
  */
 export async function init(env, options = {}) {

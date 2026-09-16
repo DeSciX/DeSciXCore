@@ -31,6 +31,7 @@
  */
 
 import { POWCH_APP_ID, normalizePowchUrl } from '../powch/powchOrigin.js';
+import { localUpstreamOrigin } from './localOrigin.js';
 
 export { POWCH_APP_ID };
 
@@ -53,8 +54,7 @@ export function resolvePowchUrl(config, options = {}) {
   const powch = (Array.isArray(env.products) ? env.products : []).find((p) => p.appId === POWCH_APP_ID);
   if (powch?.site?.port) {
     // The product's OWN origin — deliberately not the gateway route.
-    const proto = powch.site.protocol || 'https';
-    return `${proto}://localhost:${powch.site.port}/`;
+    return `${localUpstreamOrigin(powch.site, `env.products[${POWCH_APP_ID}].site`)}/`;
   }
   return null;
 }

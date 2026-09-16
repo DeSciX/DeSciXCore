@@ -64,6 +64,17 @@ const NOT_CONFIGURED_MESSAGE =
   'Run "npx descix init" first to initialize your workspace.';
 
 /**
+ * THE ONE OWNER of "how do I set the API origin". Named by every refusal that turns a developer
+ * away from a retired way of setting it (the retired setter verb, a top-level `apiUrl` key), so
+ * the three live surfaces are spelled once. Order: persistent known env, persistent custom
+ * origin, per-run.
+ */
+export const TOP_LEVEL_API_URL_REMEDY =
+  'descix config init --env dev|demo|prod         # pin a known environment (writes env.apiUrl)\n' +
+  '  descix config set-env <name> --url <origin>    # pin a custom origin under your own env name\n' +
+  '  descix --api-url <origin> <command>            # this run only; no workspace change (e.g. serve)';
+
+/**
  * THE ONE OWNER of the "move it aside, do not delete it" remedy.
  *
  * TWO different diagnoses reach this SAME remedy: a workspace.json that cannot be READ
@@ -151,7 +162,6 @@ export class WorkspaceConfig {
     
     // Legacy fields (kept for save() PWA response conversion compatibility)
     this.defaultContext = config.defaultContext;
-    this.apiUrl = config.apiUrl;
     this.environment = config.environment;
     this.directoryMappings = config.directoryMappings || {};
 
@@ -429,6 +439,23 @@ export class WorkspaceConfig {
       );
     }
 
+    // A v2.1 file carrying a TOP-LEVEL `apiUrl` is refused by name. That key is retired: no
+    // reader consumes it (the origin owner resolves `env.apiUrl` only) and save() never writes
+    // it, so a developer who set it by hand would be silently ignored on every invocation —
+    // exactly what the retired setter verb used to do from the other side, printing a success
+    // banner over a value that landed nowhere. The file is otherwise fine; the remedy is to remove the
+    // one key and set the origin where it is read. Nothing here is destructive.
+    if (typeof parsed.apiUrl === 'string' && parsed.apiUrl.trim() !== '') {
+      throw new Error(
+        'workspace.json carries a top-level "apiUrl", which is a retired v1 key that nothing reads.\n' +
+        `  File:   ${configPath}\n` +
+        `  Value:  ${parsed.apiUrl.trim()}\n` +
+        '\n' +
+        'The API origin lives at env.apiUrl. Remove the top-level key, then set the origin with:\n' +
+        `  ${TOP_LEVEL_API_URL_REMEDY}`
+      );
+    }
+
     return new WorkspaceConfig(parsed, workspaceRoot);
   }
 
@@ -691,19 +718,20 @@ export class WorkspaceConfig {
   }
 
   /**
-   * Get the API origin this workspace is configured for, or NULL when none is configured.
+   * Get the API origin this workspace is configured for.
    *
-   * Priority: env.apiUrl > legacy this.apiUrl. There is NO third branch. This used to end in
+   * The workspace names its origin at `env.apiUrl` and nowhere else. This used to end in
    * `return DEFAULT_API_URL` — the shipped PROD origin — which meant an unconfigured workspace
    * was indistinguishable from one that had deliberately chosen production, and every caller
    * received a prod origin the developer had never picked. Resolution and the fail-loud live in
    * `lib/origin.js`; this method only reports what THIS workspace file says.
    *
-   * There is likewise no environment-name-to-localhost derivation: an environment names a cloud
-   * environment, and localhost is a URL you set explicitly
-   * (`descix config set-env dev --url https://localhost:4000`, or env.apiUrl).
+   * There is no environment-name-to-localhost derivation: an environment names a cloud
+   * environment. A local origin is either per-run (`descix --api-url https://localhost:4000
+   * serve ...`) or a custom env (`descix config set-env local --url ...`) — see
+   * TOP_LEVEL_API_URL_REMEDY, the one owner of that list.
    *
-   * @returns {string|null} the configured origin, or null if this workspace names none
+   * @returns {string} the configured origin, or the declared default when this workspace names none
    */
   getApiUrl() {
     // Consumes the ONE origin owner rather than re-deriving the precedence or re-spelling the
@@ -712,7 +740,6 @@ export class WorkspaceConfig {
     // resolveOrigin() and printed by the api-client, never by a null returned from here.
     return resolveOrigin({
       workspaceEnvApiUrl: this.env?.apiUrl,
-      legacyApiUrl: this.apiUrl,
     }).origin;
   }
 
@@ -908,9 +935,12 @@ export class WorkspaceConfig {
    * Persistently set the target environment in workspace.json.
    *
    * Updates env.environment and env.apiUrl, then saves. EVERY environment writes a
-   * URL — including dev, which writes the cloud DEV origin. Pointing at a local
-   * backend is `--url`: `descix config set-env dev --url https://localhost:4000`.
-   * For custom envs, uses --url or defaults to https://{name}.descix.net.
+   * URL — including dev, which writes the cloud DEV origin. For custom envs, uses --url or
+   * defaults to https://{name}.descix.net. The `config set-env` verb refuses `--url` on a
+   * KNOWN name (it sends you to `config init --env`), so a local backend is either per-run —
+   * `descix --api-url https://localhost:4000 <command>`, no workspace change — or a custom name
+   * (`set-env local --url ...`). Mind that cloud-core derives DEPLOY_ENV and port auto-detect
+   * only from `env.environment === 'DEV'`, so a custom name is not a DEV workspace.
    *
    * @param {string} envName - Environment name (dev, demo, prod, or custom)
    * @param {string|null} [apiUrl] - Explicit API URL override

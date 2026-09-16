@@ -15,6 +15,7 @@ import fs from 'fs';
 import path from 'path';
 import { resolveApiTarget, proxyEntry } from './resolveGatewayTargets.js';
 import { resolvePowchUrl } from './powchUrl.js';
+import { localUpstreamOrigin } from './localOrigin.js';
 
 /**
  * @param {string} workspacePath - Path to workspace root (contains .descix/workspace.json)
@@ -57,7 +58,7 @@ export function createViteProxyConfig(workspacePath, options = {}) {
     const p = envBlock.platform;
     const appId = p.appId;
     if (appId) {
-      if (p.microservice?.port) serviceRoutes[appId] = { port: p.microservice.port };
+      if (p.microservice?.port) serviceRoutes[appId] = { port: p.microservice.port, protocol: p.microservice.protocol };
     }
   }
   if (Array.isArray(envBlock.products)) {
@@ -71,7 +72,7 @@ export function createViteProxyConfig(workspacePath, options = {}) {
         const staticDir = p.site.static === '.' ? localPath : path.join(localPath, p.site.static);
         staticRoutes[appId] = path.resolve(workspaceRoot, staticDir);
       }
-      if (p.microservice?.port) serviceRoutes[appId] = { port: p.microservice.port };
+      if (p.microservice?.port) serviceRoutes[appId] = { port: p.microservice.port, protocol: p.microservice.protocol };
     }
   }
 
@@ -105,22 +106,22 @@ export function createViteProxyConfig(workspacePath, options = {}) {
     proxy['/powch'] = proxyEntry(powchUrl, { ws: true });
   }
 
-  // Microservice routes: /s/{appId} -> localhost:{service.port} (prefix stripped)
+  // Microservice routes: /s/{appId} -> the service's local origin (prefix stripped).
+  // The origin — scheme included — comes from the ONE owner (localOrigin.js); this used to
+  // hardcode http:// here while resolveGatewayTargets built the same service as https.
   Object.entries(serviceRoutes).forEach(([routeKey, route]) => {
     const prefix = `/s/${routeKey}`;
-    proxy[prefix] = proxyEntry(`http://localhost:${route.port}`, { // Services are usually HTTP
+    proxy[prefix] = proxyEntry(localUpstreamOrigin(route, `env.*[${routeKey}].microservice`), {
       ws: true,
       rewrite: (p) => p.replace(new RegExp(`^${prefix}`), ''),
     });
   });
 
-  // Product site dev server routes: /p/{productId} -> localhost:{site.port}
+  // Product site dev server routes: /p/{productId} -> the site's local origin.
   // NO path rewrite — each app must configure its framework's base path to match.
   Object.entries(localAppRoutes).forEach(([productId, route]) => {
     const pathPrefix = `/p/${productId}`;
-    const proto = route.protocol || 'https';
-
-    proxy[pathPrefix] = proxyEntry(`${proto}://localhost:${route.port}`, { ws: true });
+    proxy[pathPrefix] = proxyEntry(localUpstreamOrigin(route, `env.products[${productId}].site`), { ws: true });
   });
 
   // GCS fallback for remote Community assets

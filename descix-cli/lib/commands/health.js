@@ -3,7 +3,12 @@
  *
  * WS-CLI-HEALTH-ENV-PIVOT (2026-05-26):
  *   `descix health --env <env>` pivots the probe surface based on env:
- *     - dev  (default): existing local-port checks (UNCHANGED behavior)
+ *     - dev  (default): BOUND (lsof) AND SERVES (a route probe) per service, plus a gateway
+ *             row from env.gateway.port. A bound port is not a health check: measured
+ *             2026-09-16, a port answering 500 to every request reported PASS, and the
+ *             gateway had no row. A microservice's health path is read from its OWN served
+ *             manifest (`GET /manifest` → service.healthEndpoint — cloud declares
+ *             /api/health, powch /health), never assumed.
  *     - demo: gcloud probes against demo cloud resources + synthetic HTTPS
  *             probes against *.demo.descix.net hosts
  *     - prod: gcloud probes against prod cloud resources + synthetic HTTPS
@@ -28,6 +33,7 @@
 import chalk from 'chalk';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { localUpstreamOrigin, resolveGatewayPort } from '@descix/app-sdk/dev';
 import https from 'https';
 import http from 'http';
 import { WorkspaceConfig } from '../workspace-config.js';
@@ -67,17 +73,22 @@ async function defaultExec(cmd) {
 }
 
 /**
- * Default HTTPS probe. Resolves with { status, error? } — never rejects.
- * Tests replace this with a mock.
+ * Default HTTP(S) probe. Resolves with { status, body, error? } — never rejects.
+ * `insecure` tolerates the workspace's self-signed dev certs and is set ONLY by the DEV
+ * path; cloud probes keep TLS validation. Tests replace this with a mock.
  */
-function defaultHttpsProbe(url, timeoutMs = 8000) {
+function defaultHttpsProbe(url, timeoutMs = 8000, { insecure = false } = {}) {
     return new Promise((resolve) => {
         try {
             const parsed = new URL(url);
             const client = parsed.protocol === 'http:' ? http : https;
-            const req = client.get(url, { timeout: timeoutMs }, (res) => {
-                res.resume();
-                resolve({ status: res.statusCode });
+            const opts = { timeout: timeoutMs };
+            if (insecure && parsed.protocol === 'https:') opts.rejectUnauthorized = false;
+            const req = client.get(url, opts, (res) => {
+                let body = '';
+                res.setEncoding('utf8');
+                res.on('data', (chunk) => { body += chunk; });
+                res.on('end', () => resolve({ status: res.statusCode, body }));
             });
             req.on('error', (err) => resolve({ status: 0, error: err.message }));
             req.on('timeout', () => { req.destroy(); resolve({ status: 0, error: 'timeout' }); });
@@ -90,29 +101,34 @@ function defaultHttpsProbe(url, timeoutMs = 8000) {
 // ─── DEV path (UNCHANGED behavior) ───────────────────────────────────────────
 
 /**
- * Build the service registry from workspace.json for DEV port checks.
- * Returns an array of { name, appId, port, type, protocol? }.
+ * Build the service registry from workspace.json for DEV checks.
+ * Returns an array of { name, appId, port, type, origin }. `origin` — scheme included — comes
+ * from the ONE owner of a local upstream's origin (@descix/app-sdk localOrigin), never a
+ * protocol default re-derived here. The gateway is a row too: it is the process a local platform
+ * developer most needs to see, and it used to be structurally invisible to this command.
  */
 function buildServiceRegistry(wsConfig) {
     const services = [];
     const env = wsConfig.env || {};
 
     if (env.platform) {
+        const name = env.platform.appId || 'platform';
         if (env.platform.microservice?.port) {
             services.push({
-                name: env.platform.appId || 'platform',
+                name,
                 appId: env.platform.appId,
                 port: env.platform.microservice.port,
                 type: 'microservice',
+                origin: localUpstreamOrigin(env.platform.microservice, 'env.platform.microservice'),
             });
         }
         if (env.platform.site?.port) {
             services.push({
-                name: `${env.platform.appId || 'platform'}-site`,
+                name: `${name}-site`,
                 appId: env.platform.appId,
                 port: env.platform.site.port,
                 type: 'site',
-                protocol: env.platform.site.protocol || 'https',
+                origin: localUpstreamOrigin(env.platform.site, 'env.platform.site'),
             });
         }
     }
@@ -124,6 +140,7 @@ function buildServiceRegistry(wsConfig) {
                 appId: product.appId,
                 port: product.microservice.port,
                 type: 'microservice',
+                origin: localUpstreamOrigin(product.microservice, `env.products[${product.appId}].microservice`),
             });
         }
         if (product.site?.port) {
@@ -132,12 +149,80 @@ function buildServiceRegistry(wsConfig) {
                 appId: product.appId,
                 port: product.site.port,
                 type: 'site',
-                protocol: product.site.protocol || 'https',
+                origin: localUpstreamOrigin(product.site, `env.products[${product.appId}].site`),
             });
         }
     }
 
+    // The gateway — port from its ONE owner (resolveGatewayPort: --port > env.gateway.port >
+    // the SDK default), origin from the same owner as every other row.
+    const { port: gatewayPort } = resolveGatewayPort(wsConfig);
+    services.push({
+        name: 'gateway',
+        appId: null,
+        port: gatewayPort,
+        type: 'gateway',
+        origin: localUpstreamOrigin({ port: gatewayPort }, 'env.gateway'),
+    });
+
     return services;
+}
+
+/** What a DEV run reads, and what it does not — printed on green AND red, and carried in JSON. */
+const DEV_PROBE_BOUNDARY =
+    'Probes: bound = lsof on the port; serves = microservices: GET /manifest then GET its ' +
+    'service.healthEndpoint (2xx); sites: GET / (2xx); gateway: GET /__descix/app-binding.json ' +
+    '(a JSON binding, not HTML). Not probed: authentication, any command, credits, the mesh ' +
+    'registration, or the deployed cloud — use --env demo|prod for that.';
+
+/** A JSON body, or null when it is not one (a vite dev server answers 200 HTML for any path). */
+function parseJsonBody(body) {
+    try {
+        const v = JSON.parse(body);
+        return v && typeof v === 'object' ? v : null;
+    } catch {
+        return null;
+    }
+}
+
+const is2xx = (status) => typeof status === 'number' && status >= 200 && status < 300;
+
+/**
+ * DEV mode: does the bound process actually SERVE? Resolves { serves, probe } where `probe` says
+ * exactly what was asked and what came back, so a FAIL line names its own reason.
+ */
+async function checkServesDev(svc, httpsProbeFn) {
+    const opts = { insecure: true };
+    try {
+        if (svc.type === 'microservice') {
+            const m = await httpsProbeFn(`${svc.origin}/manifest`, 8000, opts);
+            if (!is2xx(m.status)) {
+                return { serves: false, probe: `GET /manifest -> ${m.status || m.error || 'unreachable'}` };
+            }
+            const manifest = parseJsonBody(m.body);
+            const healthEndpoint = manifest?.service?.healthEndpoint;
+            if (typeof healthEndpoint !== 'string' || healthEndpoint === '') {
+                return { serves: false, probe: 'GET /manifest -> 200 but it names no service.healthEndpoint' };
+            }
+            const h = await httpsProbeFn(`${svc.origin}${healthEndpoint}`, 8000, opts);
+            return { serves: is2xx(h.status), probe: `GET ${healthEndpoint} -> ${h.status || h.error || 'unreachable'}` };
+        }
+        if (svc.type === 'gateway') {
+            const b = await httpsProbeFn(`${svc.origin}/__descix/app-binding.json`, 8000, opts);
+            const binding = is2xx(b.status) ? parseJsonBody(b.body) : null;
+            const isBinding = !!binding && typeof binding.mode === 'string';
+            return {
+                serves: isBinding,
+                probe: `GET /__descix/app-binding.json -> ${b.status || b.error || 'unreachable'}` +
+                    (is2xx(b.status) && !isBinding ? ' (not a binding: something else is on this port)' : ''),
+            };
+        }
+        // site
+        const s = await httpsProbeFn(`${svc.origin}/`, 8000, opts);
+        return { serves: is2xx(s.status) && !!s.body, probe: `GET / -> ${s.status || s.error || 'unreachable'}` };
+    } catch (err) {
+        return { serves: false, probe: `probe threw: ${err.message}` };
+    }
 }
 
 /**
@@ -402,16 +487,16 @@ export async function runHealth(options = {}) {
     }
 
     if (env === 'dev') {
-        return runHealthDev(wsConfig, filterName, jsonOutput, execFn);
+        return runHealthDev(wsConfig, filterName, jsonOutput, execFn, httpsProbeFn);
     }
 
     return runHealthCloud(env, wsConfig, filterName, jsonOutput, execFn, httpsProbeFn);
 }
 
 /**
- * DEV path — unchanged from pre-pivot behavior.
+ * DEV path — bound AND serves, per service, plus the gateway.
  */
-async function runHealthDev(wsConfig, filterName, jsonOutput, execFn) {
+async function runHealthDev(wsConfig, filterName, jsonOutput, execFn, httpsProbeFn) {
     let services = buildServiceRegistry(wsConfig);
 
     if (filterName) {
@@ -432,13 +517,20 @@ async function runHealthDev(wsConfig, filterName, jsonOutput, execFn) {
     const results = [];
     const startTime = Date.now();
     for (const svc of services) {
-        const check = await checkPortDev(svc.port, execFn);
+        const bound = (await checkPortDev(svc.port, execFn)).healthy;
+        const { serves, probe } = bound
+            ? await checkServesDev(svc, httpsProbeFn)
+            : { serves: false, probe: 'not bound' };
         results.push({
             service: svc.name,
             appId: svc.appId,
             type: svc.type,
             port: svc.port,
-            ...check,
+            bound,
+            serves,
+            serves_probe: probe,
+            healthy: bound && serves,
+            method: 'port+route',
         });
     }
     const totalTime = Date.now() - startTime;
@@ -447,7 +539,8 @@ async function runHealthDev(wsConfig, filterName, jsonOutput, execFn) {
         environment: 'dev',
         timestamp: new Date().toISOString(),
         check_duration_ms: totalTime,
-        probe_surface: 'local-port',
+        probe_surface: 'local-port+route',
+        probe_boundary: DEV_PROBE_BOUNDARY,
         services: results,
         all_healthy: results.every(r => r.healthy),
         summary: {
@@ -466,10 +559,12 @@ async function runHealthDev(wsConfig, filterName, jsonOutput, execFn) {
     console.log(chalk.cyan('='.repeat(50)));
     console.log(chalk.gray(`  Timestamp: ${output.timestamp}`));
     console.log(chalk.gray(`  Check duration: ${output.check_duration_ms}ms`));
-    console.log(chalk.gray(`  Probe surface: local-port (lsof)\n`));
+    console.log(chalk.gray(`  Probe surface: local-port+route`));
+    console.log(chalk.gray(`  ${DEV_PROBE_BOUNDARY}\n`));
 
     for (const r of results) {
-        const probeDetail = `${r.type}, port:${r.port}`;
+        const yn = (v) => (v ? 'yes' : 'no');
+        const probeDetail = `${r.type}, port:${r.port}, bound:${yn(r.bound)}, serves:${yn(r.serves)}, ${r.serves_probe}`;
         console.log(formatProbeLine(r.service, 'dev', r.healthy, probeDetail));
     }
 

@@ -81,7 +81,10 @@ function mockHttpsProbe(byHost) {
 
 // ─── AC1: --env=dev runs local-port path ────────────────────────────────────
 
-test('AC1: --env=dev runs the local-port path (no gcloud calls)', async () => {
+test('AC1: --env=dev runs the LOCAL path (lsof + local route probes, no gcloud calls)', async () => {
+    // 2026-09-16: the dev path now probes routes as well as ports — a bound port answering 500
+    // used to report PASS. The invariant this test guards is unchanged: NO gcloud in dev.
+    // Local probes are exercised in tests/health-dev-serves.test.js; here they are all green.
     const wsConfig = fakeWsConfig({
         products: [
             { appId: 'beast', microservice: { port: 3011 } },
@@ -91,7 +94,14 @@ test('AC1: --env=dev runs the local-port path (no gcloud calls)', async () => {
     const exec = mockExec([
         { match: /^lsof -i :\d+/, stdout: 'node  12345 user  TCP *:3011 (LISTEN)\n' },
     ]);
-    const httpsProbe = mockHttpsProbe({});
+    const manifest = JSON.stringify({ service: { healthEndpoint: '/health' } });
+    const httpsProbe = async (url) => {
+        httpsProbe.calls.push(url);
+        if (url.endsWith('/manifest')) return { status: 200, body: manifest };
+        if (url.endsWith('/__descix/app-binding.json')) return { status: 200, body: JSON.stringify({ mode: 'standalone', appId: 'x' }) };
+        return { status: 200, body: 'OK' };
+    };
+    httpsProbe.calls = [];
 
     // Capture stdout to keep test output clean.
     const origLog = console.log;
@@ -110,14 +120,17 @@ test('AC1: --env=dev runs the local-port path (no gcloud calls)', async () => {
     }
 
     assert.equal(result.environment, 'dev');
-    assert.equal(result.probe_surface, 'local-port');
+    assert.equal(result.probe_surface, 'local-port+route');
     assert.equal(result.all_healthy, true);
 
     // All exec calls must be lsof — NO gcloud in dev path.
     for (const cmd of exec.calls) {
         assert.match(cmd, /^lsof /, `dev path must only call lsof, got: ${cmd}`);
     }
-    assert.equal(httpsProbe.calls.length, 0, 'dev path must not invoke HTTPS probe');
+    // And every HTTP probe stays on localhost — nothing in dev reaches a cloud host.
+    for (const url of httpsProbe.calls) {
+        assert.match(url, /^https?:\/\/localhost:\d+\//, `dev path must only probe localhost, got: ${url}`);
+    }
 });
 
 // ─── AC2: --env=demo invokes gcloud probes ──────────────────────────────────

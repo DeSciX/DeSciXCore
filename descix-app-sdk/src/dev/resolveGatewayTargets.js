@@ -24,6 +24,7 @@ import { invokedBin } from './invokedBin.js';
 
 export { ENV_ORIGINS, DEFAULT_ENV, DEFAULT_API_URL, PROD_URL, CLOUD_DEV_URL } from './envOrigins.js';
 import { DEFAULT_API_URL, DEFAULT_ENV } from './envOrigins.js';
+import { localUpstreamOrigin } from './localOrigin.js';
 
 const LOCAL_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]', '::1', '0.0.0.0']);
 
@@ -109,9 +110,7 @@ export function resolveApiTarget(config = {}, options = {}) {
     apiUrl = env.apiUrl;
     apiSource = 'workspace env.apiUrl';
   } else if (env.platform?.microservice?.port) {
-    const ms = env.platform.microservice;
-    const proto = ms.protocol || 'https';
-    apiUrl = `${proto}://localhost:${ms.port}`;
+    apiUrl = localUpstreamOrigin(env.platform.microservice, 'env.platform.microservice');
     apiSource = 'workspace env.platform.microservice (local platform)';
   } else {
     apiUrl = DEFAULT_API_URL;
@@ -163,10 +162,8 @@ export function resolveSiteTarget(config = {}, options = {}) {
   }
 
   if (env.platform?.site?.port) {
-    const site = env.platform.site;
-    const proto = site.protocol || 'https';
     return {
-      siteUrl: `${proto}://localhost:${site.port}`,
+      siteUrl: localUpstreamOrigin(env.platform.site, 'env.platform.site'),
       siteSource: 'workspace env.platform.site (local shell, local API)',
     };
   }
