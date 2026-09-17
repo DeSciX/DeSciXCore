@@ -184,6 +184,35 @@ test('dev-certs check: expired cert -> exit non-zero, reason names the expiry', 
     assert.match(parsed.detail, /expired on/);
   })));
 
+test('dev-certs check: non-darwin -> exit non-zero, still prints the resolved cert path (text and --json)', () =>
+  withTmpDir('devcerts-cli-', (dir) => withCwd(dir, async () => {
+    writeWorkspaceDevCerts(dir);
+    const certPath = makeGoodCert(dir);
+    scenario.security = () => { throw new Error('must not call security on non-darwin'); };
+    const platformDesc = Object.getOwnPropertyDescriptor(process, 'platform');
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+    const origLog = console.log;
+    try {
+      let printedText = '';
+      console.log = (s) => { printedText += s + '\n'; };
+      const exitText = await withExitCode(async () => { await runDevCertsCheck({}); });
+      assert.notEqual(exitText, 0);
+      assert.match(printedText, new RegExp(certPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'text mode must print the cert path even when unverifiable');
+      assert.match(printedText, /unverifiable/);
+
+      let printedJson = '';
+      console.log = (s) => { printedJson += s; };
+      const exitJson = await withExitCode(async () => { await runDevCertsCheck({ json: true }); });
+      assert.notEqual(exitJson, 0);
+      const parsed = JSON.parse(printedJson);
+      assert.equal(parsed.certPath, certPath, '--json must include certPath even when unverifiable');
+      assert.equal(parsed.status, 'unverifiable');
+    } finally {
+      console.log = origLog;
+      Object.defineProperty(process, 'platform', platformDesc);
+    }
+  })));
+
 // -------------------------------------------------------------------- trust
 
 test('dev-certs trust: already trusted -> no execSync call, no keychain touch', () =>
