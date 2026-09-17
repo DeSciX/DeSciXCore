@@ -43,6 +43,16 @@ export const AppProvider = ({ children }) => {
   const [custodialBalance, _setCustodialBalance] = useState(AppData.custodialBalance || 0);
   // --- End NEW State ---
 
+  // --- Reactive mirror of AppData.myApps (owned/entitled apps) ---
+  // AppData.myApps is the non-reactive cache `refreshMyCommunitiesAndApps()` mutates
+  // directly; a component reading it at render sees whatever was true the last time
+  // IT happened to re-render, not when the data actually changed (the "sign in
+  // disappears but chat stays locked" bug class). This state is the one reactive
+  // source of that same fact — set immediately after every fetch that changes it,
+  // so a context consumer re-renders exactly when entitlement actually changes.
+  const [myApps, setMyApps] = useState(() => AppData.myApps || []);
+  // --- End Reactive mirror ---
+
   // --- REMOVED: Login Modal State (all auth flows use SignInButton + usePowchBridge) ---
   // --- End Login Modal State ---
 
@@ -82,8 +92,9 @@ export const AppProvider = ({ children }) => {
   const clearStoreCache = useCallback(() => {
     AppData.availableCommunities = [];
     AppData.myCommunities = [];
-    AppData.myApps = []; 
+    AppData.myApps = [];
     AppData.myTransactions = [];
+    setMyApps([]);
   }, []);
 
   // --- Selected Community/App Getters/Setters ---
@@ -174,6 +185,9 @@ export const AppProvider = ({ children }) => {
       if (hadNoCommunities && AppData.myCommunities && AppData.myCommunities.length > 0) {
         setSelectedCommunity(AppData.myCommunities[0]);
       }
+      // Publish the reactive mirror — this is the render that makes entitlement
+      // catch up with the fetch that just landed (see myApps state comment above).
+      setMyApps(AppData.myApps || []);
       console.log("AppContext: Refresh complete.");
     } catch (error) {
       console.error("AppContext: Error during data refresh:", error);
@@ -755,12 +769,14 @@ export const AppProvider = ({ children }) => {
   // --- Uninstall Functions (Local-only: removes from cache, entitlement persists on server) ---
   const uninstallApp = (app) => {
     AppData.myApps = (AppData.myApps || []).filter(a => a.app_id !== app.app_id);
+    setMyApps(AppData.myApps);
     setCurrentView(AppContextView.MY_APPS);
   };
 
   const uninstallCommunity = (community) => {
     AppData.myCommunities = (AppData.myCommunities || []).filter(c => c.community_id !== community.community_id);
     AppData.myApps = (AppData.myApps || []).filter(a => a.community_id !== community.community_id);
+    setMyApps(AppData.myApps);
     setCurrentView(AppContextView.MY_APPS);
   };
 
@@ -819,6 +835,11 @@ export const AppProvider = ({ children }) => {
         // Selected Context
         selectedCommunity, setSelectedCommunity,
         selectedApp, setSelectedApp,
+
+        // Reactive mirror of AppData.myApps — THE reactive source for "is this app
+        // owned/entitled", see the myApps state comment above. Never re-derive this
+        // from AppData.myApps at render; consume this instead.
+        myApps,
 
         // Core Functions
         verifyAuthenticationStatus,
