@@ -234,3 +234,32 @@ test('--prefix is passed through untouched (no local slash-stripping)', async (t
   assert.equal(apiClient.calls[0].payload.files[0].path, '/shows/shownotes.txt');
   assert.equal(result.assets[0].path, '/shows/shownotes.txt');
 });
+
+test('a partial failure (one of two PUTs fails) exits non-zero after uploading the rest, naming the failed path', async (t) => {
+  const a = await makeTempFile(t, 'a.mp4', 'a'.repeat(10));
+  const b = await makeTempFile(t, 'b.mp4', 'b'.repeat(10));
+  const tokenResponse = makeTokenResponse({ files: [{ path: 'a.mp4', size: 10 }, { path: 'b.mp4', size: 10 }] });
+  const apiClient = new StubApiClient({ tokenResponse });
+  const puts = stubFetch(t, { fail: new Set([tokenResponse.signed_urls['b.mp4']]) });
+  silenceConsole(t);
+
+  await assert.rejects(
+    () => runMediaUpload(apiClient, { app: 'myapp', file: [a, b], prefix: '', json: true }),
+    /1 of 2 file\(s\) failed to upload[\s\S]*b\.mp4/,
+  );
+  assert.equal(puts.length, 2, 'the healthy file is still attempted');
+});
+
+test('the storage line reports the total AFTER this upload (projected_bytes), not the total before it', async (t) => {
+  const filePath = await makeTempFile(t, 'clip.mp4', 'c'.repeat(10));
+  const tokenResponse = makeTokenResponse({ files: [{ path: 'clip.mp4', size: 10 }] });
+  tokenResponse.storage = { limit_bytes: 200 * 1024 * 1024, used_bytes: 10 * 1024 * 1024, projected_bytes: 30 * 1024 * 1024 };
+  const apiClient = new StubApiClient({ tokenResponse });
+  stubFetch(t);
+  const { stdout } = silenceConsole(t);
+
+  await runMediaUpload(apiClient, { app: 'myapp', file: [filePath], prefix: '', json: false });
+  const line = stdout.find((l) => l.includes('Storage:'));
+  assert.ok(line, 'a storage line is printed');
+  assert.match(line, /30\.0 MB \/ 200\.0 MB/);
+});

@@ -146,6 +146,11 @@ export async function runMediaUpload(apiClient, options) {
   if (uploaded.length === 0) {
     throw new Error('No files uploaded.');
   }
+  if (errors.length > 0) {
+    // FAIL LOUD on a partial upload: the files that went up are listed above, but a caller that
+    // reads only the exit status must not take a half-uploaded set as success.
+    throw new Error(`${errors.length} of ${fileDescriptors.length} file(s) failed to upload:\n  - ${errors.join('\n  - ')}`);
+  }
 
   const result = { app_id: appId, assets: uploaded, storage: storage || null };
 
@@ -159,7 +164,8 @@ export async function runMediaUpload(apiClient, options) {
       console.log(chalk.gray(`      public_url: ${u.public_url}`));
     });
     if (result.storage) {
-      const usedMb = (result.storage.used_bytes / (1024 * 1024)).toFixed(1);
+      // projected_bytes is the app's total INCLUDING this upload; used_bytes is the total before it.
+      const usedMb = (result.storage.projected_bytes / (1024 * 1024)).toFixed(1);
       const limitMb = (result.storage.limit_bytes / (1024 * 1024)).toFixed(1);
       console.log(chalk.gray(`\n  Storage: ${usedMb} MB / ${limitMb} MB used`));
     }
