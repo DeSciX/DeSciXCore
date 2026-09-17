@@ -17,6 +17,7 @@
 import fs from 'fs';
 import path from 'path';
 import { X509Certificate } from 'crypto';
+import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -33,6 +34,30 @@ export const MINT_CERT_COMMAND =
   '-addext "extendedKeyUsage=serverAuth"';
 
 /**
+ * subjectAltName entries parsed off an already-constructed X509Certificate,
+ * normalized to ['DNS:localhost', 'IP:127.0.0.1', ...]. The ONE place SAN text
+ * is parsed — certificateSanNames and checkDevCert both funnel through this so
+ * the normalization (stripping node's `IP Address:` prefix) cannot drift
+ * between them.
+ * @param {X509Certificate} cert
+ * @returns {string[]}
+ */
+function sanNamesFromCert(cert) {
+  const san = cert.subjectAltName;
+  if (!san) return [];
+  return san
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => entry.replace(/^IP Address:/, 'IP:'));
+}
+
+/** True when a normalized SAN list covers localhost. */
+function hasLocalhostSan(names) {
+  return names.some((n) => n === 'DNS:localhost' || n === 'IP:127.0.0.1');
+}
+
+/**
  * subjectAltName entries of a PEM certificate, normalized to
  * ['DNS:localhost', 'IP:127.0.0.1', ...]. Empty array when the cert has no SAN.
  *
@@ -40,13 +65,7 @@ export const MINT_CERT_COMMAND =
  * @returns {string[]}
  */
 export function certificateSanNames(pem) {
-  const san = new X509Certificate(pem).subjectAltName;
-  if (!san) return [];
-  return san
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter(Boolean)
-    .map((entry) => entry.replace(/^IP Address:/, 'IP:'));
+  return sanNamesFromCert(new X509Certificate(pem));
 }
 
 /**
@@ -56,8 +75,7 @@ export function certificateSanNames(pem) {
  */
 export function assertCertHasLocalhostSan(pem, certPath) {
   const names = certificateSanNames(pem);
-  const hasLocalhost = names.some((n) => n === 'DNS:localhost' || n === 'IP:127.0.0.1');
-  if (!hasLocalhost) {
+  if (!hasLocalhostSan(names)) {
     throw new Error(
       `[DeSciX dev certs] ${certPath} has no subjectAltName for localhost ` +
       `(found: ${names.length ? names.join(', ') : 'none'}).\n` +
@@ -86,11 +104,100 @@ export function resolveCertPaths(options = {}) {
 
 /**
  * The one-time command that makes this machine's browser trust a dev cert.
+ * `-r trustRoot` is explicit: without it `add-trusted-cert` picks a trust
+ * setting from the cert's own extensions, and the shipped cert is unusual
+ * (CA:TRUE leaf) enough that leaving it implicit is the wrong place to save
+ * four words.
  * @param {string} certPath
  * @returns {string}
  */
 export function trustCertCommand(certPath) {
-  return `security add-trusted-cert -k ~/Library/Keychains/login.keychain-db "${certPath}"`;
+  return `security add-trusted-cert -r trustRoot -k ~/Library/Keychains/login.keychain-db "${certPath}"`;
+}
+
+/**
+ * Human-readable dev-cert trust status for `certPath`, with the exact next
+ * command for whichever state it is in. The ONE owner of "is this dev cert
+ * usable for passkey sign-in" — `descix dev-certs check`, `descix doctor` and
+ * the `descix serve` banner all call this rather than re-deriving the answer.
+ *
+ * Statuses:
+ *   missing          - no readable certificate at certPath
+ *   no_localhost_san - cert exists but carries no SAN for localhost
+ *   expired          - cert's validity window has passed
+ *   untrusted        - darwin only: `security verify-cert` rejected it
+ *   trusted          - darwin only: `security verify-cert` accepted it
+ *   unverifiable     - non-darwin: trust cannot be checked from here
+ *
+ * @param {Object} options
+ * @param {string} options.certPath
+ * @returns {{status: string, detail: string, next: string|null}}
+ */
+export function checkDevCert({ certPath } = {}) {
+  if (!certPath || !fs.existsSync(certPath)) {
+    return {
+      status: 'missing',
+      detail: certPath ? `No certificate at ${certPath}.` : 'No certificate path given.',
+      next: `Mint a cert pair:\n  ${MINT_CERT_COMMAND}`,
+    };
+  }
+
+  let cert;
+  try {
+    cert = new X509Certificate(fs.readFileSync(certPath));
+  } catch (err) {
+    return {
+      status: 'missing',
+      detail: `${certPath} is not a readable certificate (${err.message}).`,
+      next: `Mint a cert pair:\n  ${MINT_CERT_COMMAND}`,
+    };
+  }
+
+  const names = sanNamesFromCert(cert);
+  if (!hasLocalhostSan(names)) {
+    return {
+      status: 'no_localhost_san',
+      detail: `${certPath} has no subjectAltName for localhost (found: ${names.length ? names.join(', ') : 'none'}).`,
+      next: `Mint a correct one:\n  ${MINT_CERT_COMMAND}\nThen trust it:\n  ${trustCertCommand(certPath)}`,
+    };
+  }
+
+  const validToMs = Date.parse(cert.validTo);
+  if (Number.isFinite(validToMs) && Date.now() > validToMs) {
+    return {
+      status: 'expired',
+      detail: `${certPath} expired on ${cert.validTo}.`,
+      next: `Mint a fresh one:\n  ${MINT_CERT_COMMAND}\nThen trust it:\n  ${trustCertCommand(certPath)}`,
+    };
+  }
+
+  if (process.platform !== 'darwin') {
+    return {
+      status: 'unverifiable',
+      detail: `Trust cannot be checked on ${process.platform} — only darwin (\`security verify-cert\`) is implemented.`,
+      next: null,
+    };
+  }
+
+  try {
+    execFileSync('security', ['verify-cert', '-c', certPath, '-p', 'ssl', '-s', 'localhost'], { stdio: 'pipe' });
+    return {
+      status: 'trusted',
+      detail: `${certPath} is trusted by the macOS keychain for https://localhost.`,
+      next: null,
+    };
+  } catch (err) {
+    const output = [err.stdout, err.stderr]
+      .filter(Boolean)
+      .map((b) => b.toString().trim())
+      .filter(Boolean)
+      .join('\n');
+    return {
+      status: 'untrusted',
+      detail: output || `\`security verify-cert\` rejected ${certPath} (exit ${err.status ?? 'unknown'}).`,
+      next: trustCertCommand(certPath),
+    };
+  }
 }
 
 /**

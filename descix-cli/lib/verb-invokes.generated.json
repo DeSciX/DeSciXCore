@@ -116,6 +116,8 @@
   "credits refund": [
     "refund_credits"
   ],
+  "dev-certs check": [],
+  "dev-certs trust": [],
   "doctor": [],
   "drive pull": [],
   "drive push": [],

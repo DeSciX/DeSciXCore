@@ -4493,6 +4493,37 @@ program
     }
   });
 
+// ============ Dev Certs Commands ============
+
+const devCertsCommand = program
+  .command('dev-certs')
+  .description('TLS dev-cert trust status for `descix serve` — passkey sign-in needs this cert trusted once per machine');
+
+devCertsCommand
+  .command('check')
+  .description('Check whether the dev-server cert is trusted for https://localhost (exit 0 only when trusted)')
+  .option('--json', 'Output raw JSON')
+  .action(async (options) => {
+    try {
+      const { runDevCertsCheck } = await import('../lib/commands/dev-certs.js');
+      await runDevCertsCheck(options);
+    } catch (error) {
+      fail(error);
+    }
+  });
+
+devCertsCommand
+  .command('trust')
+  .description('Trust the dev-server cert in the macOS keychain (prompts for your password)')
+  .action(async () => {
+    try {
+      const { runDevCertsTrust } = await import('../lib/commands/dev-certs.js');
+      await runDevCertsTrust();
+    } catch (error) {
+      fail(error);
+    }
+  });
+
 // ============ Quickstart Command ============
 
 program

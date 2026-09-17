@@ -22,7 +22,7 @@
 import fs from 'fs';
 import path from 'path';
 import { createViteProxyConfig } from './createViteProxyConfig.js';
-import { getViteHttpsConfig, resolveCertPaths, trustCertCommand } from './getViteHttpsConfig.js';
+import { getViteHttpsConfig, resolveCertPaths, checkDevCert } from './getViteHttpsConfig.js';
 import { watchWorkspaceConfig } from './watchWorkspaceConfig.js';
 import { buildWorkspaceProducts, gatewayOrigin } from './workspaceProducts.js';
 import { staticSitePlugin } from './staticSitePlugin.js';
@@ -214,8 +214,13 @@ export async function runGateway(options = {}) {
   // banner defect above — and it sat two lines below the fix for it.
   log(`\n  Gateway listening on ${gatewayOrigin(port)}\n`);
   log(`  App binding: ${gatewayOrigin(port)}${APP_BINDING_PATH}\n`);
-  log(`  Dev cert: ${certPath}`);
-  log(`  Passkey login needs this cert trusted once:\n    ${trustCertCommand(certPath)}\n`);
+
+  // Dev cert trust — checkDevCert is the ONE owner (shared with `descix
+  // dev-certs check/trust` and `descix doctor`). An untrusted/broken cert here
+  // is not cosmetic: Chrome judges WebAuthn on the WHOLE TAB's TLS state, so an
+  // untrusted cert makes passkey sign-in fail with "User cancelled" and no
+  // hint that TLS was the cause.
+  log(formatDevCertBanner(checkDevCert({ certPath }), certPath));
 
   // WS-7: Service discovery — fetch /manifest from all microservices
   discoverServices(config, log).catch(err => {
@@ -375,6 +380,30 @@ async function discoverServices(config, log) {
   }
 
   log('');
+}
+
+/**
+ * The exact banner text for the resolved dev-cert trust status. A pure
+ * function (no server, no I/O) so it is unit-testable without booting Vite —
+ * `checkDevCert` is the ONE owner of the status itself; this only formats it.
+ *
+ * Wording is relied on verbatim by devx-evangelist's docs: when not trusted,
+ * the line always reads "Passkey sign-in will fail: <reason>. Run: descix
+ * dev-certs trust" — printed only in that case; a trusted cert gets one quiet
+ * confirmation line instead.
+ *
+ * @param {{status: string, detail: string}} certStatus - checkDevCert(...) result
+ * @param {string} certPath
+ * @returns {string}
+ */
+export function formatDevCertBanner(certStatus, certPath) {
+  if (certStatus.status === 'trusted') {
+    return `  Dev cert: ${certPath}  (trusted)\n`;
+  }
+  // `detail` sources vary (some end in a period, raw `security` stderr text
+  // does not) — normalize to exactly one so the sentence always reads clean.
+  const reason = certStatus.detail.trim().replace(/\.+$/, '');
+  return `  ⚠ Passkey sign-in will fail: ${reason}. Run: descix dev-certs trust\n`;
 }
 
 function logProxyTable(proxy, log) {

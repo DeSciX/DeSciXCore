@@ -21,6 +21,8 @@ import { WorkspaceConfig } from '../lib/workspace-config.js';
 import { DeSciXApiClient } from '../lib/api-client.js';
 import { WalletFileManager } from '../lib/wallet-file.js';
 import { CLI_VERSION } from '../lib/cli-version.js';
+import { checkDevCert } from '@descix/app-sdk/dev';
+import { resolveGatewayCertContext } from '../lib/dev-cert-resolver.js';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 // WS-MCP-SSOT-TIER2 (audit §5.B-1): the curated HTTP-valid core tools are the SINGLE SOURCE
@@ -320,6 +322,28 @@ try {
       } catch (err) {
         report.warnings.push(`Could not verify remote state: ${err.message}`);
       }
+    }
+
+    // Dev certificate — the ONE owner (checkDevCert, shared with `descix
+    // dev-certs`, `descix doctor` and the `descix serve` banner). An untrusted
+    // cert is invisible from inside a WebAuthn ceremony: Chrome judges the
+    // whole tab's TLS state and Powch only ever sees "User cancelled", so an
+    // agent assisting a stuck developer needs this named explicitly, not
+    // inferred from a login failure.
+    try {
+      const { certPath } = resolveGatewayCertContext(checkRoot);
+      const certResult = checkDevCert({ certPath });
+      report.dev_cert = { cert_path: certPath, ...certResult };
+      if (certResult.status !== 'trusted') {
+        report.warnings.push(
+          'Dev certificate not trusted: passkey sign-in under descix serve will fail ' +
+          '(Powch logs "User cancelled"; the console says "WebAuthn is not supported on sites ' +
+          'with TLS certificate errors"). Ask the user to run exactly: descix dev-certs trust ' +
+          '— then quit and reopen Chrome, and re-run descix dev-certs check.'
+        );
+      }
+    } catch (err) {
+      report.dev_cert = { status: 'unverifiable', detail: `Could not resolve dev cert: ${err.message}`, next: null };
     }
 
     // Suggest cloud brain alignment when workspace is configured but alignment is missing

@@ -14,6 +14,8 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { DeSciXApiClient } from '../api-client.js';
 import { isAuthenticated } from '../auth-guard.js';
+import { checkDevCert } from '@descix/app-sdk/dev';
+import { resolveGatewayCertContext } from '../dev-cert-resolver.js';
 
 const execAsync = promisify(exec);
 
@@ -224,6 +226,26 @@ export async function checkAdc() {
 }
 
 /**
+ * Check the TLS cert `descix serve` would load for the cwd. An untrusted or
+ * structurally broken cert breaks passkey (WebAuthn) sign-in — the only
+ * DeSciX auth — so this is a real failure, not an admin-only advisory.
+ * Resolution mirrors the gateway exactly (dev-cert-resolver.js, the ONE
+ * owner shared with `descix dev-certs` and the `descix serve` banner).
+ */
+async function checkDevCertificate() {
+  const { certPath } = resolveGatewayCertContext(process.cwd());
+  const result = checkDevCert({ certPath });
+  if (result.status === 'trusted') {
+    return { ok: true, message: `${certPath} (trusted)` };
+  }
+  return {
+    ok: false,
+    message: `${result.status} — ${result.detail}`,
+    remediation: result.next || 'Run: descix dev-certs check',
+  };
+}
+
+/**
  * Run the doctor command
  */
 export async function runDoctor(options = {}) {
@@ -282,7 +304,12 @@ export async function runDoctor(options = {}) {
     spinner.text = 'Checking ADC Credentials...';
     const adcRes = await checkAdc();
     results.push({ label: 'ADC Credentials', ...adcRes });
-    
+
+    // 7. Dev certificate (passkey sign-in under `descix serve`)
+    spinner.text = 'Checking dev certificate...';
+    const devCertRes = await checkDevCertificate();
+    results.push({ label: 'Dev certificate', ...devCertRes });
+
     spinner.stop();
     
     // Print Results
@@ -317,8 +344,9 @@ export async function runDoctor(options = {}) {
     // the pass stops.
     console.log(chalk.gray(
       'Checked: Node version, API origin resolution + reachability, session, local write\n' +
-      'permissions. [-] rows are admin-only dependencies and never fail this command. NOT\n' +
-      'checked: your app\'s own build, chain state, or any credential\'s permissions at the API.'
+      'permissions, dev-cert trust for `descix serve`. [-] rows are admin-only dependencies and\n' +
+      'never fail this command. NOT checked: your app\'s own build, chain state, or any\n' +
+      'credential\'s permissions at the API.'
     ));
     console.log();
 
