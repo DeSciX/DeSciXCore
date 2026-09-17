@@ -30,7 +30,7 @@
   "author": "DeSciX",
   "license": "SEE LICENSE IN LICENSE.md",
   "dependencies": {
-    "@descix/app-sdk": "^0.1.5",
+    "@descix/app-sdk": "^0.1.8",
     "@descix/sdk": "^2.0.0",
     "@modelcontextprotocol/sdk": "^1.25.1",
     "axios": "^1.7.9",
