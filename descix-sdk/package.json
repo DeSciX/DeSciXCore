@@ -1,6 +1,6 @@
 {
   "name": "@descix/sdk",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "DeSciX SDK - Shared runtime libraries for Node.js and Browser",
   "repository": {
     "type": "git",
