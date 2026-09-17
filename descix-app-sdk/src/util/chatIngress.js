@@ -252,3 +252,42 @@ export function composeTurnInput(contributions, typedText) {
   if (typedText && typedText.trim()) parts.push(typedText);
   return parts.join('\n\n');
 }
+
+/**
+ * The staged-contribution list — ONE synchronous owner.
+ *
+ * A contribution staged and a 'send' issued in the same task must ride the same turn, and a
+ * send must clear exactly what it flushed. React state cannot own that: a staged append is
+ * only QUEUED until the next render, so a send that reads state (or a ref refreshed on render)
+ * in the same task misses the bag, and a blanket clear queued after the append wipes it
+ * (measured 2026-09-17, GODSWORLD-DEV verifier: DeSciX.chat.sendMedia then an action_result
+ * 'send' with no await submitted the result alone and left nothing staged). This owner holds
+ * the list synchronously; the widget mirrors it into state only to render the chips.
+ *
+ * @param {(staged: object[]) => void} onChange - receives the new list after every change
+ */
+export function createContributionStage(onChange) {
+  let staged = [];
+  const publish = () => onChange(staged);
+  return {
+    /** The list as of this instant. */
+    current: () => staged,
+    /** Append one normalized contribution; visible to a send issued immediately after. */
+    stage(contribution) {
+      staged = [...staged, contribution];
+      publish();
+      return contribution;
+    },
+    /** Remove one contribution (the composer chip's delete). */
+    remove(contribution) {
+      staged = staged.filter((c) => c !== contribution);
+      publish();
+    },
+    /** Drop exactly the contributions a submitted turn carried; later arrivals stay staged. */
+    release(flushed) {
+      const sent = new Set(flushed);
+      staged = staged.filter((c) => !sent.has(c));
+      publish();
+    },
+  };
+}

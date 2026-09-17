@@ -34,7 +34,7 @@ import { useNetworkLoading } from '../util/NetworkAPI';
 import { NetworkLoadingType, makeCommandRequestJSON, AppData, ProductTypes, isAppEntitled } from '../util/AppData';
 import { Api } from '../util/api';
 import { usePowchBridge } from '../providers/PowchBridgeProvider';
-import { normalizeContribution, composeTurnInput, collectTurnMedia } from '../util/chatIngress';
+import { normalizeContribution, composeTurnInput, collectTurnMedia, createContributionStage } from '../util/chatIngress';
 
 const messages = ["searching knowledgebase", "running analytics"];
 
@@ -498,7 +498,14 @@ const ChatWidget = (props = {}) => {
   const [message, setMessage] = useState('');
   // WS-B8: external contributions staged on the composer, waiting to ride into the
   // next submitted turn. See util/chatIngress.js for the contract.
+  // Rendered mirror only: the list itself is owned synchronously by contributionStage, so a
+  // stage and a send issued in the same task share one turn (see createContributionStage).
   const [pendingContributions, setPendingContributions] = useState([]);
+  const contributionStageRef = useRef(null);
+  if (!contributionStageRef.current) {
+    contributionStageRef.current = createContributionStage(setPendingContributions);
+  }
+  const contributionStage = contributionStageRef.current;
   const [selectedDocIds, setSelectedDocIds] = useState([]);
   const [sourcesModalOpen, setSourcesModalOpen] = useState(false);
   const [availableSources, setAvailableSources] = useState([]);
@@ -1154,7 +1161,7 @@ const ChatWidget = (props = {}) => {
         messages: [...activeThread.messages, newMessage]
       });
       setMessage('');
-      setPendingContributions([]);
+      contributionStage.release(contributions);
 
       if (useStreaming) {
         const streamGenerator = await makeCommandRequestJSON('ask_question_to_app', params);
@@ -1288,13 +1295,11 @@ const ChatWidget = (props = {}) => {
   // renders) but must always see CURRENT state. Assigned every render.
   const submitTurnRef = useRef(submitTurn);
   submitTurnRef.current = submitTurn;
-  const pendingContributionsRef = useRef(pendingContributions);
-  pendingContributionsRef.current = pendingContributions;
 
   // The composer's submit: the human's typed text plus anything staged on it.
   const handleSubmit = async (e) => {
     e.preventDefault();
-    await submitTurn({ typedText: message, contributions: pendingContributions });
+    await submitTurn({ typedText: message, contributions: contributionStage.current() });
   };
 
   /**
@@ -1313,16 +1318,15 @@ const ChatWidget = (props = {}) => {
     const contribution = normalizeContribution(partial);
     if (contribution.disposition === 'send') {
       // Flush anything already staged along with it — one turn, in arrival order.
-      const batch = [...pendingContributionsRef.current, contribution];
+      const batch = [...contributionStage.current(), contribution];
       // Via ref: `contribute` must stay referentially stable for the host's ref
       // handle, but must always run the CURRENT submitTurn (which closes over
       // activeThread/message state that changes every render).
       await submitTurnRef.current({ typedText: '', contributions: batch });
       return contribution;
     }
-    setPendingContributions((prev) => [...prev, contribution]);
-    return contribution;
-  }, []);
+    return contributionStage.stage(contribution);
+  }, [contributionStage]);
 
   // Publish the ingress handle to the host (CodeSiteWidget). A ref object is the
   // contract: the host calls ingressRef.current.contribute(bag).
@@ -1697,7 +1701,7 @@ const ChatWidget = (props = {}) => {
                 color={c.kind === 'action_error' ? 'error' : 'info'}
                 data-testid={`chat-contribution-${c.kind}`}
                 label={`${c.label}${c.truncated ? ` (truncated ${c.omittedChars} chars)` : ''}`}
-                onDelete={() => setPendingContributions((prev) => prev.filter((_, i) => i !== idx))}
+                onDelete={() => contributionStage.remove(c)}
               />
             ))}
           </Box>
