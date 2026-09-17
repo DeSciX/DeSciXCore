@@ -183,31 +183,48 @@ Two consequences worth knowing before they cost you an afternoon:
 
 ### Trust the dev certificate (one time, required for passkey login)
 
-The SDK ships a self-signed cert for `https://localhost` with a `subjectAltName` block.
-Chrome will still warn until you trust it, and **WebAuthn refuses to run on an untrusted
-origin** — so passkey sign-in needs this step:
+The gateway serves `https://localhost` with the SDK's self-signed cert (it carries a
+`subjectAltName` for `localhost`, `127.0.0.1` and `::1`), or with your own pair when the workspace
+names one. **Chrome refuses WebAuthn on a tab whose certificate is untrusted**, and it judges the
+whole tab — so the Powch sign-in iframe fails even though Powch itself is on a trusted origin.
 
-> The failure has no SDK-level hint. The browser refuses the ceremony itself, verbatim:
-> `WebAuthn is not supported on sites with TLS certificate errors`. If Powch login dies with
-> that message, it is the certificate, not your code or your Powch config. **A cert you trusted
-> months ago and that has since EXPIRED fails exactly the same way** — trust is not the only
-> thing the browser checks, so re-mint and re-trust rather than assuming a one-time step holds
-> forever.
+**Symptoms that mean "the dev certificate is not trusted":**
 
-`descix serve` prints the exact command with the resolved path on every start. On macOS:
+- Powch sign-in fails and the Powch/ChatWidget log says only `User cancelled` (that is Powch's
+  panel-close rejection; the real error is in the browser).
+- The browser console says, verbatim:
+  `NotAllowedError: WebAuthn is not supported on sites with TLS certificate errors`.
+
+It is the certificate, not your code or your Powch config.
+
+**Check, trust, re-check:**
 
 ```bash
-security add-trusted-cert -k ~/Library/Keychains/login.keychain-db \
-  "$(node --input-type=module -e "import {DEFAULT_CERT_DIR} from '@descix/app-sdk/dev'; console.log(DEFAULT_CERT_DIR + '/cert.pem')")"
+descix dev-certs check          # exit 0 only when the cert the gateway uses is trusted (--json for machines)
+descix dev-certs trust          # macOS: asks for your login password, trusts the cert, re-checks
 ```
 
+After `descix dev-certs trust` succeeds, **quit Chrome completely and reopen it** — a running
+Chrome keeps its old verdict. Then run `descix dev-certs check` again. `descix doctor` reports the
+same result under "Dev certificate", and the `descix serve` banner warns
+`Passkey sign-in will fail: <reason>. Run: descix dev-certs trust` whenever the cert is not trusted.
+
+A cert that has **expired** fails in the browser exactly like an untrusted one.
+
+**Linux and Windows:** `descix dev-certs check` reports `unverifiable` with the reason, and
+`descix dev-certs trust` is macOS-only. Trusting the cert there is a manual step that has not been
+verified on DeSciX: import the `cert.pem` the gateway uses into the store Chrome reads (Linux: the
+NSS database at `~/.pki/nssdb`, with `certutil -d sql:$HOME/.pki/nssdb -A -t "P,," -n descix-localhost -i <cert.pem>`;
+Windows: the Current User "Trusted Root Certification Authorities" store), then restart the browser.
+
 Prefer your own cert (e.g. from `mkcert -install && mkcert localhost 127.0.0.1 ::1`)? Point
-the workspace at it — no SDK edit, no hand-edited JSON:
+the workspace at it — no SDK edit, no hand-edited JSON. `descix dev-certs check` and
+`descix dev-certs trust` then act on that pair:
 
 ```bash
 descix config set-dev-certs --dir ./certs          # expects cert.pem + key.pem
 descix config set-dev-certs --cert ./certs/x.pem --key ./certs/x-key.pem
-descix config set-dev-certs --clear                # back to the SDK-tracked SAN pair
+descix config set-dev-certs --clear                # back to the SDK's shipped pair
 ```
 
 That pair has **one owner** and is used by the gateway *and* every app dev server behind it —

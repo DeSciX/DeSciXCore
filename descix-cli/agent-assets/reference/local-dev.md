@@ -187,11 +187,51 @@ a different case and FAILS LOUD naming the remedy, rather than quietly becoming 
 
 The derived Shell rule is the important one: point the API at a cloud environment and the shell comes from that same origin, so one origin carries shell + app + `/apifront` with nothing else configured. A stale `env.platform.site` block does not hijack the root once the API is remote. Platform developers opt IN to a local shell by naming it (`--site-url https://localhost:5174` or `env.siteUrl`).
 
+### 3.3. The dev certificate and passkey sign-in
+
+The gateway's HTTPS uses one certificate: the pair named by `env.devCerts`
+(`descix config set-dev-certs`), else the SDK's shipped self-signed pair (SAN `localhost`,
+`127.0.0.1`, `::1`). The same pair serves every app dev server behind the gateway.
+
+**Chrome refuses WebAuthn on a tab whose certificate is untrusted, and it judges the whole tab.**
+The Powch sign-in iframe on `powch.descix.net` therefore fails inside an untrusted
+`https://localhost:<port>` tab, even though Powch's own origin is trusted.
+
+| Symptom | Meaning |
+|---|---|
+| Powch/ChatWidget log shows only `User cancelled` on sign-in | Powch's panel-close rejection; the real error is in the browser console |
+| Browser console: `NotAllowedError: WebAuthn is not supported on sites with TLS certificate errors` | the gateway certificate is not trusted (or has expired) |
+| `descix serve` banner: `Passkey sign-in will fail: <reason>. Run: descix dev-certs trust` | same, detected before the browser opens |
+| `descix doctor` row "Dev certificate" not passing | same |
+
+| Command | Who runs it | Effect |
+|---|---|---|
+| `descix dev-certs check [--json]` | the assisting agent | resolves the cert the gateway uses; exits 0 only when it is trusted; reports `unverifiable` with the reason on Linux and Windows |
+| `descix doctor` | the assisting agent | includes the same result as the "Dev certificate" check |
+| `descix dev-certs trust` | **the human** | macOS: trusts that cert in the login keychain (password prompt), re-checks, and says to quit and reopen Chrome |
+
+**Assisting-agent flow:**
+
+1. Run `descix doctor` (or `descix dev-certs check`).
+2. If the dev certificate is trusted, continue. Passkey failures then have another cause.
+3. If it is not trusted, hand the human exactly one command to run in their own terminal:
+   `descix dev-certs trust`. It needs their macOS login password, so the agent does not run it.
+4. When they report it succeeded, tell them to **quit Chrome completely and reopen it** (a running
+   Chrome keeps its old verdict), reload the `descix serve` URL, and sign in again.
+5. Run `descix dev-certs check` again and confirm exit 0 before calling sign-in fixed.
+
+**Linux and Windows:** the check reports `unverifiable`, and `descix dev-certs trust` is macOS-only.
+Trusting the cert is a manual step that has not been verified on DeSciX: import the gateway's
+`cert.pem` into the store Chrome reads (Linux: the NSS database,
+`certutil -d sql:$HOME/.pki/nssdb -A -t "P,," -n descix-localhost -i <cert.pem>`; Windows: the
+Current User "Trusted Root Certification Authorities" store), then restart the browser. Tell the
+human it is unverified.
+
 ## 4. Scenarios
 
 ### Scenario 1: App Dev (the common case)
 *   **User**: App developer. No platform checkout.
-*   **Setup**: `descix config set-env dev`, `descix app init`, `descix app set-site`, then `cd my-app && descix serve`.
+*   **Setup**: `descix config set-env dev`, `descix app init`, `descix app set-site`, `descix dev-certs check` (if not trusted, the human runs `descix dev-certs trust` once — §3.3), then `cd my-app && descix serve`.
 *   **Result**: one HTTPS origin. `/` → the cloud App Shell, `/apifront` → the cloud API, `/p/my-app` → your app, and the shell boots **standalone into your app** — its INITIAL VIEW is your app rather than the store, with the platform views still reachable from there.
 
 ### Scenario 2: Platform Dev ("Dogfooding")
