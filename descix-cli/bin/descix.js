@@ -40,34 +40,11 @@ import { kbVectorCell, kbCountSource } from '../lib/commands/kb-list-render.js';
 import * as corpusCommands from '../lib/commands/corpus.js';
 import * as modelConfigCommands from '../lib/commands/model-config.js';
 import { isHelpInvocation, getCommandSurface, applyVisibility } from '../lib/command-visibility.js';
+import { progress } from '../lib/output.js';
+import { runMediaUpload } from '../lib/commands/media-upload.js';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
-
-
-/**
- * Emit human-facing PROGRESS for a command that can also emit JSON.
- *
- * When `--json` is set, stdout is a DATA CHANNEL: it must contain the JSON document and
- * nothing else, or every scripted consumer breaks. Progress then goes to stderr, where a
- * human piping stdout still sees it. Without `--json`, stdout is the human channel and
- * progress belongs there.
- *
- * ONE OWNER of that decision. Before this existed, each --json command re-decided it by
- * calling console.log directly, and both of them got it wrong: `mcp execute --json` prefixed
- * the document with "Executing <tool>..." and `app media-upload --json` prefixed it with a
- * header, a per-file listing and a per-file +/x line. Both exited 0, so a consumer saw a
- * success code and an unparseable stream. Measured 2026-08-21/22 (seat BEAST): two seats had
- * independently hand-rolled prefix-stripping workarounds (`tail -n +2`, `raw.find('[')`)
- * rather than reporting it.
- *
- * @param {Object} options - the command's parsed options (read for .json)
- * @param {...any} args - passed through to console.log / console.error
- */
-function progress(options, ...args) {
-  if (options && options.json) console.error(...args);
-  else console.log(...args);
-}
 
 /**
  * THE ONE OWNER of "a command threw, and the process must stop saying why".
@@ -1196,15 +1173,12 @@ appCommand
 
 
 // descix app media-upload — upload media/asset files to an app's GCS assets prefix via the
-// API surface (WS-V1-PURGE Phase 1, item 2; media-via-API-surface PLATFORM half).
-// This is the canonical, filesystem-free way to get app media (podcast audio, cover art,
-// etc.) into the platform: request a short-lived signed PUT token from the API surface
-// (`get_asset_upload_token` over /apifront, user-session authed), upload each file straight
-// to GCS, and print the ASSET REFERENCES. An app microservice then fetches an uploaded asset
-// by reference over the Core broker via `get_app_asset` (no shared local filesystem needed).
+// API surface (WS-V1-PURGE Phase 1, item 2; media-via-API-surface PLATFORM half). Command body
+// lives in lib/commands/media-upload.js (runMediaUpload) — see that module for the full
+// contract (server-owned quota/path/permission checks, verbatim upload_headers ferrying).
 appCommand
   .command('media-upload')
-  .description('Upload media/asset files to an app\'s GCS assets prefix via the API surface (returns asset references)')
+  .description('Upload media/asset files to an app\'s GCS assets prefix (200 MB per app today; app owners, community admins and platform admins may upload — returns asset references)')
   .requiredOption('-a, --app <id>', 'App ID (community is resolved server-side from Products)')
   .requiredOption('-f, --file <path...>', 'One or more local file paths to upload')
   .option('--prefix <relPath>', 'Optional sub-path under the app assets/ prefix (e.g. "shows/myshow")', '')
@@ -1213,115 +1187,7 @@ appCommand
     try {
       const apiClient = new DeSciXApiClient();
       await requireAuth(apiClient);
-
-      const path = await import('path');
-      const mime = (await import('mime-types')).default;
-
-      const appId = options.app;
-      const localFiles = Array.isArray(options.file) ? options.file : [options.file];
-      const subPrefix = (options.prefix || '').replace(/^\/+|\/+$/g, '');
-
-      // Build the upload descriptor list: object path under assets/ = [subPrefix/]basename.
-      const fileDescriptors = [];
-      for (const localPath of localFiles) {
-        const abs = path.resolve(localPath);
-        let stat;
-        try {
-          stat = await fs.stat(abs);
-        } catch {
-          console.error(chalk.red(`\n❌ File not found: ${abs}\n`));
-          process.exit(1);
-        }
-        if (!stat.isFile()) {
-          console.error(chalk.red(`\n❌ Not a file: ${abs}\n`));
-          process.exit(1);
-        }
-        const base = path.basename(abs);
-        const objectPath = subPrefix ? `${subPrefix}/${base}` : base;
-        fileDescriptors.push({
-          path: objectPath,
-          content_type: mime.lookup(abs) || 'application/octet-stream',
-          size: stat.size,
-          _absolutePath: abs
-        });
-      }
-
-      console.log(chalk.cyan(`\n  Media Upload: ${appId} → GCS assets/\n`));
-      fileDescriptors.forEach(f => progress(options, chalk.gray(`  • ${f.path} (${(f.size / 1024).toFixed(1)}KB, ${f.content_type})`)));
-
-      // 1. Request a signed-PUT upload token over the API surface.
-      const tokenResponse = await apiClient.invoke('get_asset_upload_token', {
-        app_id: appId,
-        files: fileDescriptors.map(f => ({ path: f.path, content_type: f.content_type, size: f.size }))
-      });
-      const token = tokenResponse.message || tokenResponse;
-      const { signed_urls, objects } = token;
-
-      // 2. PUT each file directly to GCS using its signed URL.
-      progress(options, chalk.gray(`\n  Uploading ${fileDescriptors.length} file(s)...`));
-      const uploaded = [];
-      const errors = [];
-      for (const f of fileDescriptors) {
-        const signedUrl = signed_urls?.[f.path];
-        if (!signedUrl) {
-          errors.push(`No signed URL for: ${f.path}`);
-          progress(options, chalk.red(`  x ${f.path}`));
-          continue;
-        }
-        try {
-          const content = await fs.readFile(f._absolutePath);
-          const resp = await fetch(signedUrl, {
-            method: 'PUT',
-            headers: { 'Content-Type': f.content_type },
-            body: content
-          });
-          if (!resp.ok) {
-            errors.push(`Failed ${f.path}: ${resp.status} ${resp.statusText}`);
-            progress(options, chalk.red(`  x ${f.path}`));
-          } else {
-            const obj = (objects || []).find(o => o.path === f.path) || {};
-            // The asset REFERENCE an app handler / get_app_asset consumes: the gs:// URI.
-            const gcsRef = obj.gcs_path
-              ? `gs://${token.bucket}/${obj.gcs_path}`
-              : null;
-            uploaded.push({
-              path: f.path,
-              ref: gcsRef,
-              gcs_path: obj.gcs_path || null,
-              public_url: obj.public_url || null,
-              content_type: f.content_type,
-              size: f.size
-            });
-            progress(options, chalk.green(`  + ${f.path}`));
-          }
-        } catch (err) {
-          errors.push(`Error ${f.path}: ${err.message}`);
-          progress(options, chalk.red(`  x ${f.path}`));
-        }
-      }
-
-      if (errors.length > 0) {
-        progress(options, chalk.yellow(`\n  ${errors.length} error(s):`));
-        errors.forEach(e => progress(options, chalk.red(`  - ${e}`)));
-      }
-
-      if (uploaded.length === 0) {
-        console.error(chalk.red('\n❌ No files uploaded.\n'));
-        process.exit(1);
-      }
-
-      if (options.json) {
-        console.log('\n' + JSON.stringify({ app_id: appId, assets: uploaded }, null, 2) + '\n');
-      } else {
-        console.log(chalk.green(`\n  ✅ Uploaded ${uploaded.length} asset(s).\n`));
-        console.log(chalk.cyan('  Asset references (pass these to your app handler; the service fetches via get_app_asset):'));
-        uploaded.forEach(u => {
-          console.log(chalk.white(`    ${u.path}`));
-          console.log(chalk.gray(`      ref:        ${u.ref}`));
-          console.log(chalk.gray(`      public_url: ${u.public_url}`));
-        });
-        console.log();
-      }
+      await runMediaUpload(apiClient, options);
     } catch (error) {
       console.error(chalk.red(`\n❌ ${error.message}\n`));
       process.exit(1);
