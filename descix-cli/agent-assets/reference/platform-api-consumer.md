@@ -91,11 +91,17 @@ ASSET NOT FOUND at gs://... Upload it first with `descix app media-upload`.
 Both come back as `MEDIA_ASSET_UNREADABLE`. The first means you referenced the wrong app's asset;
 the second means you have not uploaded yet. Upload into the app that will do the asking.
 
-**The upload verb hands you both forms, and both work.** `descix app media-upload` returns a
-`path` (relative to the app's assets prefix) and a `ref` (the `gs://` URI) for every file, plus a
-`public_url`; `--json` prints them for scripting. Either `path` or `ref` is a valid `asset_ref` —
-so if a rule in your head says the tool's own `ref` field is unusable, the rule is wrong, not the
-tool.
+**The upload verb hands you the relative `path`, and it is a valid `asset_ref` as-is.** `descix
+app media-upload` returns, per file, a `path` (relative to the app's assets prefix), a
+`public_url` (the app-host form, e.g. `https://{app}.descix.net/assets/<path>`), `gcs_path` and
+`content_type`; `--json` prints them for scripting. Pass `path` (or a `gs://` URI you construct
+yourself) as `asset_ref` — either form works, see below.
+
+**Who can upload, and how much.** Any app owner, community admin or platform admin may call
+`media-upload` for that app. Storage is capped **200 MB per app today** (pending credit-based
+metering for more) — the cap is enforced server-side by `get_asset_upload_token`, which refuses
+with its own message when a would-be upload exceeds it; the CLI never pre-checks quota locally,
+so trust that refusal over any local math.
 
 **The `gs://` form is accepted.** A `gs://` URI works as an `asset_ref` — it is parsed and
 scope-checked, and the handler then looks the object up by path. What is PROVEN is the form and

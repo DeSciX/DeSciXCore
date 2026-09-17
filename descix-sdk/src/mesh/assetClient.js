@@ -5,9 +5,13 @@
  * does NOT share a filesystem with the CLI that uploaded the media, so it cannot read a
  * local path. Instead:
  *
- *   1. The app developer uploads media via the API surface:
+ *   1. The app developer (app owner, community admin, or platform admin — the server is the
+ *      sole authority on both permission and the app's storage cap, 200 MB per app today)
+ *      uploads media via the API surface:
  *        descix app media-upload -a <appId> -f cover.jpg -f episode.mp3
- *      which returns ASSET REFERENCES (gs:// URIs under {env}/{appId}/assets/...).
+ *      which returns ASSET REFERENCES: a relative `path` under {env}/{appId}/assets/, plus the
+ *      app-host `public_url`. A `gs://` URI also works as a ref (see below) but media-upload
+ *      does not construct one for you — pass `path` verbatim.
  *   2. The app handler receives a ref and fetches the bytes over the Core broker
  *        (/apifront) via the packaged CLI api-client:
  *        const invoke = makeServiceApiClientInvoke(...);   // @descix/cli service client
@@ -31,7 +35,8 @@
  *        (a `(command, params) => Promise<message>`).
  * @param {object} opts
  * @param {string} opts.appId - The app that owns the asset.
- * @param {string} opts.ref   - A gs:// URI (from media-upload) OR a relative path under assets/.
+ * @param {string} opts.ref   - The relative `path` returned by media-upload, under assets/, OR
+ *                              a gs:// URI.
  * @returns {Promise<{ buffer: Buffer, contentType: string, size: number, gcsUri: string }>}
  */
 export async function fetchAppAsset(invoke, { appId, ref } = {}) {
