@@ -113,7 +113,7 @@ test('checkDevCert: a real SAN-less cert -> no_localhost_san, names WebAuthn-saf
     assert.equal(result.status, 'no_localhost_san');
     assert.match(result.detail, /no subjectAltName for localhost/);
     assert.match(result.next, /openssl req -x509/);
-    assert.match(result.next, /security add-trusted-cert/);
+    assert.match(result.next, /descix dev-certs trust/);
   }));
 
 test('checkDevCert: a real expired cert -> expired, detail names the expiry date', () =>
@@ -152,7 +152,7 @@ test('checkDevCert: darwin + security succeeds -> trusted', () =>
     }
   }));
 
-test('checkDevCert: darwin + security rejects -> untrusted, next is the trust command', () =>
+test('checkDevCert: darwin + security rejects -> untrusted, detail names the verdict, next is `descix dev-certs trust`', () =>
   withTmpDir('devcert-untrusted-', async (dir) => {
     const certPath = makeGoodCert(dir);
     const platformDesc = Object.getOwnPropertyDescriptor(process, 'platform');
@@ -173,9 +173,8 @@ test('checkDevCert: darwin + security rejects -> untrusted, next is the trust co
       const mod = await freshModule();
       const result = mod.checkDevCert({ certPath });
       assert.equal(result.status, 'untrusted');
-      assert.match(result.detail, /CSSMERR_TP_NOT_TRUSTED/);
-      assert.match(result.next, /security add-trusted-cert -r trustRoot/);
-      assert.match(result.next, new RegExp(certPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+      assert.equal(result.detail, 'not trusted by the macOS keychain for https://localhost (security verify-cert: CSSMERR_TP_NOT_TRUSTED)');
+      assert.equal(result.next, 'descix dev-certs trust');
       mock.restoreAll();
     } finally {
       Object.defineProperty(process, 'platform', platformDesc);

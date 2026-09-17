@@ -81,7 +81,7 @@ export function assertCertHasLocalhostSan(pem, certPath) {
       `(found: ${names.length ? names.join(', ') : 'none'}).\n` +
       'Chrome rejects SAN-less certs and WebAuthn/passkey login cannot run on this origin.\n' +
       `Mint a correct one:\n  ${MINT_CERT_COMMAND}\n` +
-      `Then trust it:\n  ${trustCertCommand(certPath)}`
+      `Then trust it:\n  ${TRUST_VERB}`
     );
   }
 }
@@ -101,6 +101,9 @@ export function resolveCertPaths(options = {}) {
     keyPath: options.keyFile ? path.resolve(options.keyFile) : path.join(dir, 'key.pem'),
   };
 }
+
+/** The one command a human runs to trust the resolved dev cert (it wraps trustCertCommand). */
+export const TRUST_VERB = 'descix dev-certs trust';
 
 /**
  * The one-time command that makes this machine's browser trust a dev cert.
@@ -158,7 +161,7 @@ export function checkDevCert({ certPath } = {}) {
     return {
       status: 'no_localhost_san',
       detail: `${certPath} has no subjectAltName for localhost (found: ${names.length ? names.join(', ') : 'none'}).`,
-      next: `Mint a correct one:\n  ${MINT_CERT_COMMAND}\nThen trust it:\n  ${trustCertCommand(certPath)}`,
+      next: `Mint a correct one:\n  ${MINT_CERT_COMMAND}\nThen trust it:\n  ${TRUST_VERB}`,
     };
   }
 
@@ -167,7 +170,7 @@ export function checkDevCert({ certPath } = {}) {
     return {
       status: 'expired',
       detail: `${certPath} expired on ${cert.validTo}.`,
-      next: `Mint a fresh one:\n  ${MINT_CERT_COMMAND}\nThen trust it:\n  ${trustCertCommand(certPath)}`,
+      next: `Mint a fresh one:\n  ${MINT_CERT_COMMAND}\nThen trust it:\n  ${TRUST_VERB}`,
     };
   }
 
@@ -187,15 +190,14 @@ export function checkDevCert({ certPath } = {}) {
       next: null,
     };
   } catch (err) {
-    const output = [err.stdout, err.stderr]
-      .filter(Boolean)
-      .map((b) => b.toString().trim())
-      .filter(Boolean)
-      .join('\n');
+    // `security` prints CT/EV diagnostics with terminal colour codes around its verdict; the verdict
+    // code (e.g. CSSMERR_TP_NOT_TRUSTED) is the only part a human or an agent can act on.
+    const output = [err.stdout, err.stderr].filter(Boolean).map((b) => b.toString()).join('\n');
+    const verdict = output.match(/\b(CSSMERR_[A-Z_]+|errSec[A-Za-z]+)\b/)?.[1] ?? `exit ${err.status ?? 'unknown'}`;
     return {
       status: 'untrusted',
-      detail: output || `\`security verify-cert\` rejected ${certPath} (exit ${err.status ?? 'unknown'}).`,
-      next: trustCertCommand(certPath),
+      detail: `not trusted by the macOS keychain for https://localhost (security verify-cert: ${verdict})`,
+      next: TRUST_VERB,
     };
   }
 }
