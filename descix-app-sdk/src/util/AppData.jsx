@@ -518,6 +518,10 @@ export class AppEventViewData {
 
 }
 
+// isAppEntitled — see entitlement.js for the definition and why it lives outside
+// this file. Re-exported here so existing `from '../util/AppData'` call sites work.
+export { isAppEntitled } from './entitlement.js';
+
 
 
 export const apiProxyUrlPrefix = (import.meta.env.VITE_DEBUG_PROXY && isEmbedded)

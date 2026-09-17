@@ -31,7 +31,7 @@ import ArticleIcon from '@mui/icons-material/Article';
 import VerticalSplitIcon from '@mui/icons-material/VerticalSplit';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { useNetworkLoading } from '../util/NetworkAPI';
-import { NetworkLoadingType, makeCommandRequestJSON, AppData, ProductTypes } from '../util/AppData';
+import { NetworkLoadingType, makeCommandRequestJSON, AppData, ProductTypes, isAppEntitled } from '../util/AppData';
 import { Api } from '../util/api';
 import { usePowchBridge } from '../providers/PowchBridgeProvider';
 import { normalizeContribution, composeTurnInput, collectTurnMedia } from '../util/chatIngress';
@@ -452,11 +452,14 @@ const ChatWidget = (props = {}) => {
     documentId,           // IPDoc file ID for document mode
     layoutMode: initialLayoutMode = 'chat',  // chat, document, split
     // WS-HEADLESS-MVP-A4: embeddability override. The isAppOwned input gate is a
-    // store-UX affordance driven by AppData.myApps, which only the platform store flow
-    // populates — an EMBEDDING host app (e.g. frqtl.com) manages entitlement itself and
-    // passes entitled={true}. The SERVER remains authoritative (verify_subscription +
-    // credits gate on every ask_question_to_app); this only unlocks the input UI.
-    entitled,             // undefined => legacy AppData.myApps check
+    // store-UX affordance driven by the REACTIVE `myApps` mirror in AppContext.jsx
+    // (isAppEntitled(selectedApp, myApps) — updated the instant a fetch changes it,
+    // never a stale AppData.myApps read at render), which only the platform store
+    // flow populates — an EMBEDDING host app (e.g. frqtl.com) manages entitlement
+    // itself and passes entitled={true}. The SERVER remains authoritative
+    // (verify_subscription + credits gate on every ask_question_to_app); this only
+    // unlocks the input UI.
+    entitled,             // undefined => legacy reactive-myApps check
     // WS-HEADLESS-MVP-A4: host-supplied login trigger for STANDALONE embeds (e.g. a
     // PowchClient-based host like the splitview harness / frqtl.com). When absent, the
     // widget falls back to the in-shell Powch bridge (usePowchBridge().login — the
@@ -471,7 +474,7 @@ const ChatWidget = (props = {}) => {
   } = props;
 
   const useStreaming = true;
-  const { loginStatus, setCurrentView, sessionInfo } = useAppContext();
+  const { loginStatus, setCurrentView, sessionInfo, myApps } = useAppContext();
   // Inter-view state: selectedApp/selectedCommunity are read DIRECTLY from AppData —
   // the shell's viewRouter assigns them immediately before triggering the view
   // transition (PlatformViewContext.jsx '--- Update selected context ---'), and the
@@ -516,11 +519,14 @@ const ChatWidget = (props = {}) => {
   
   const responseContainerRef = useRef(null);
 
+  // `myApps` is the REACTIVE mirror from AppContext (updated the moment a fetch
+  // changes it) — not AppData.myApps read at render, which only reflects reality
+  // on whichever render happens to occur next, and stayed silently wrong after a
+  // login until something else forced a remount (the "sign in disappears but chat
+  // stays locked" bug class; see AppContext.jsx myApps state comment).
   const isAppOwned = entitled !== undefined
     ? (!!entitled && !!selectedApp)
-    : selectedApp && AppData.myApps?.some(
-        app => app.app_id === selectedApp.app_id && app.community_id === selectedApp.community_id
-      );
+    : isAppEntitled(selectedApp, myApps);
 
   const communityId = selectedApp?.community_id || selectedCommunity?.community_id;
   const appId = selectedApp?.app_id;
