@@ -294,6 +294,12 @@ User is trying to configure an app they don't own. Suggest purchase.
 ### "Folder already configured"
 Check if configuration matches intended app. Offer to update or skip.
 
+### Powch sign-in under `descix serve` fails ("User cancelled", or "WebAuthn is not supported on sites with TLS certificate errors")
+The gateway's dev certificate is not trusted. Run `descix dev-certs check`. If it is not trusted,
+give the user exactly `descix dev-certs trust` to run (macOS password prompt), tell them to quit
+and reopen Chrome, then run `descix dev-certs check` again. Details and Linux/Windows notes:
+`reference/local-dev.md` §3.3.
+
 ## Next Steps After Onboarding
 
 Once configured, guide user to:

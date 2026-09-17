@@ -136,6 +136,16 @@ resolves `--port` > `env.gateway.port` > 5173 and is printed with its source, so
 never hardcode `:5173`. Set your framework's base path to `/p/<appId>` — the
 gateway does not rewrite paths.
 
+**Passkey sign-in needs a trusted dev certificate.** If Powch sign-in under
+`descix serve` fails with `User cancelled`, or the browser console says
+`WebAuthn is not supported on sites with TLS certificate errors`, the gateway's
+certificate is not trusted. Run `descix dev-certs check` (or `descix doctor`, row
+"Dev certificate"). If it is not trusted, do not try to trust it yourself: give
+the user exactly `descix dev-certs trust` to run (macOS asks for their password),
+tell them to quit and reopen Chrome, then run `descix dev-certs check` again. On
+Linux and Windows the check reports `unverifiable` and trusting is a manual,
+unverified step — see `.descix/sdk-assets/reference/local-dev.md` §3.3.
+
 ## MCP Tools
 
 - `descix_doctor` — Startup diagnostic (call first)

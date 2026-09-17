@@ -33,7 +33,7 @@ is the schema and the verb that owns each key.
 | `env.environment` | `DEV`, `DEMO` or `PROD` | `descix config init --env dev\|demo\|prod` |
 | `env.apiUrl` | the API origin this workspace talks to | `descix config init --env …` (known envs) / `descix config set-env <name> --url <origin>` (custom) |
 | `env.gateway.port` | the port `descix serve` listens on | `descix config set-gateway-port <port>` |
-| `env.devCerts` | `dir`, or `cert` + `key` — the TLS pair for the gateway and every app behind it | `descix config set-dev-certs --dir\|--cert\|--key\|--clear` |
+| `env.devCerts` | `dir`, or `cert` + `key` — the TLS pair for the gateway and every app behind it; unset means the SDK's shipped pair. Passkey sign-in needs it trusted: `descix dev-certs check`, then the human runs `descix dev-certs trust` (see `reference/local-dev.md` §3.3) | `descix config set-dev-certs --dir\|--cert\|--key\|--clear` |
 | `env.powchUrl` | Powch's own origin (optional; Powch is cross-origin from the shell by design) | `descix config set-powch-url <url>` |
 | `env.siteUrl` | the App Shell origin the gateway proxies `/` to (optional; default is the API origin) | `descix config set-site-url <url>` |
 | `env.products[]` | one entry per app in this workspace, see below | `descix app init`, `app set-site`, `app set-port`, `app set-localpath`, `app unmap` |
