@@ -39,6 +39,7 @@ import { Api } from '../util/api';
 import { usePowchBridge } from '../providers/PowchBridgeProvider';
 import { normalizeContribution, composeTurnInput, collectTurnMedia, createContributionStage } from '../util/chatIngress';
 import { describeActionCard } from '../util/actionCard';
+import { mintMessageId, patchMessageById } from '../util/threadMessages';
 
 const messages = ["searching knowledgebase", "running analytics"];
 
@@ -80,7 +81,7 @@ const ActivityIndicator = ({ messages }) => {
  * keeps no flag of its own, so there is nothing to drift out of step with the page and no way to
  * hit a stop that stops half the system.
  */
-const ActionRow = ({ action, onExecuteAction, selfGuidance }) => {
+const ActionRow = ({ action, onExecuteAction, selfGuidance, settled }) => {
   const firedRef = useRef(false);
   // 'idle' | 'running' | 'ran' | 'held'. A card that has finished must REPORT, not sit
   // forever on a Stop button it can no longer honour.
@@ -97,7 +98,14 @@ const ActionRow = ({ action, onExecuteAction, selfGuidance }) => {
   };
 
   useEffect(() => {
-    if (!selfGuidance || firedRef.current) return;
+    // WAIT FOR THE TURN TO SETTLE. An action used to fire the moment its block had streamed
+    // in, while the answer was still arriving. Its result then went out as a new turn with the
+    // thread's PREVIOUS interaction id (the settled one is only known when the stream ends),
+    // so the model's reply to its own action continued from BEFORE the answer that asked for
+    // it — and the two live streams on one thread were what copied an answer into the next
+    // message and fired every op twice (measured on PROD, 2026-09-18). An errored turn is
+    // settled but never auto-acts.
+    if (!selfGuidance || !settled || firedRef.current) return;
     // Decided at EFFECT time, not render time: the app frame publishes its declaration
     // asynchronously, and budget/stop-state change during a run.
     const { autoRun, reason } = selfGuidance.decide(action.functionName);
@@ -105,16 +113,12 @@ const ActionRow = ({ action, onExecuteAction, selfGuidance }) => {
       if (reason) setState({ status: 'held', reason });
       return;
     }
-    // NOTE (2026-09-18): this ref is per-INSTANCE, so it does not survive a remount — the
-    // double-fire GODSWORLD-DEV measured is not closed by this change and is tracked
-    // separately. It is NOT fixed here on purpose: the remount trigger is still unidentified,
-    // and a guard shipped without it could not be shown to have worked.
     firedRef.current = true;
     selfGuidance.spend();                    // one hop, even with no media — bounds text-only loops
     invoke();
-    // Intentionally keyed on identity only: re-deciding on every render would re-fire.
+    // Keyed on identity and settlement only: re-deciding on every render would re-fire.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [action.functionName]);
+  }, [action.functionName, settled]);
 
   const card = describeActionCard({
     functionName: action.functionName,
@@ -351,6 +355,7 @@ const MessageContent = ({ item, isAiResponse, onExecuteAction, onChatWithSources
               action={action}
               onExecuteAction={onExecuteAction}
               selfGuidance={selfGuidance}
+              settled={!!item.checked && !item.error}
             />
           ))}
         </Box>
@@ -1182,6 +1187,11 @@ const ChatWidget = (props = {}) => {
     // words IS a turn, so media alone must not be discarded here.
     if (!composedInput.trim() && turnMedia.length === 0) return;
 
+    // THIS turn's message. Every write below addresses it by id — never "the last message",
+    // which stops being this turn's the moment anything else (an action result racing this
+    // stream) appends one. Minted before the try so the error path writes to it too.
+    const turnMessageId = mintMessageId();
+
     setNetworkLoading(NetworkLoadingType.GET_AI_RESPONSE, true, 'Fetching AI response...');
     try {
       const params = {
@@ -1198,9 +1208,8 @@ const ChatWidget = (props = {}) => {
       };
 
       setSelectedDocIds([]);
-      const newMessageId = `msg_${Date.now()}`;
       const newMessage = {
-        id: newMessageId,
+        id: turnMessageId,
         // The transcript shows exactly what the model was given, so an action
         // result is VISIBLE to the user (WS-B8: Maxi must SEE his results).
         question: composedInput,
@@ -1229,17 +1238,10 @@ const ChatWidget = (props = {}) => {
         for await (const chunk of streamGenerator) {
           if (chunk.reply) {
             accumulatedResponse += chunk.reply;
-            setActiveThread(prev => {
-              const updatedMessages = [...prev.messages];
-              const lastIdx = updatedMessages.length - 1;
-              if (lastIdx >= 0) {
-                updatedMessages[lastIdx] = { 
-                  ...updatedMessages[lastIdx], 
-                  answer: accumulatedResponse 
-                };
-              }
-              return { ...prev, messages: updatedMessages };
-            });
+            setActiveThread(prev => ({
+              ...prev,
+              messages: patchMessageById(prev.messages, turnMessageId, { answer: accumulatedResponse })
+            }));
           }
           if (chunk.interaction_id) {
             finalInteractionId = chunk.interaction_id;
@@ -1254,18 +1256,13 @@ const ChatWidget = (props = {}) => {
         
         // Final update with all data
         setActiveThread(prev => {
-          const finalMessages = [...prev.messages];
-          const lastIdx = finalMessages.length - 1;
-          if (lastIdx >= 0) {
-            finalMessages[lastIdx] = { 
-              ...finalMessages[lastIdx], 
-              answer: accumulatedResponse,
-              sources: finalSources,
-              advertisements: finalAds,
-              checked: true 
-            };
-          }
-          
+          const finalMessages = patchMessageById(prev.messages, turnMessageId, {
+            answer: accumulatedResponse,
+            sources: finalSources,
+            advertisements: finalAds,
+            checked: true
+          });
+
           const updatedThread = { 
             ...prev, 
             messages: finalMessages,
@@ -1295,17 +1292,12 @@ const ChatWidget = (props = {}) => {
         const result = response.message || response;
         
         setActiveThread(prev => {
-          const finalMessages = [...prev.messages];
-          const lastIdx = finalMessages.length - 1;
-          if (lastIdx >= 0) {
-            finalMessages[lastIdx] = { 
-              ...finalMessages[lastIdx], 
-              answer: result.response || result.text,
-              sources: result.sources || [],
-              advertisements: result.advertisements || [],
-              checked: true 
-            };
-          }
+          const finalMessages = patchMessageById(prev.messages, turnMessageId, {
+            answer: result.response || result.text,
+            sources: result.sources || [],
+            advertisements: result.advertisements || [],
+            checked: true
+          });
           return {
             ...prev,
             messages: finalMessages,
@@ -1328,19 +1320,18 @@ const ChatWidget = (props = {}) => {
       }
       setActiveThread(prev => {
         if (!prev) return prev;
-        const msgs = [...prev.messages];
-        const lastIdx = msgs.length - 1;
-        if (lastIdx >= 0 && !msgs[lastIdx].answer) {
-          msgs[lastIdx] = {
-            ...msgs[lastIdx],
+        return {
+          ...prev,
+          // Only THIS turn's message, and only if it has no answer yet — an error must never
+          // overwrite a different turn's answer, or a partial answer this turn already showed.
+          messages: patchMessageById(prev.messages, turnMessageId, (m) => (m.answer ? {} : {
             answer: isCreditsRequired
               ? '**Out of AI credits.** This chat is metered — buy credits below to continue.'
               : `**Error:** ${error.message}`,
             error: true,
             checked: true,
-          };
-        }
-        return { ...prev, messages: msgs };
+          })),
+        };
       });
     } finally {
       setNetworkLoading(NetworkLoadingType.GET_AI_RESPONSE, false);
