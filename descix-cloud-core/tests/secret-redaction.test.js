@@ -164,3 +164,15 @@ console.error(
     'Manager-sourced values (_mergeConfig path) or a live Cloud Logging sink — see the file ' +
     'header for the negative-control recipe (revert to HEAD: RED).',
 );
+
+// The session token IS the credential. Logging it on expiry put a live session into Cloud Logging,
+// which is readable far more widely than the session store itself — the same defect class as the
+// bootstrap-key leak above, found in the same sweep (2026-09-17).
+test('an expiring session is identified by user, never by its access token', async () => {
+  const src = await fsp.readFile(new URL('../src/storageUtils.js', import.meta.url), 'utf8');
+  const expiryLogs = src.split('\n').filter((l) => /Session .*expired/.test(l));
+  assert.ok(expiryLogs.length > 0, 'the expiry log line must still exist');
+  for (const line of expiryLogs) {
+    assert.doesNotMatch(line, /\$\{access_token\}/, `expiry log prints the token: ${line.trim()}`);
+  }
+});
