@@ -127,7 +127,9 @@ async function runSyncCapturing(responses, { paragraphs = 1 } = {}) {
   process.stdout.write = sink;
   process.stderr.write = sink;
   try {
-    await runCorpusSync(new FakeStore(responses), { app: appId, yes: true, verbose: false });
+    // skipRetrievalCanary: this file measures printed-count honesty, not searchability — the
+    // retrieval canary (RetrievalCanary.js) has its own dedicated tests.
+    await runCorpusSync(new FakeStore(responses), { app: appId, yes: true, verbose: false, skipRetrievalCanary: true });
   } finally {
     process.stdout.write = outWrite;
     process.stderr.write = errWrite;

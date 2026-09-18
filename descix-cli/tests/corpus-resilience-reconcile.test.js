@@ -15,6 +15,10 @@
  * Strategy: drive runCorpusSync() directly against a SpyApiClient (no live backend),
  * mirroring corpus-rebuild-safety.test.js. Backoff is real wall-clock; we use a tiny
  * fixture so at most one retry fires (a few seconds) — acceptable for CI.
+ *
+ * `skipRetrievalCanary: true` on every call: this file measures upsert retry + reconcile
+ * behavior, not searchability — the post-sync retrieval canary (RetrievalCanary.js) is a
+ * separate property with its own dedicated tests in retrieval-canary.test.js.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -130,7 +134,7 @@ test('R1 — a transient UPSERT_TIMEOUT batch is RETRIED (not skipped), sync com
   // Fail the first kb_sync_chunks attempt with a timeout, then succeed.
   const spy = new ResilienceSpyApiClient({ failKbSyncTimes: 1, failError: 'UPSERT_TIMEOUT: exceeded the 120000ms deadline' });
 
-  await runCorpusSync(spy, { app: appId, yes: true, verbose: false });
+  await runCorpusSync(spy, { app: appId, yes: true, verbose: false, skipRetrievalCanary: true });
 
   const syncCalls = spy.callsTo('kb_sync_chunks');
   // At least 2 attempts on the SAME batch: the failed attempt + the retry.
@@ -144,7 +148,7 @@ test('R2 — a COMPLETED clean sync AUTO-RECONCILES (calls get_kb_rag_status rec
   const { appId } = await makeFixture(t);
   const spy = new ResilienceSpyApiClient({ failKbSyncTimes: 0 });
 
-  await runCorpusSync(spy, { app: appId, yes: true, verbose: false });
+  await runCorpusSync(spy, { app: appId, yes: true, verbose: false, skipRetrievalCanary: true });
 
   const reconcileCalls = spy.callsTo('get_kb_rag_status').filter(c => c.payload?.reconcile === true);
   assert.equal(reconcileCalls.length, 1,
@@ -158,7 +162,7 @@ test('R3 — a PERMANENT (non-transient) batch error does NOT retry and does NOT
   // Permanent validation-style error: not in the transient/timeout set.
   const spy = new ResilienceSpyApiClient({ failPermanent: true, failError: 'invalid chunk schema: bad field' });
 
-  await runCorpusSync(spy, { app: appId, yes: true, verbose: false });
+  await runCorpusSync(spy, { app: appId, yes: true, verbose: false, skipRetrievalCanary: true });
 
   const syncCalls = spy.callsTo('kb_sync_chunks');
   // Permanent error → one attempt per batch, no retry storm.

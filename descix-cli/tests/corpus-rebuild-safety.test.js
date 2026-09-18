@@ -255,7 +255,8 @@ test('A4 — --rebuild WITHOUT --dry-run and WITHOUT --yes would prompt (no auto
     remoteFileIds: ['corpus:dead0000beef']
   });
 
-  await runCorpusSync(spy, { app: appId, rebuild: true, yes: true });
+  // skipRetrievalCanary: this file measures the purge/delete contract, not searchability.
+  await runCorpusSync(spy, { app: appId, rebuild: true, yes: true, skipRetrievalCanary: true });
 
   // With --yes (and NO --dry-run), the spy SHOULD see kb_delete_chunks.
   assert.equal(spy.callsTo('kb_delete_chunks').length >= 1, true,
@@ -280,7 +281,8 @@ test('A6 — --rebuild --yes purges the FULL scope (purge_scope:true), not a fil
     remoteFileIds: ['corpus:dead0000beef', 'legacy:orphan-no-corpus-prefix']
   });
 
-  await runCorpusSync(spy, { app: appId, rebuild: true, yes: true });
+  // skipRetrievalCanary: this file measures the purge/delete contract, not searchability.
+  await runCorpusSync(spy, { app: appId, rebuild: true, yes: true, skipRetrievalCanary: true });
 
   const deletes = spy.callsTo('kb_delete_chunks');
   // Exactly one purge call for the single manifest's KB.

@@ -2187,6 +2187,7 @@ corpusCommand
   .option('--dry-run', 'Enumerate would-be-purged file_ids and would-be-upserted chunks without ANY Pinecone writes. Exit 0 if no drift, 1 if drift. Read-only.')
   .option('--show-walk', 'Print the resolved ref + the first 50 walked files BEFORE any Pinecone operations. Useful for verifying --ref / manifest source resolution.')
   .option('--yes', 'Skip the interactive purge confirmation in --rebuild mode. Use in scripting/CI.')
+  .option('--skip-retrieval-canary', 'Skip the post-sync retrieval canary that confirms a synced chunk actually retrieves before reporting success (measured 2026-09-17: presence in Pinecone is not the same as searchable — the index can lag ~20 minutes after a large upsert/purge). Skipping costs nothing but SAVES one credit-metered query_knowledge_base call and up to ~25s; the sync then reports success on presence only, same as before this check existed. Prefer leaving this ON for anything user-facing; use it for CI/cost-sensitive automation that will verify separately.')
   .action(async (options) => {
     try {
       const apiClient = new DeSciXApiClient();
