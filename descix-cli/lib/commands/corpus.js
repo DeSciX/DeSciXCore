@@ -744,6 +744,21 @@ export async function runCorpusSync(apiClient, options) {
         console.log(chalk.cyan(`\n  [dry-run] Plan for ${kbName}:`));
         console.log(chalk.white(`    Would upsert: ${allChunks.length} chunks from ${newOrChangedFiles.length} file(s)`));
         console.log(chalk.white(`    Would delete (stale-file): ${fileIdsToDelete.length} blob SHA(s)`));
+        // NAME them, so the operator sees WHICH documents a real run removes, not just how many.
+        // A corpus file_id is a git blob SHA, so the corpus's own repositories can say where it lived.
+        if (fileIdsToDelete.length > 0) {
+          const { describeStaleBlobs } = await import('../core/staleBlobNames.js');
+          const { resolveOwningRepo } = await import('../core/ManifestLoader.js');
+          const repoRoots = [...new Set(files
+            .map((f) => resolveOwningRepo(f.absolute_path)?.repoRoot)
+            .filter(Boolean))];
+          for (const s of describeStaleBlobs(fileIdsToDelete, repoRoots)) {
+            const where = s.path
+              ? `${s.repo.split('/').pop()}:${s.path} (last seen in ${s.commit.substring(0, 8)})`
+              : 'not in any local history of this corpus — cannot be named';
+            console.log(chalk.gray(`      - ${s.file_id.substring(0, 16)}…  ${where}`));
+          }
+        }
         if (options.rebuild) {
           console.log(chalk.white(
             `    Would purge (rebuild): FULL scope ${communityId}/${appId}/${kbName} ` +
