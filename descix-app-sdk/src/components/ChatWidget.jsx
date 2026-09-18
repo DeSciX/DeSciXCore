@@ -4,7 +4,7 @@ import {
   Alert, Button, Dialog, DialogTitle, DialogContent, DialogActions,
   List, ListItem, ListItemText, Checkbox, ListItemIcon, Chip,
   Drawer, Divider, ListItemButton, ListItemSecondaryAction, Tooltip,
-  Snackbar, Grid, Menu, MenuItem
+  Snackbar, Grid, Menu, MenuItem, Collapse
 } from '@mui/material';
 import { marked } from 'marked';
 import 'github-markdown-css/github-markdown-dark.css';
@@ -30,11 +30,15 @@ import FavoriteBorderIcon from '@mui/icons-material/FavoriteBorder';
 import ArticleIcon from '@mui/icons-material/Article';
 import VerticalSplitIcon from '@mui/icons-material/VerticalSplit';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import ReplayIcon from '@mui/icons-material/Replay';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { useNetworkLoading } from '../util/NetworkAPI';
 import { NetworkLoadingType, makeCommandRequestJSON, AppData, ProductTypes, isAppEntitled } from '../util/AppData';
 import { Api } from '../util/api';
 import { usePowchBridge } from '../providers/PowchBridgeProvider';
 import { normalizeContribution, composeTurnInput, collectTurnMedia, createContributionStage } from '../util/chatIngress';
+import { describeActionCard } from '../util/actionCard';
 
 const messages = ["searching knowledgebase", "running analytics"];
 
@@ -78,7 +82,19 @@ const ActivityIndicator = ({ messages }) => {
  */
 const ActionRow = ({ action, onExecuteAction, selfGuidance }) => {
   const firedRef = useRef(false);
-  const [state, setState] = useState({ auto: false, reason: null });
+  // 'idle' | 'running' | 'ran' | 'held'. A card that has finished must REPORT, not sit
+  // forever on a Stop button it can no longer honour.
+  const [state, setState] = useState({ status: 'idle', reason: null });
+
+  const invoke = async () => {
+    setState({ status: 'running', reason: null });
+    try {
+      await onExecuteAction(action.functionName, action.args);
+    } catch (err) {
+      console.error('[ActionRow] action failed:', err);
+    }
+    setState({ status: 'ran', reason: null });
+  };
 
   useEffect(() => {
     if (!selfGuidance || firedRef.current) return;
@@ -86,21 +102,28 @@ const ActionRow = ({ action, onExecuteAction, selfGuidance }) => {
     // asynchronously, and budget/stop-state change during a run.
     const { autoRun, reason } = selfGuidance.decide(action.functionName);
     if (!autoRun) {
-      if (reason) setState({ auto: false, reason });
+      if (reason) setState({ status: 'held', reason });
       return;
     }
-    firedRef.current = true;                 // once per action, never on re-render
+    // NOTE (2026-09-18): this ref is per-INSTANCE, so it does not survive a remount — the
+    // double-fire GODSWORLD-DEV measured is not closed by this change and is tracked
+    // separately. It is NOT fixed here on purpose: the remount trigger is still unidentified,
+    // and a guard shipped without it could not be shown to have worked.
+    firedRef.current = true;
     selfGuidance.spend();                    // one hop, even with no media — bounds text-only loops
-    setState({ auto: true, reason: null });
-    onExecuteAction(action.functionName, action.args);
+    invoke();
     // Intentionally keyed on identity only: re-deciding on every render would re-fire.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [action.functionName]);
 
-  const running = state.auto;
+  const card = describeActionCard({
+    functionName: action.functionName,
+    status: state.status,
+    reason: state.reason,
+  });
   return (
     <Alert
-      severity={running ? 'success' : 'info'}
+      severity={card.severity}
       icon={false}
       sx={{
         py: 0,
@@ -108,15 +131,16 @@ const ActionRow = ({ action, onExecuteAction, selfGuidance }) => {
         '& .MuiAlert-message': { width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }
       }}
     >
-      <Typography variant="caption" sx={{ fontWeight: 'bold' }}>
-        Action: {action.functionName}
-        {state.reason ? (
+      <Typography variant="caption" sx={{ fontWeight: 'bold', display: 'flex', alignItems: 'center' }}>
+        {card.action === 'rerun' ? <CheckCircleIcon fontSize="small" sx={{ mr: 0.5, fontSize: '0.9rem' }} /> : null}
+        {card.text}
+        {card.reason ? (
           <Typography component="span" variant="caption" sx={{ ml: 1, opacity: 0.75, fontWeight: 'normal' }}>
-            — {state.reason}
+            — {card.reason}
           </Typography>
         ) : null}
       </Typography>
-      {running ? (
+      {card.action === 'stop' ? (
         <IconButton
           size="small"
           color="warning"
@@ -125,12 +149,21 @@ const ActionRow = ({ action, onExecuteAction, selfGuidance }) => {
           <StopIcon fontSize="small" />
           <Typography variant="button" sx={{ ml: 0.5, fontSize: '0.7rem' }}>Stop</Typography>
         </IconButton>
-      ) : (
-        <IconButton
+      ) : card.action === 'rerun' ? (
+        // An action that has ALREADY run offers no bare "Run" — the CEO read that as "are they
+        // supposed to re-run what Maxi just did?". Re-running stays possible but is an explicit,
+        // labelled, visually secondary choice.
+        <Button
           size="small"
-          color="primary"
-          onClick={() => onExecuteAction(action.functionName, action.args)}
+          color="inherit"
+          startIcon={<ReplayIcon fontSize="small" />}
+          onClick={invoke}
+          sx={{ fontSize: '0.65rem', opacity: 0.7 }}
         >
+          Run again
+        </Button>
+      ) : (
+        <IconButton size="small" color="primary" onClick={invoke}>
           <PlayArrowIcon fontSize="small" />
           <Typography variant="button" sx={{ ml: 0.5, fontSize: '0.7rem' }}>Run</Typography>
         </IconButton>
@@ -144,7 +177,10 @@ const MessageContent = ({ item, isAiResponse, onExecuteAction, onChatWithSources
   const sources = item.sources || [];
   const ads = item.advertisements || [];
   const [likedSources, setLikedSources] = useState(new Set());
-  
+  // Per chat interaction: each message owns its own disclosure, so opening one turn's
+  // sources does not unfold every other turn's.
+  const [sourcesOpen, setSourcesOpen] = useState(false);
+
   const html = useMemo(() => marked(text), [text]);
   
   const actions = useMemo(() => {
@@ -232,19 +268,38 @@ const MessageContent = ({ item, isAiResponse, onExecuteAction, onChatWithSources
       {/* Sources Display with Likes */}
       {isAiResponse && sources.length > 0 && (
         <Box sx={{ mt: 2, pt: 1, borderTop: '1px dashed #eee' }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-            <Typography variant="caption" sx={{ fontWeight: 'bold', color: 'text.secondary' }}>
-              Sources:
-            </Typography>
-            <Button 
-              size="small" 
-              startIcon={<DescriptionIcon />} 
-              onClick={() => onChatWithSources(sources)}
-              sx={{ fontSize: '0.7rem' }}
+          {/*
+            COLLAPSED BY DEFAULT (CEO 2026-09-18). In a working lab thread the same sources
+            repeat on nearly every turn, and rendering them expanded pushes the answer — the two
+            or three numbers the human is actually reading — off screen. The disclosure states
+            the COUNT so nothing is hidden, only folded.
+          */}
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: sourcesOpen ? 1 : 0 }}>
+            <Button
+              size="small"
+              onClick={() => setSourcesOpen((open) => !open)}
+              endIcon={
+                <ExpandMoreIcon
+                  fontSize="small"
+                  sx={{ transform: sourcesOpen ? 'rotate(180deg)' : 'none', transition: 'transform 150ms' }}
+                />
+              }
+              sx={{ fontSize: '0.7rem', color: 'text.secondary', fontWeight: 'bold', textTransform: 'none', minWidth: 0, px: 0.5 }}
             >
-              Chat with Sources
+              {sources.length} source{sources.length === 1 ? '' : 's'}
             </Button>
+            {sourcesOpen ? (
+              <Button
+                size="small"
+                startIcon={<DescriptionIcon />}
+                onClick={() => onChatWithSources(sources)}
+                sx={{ fontSize: '0.7rem' }}
+              >
+                Chat with Sources
+              </Button>
+            ) : null}
           </Box>
+          <Collapse in={sourcesOpen} unmountOnExit>
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
             {sources.map((source, idx) => {
               const sourceId = source.fileId || source.id || source;
@@ -284,6 +339,7 @@ const MessageContent = ({ item, isAiResponse, onExecuteAction, onChatWithSources
               );
             })}
           </Box>
+          </Collapse>
         </Box>
       )}
 
