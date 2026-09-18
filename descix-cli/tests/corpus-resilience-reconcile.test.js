@@ -42,7 +42,13 @@ class ResilienceSpyApiClient {
     this.failPermanent = failPermanent;
     this.kbSyncAttempts = 0;
     this.upsertedTotal = 0;
+    this.baseUrl = 'https://dev.descix.net';
   }
+
+  async ensureBaseUrl() {
+    return this.baseUrl;
+  }
+
   async invoke(command, payload) {
     this.calls.push({ command, payload });
 

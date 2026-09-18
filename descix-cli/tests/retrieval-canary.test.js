@@ -36,6 +36,7 @@ import {
     DEFAULT_CANARY_DELAYS_MS,
 } from '../lib/core/RetrievalCanary.js';
 import { runCorpusSync, runCorpusStatus } from '../lib/commands/corpus.js';
+import { syncStatePath } from '../lib/core/syncState.js';
 
 // ── Layer 1: the pure/injectable module ─────────────────────────────────────────────────────
 
@@ -121,7 +122,13 @@ class CanarySpyApiClient {
         this.calls = [];
         this.queryFindsAfter = queryFindsAfter; // 0 = finds on first call; Infinity = never finds
         this.queryCalls = 0;
+        this.baseUrl = 'https://dev.descix.net';
     }
+
+    async ensureBaseUrl() {
+        return this.baseUrl;
+    }
+
     async invoke(command, payload) {
         this.calls.push({ command, payload });
         if (command === 'list_knowledge_bases') {
@@ -195,7 +202,7 @@ test('GATE: a sync whose canary finds the chunk on the first attempt resolves no
     await runCorpusSync(spy, { app: appId, yes: true, ...FAST_CANARY });
 
     assert.equal(spy.callsTo('query_knowledge_base').length, 1, 'should confirm on the FIRST attempt and stop');
-    const state = JSON.parse(await fs.readFile(path.join(appRoot, '.descix', 'sync-state', 'Corpus.json'), 'utf8'));
+    const state = JSON.parse(await fs.readFile(syncStatePath(appRoot, 'Corpus', await spy.ensureBaseUrl()), 'utf8'));
     assert.equal(state.retrieval_canary?.ok, true);
 });
 
@@ -216,7 +223,7 @@ test('GATE: a sync whose canary NEVER finds the chunk FAILS LOUD (throws) — ne
 
     // Even on canary failure, the sync state is still written — the vectors WERE upserted, and
     // the recorded verdict lets `kb corpus status` and a later re-run see exactly what happened.
-    const state = JSON.parse(await fs.readFile(path.join(appRoot, '.descix', 'sync-state', 'Corpus.json'), 'utf8'));
+    const state = JSON.parse(await fs.readFile(syncStatePath(appRoot, 'Corpus', await spy.ensureBaseUrl()), 'utf8'));
     assert.equal(state.retrieval_canary?.ok, false);
 });
 
@@ -228,7 +235,7 @@ test('GATE: --skip-retrieval-canary bypasses the check entirely (documented cost
     await runCorpusSync(spy, { app: appId, yes: true, skipRetrievalCanary: true });
 
     assert.equal(spy.callsTo('query_knowledge_base').length, 0, 'skip must mean ZERO canary calls (this is the cost the flag saves)');
-    const state = JSON.parse(await fs.readFile(path.join(appRoot, '.descix', 'sync-state', 'Corpus.json'), 'utf8'));
+    const state = JSON.parse(await fs.readFile(syncStatePath(appRoot, 'Corpus', await spy.ensureBaseUrl()), 'utf8'));
     assert.equal(state.retrieval_canary, null, 'a skipped canary must record null, never a fabricated ok:true');
 });
 
@@ -242,7 +249,10 @@ test('GATE: `descix kb corpus status` reports the retrieval verdict from the loc
     const orig = process.stdout.write.bind(process.stdout);
     process.stdout.write = (chunk, enc, cb) => { captured += String(chunk); if (typeof enc === 'function') enc(); else if (typeof cb === 'function') cb(); return true; };
     try {
-        await runCorpusStatus(null, { app: appId });
+        // A client is REQUIRED now: sync state is keyed by origin, so there is no
+        // origin-independent status to print. Same spy, so status reports the origin the
+        // sync above actually wrote.
+        await runCorpusStatus(spy, { app: appId });
     } finally {
         process.stdout.write = orig;
     }
