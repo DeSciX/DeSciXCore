@@ -32,6 +32,7 @@ import {
   isReportedCount, accumulateReportedCount, UNREPORTED_COUNT
 } from '../core/Syncer.js';
 import { lintManifestForDenyClasses, assertNoViolations } from '../core/CorpusDenyLint.js';
+import { pickCanaryChunk, runRetrievalCanary, DEFAULT_CANARY_DELAYS_MS } from '../core/RetrievalCanary.js';
 
 /**
  * Resolve community_id for corpus sync — same precedence as site upload / update kb:
@@ -467,6 +468,11 @@ export async function runCorpusSync(apiClient, options) {
     let totalChunksCreated = 0;
     let totalFilesSkipped = 0;
     let totalFilesDeleted = 0;
+    // The retrieval canary's verdict per KB — a sync/rebuild does not get to report a bare
+    // success while any of these are unverified (see RetrievalCanary.js). Collected across
+    // manifests so ONE loud failure at the end names every KB still unconfirmed, rather than
+    // failing fast on the first and leaving later manifests unsynced.
+    const canaryResults = [];
 
     for (const rawManifest of manifests) {
       // ── Deliverable B: resolve --ref override (CLI > manifest > default) ──
@@ -877,6 +883,49 @@ export async function runCorpusSync(apiClient, options) {
         }
       }
 
+      // 3f-2. RETRIEVAL CANARY (measured 2026-09-17): presence in Pinecone (reconciled above)
+      // is NOT searchability — the PROD index can take ~20 minutes to catch up after a
+      // purge+re-upsert, during which every status surface still says healthy. A sync does not
+      // get to report bare success until a chunk it just wrote actually RETRIEVES. Bounded
+      // (RetrievalCanary.js) rather than a loop: query_knowledge_base is credit-metered.
+      let retrievalCanary = null;
+      if (allChunks.length > 0 && options.skipRetrievalCanary) {
+        console.log(chalk.gray('  [canary] Skipped (--skip-retrieval-canary): searchability NOT confirmed.'));
+      } else if (allChunks.length > 0) {
+        const canaryChunk = pickCanaryChunk(allChunks, syncFailures);
+        if (canaryChunk) {
+          const canarySpinner = ora('  [canary] Confirming a synced chunk actually retrieves...').start();
+          // TEST SEAM ONLY: options._canaryDelaysMs / options._canarySleep let tests exercise
+          // this path without real wall-clock waits or a live query_knowledge_base backend.
+          // Production callers never set these — runRetrievalCanary defaults to the real
+          // bounded backoff and real timers when they are undefined.
+          const result = await runRetrievalCanary(apiClient, {
+            appId, kbName, chunk: canaryChunk,
+            ...(options._canaryDelaysMs ? { delaysMs: options._canaryDelaysMs } : {}),
+            ...(options._canarySleep ? { sleep: options._canarySleep } : {}),
+          });
+          retrievalCanary = { ...result, checked_at: new Date().toISOString() };
+          if (result.ok) {
+            canarySpinner.succeed(
+              `  [canary] Confirmed searchable after ${(result.elapsedMs / 1000).toFixed(1)}s ` +
+              `(attempt ${result.attempts}/${DEFAULT_CANARY_DELAYS_MS.length})`
+            );
+          } else {
+            canarySpinner.warn(
+              `  [canary] NOT YET SEARCHABLE after ${(result.elapsedMs / 1000).toFixed(1)}s and ` +
+              `${result.attempts} attempt(s)${result.lastError ? ` (last error: ${result.lastError})` : ''}. ` +
+              `The vectors ARE present in Pinecone (reconciled above) but the index has not caught up yet — ` +
+              `this is a known ~20-minute propagation delay after a large upsert/purge. ` +
+              `Re-run 'descix kb corpus sync -a ${appId} -k ${kbName}' later to re-check ` +
+              `(unchanged files are cheap; this canary re-runs).`
+            );
+          }
+          canaryResults.push({ kbName, ...retrievalCanary });
+        } else {
+          console.log(chalk.yellow('  [canary] Skipped: every upsert batch failed, nothing new to confirm.'));
+        }
+      }
+
       // 3g. Save sync state with blob SHAs for future delta computation
       const allSyncedBlobShas = [...localBlobShas]; // All current files
       await saveSyncState(appRoot, kbName, {
@@ -894,7 +943,10 @@ export async function runCorpusSync(apiClient, options) {
         files_unchanged: unchangedCount,
         chunks_upserted: isReportedCount(upserted) ? upserted : null,
         chunks_deleted: isReportedCount(deleted) ? deleted : null,
-        synced_blob_shas: allSyncedBlobShas
+        synced_blob_shas: allSyncedBlobShas,
+        // The retrieval canary's verdict — read this, not `total_chunks`, to know whether the
+        // last sync's content was CONFIRMED searchable or only confirmed present.
+        retrieval_canary: retrievalCanary
       });
 
       totalFilesProcessed += newOrChangedFiles.length;
@@ -935,6 +987,26 @@ export async function runCorpusSync(apiClient, options) {
     const deletedLine = `  Chunks deleted:  ${renderCount(totalFilesDeleted)}`;
     console.log(totalFilesDeleted === 0 ? chalk.gray(deletedLine) : chalk.white(deletedLine));
     console.log('');
+
+    // NEVER A BARE SUCCESS: if any KB's retrieval canary did not confirm searchability, this
+    // command fails loud here rather than letting the green summary above stand as the last
+    // word. The summary itself is left intact (it is a true report of what was written) —
+    // this is a SEPARATE fact ("can it be found yet") that gets its own loud verdict.
+    const unverified = canaryResults.filter((r) => !r.ok);
+    if (unverified.length > 0) {
+      throw new Error(
+        `Sync wrote vectors successfully, but ${unverified.length} KB(s) did NOT confirm ` +
+        `searchable within the canary window:\n` +
+        unverified.map((r) =>
+          `  - ${r.kbName}: not found after ${(r.elapsedMs / 1000).toFixed(1)}s / ${r.attempts} attempt(s)` +
+          (r.lastError ? ` (last error: ${r.lastError})` : '')
+        ).join('\n') +
+        `\nThe vectors ARE present in Pinecone (reconciled above) — this is the store's own ` +
+        `~20-minute post-upsert propagation delay, not data loss. Re-run the same sync command ` +
+        `later to re-check; unchanged files make the re-run cheap and it re-runs this canary.`
+      );
+    }
+
     return { dryRun: false };
 
   } catch (error) {
@@ -1017,11 +1089,32 @@ export async function runCorpusStatus(apiClient, options) {
       console.log(chalk.white(`  Last sync:       ${syncState.timestamp}`));
       console.log(chalk.white(`  Commit:          ${syncState.last_sync_commit?.substring(0, 8) || 'unknown'}`));
       console.log(chalk.white(`  Files tracked:   ${syncState.synced_files_count}`));
+      // NAME THE SOURCE OF THIS NUMBER: this is a LOCAL RECORD of what the store reported
+      // AT THE TIME OF THE LAST SYNC's reconcile — not a fresh read of the store now. It can be
+      // stale (the store's contents can change from other syncs/purges) and, even when fresh,
+      // "present" is not "searchable" (see the Retrieval line below). `descix kb doctor -a
+      // <app> -k <kb> --live` reads Pinecone directly for the current truth.
       console.log(chalk.white(
-        `  Chunks in store: ${Number.isFinite(syncState.total_chunks)
+        `  Chunks (local record, as of last sync): ${Number.isFinite(syncState.total_chunks)
           ? syncState.total_chunks
           : 'unknown (the last sync reported no live count)'}`
       ));
+      // Retrieval canary verdict from the last sync (see RetrievalCanary.js) — the only field
+      // in this file that speaks to SEARCHABILITY rather than presence.
+      const canary = syncState.retrieval_canary;
+      if (canary === undefined) {
+        console.log(chalk.gray('  Retrieval:       unknown (synced before the retrieval-canary check existed)'));
+      } else if (canary === null) {
+        console.log(chalk.gray('  Retrieval:       not checked (last sync upserted nothing new)'));
+      } else if (canary.ok) {
+        console.log(chalk.green(`  Retrieval:       CONFIRMED searchable (as of last sync, ${canary.checked_at})`));
+      } else {
+        console.log(chalk.yellow(
+          `  Retrieval:       NOT CONFIRMED as of last sync (${canary.checked_at}) — vectors were ` +
+          `present but did not retrieve within the canary window. Re-run 'descix kb corpus sync ` +
+          `-a ${appId} -k ${kbName}' to re-check.`
+        ));
+      }
 
       // Quick change detection: walk and compare blob SHAs
       if (options.verbose) {
