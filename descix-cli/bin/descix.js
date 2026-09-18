@@ -2537,6 +2537,11 @@ siteCommand
         return;
       }
 
+      // 1b. Refuse to publish backend source, an agent's persona, credentials or workspace
+      // state — BEFORE any token is requested, so a dry run refuses too (SiteDenyLint).
+      const { assertSitePublishable } = await import('../lib/core/SiteDenyLint.js');
+      assertSitePublishable(fileList.map((f) => f.path));
+
       // 2. Request deploy token with file list
       const tokenResponse = await apiClient.invoke('get_site_deploy_token', {
         community_id: communityId,
