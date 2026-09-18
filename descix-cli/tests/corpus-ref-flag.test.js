@@ -34,7 +34,15 @@ class SpyApiClient {
     this.calls = [];
     this.registeredKbs = registeredKbs;
     this.remoteFileIds = remoteFileIds;
+    // Sync state is keyed by the ORIGIN the sync talked to (lib/core/syncState.js), so a client
+    // stub must name one — a fixture with no origin cannot exercise the real code path.
+    this.baseUrl = 'https://dev.descix.net';
   }
+
+  async ensureBaseUrl() {
+    return this.baseUrl;
+  }
+
   async invoke(command, payload) {
     this.calls.push({ command, payload });
     if (command === 'list_knowledge_bases') {

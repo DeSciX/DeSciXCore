@@ -33,6 +33,7 @@ import * as driveADC from '../google-storage-adc.js';
 // commands' next steps are read by a developer as instructions, so they must name the live verb
 // and nothing else.
 import { CANONICAL_KB_SYNC } from './retired-kb-sync.js';
+import { loadSyncState, syncStatePath } from '../core/syncState.js';
 
 // ============ Pull Command ============
 
@@ -346,24 +347,24 @@ export async function runKbDoctor(apiClient, options) {
     }
   }
 
-  // (b) Local sync-state total_chunks
-  const syncStatePath = path.join(appRoot, '.descix', 'sync-state', `${kbName}.json`);
-  let localChunks = null;
-  let syncStateRaw = null;
-  try {
-    const raw = await fs.readFile(syncStatePath, 'utf-8');
-    syncStateRaw = JSON.parse(raw);
-    localChunks = syncStateRaw?.total_chunks;
-    if (typeof localChunks !== 'number') {
-      throw new Error(`sync-state has no total_chunks: ${syncStatePath}`);
-    }
-  } catch (err) {
-    if (err.code === 'ENOENT') {
-      console.log(chalk.yellow(`  ⚠ No local sync-state at ${syncStatePath}`));
-      console.log(chalk.gray(`    Run 'descix kb corpus sync -a ${appId} -k ${kbName}' first.`));
-      process.exit(2);
-    }
-    throw err;
+  // (b) Local sync-state total_chunks, for THIS ORIGIN.
+  //
+  // The path is resolved by its owner (lib/core/syncState.js), never rebuilt here: doctor
+  // compares a LOCAL record against a LIVE store, so reading one origin's state while querying
+  // another's store would manufacture the very drift this command exists to detect.
+  const doctorOrigin = await apiClient.ensureBaseUrl();
+  const statePathForOrigin = syncStatePath(appRoot, kbName, doctorOrigin);
+  const loadedState = await loadSyncState(appRoot, kbName, doctorOrigin);
+  const syncStateRaw = loadedState.state;
+  if (!syncStateRaw) {
+    console.log(chalk.yellow(`  ⚠ No local sync-state for ${doctorOrigin} at ${statePathForOrigin}`));
+    if (loadedState.detail) console.log(chalk.gray(`    ${loadedState.detail}`));
+    console.log(chalk.gray(`    Run 'descix kb corpus sync -a ${appId} -k ${kbName}' against this origin first.`));
+    process.exit(2);
+  }
+  const localChunks = syncStateRaw.total_chunks;
+  if (typeof localChunks !== 'number') {
+    throw new Error(`sync-state has no total_chunks: ${statePathForOrigin}`);
   }
 
   // (c) Report

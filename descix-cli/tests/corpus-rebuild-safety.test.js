@@ -26,6 +26,7 @@ import os from 'os';
 import path from 'path';
 import { execSync } from 'child_process';
 
+import { syncStatePath } from '../lib/core/syncState.js';
 import { runCorpusSync } from '../lib/commands/corpus.js';
 
 // Endpoints the Syncer / corpus.js may invoke. Used by the spy to classify
@@ -47,7 +48,15 @@ class SpyApiClient {
     this.calls = [];
     this.registeredKbs = registeredKbs;
     this.remoteFileIds = remoteFileIds;
+    // Sync state is keyed by the ORIGIN the sync talked to (lib/core/syncState.js), so a client
+    // stub must name one — a fixture with no origin cannot exercise the real code path.
+    this.baseUrl = 'https://dev.descix.net';
   }
+
+  async ensureBaseUrl() {
+    return this.baseUrl;
+  }
+
   async invoke(command, payload) {
     this.calls.push({ command, payload });
     if (WRITE_ENDPOINTS.has(command)) {
@@ -199,11 +208,18 @@ test('A2 — dry-run with NO drift exits 0 (drift=false)', async (t) => {
     cwd: process.cwd(), encoding: 'utf-8'
   }).trim();
   // Pre-seed sync state with matching blob SHA so the file is "unchanged".
-  const stateDir = path.join(process.cwd(), 'apps', appId, '.descix', 'sync-state');
-  await fs.mkdir(stateDir, { recursive: true });
+  //
+  // Seeded FOR THE SPY'S ORIGIN, through the path owner. Sync state is keyed by the origin it
+  // describes (lib/core/syncState.js), so a state file dropped at the old unkeyed path is
+  // correctly treated as belonging to no origin and forces a full walk — which would make this
+  // no-drift fixture unable to produce no drift.
+  const spy = new SpyApiClient({ registeredKbs: ['Corpus'], remoteFileIds: [] });
+  const seedPath = syncStatePath(path.join(process.cwd(), 'apps', appId), 'Corpus', await spy.ensureBaseUrl());
+  await fs.mkdir(path.dirname(seedPath), { recursive: true });
   await fs.writeFile(
-    path.join(stateDir, 'Corpus.json'),
+    seedPath,
     JSON.stringify({
+      origin: await spy.ensureBaseUrl(),
       last_sync_commit: 'seed',
       synced_files_count: 1,
       total_chunks: 1,
@@ -212,7 +228,6 @@ test('A2 — dry-run with NO drift exits 0 (drift=false)', async (t) => {
     })
   );
 
-  const spy = new SpyApiClient({ registeredKbs: ['Corpus'], remoteFileIds: [] });
   const result = await runCorpusSync(spy, { app: appId, dryRun: true, yes: true });
 
   assert.equal(spy.hasAnyWriteCall(), false);

@@ -33,6 +33,7 @@ import {
 } from '../core/Syncer.js';
 import { lintManifestForDenyClasses, assertNoViolations } from '../core/CorpusDenyLint.js';
 import { pickCanaryChunk, runRetrievalCanary, DEFAULT_CANARY_DELAYS_MS } from '../core/RetrievalCanary.js';
+import { loadSyncState, saveSyncState, syncStatePath, syncFailureLogPath } from '../core/syncState.js';
 
 /**
  * Resolve community_id for corpus sync — same precedence as site upload / update kb:
@@ -207,35 +208,12 @@ export function renderCount(value, unknownText = 'an unreported number of') {
 }
 
 /**
- * Save sync state after a successful corpus sync.
- *
- * @param {string} appRoot - App root directory
- * @param {string} kbName - Knowledge base name
- * @param {Object} state - { last_sync_commit, sources_provenance, synced_files_count, total_chunks, timestamp }
+ * Sync state is owned by lib/core/syncState.js and keyed by the ORIGIN the sync talked to.
+ * The unscoped local helpers that used to live here are DELETED, not wrapped: they were the
+ * defect (one file per KB name, no environment anywhere in it), and a compat path that still
+ * resolved `.descix/sync-state/<KB>.json` would keep producing the silent under-sync this
+ * module exists to end. See that file's header for the measurement.
  */
-async function saveSyncState(appRoot, kbName, state) {
-  const stateDir = path.join(appRoot, '.descix', 'sync-state');
-  await fs.mkdir(stateDir, { recursive: true });
-  const statePath = path.join(stateDir, `${kbName}.json`);
-  await fs.writeFile(statePath, JSON.stringify(state, null, 2));
-}
-
-/**
- * Load sync state from a previous corpus sync.
- *
- * @param {string} appRoot - App root directory
- * @param {string} kbName - Knowledge base name
- * @returns {Promise<Object|null>} Sync state or null if no previous sync
- */
-async function loadSyncState(appRoot, kbName) {
-  const statePath = path.join(appRoot, '.descix', 'sync-state', `${kbName}.json`);
-  try {
-    const raw = await fs.readFile(statePath, 'utf-8');
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
 
 /**
  * Detect the current git branch in workspaceRoot.
@@ -397,6 +375,13 @@ export async function runCorpusSync(apiClient, options) {
     }
 
     spinner.succeed(`Found ${manifests.length} manifest(s)`);
+
+    // THE ORIGIN THIS SYNC IS TALKING TO — resolved once, from the client that will actually
+    // carry the upserts, and used to key every sync-state read and write below. Taken from the
+    // client rather than re-derived from the workspace: a re-derivation could name a different
+    // origin than the one receiving the chunks, which is precisely the lie that state file
+    // told for months. Awaited because baseUrl is loaded lazily.
+    const syncOrigin = await apiClient.ensureBaseUrl();
 
     // Deliverable B: branch-mismatch advisory. We only emit this when:
     //   - no --ref override was supplied, AND
@@ -649,7 +634,16 @@ export async function runCorpusSync(apiClient, options) {
       // Deliverable A note: in dry-run + rebuild we ALSO null previousState so
       // the count below reflects what a real rebuild would upsert (all files),
       // not what an incremental sync would upsert.
-      let previousState = await loadSyncState(appRoot, kbName);
+      // State is per-ORIGIN. The blob-SHA skip below is only sound against the origin that
+      // actually received those SHAs — see lib/core/syncState.js.
+      const loadedState = await loadSyncState(appRoot, kbName, syncOrigin);
+      let previousState = loadedState.state;
+      if (loadedState.reason === 'unkeyed-legacy' || loadedState.reason === 'origin-mismatch') {
+        // LOUD, because the consequence of not saying it is a full re-walk the operator did not
+        // ask for, and silence here is what made the original defect invisible for months.
+        console.log(chalk.yellow(`  ⚠ No sync state for ${syncOrigin} — walking the FULL corpus.`));
+        console.log(chalk.gray(`    ${loadedState.detail}`));
+      }
       if (options.rebuild) {
         previousState = null;
       }
@@ -657,9 +651,9 @@ export async function runCorpusSync(apiClient, options) {
       const previousChunkCount = readPreviousChunkCount(previousState);
 
       if (previousBlobShas.size > 0) {
-        console.log(chalk.gray(`  Previous sync: ${previousBlobShas.size} files, ${previousChunkCount ?? 'an unknown number of'} chunks`));
+        console.log(chalk.gray(`  Previous sync to ${syncOrigin}: ${previousBlobShas.size} files, ${previousChunkCount ?? 'an unknown number of'} chunks`));
       } else {
-        console.log(chalk.gray('  First sync (no previous state)'));
+        console.log(chalk.gray(`  First sync to ${syncOrigin} (no previous state for this origin)`));
       }
 
       // 3c. Compute delta — compare by blob SHA against local sync state
@@ -822,10 +816,10 @@ export async function runCorpusSync(apiClient, options) {
 
         // Write failure log to .descix if any batches failed
         if (syncFailures.length > 0) {
-          const failLogDir = path.join(appRoot, '.descix', 'sync-state');
-          await fs.mkdir(failLogDir, { recursive: true });
-          const failLogPath = path.join(failLogDir, `${kbName}-failures.json`);
+          const failLogPath = syncFailureLogPath(appRoot, kbName, syncOrigin);
+          await fs.mkdir(path.dirname(failLogPath), { recursive: true });
           await fs.writeFile(failLogPath, JSON.stringify({
+            origin: syncOrigin,
             timestamp: new Date().toISOString(),
             commit: commitSha,
             failures: syncFailures,
@@ -928,7 +922,7 @@ export async function runCorpusSync(apiClient, options) {
 
       // 3g. Save sync state with blob SHAs for future delta computation
       const allSyncedBlobShas = [...localBlobShas]; // All current files
-      await saveSyncState(appRoot, kbName, {
+      await saveSyncState(appRoot, kbName, syncOrigin, {
         last_sync_commit: commitSha,
         // Per-source provenance: WHICH repo, at WHICH ref, and the RESOLVED COMMIT SHA actually
         // synced. `ref` may be a mutable branch, so the ref alone is not a record of what was
@@ -1048,6 +1042,19 @@ export async function runCorpusStatus(apiClient, options) {
 
     const appRoot = appConfig.absolutePath;
 
+    // Sync state is per-ORIGIN, so status cannot report it without knowing which origin is
+    // being asked about. Resolved from the same client the sync would use — never re-derived
+    // here, which would let status describe one origin while sync wrote another.
+    if (!apiClient) {
+      spinner.fail('Origin required');
+      throw new Error(
+        'corpus status needs an API client to know WHICH origin\'s sync state to report. '
+        + 'Sync state is keyed by origin (see lib/core/syncState.js), so there is no '
+        + 'origin-independent status to print.',
+      );
+    }
+    const statusOrigin = await apiClient.ensureBaseUrl();
+
     // Load manifests
     const manifests = await loadManifests(appRoot, workspaceRoot, options.kb || null);
 
@@ -1064,11 +1071,20 @@ export async function runCorpusStatus(apiClient, options) {
       const refResolution = resolveRef(rawManifest, options.ref || null);
       const manifest = refResolution.manifest;
       const kbName = manifest.kb_name;
-      const syncState = await loadSyncState(appRoot, kbName);
+      // Status reports state for ONE origin — the one this invocation is pointed at. A status
+      // that merged or guessed across origins would be the same unscoped claim the state file
+      // used to make.
+      const loadedState = await loadSyncState(appRoot, kbName, statusOrigin);
+      const syncState = loadedState.state;
 
       console.log(chalk.cyan(`\nCorpus Status: ${appId} / ${kbName}`));
       console.log(chalk.gray('─'.repeat(50)));
+      console.log(chalk.white(`  Origin:          ${statusOrigin}`));
       console.log(chalk.white(`  Resolved ref:    ${refResolution.resolvedRef} (source=${refResolution.source})`));
+      if (loadedState.reason === 'unkeyed-legacy' || loadedState.reason === 'origin-mismatch') {
+        console.log(chalk.yellow(`  ⚠ No sync state for this origin.`));
+        console.log(chalk.gray(`    ${loadedState.detail}`));
+      }
 
       // File count from a fresh walk so the operator sees the LIVE file count
       // at the resolved ref, not the count from the last sync. This is the
