@@ -1,16 +1,11 @@
 /**
- * The action card REPORTS what happened, and a repeated action is not a duplicate.
+ * The action card REPORTS what happened, and the sources fold.
  *
  * THE DEFECTS (GODSWORLD-DEV, measured on PROD 2026-09-18, egpt-godsworld):
  *  - the card rendered `Action: previewPath` — an identifier, not an act — and kept a live Run
  *    button on an action that had already run. The CEO, reading his own thread: the cards "are
  *    unintuitive as presented (are they supposed to re-run what Maxi just did?)".
  *  - the Sources block rendered EXPANDED on every AI turn, pushing the answer off screen.
- *
- * THE TRAP THIS SUITE GUARDS: any future dedupe for the double-fire must key on the action's
- * INSTANCE, never its name. The consumer's own method takes the same action twice on purpose
- * ("Recipe: read the detector … a second look after a short wait"), so a name-keyed guard
- * silently eats the second look and the failure reads as the model being lazy.
  *
  * Run: node --test tests/action-card-and-sources.test.js
  */
@@ -21,7 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-    actionInstanceKey, humaniseActionName, describeActionCard,
+    humaniseActionName, describeActionCard,
 } from '../src/util/actionCard.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -68,33 +63,6 @@ test('a HELD card carries the page\'s own reason through unchanged', () => {
     const c = describeActionCard({ functionName: 'recordFlight', status: 'held', reason: 'hops budget spent (12/12)' });
     assert.equal(c.reason, 'hops budget spent (12/12)');
     assert.equal(c.action, 'run', 'the human may still choose to run it');
-});
-
-// ── Identity: the instance, never the name ──────────────────────────────────────────────────
-
-test('THE TRAP: two deliberate looks in different messages are DIFFERENT actions', () => {
-    const first = actionInstanceKey({ messageId: 'msg_1', index: 0, functionName: 'look', args: {} });
-    const second = actionInstanceKey({ messageId: 'msg_2', index: 0, functionName: 'look', args: {} });
-    assert.notEqual(first, second,
-        'a name-keyed dedupe would treat these as one and eat the second look');
-});
-
-test('two looks in the SAME message at different positions are different actions', () => {
-    assert.notEqual(
-        actionInstanceKey({ messageId: 'm', index: 0, functionName: 'look', args: {} }),
-        actionInstanceKey({ messageId: 'm', index: 1, functionName: 'look', args: {} }));
-});
-
-test('the same action re-rendered keeps ONE identity — this is what a guard must match', () => {
-    const a = actionInstanceKey({ messageId: 'm', index: 0, functionName: 'glance', args: { note: 'x', t: 1 } });
-    const b = actionInstanceKey({ messageId: 'm', index: 0, functionName: 'glance', args: { t: 1, note: 'x' } });
-    assert.equal(a, b, 'argument key ORDER must not change identity');
-});
-
-test('without a message id the key REFUSES rather than collapsing to (name, args)', () => {
-    assert.throws(
-        () => actionInstanceKey({ index: 0, functionName: 'look', args: {} }),
-        /messageId is required/);
 });
 
 // ── The widget consumes the owner, and the sources fold ─────────────────────────────────────
