@@ -9,6 +9,7 @@ import { useAppContext } from '../AppContext';
 import ChatWidget from './ChatWidget';
 import { actionResultContribution, actionErrorContribution } from '../util/chatIngress';
 import { publishChatApi, retractChatApi } from '../util/appChat.js';
+import { chatLayout } from '../util/chatLayout.js';
 import {
   readSelfGuidedDeclaration,
   decideAutoRun,
@@ -99,7 +100,18 @@ const CodeSiteWidget = ({
   // transition; the context mirror is provider-render-stale — see ChatWidget note).
   const selectedCommunity = AppData.selectedCommunity;
   const selectedApp = AppData.selectedApp;
+  // The HUMAN's toggle only. Whether the chat actually shows is `chatVisible` below — never
+  // this flag on its own, because the APP also has a say (`enableChat`, driven by
+  // DeSciX.view.set) and two owners of one fact drift the moment they disagree.
   const [chatOpen, setChatOpen] = useState(enableChat);
+
+  // The app asking for a different view SUPERSEDES a stale human toggle: a SplitView request
+  // must bring the chat back even if the human had hidden it under a previous view. This does
+  // not fight the toggle — `enableChat` is unchanged when the human clicks, so this effect
+  // does not re-run.
+  useEffect(() => {
+    setChatOpen(enableChat);
+  }, [enableChat]);
 
   const iframeSrc = useMemo(() => gcsMediaPath(url), [url]);
   const usesChildrenPanel = !!children;
@@ -284,8 +296,9 @@ const CodeSiteWidget = ({
   // Layout: chatWidth is ALWAYS the chat pane's fraction; chatPosition picks the side
   // (row-reverse puts the chat pane first visually for 'left' — WS-HEADLESS-MVP-A4 fix:
   // previously 'left' swapped the WIDTHS but the chat still rendered on the right).
-  const codesiteWidth = chatOpen ? 1 - chatWidth : 1;
-  const chatPanelWidth = chatOpen ? chatWidth : 0;
+  // ONE derivation of "is the chat on screen" and the widths that follow from it — see
+  // util/chatLayout.js, which owns the rule and the defect it closes.
+  const { chatVisible, codesiteWidth, chatPanelWidth } = chatLayout({ enableChat, chatOpen, chatWidth });
 
   return (
     <Box sx={{ display: 'flex', flexDirection: chatPosition === 'left' ? 'row-reverse' : 'row', height, position: 'relative' }}>
@@ -325,16 +338,16 @@ const CodeSiteWidget = ({
               '&:hover': { bgcolor: 'action.hover' }
             }}
             size="small"
-            title={chatOpen ? 'Hide Chat' : 'Show Chat'}
+            title={chatVisible ? 'Hide Chat' : 'Show Chat'}
           >
-            {chatOpen ? <CloseIcon /> : <ChatIcon />}
+            {chatVisible ? <CloseIcon /> : <ChatIcon />}
           </IconButton>
         )}
       </Box>
 
       {/* Chat Sidebar */}
-      {enableChat && chatOpen && (
-        <Paper 
+      {chatVisible && (
+        <Paper
           elevation={3}
           sx={{ 
             width: `${chatPanelWidth * 100}%`, 
