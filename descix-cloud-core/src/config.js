@@ -57,6 +57,42 @@ export class CloudConfigFatalError extends Error {
     }
 }
 
+/**
+ * THE ONE OWNER of "which config keys are secret-valued and must never be logged".
+ *
+ * MEASURED ON PROD (2026-09-17): `[Config] Bootstrap (Env) ${key}=${this[key]}` logged every
+ * bootstrap key WITH ITS VALUE, and `DEVELOPER_SIGNATURE` (the CEO's durable wallet signature)
+ * is a bootstrap key — so it was in cleartext in Cloud Logging on every boot, every environment,
+ * readable by anyone with log access, far wider than the Secret Manager binding it came from.
+ *
+ * The classification lives in `config-schema.json` `secret_keys` as DATA, not as a regex guess
+ * scattered at each call site — declaring a new secret key is a one-line schema edit, and every
+ * log site that would otherwise print a raw value consults this same set.
+ */
+const SECRET_CONFIG_KEYS = new Set(configSchema.secret_keys?.keys || []);
+
+/**
+ * Is `key` classified as secret-valued in config-schema.json `secret_keys`?
+ * @param {string} key
+ * @returns {boolean}
+ */
+export function isSecretConfigKey(key) {
+    return SECRET_CONFIG_KEYS.has(key);
+}
+
+/**
+ * The value form safe to write to a log line for `key`: the real value, stringified, for a
+ * non-secret key (unchanged from before this fix) — or the literal `'<redacted>'` for a key
+ * classified secret. NEVER a prefix or a length of the real value: either of those still leaks
+ * material (and a length leak is exactly the kind of thing that narrows a brute force).
+ * @param {string} key
+ * @param {*} value
+ * @returns {string}
+ */
+export function loggableConfigValue(key, value) {
+    return isSecretConfigKey(key) ? '<redacted>' : String(value);
+}
+
 // Constants exported for consumers
 class ProductTypes {
     static COMMUNITY = "COMMUNITY";
@@ -396,7 +432,7 @@ class CloudConfig {
             const value = process.env[key];
             if (value !== undefined) {
                 this[key] = boolean_keys.keys.includes(key) ? value === 'true' : value;
-                console.log(`[Config] Bootstrap (Env) ${key}=${this[key]}`);
+                console.log(`[Config] Bootstrap (Env) ${key}=${loggableConfigValue(key, this[key])}`);
             }
         });
 
@@ -810,7 +846,12 @@ class CloudConfig {
             // If disk value is unchanged (still null, still old non-null), leave alone.
             const snapshot = this.__defaults_config_snapshot || {};
             const changedKeys = [];
-            const formatVal = (v) => {
+            // A secret should never legitimately land in defaults-config.json (that file is
+            // non-secret-only by contract), but this log site prints whatever key changed on
+            // disk — so it redacts on the SAME schema-owned classification as the bootstrap-key
+            // log, rather than trusting that contract to hold forever.
+            const formatVal = (key, v) => {
+                if (isSecretConfigKey(key)) return '<redacted>';
                 if (v === null) return 'null';
                 if (v === undefined) return 'undefined';
                 if (typeof v === 'object') {
@@ -826,7 +867,7 @@ class CloudConfig {
                 if (JSON.stringify(snapVal) === JSON.stringify(newVal)) continue;
                 // Disk value genuinely changed. Apply to singleton.
                 const prev = this[key];
-                console.log(`[CloudConfig] HOT-RELOAD: ${key} changed from ${formatVal(prev)} to ${formatVal(newVal)}`);
+                console.log(`[CloudConfig] HOT-RELOAD: ${key} changed from ${formatVal(key, prev)} to ${formatVal(key, newVal)}`);
                 this[key] = newVal;
                 changedKeys.push(key);
             }
@@ -837,7 +878,7 @@ class CloudConfig {
                 // Key was on disk at boot, no longer on disk. We do NOT clear the
                 // singleton — Secret Manager / dev-overrides may legitimately own it
                 // now. Warn so the operator notices.
-                console.warn(`[CloudConfig] HOT-RELOAD: key ${key} was removed from defaults-config.json. Singleton value (${formatVal(this[key])}) NOT cleared — restart to re-derive precedence.`);
+                console.warn(`[CloudConfig] HOT-RELOAD: key ${key} was removed from defaults-config.json. Singleton value (${formatVal(key, this[key])}) NOT cleared — restart to re-derive precedence.`);
             }
 
             this.__defaults_config_sha = newSha;

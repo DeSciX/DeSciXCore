@@ -21,6 +21,8 @@ export {
     GUEST_ALLOWED_COMMANDS,
     networkResponse,
     stripInvalidAndLower,
+    isSecretConfigKey,
+    loggableConfigValue,
 } from './config.js';
 
 export {
