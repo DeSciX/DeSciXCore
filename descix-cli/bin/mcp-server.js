@@ -23,6 +23,7 @@ import { WalletFileManager } from '../lib/wallet-file.js';
 import { CLI_VERSION } from '../lib/cli-version.js';
 import { checkDevCert } from '@descix/app-sdk/dev';
 import { resolveGatewayCertContext } from '../lib/dev-cert-resolver.js';
+import { originStampFor, stampToolResult } from '../lib/mcp-origin-stamp.js';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 // WS-MCP-SSOT-TIER2 (audit §5.B-1): the curated HTTP-valid core tools are the SINGLE SOURCE
@@ -153,7 +154,7 @@ try {
   // descix_doctor — local diagnostic (no backend call)
   // -------------------------------------------------------------------------
 
-  async function runDoctor(args) {
+  async function runDoctor(args, originStamp) {
     const verifyRemote = args?.verify_remote !== false;
     const report = {
       auth: { connected: false },
@@ -199,7 +200,12 @@ try {
           app_id: freshContext.appId,
           community_id: freshContext.communityId,
           kb_id: freshContext.kbId || 'General',
-          api_url: freshConfig.apiUrl || apiClient.baseUrl,
+          // ONE OWNER: `freshConfig.apiUrl` is a legacy top-level key WorkspaceConfig never
+          // populates (the real value lives at `env.apiUrl`, read via `resolveOrigin()`) — the
+          // `||` here was always falling through to `apiClient.baseUrl`. Read the resolved
+          // origin stamp directly rather than keeping a dead alternative that looked like a
+          // second source.
+          api_url: originStamp?.origin ?? apiClient.baseUrl,
           local_apps: [
             platform.appId,
             ...products.map(p => p.appId),
@@ -361,6 +367,13 @@ try {
       report.status = 'warnings';
     }
 
+    // The same origin stamp every other tool result carries (see mcp-origin-stamp.js) — doctor
+    // is the diagnostic surface, so it states the fact explicitly rather than only via the
+    // appended content block every tool gets.
+    if (originStamp) {
+      report.origin_stamp = originStamp;
+    }
+
     return report;
   }
 
@@ -407,13 +420,35 @@ try {
     const { name, arguments: args } = request.params;
     console.error(`[MCP] tools/call — ${name}`);
 
+    // Resolve the origin stamp ONCE per call, from the one owner (api-client.js's own
+    // resolution — the same baseUrl/originSource the CLI's `env:` line reports), and carry it
+    // onto EVERY result this call returns, success or error. MEASURED 2026-09-17: two sessions
+    // spent hours reading DEV through this connector while believing they were reading PROD
+    // because no tool result said where it came from — see mcp-origin-stamp.js.
+    let originStamp = null;
+    let originStampError = null;
     try {
+      await apiClient.ensureInitialized();
+      originStamp = originStampFor(apiClient);
+    } catch (err) {
+      // The origin itself failed to resolve (e.g. a configured-but-invalid origin). There is
+      // nothing valid to stamp — the error's own message already names the fix — so this call
+      // fails loud below rather than stamping a guess.
+      originStampError = err;
+    }
+    const withStamp = (result) => (originStamp ? stampToolResult(result, originStamp) : result);
+
+    try {
+      if (originStampError) {
+        throw originStampError;
+      }
+
       // descix_doctor is handled locally
       if (name === 'descix_doctor') {
-        const report = await runDoctor(args);
-        return {
+        const report = await runDoctor(args, originStamp);
+        return withStamp({
           content: [{ type: 'text', text: JSON.stringify(report, null, 2) }],
-        };
+        });
       }
 
       // Merge default context for convenience (caller can override). Only auto-fill when the
@@ -455,12 +490,12 @@ try {
       });
 
       const result = await apiClient.invoke(name, params);
-      return {
+      return withStamp({
         content: [{
           type: 'text',
           text: typeof result === 'string' ? result : JSON.stringify(result, null, 2),
         }],
-      };
+      });
     } catch (error) {
       console.error(`[MCP] Tool error: ${error.message}`);
       // WS-HEADLESS-MVP-A3: when the backend attached structured error fields (code +
@@ -471,10 +506,10 @@ try {
       const structured = (error.code || error.data)
         ? `\n${JSON.stringify({ code: error.code, data: error.data }, null, 2)}`
         : '';
-      return {
+      return withStamp({
         content: [{ type: 'text', text: `Error: ${error.message}${structured}` }],
         isError: true,
-      };
+      });
     }
   });
 
