@@ -763,7 +763,9 @@ class UserSession {
     if (session.expires_in && session.create_datetime instanceof Date) {
          const expiryTime = new Date(session.create_datetime.getTime() + session.expires_in * 1000);
          if (new Date() > expiryTime) {
-             console.log(`Session ${access_token} for user ${user_id} expired. Deleting.`);
+             // The token is the credential itself: logging it puts a live session in Cloud Logging,
+             // which is readable far more widely than the session store. Identify it, never print it.
+             console.log(`Session for user ${user_id} expired. Deleting.`);
              const db = new CacheFirestore();
              db.delete_doc(FirestoreCollections.USER_SESSIONS(user_id), access_token).catch(e => console.error("Error deleting expired session:", e));
 
