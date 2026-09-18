@@ -143,7 +143,8 @@
     "delete_knowledge_base"
   ],
   "kb doctor": [
-    "get_kb_rag_status"
+    "get_kb_rag_status",
+    "kb_list_file_ids"
   ],
   "kb list": [
     "list_knowledge_bases"

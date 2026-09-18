@@ -156,6 +156,21 @@ async function chunkCorpusFile(fileEntry, context) {
   }).filter(Boolean);
 }
 
+
+/**
+ * The walked files that produce NO chunks, for this sync's state. Returns null (UNKNOWN) when a
+ * file carried over unchanged comes from a state that never recorded the field: a partial list
+ * would make `kb doctor` report a file as lost from the store when it is merely empty.
+ */
+export function zeroChunkBlobShas(previousState, localBlobShas, newOrChangedFiles, zeroThisRun) {
+  const changed = new Set(newOrChangedFiles.map((f) => f.blob_sha));
+  const carriedUnchanged = [...localBlobShas].filter((sha) => !changed.has(sha));
+  if (carriedUnchanged.length > 0 && !Array.isArray(previousState?.zero_chunk_blob_shas)) return null;
+  const previousZero = new Set(previousState?.zero_chunk_blob_shas || []);
+  const carried = carriedUnchanged.filter((sha) => previousZero.has(sha));
+  return [...new Set([...carried, ...zeroThisRun])].sort();
+}
+
 /**
  * Read the previously-synced chunk total out of sync state, for REPORTING only.
  *
@@ -660,26 +675,41 @@ export async function runCorpusSync(apiClient, options) {
       const localBlobShas = new Set(files.map(f => f.blob_sha));
       const newOrChangedFiles = files.filter(f => !previousBlobShas.has(f.blob_sha));
 
-      // Stale blob_shas: anything we synced previously that is no longer in the local
-      // walk. This covers BOTH cases:
-      //   (a) File deleted from the source corpus entirely.
-      //   (b) File modified in place — same source_path, new blob_sha → old blob_sha
-      //       is no longer in localBlobShas.
-      // Each stale blob_sha maps to a file_id of `corpus:{blob_sha}` in Pinecone metadata
-      // and is purged via the deleteStaleChunksByFileId primitive (multi-tenancy filter).
-      const deletedBlobShas = [...previousBlobShas].filter(sha => !localBlobShas.has(sha));
-      const fileIdsToDelete = deletedBlobShas.map(sha => `corpus:${sha}`);
+      // STALE = what is LIVE in this KB's corpus scheme and absent from the walk. ONE
+      // derivation, read from the store itself — never from local history.
+      //
+      // It used to be "previously synced blob_shas minus the walk", which is only as good as
+      // the history. Measured 2026-09-18 (GODSWORLD-DEV, PROD): the first origin-keyed sync
+      // had NO history for its origin, so it purged nothing, and a superseded INDEX.md stayed
+      // retrievable beside its replacement indefinitely — no later incremental sync could
+      // ever name it. Lost state, a repointed origin and a hand edit all fail the same way.
+      // A `corpus:` file_id is written only by this manifest's sync, so a live corpus id the
+      // walk does not produce is stale by definition. Both cases are covered:
+      //   (a) file deleted from the corpus;  (b) file modified in place (new blob_sha).
+      // --rebuild purges the whole scope instead, so it computes no per-file list.
+      const localFileIds = new Set(files.map(f => `corpus:${f.blob_sha}`));
+      let fileIdsToDelete = [];
+      if (!options.rebuild) {
+        const remote = await listRemoteFileIds(apiClient, appId, kbName);
+        fileIdsToDelete = remote.file_ids
+          .filter(id => typeof id === 'string' && id.startsWith('corpus:') && !localFileIds.has(id))
+          .sort();
+      }
 
       const unchangedCount = files.length - newOrChangedFiles.length;
 
       if (options.verbose) {
         console.log(chalk.gray(`  New/changed files: ${newOrChangedFiles.length}`));
         console.log(chalk.gray(`  Unchanged files: ${unchangedCount}`));
-        console.log(chalk.gray(`  Stale blob SHAs (delete): ${deletedBlobShas.length}`));
+        console.log(chalk.gray(`  Stale corpus file_ids live in the KB (delete): ${fileIdsToDelete.length}`));
       }
 
       // 3d. Chunk new/changed files
       const allChunks = [];
+      // Files this run chunked to NOTHING — recorded so `kb doctor` can tell "empty by design"
+      // from "lost from the store". A file that FAILED to chunk is not added: it is missing
+      // content, and the doctor should say so.
+      const zeroChunkShasThisRun = [];
       if (newOrChangedFiles.length > 0) {
         const chunkSpinner = ora(`  Chunking ${newOrChangedFiles.length} file(s)...`).start();
 
@@ -689,6 +719,7 @@ export async function runCorpusSync(apiClient, options) {
             allChunks.push(...chunks);
 
             if (chunks.length === 0) {
+              zeroChunkShasThisRun.push(fileEntry.blob_sha);
               // M1 (2026-04-20): always surface 0-chunk files even without -v.
               // These are the silent failures that caused the 77% EGPT gap.
               // 'kb doctor' scans sync logs for this exact string.
@@ -938,6 +969,11 @@ export async function runCorpusSync(apiClient, options) {
         chunks_upserted: isReportedCount(upserted) ? upserted : null,
         chunks_deleted: isReportedCount(deleted) ? deleted : null,
         synced_blob_shas: allSyncedBlobShas,
+        // Walked files that produced no chunks. KNOWN only when every file's outcome is known:
+        // chunked this run, or carried from a previous state that recorded the field. A state
+        // written before this field existed leaves unchanged files unaccounted for, so the
+        // field is null (UNKNOWN) rather than a partial list the doctor would read as complete.
+        zero_chunk_blob_shas: zeroChunkBlobShas(previousState, localBlobShas, newOrChangedFiles, zeroChunkShasThisRun),
         // The retrieval canary's verdict — read this, not `total_chunks`, to know whether the
         // last sync's content was CONFIRMED searchable or only confirmed present.
         retrieval_canary: retrievalCanary
