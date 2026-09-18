@@ -27,7 +27,7 @@ import { requireInteractive } from '../interactive.js';
 import { WorkspaceConfig } from '../workspace-config.js';
 import { hydrateKb, pushStaging, checkStagingFiles } from '../core/Hydrator.js';
 import { processKb } from '../core/Chunker.js';
-import { syncKb, getSyncStatus } from '../core/Syncer.js';
+import { syncKb, getSyncStatus, listRemoteFileIds } from '../core/Syncer.js';
 import * as driveADC from '../google-storage-adc.js';
 // The one canonical KB-sync surface, from its owner. Never spell it as a literal here: these
 // commands' next steps are read by a developer as instructions, so they must name the live verb
@@ -252,32 +252,30 @@ export async function runKbPush(apiClient, options) {
 
 // ============ M3: `descix kb doctor` — drift detector (2026-04-20) ============
 /**
- * Compare local sync-state vs live Pinecone vectorCount, and scan the most
- * recent verbose sync log (if any) for per-file 0-chunk warnings. Reports
- * drift direction and exits non-zero when drift exceeds the threshold.
+ * Check a KB against its last corpus sync by FILE IDENTITY, and scan the most recent verbose
+ * sync log (if any) for per-file 0-chunk warnings.
  *
- * WHY THIS EXISTS
- * ---------------
- * `descix kb corpus sync` trusts local sync-state/<KB>.json for delta
- * detection. When the Pinecone index is reset (e.g. dev-env churn), the
- * local state still lists all blob SHAs as "synced", so the next sync
- * skips re-upload and orphan/loss goes undetected until a content
- * retrieval test fails. This command surfaces the drift directly.
+ * WHY IDENTITY, NOT COUNT
+ * -----------------------
+ * The first version compared Pinecone's vectorCount with the sync-state's total_chunks. But the
+ * sync writes total_chunks FROM the reconciled live count, so the comparison was the store
+ * against a copy of itself: drift 0 by construction, "HEALTHY" over a superseded document that
+ * was still live and retrievable (measured 2026-09-18, GODSWORLD-DEV, PROD). vectorCount also
+ * lags deletes. What matters is WHICH files are live, so that is what this checks.
  *
  * BEHAVIOUR
  * ---------
- *   descix kb doctor -a <app> -k <kb>
+ *   descix kb doctor -a <app> -k <kb> [--live | --reconcile]
  *
- *   (a) Queries Pinecone via get_kb_rag_status for vectorCount.
- *   (b) Reads {appRoot}/.descix/sync-state/{kb}.json for total_chunks.
- *   (c) Reports diff and direction:
- *          Pinecone < sync-state  → LOST (chunks missing from Pinecone)
- *          Pinecone > sync-state  → ORPHANS (Pinecone has extra vectors)
- *          |drift| / local ≤ threshold  → HEALTHY
- *   (d) Scans the most recent file matching logs/kb-sync-*.log for
- *       '0-chunk' / 'skipped' warnings (these are the signal M1 wired
- *       into corpus.js).
- *   (e) Exits non-zero on drift above threshold (default: 5%).
+ *   (a) get_kb_rag_status for vectorCount — reported as information only. --live / --reconcile
+ *       still check the server's CACHED counter against the live store, a separate question.
+ *   (b) Reads this origin's sync-state: the walked blob SHAs and the zero-chunk ones.
+ *   (c) Lists the live corpus file_ids and reports:
+ *          ORPHANS — live but not walked: retrievable stale content. Fails.
+ *          MISSING — walked, has content, not live. Fails. UNVERIFIABLE (not failing) when the
+ *                    state predates the zero-chunk record, rather than guessing.
+ *   (d) Scans the most recent logs/kb-sync-*.log for '0-chunk' / 'skipped' warnings.
+ *   (e) Exits 1 on orphans or missing files, 2 when the state cannot be read.
  */
 export async function runKbDoctor(apiClient, options) {
   const { WorkspaceConfig } = await import('../workspace-config.js');
@@ -292,10 +290,6 @@ export async function runKbDoctor(apiClient, options) {
   if (!appMeta) throw new Error(`App '${appId}' not found in workspace.json`);
   const appRoot = appMeta.absolutePath;
   const communityId = appMeta.communityId || appMeta.community_id || null;
-
-  // Drift threshold (fraction). CEO guidance 2026-04-20: ~5% is reasonable.
-  const DRIFT_THRESHOLD = Number.isFinite(Number(options.threshold))
-    ? Number(options.threshold) : 0.05;
 
   const scope = communityId ? `${communityId}/${appId}/${kbName}` : `${appId}/${kbName}`;
   console.log(chalk.cyan(`\n🩺 kb doctor — ${scope}\n`));
@@ -362,23 +356,33 @@ export async function runKbDoctor(apiClient, options) {
     console.log(chalk.gray(`    Run 'descix kb corpus sync -a ${appId} -k ${kbName}' against this origin first.`));
     process.exit(2);
   }
-  const localChunks = syncStateRaw.total_chunks;
-  if (typeof localChunks !== 'number') {
-    throw new Error(`sync-state has no total_chunks: ${statePathForOrigin}`);
+  // (c) IDENTITY, not count. Which corpus files are LIVE, against which files the last sync
+  // WALKED. The count comparison this replaced read the store against `total_chunks`, which the
+  // sync itself writes FROM the reconciled live count — so drift was zero by construction and
+  // the check could not fail (measured 2026-09-18, GODSWORLD-DEV: "HEALTHY" printed over a
+  // superseded INDEX.md that was still live and retrievable). Identity catches exactly that.
+  if (!Array.isArray(syncStateRaw.synced_blob_shas)) {
+    console.log(chalk.yellow(`  ⚠ sync-state records no synced_blob_shas at ${statePathForOrigin} — the walked set is UNKNOWN.`));
+    process.exit(2);
   }
+  const report = diagnoseCorpusIdentity({
+    liveFileIds: (await listRemoteFileIds(apiClient, appId, kbName)).file_ids,
+    walkedBlobShas: syncStateRaw.synced_blob_shas,
+    zeroChunkBlobShas: syncStateRaw.zero_chunk_blob_shas,
+  });
 
-  // (c) Report
-  const delta = vectorCount - localChunks;
-  const ratio = localChunks === 0 ? Infinity : Math.abs(delta) / localChunks;
-  const direction = delta === 0 ? 'EXACT'
-    : delta < 0 ? 'LOST (Pinecone missing chunks)'
-    : 'ORPHANS (Pinecone has extra vectors)';
-  const healthy = Math.abs(delta) / Math.max(localChunks, 1) <= DRIFT_THRESHOLD;
-
-  console.log(`  Pinecone vectorCount : ${chalk.white(vectorCount)}`);
-  console.log(`  Local total_chunks   : ${chalk.white(localChunks)}`);
-  console.log(`  Drift                : ${chalk.white((delta >= 0 ? '+' : '') + delta)} (${(ratio * 100).toFixed(1)}%)`);
-  console.log(`  Direction            : ${delta === 0 ? chalk.green(direction) : (healthy ? chalk.yellow(direction) : chalk.red(direction))}`);
+  console.log(`  Walked by last sync  : ${chalk.white(report.walked)} file(s)` +
+    (report.zeroKnown ? chalk.gray(` (${report.zeroChunk} empty by design)`) : ''));
+  console.log(`  Live corpus files    : ${chalk.white(report.live)}`);
+  console.log(`  Orphans (live, not walked) : ${report.orphans.length ? chalk.red(report.orphans.length) : chalk.green(0)}`);
+  report.orphans.slice(0, 10).forEach((id) => console.log(chalk.red(`    ${id}`)));
+  if (report.zeroKnown) {
+    console.log(`  Missing (walked, not live) : ${report.missing.length ? chalk.red(report.missing.length) : chalk.green(0)}`);
+    report.missing.slice(0, 10).forEach((id) => console.log(chalk.red(`    ${id}`)));
+  } else {
+    console.log(chalk.yellow('  Missing (walked, not live) : UNVERIFIABLE — this state predates the record of empty files; the next sync writes it.'));
+  }
+  console.log(chalk.gray(`  Pinecone vectorCount : ${vectorCount} (informational — it lags deletes and is not a health signal)`));
   console.log(`  Index                : ${ragStatus.indexName || '(unknown)'}`);
   console.log(`  Last sync (server)   : ${ragStatus.lastSync || '(unknown)'}`);
   console.log(`  Last sync (local)    : ${syncStateRaw.timestamp || '(unknown)'}`);
@@ -420,19 +424,37 @@ export async function runKbDoctor(apiClient, options) {
 
   // (e) Exit
   console.log();
-  if (!healthy) {
-    console.log(chalk.red(`  ✗ DRIFT detected: ${(ratio * 100).toFixed(1)}% exceeds ${(DRIFT_THRESHOLD * 100).toFixed(1)}% threshold.\n`));
-    if (delta < 0) {
-      console.log(chalk.gray(`    Recommended: invalidate sync-state and re-sync:`));
-      console.log(chalk.gray(`      rm "${syncStatePath}"`));
-      console.log(chalk.gray(`      descix kb corpus sync -a ${appId} -k ${kbName}\n`));
-    } else {
-      console.log(chalk.gray(`    Recommended: clear stale vectors and re-sync to rebuild Pinecone from local state.\n`));
-    }
-    process.exit(1);
+  if (report.orphans.length > 0) {
+    console.log(chalk.red(`  ✗ ORPHANS: ${report.orphans.length} corpus file(s) are live and retrievable but were not in the last walk.`));
+    console.log(chalk.gray(`    A plain sync purges them (it reconciles against the live KB). Preview it first:`));
+    console.log(chalk.gray(`      descix kb corpus sync -a ${appId} -k ${kbName} --dry-run\n`));
   }
+  if (report.missing.length > 0) {
+    console.log(chalk.red(`  ✗ MISSING: ${report.missing.length} walked file(s) hold chunks but are not live.`));
+    console.log(chalk.gray(`    A plain sync skips files its state already records, so rebuild:`));
+    console.log(chalk.gray(`      descix kb corpus sync -a ${appId} -k ${kbName} --rebuild --dry-run\n`));
+  }
+  if (report.orphans.length > 0 || report.missing.length > 0) process.exit(1);
 
-  console.log(chalk.green(`  ✓ HEALTHY (drift within ${(DRIFT_THRESHOLD * 100).toFixed(1)}% threshold)\n`));
+  if (report.zeroKnown) {
+    console.log(chalk.green(`  ✓ HEALTHY — every live corpus file was walked, and every walked file with content is live.\n`));
+  } else {
+    console.log(chalk.green(`  ✓ No orphans.`) + chalk.yellow(` Missing-content check pending the next sync.\n`));
+  }
+}
+
+/**
+ * Compare the live corpus file set against the last walk. Pure, so the verdict is testable
+ * without a store. Only `corpus:` ids are this manifest's to judge; other schemes are ignored.
+ */
+export function diagnoseCorpusIdentity({ liveFileIds, walkedBlobShas, zeroChunkBlobShas }) {
+  const live = new Set((liveFileIds || []).filter((id) => typeof id === 'string' && id.startsWith('corpus:')));
+  const walked = new Set((walkedBlobShas || []).map((sha) => `corpus:${sha}`));
+  const zeroKnown = Array.isArray(zeroChunkBlobShas);
+  const zero = new Set((zeroChunkBlobShas || []).map((sha) => `corpus:${sha}`));
+  const orphans = [...live].filter((id) => !walked.has(id)).sort();
+  const missing = zeroKnown ? [...walked].filter((id) => !zero.has(id) && !live.has(id)).sort() : [];
+  return { live: live.size, walked: walked.size, zeroKnown, zeroChunk: zero.size, orphans, missing };
 }
 
 export default {
