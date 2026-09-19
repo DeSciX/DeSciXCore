@@ -6,6 +6,7 @@ import { resolveOrigin } from './origin.js';
 // a stuck developer will copy verbatim, so it must resolve to the live verb rather than a literal
 // that can go stale where nobody is watching.
 import { CANONICAL_KB_SYNC } from './commands/retired-kb-sync.js';
+import { npxCommand } from './invocation.js';
 
 /**
  * THE ONE OWNER of "this app is not mapped in workspace.json, here is how to fix it".
@@ -61,7 +62,7 @@ export function resolveWorkspacePath(workspaceRoot, localPath, label = 'app') {
  */
 const NOT_CONFIGURED_MESSAGE =
   'Workspace not configured.\n' +
-  'Run "npx descix init" first to initialize your workspace.';
+  `Run "${npxCommand('init')}" first to initialize your workspace.`;
 
 /**
  * THE ONE OWNER of "how do I set the API origin". Named by every refusal that turns a developer

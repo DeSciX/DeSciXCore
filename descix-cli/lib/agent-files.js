@@ -11,6 +11,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { readIdentity, isIdentityNamed } from './workspace-identity.js';
+import { mcpServerEntry } from './invocation.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -163,12 +164,31 @@ export async function generateMcpConfig(workspaceRoot) {
   }
 
   // Add/update DeSciX MCP server
-  existing.servers['descix'] = {
-    command: 'descix',
-    args: ['mcp-serve'],
-  };
+  existing.servers['descix'] = mcpServerEntry();
 
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
   await fs.writeFile(outputPath, JSON.stringify(existing, null, 2), 'utf-8');
+  return true;
+}
+
+/**
+ * Claude Code's PROJECT MCP config: `.mcp.json` at the project root, `{ mcpServers: { … } }`.
+ * Written independently of the VS Code file above (whose DeSciX-extension skip does not apply to
+ * Claude Code). Existing servers are preserved; only the `descix` entry is set.
+ *
+ * @param {string} workspaceRoot
+ * @returns {Promise<boolean>} true when written
+ */
+export async function generateClaudeCodeMcpConfig(workspaceRoot) {
+  const outputPath = path.join(workspaceRoot, '.mcp.json');
+  let existing = { mcpServers: {} };
+  try {
+    existing = JSON.parse(await fs.readFile(outputPath, 'utf-8'));
+    if (!existing.mcpServers) existing.mcpServers = {};
+  } catch {
+    // No existing file — start fresh
+  }
+  existing.mcpServers.descix = mcpServerEntry();
+  await fs.writeFile(outputPath, JSON.stringify(existing, null, 2) + '\n', 'utf-8');
   return true;
 }

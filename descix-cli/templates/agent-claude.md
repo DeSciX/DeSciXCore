@@ -317,15 +317,22 @@ Follow Checkpoint 4 from the doctor's `next_steps`:
 ### If `claude_code_detected` is true (Claude Code environment)
 Also create these files for always-on dynamic alignment:
 
-**`.claude/settings.json`** (merge with existing if present):
+**`.mcp.json`** at the project root — Claude Code reads PROJECT MCP servers from this file, not from
+`.claude/settings.json` (`descix quickstart` writes it for you; merge with existing if present):
 ```json
 {
   "mcpServers": {
     "descix": {
       "command": "npx",
-      "args": ["descix", "mcp-serve"]
+      "args": ["-y", "-p", "@descix/cli", "descix", "mcp-serve"]
     }
-  },
+  }
+}
+```
+
+**`.claude/settings.json`** (merge with existing if present):
+```json
+{
   "hooks": {
     "UserPromptSubmit": [
       {
