@@ -13,9 +13,11 @@
  * protocol to it, and reads what actually came back on fd 1. A line counts as clean only if it
  * parses as JSON with jsonrpc === '2.0'.
  *
- * THE CONTROL IS THE POINT. `--mode control` issues tools/list, which returns >80 KB of entirely
- * valid JSON-RPC. That is what makes a zero meaningful: it proves the harness read a large stream
- * and found nothing bad, rather than reading nothing at all and calling it clean.
+ * THE CONTROL IS THE POINT. `--mode control` issues tools/list CONTROL_REQUESTS times, which
+ * returns >80 KB of entirely valid JSON-RPC. That is what makes a zero meaningful: it proves the
+ * harness read a large stream and found nothing bad, rather than reading nothing at all and
+ * calling it clean. It repeats the request because one unauthenticated tools/list is now only the
+ * discovery floor (~18 KB, 2026-09-19); the bar is bytes read, not tools listed.
  *
  * ZERO ACCOUNT STATE: a temp workspace, an origin pointed at the discard port, and a wallet.json
  * belonging to nobody (zero address, zero signature). Nothing is created, mutated, or
@@ -41,6 +43,8 @@ const CLI = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const die = (m) => { console.error(`check-mcp-stdout-purity: ${m}`); process.exit(2); };
 const arg = (f, d) => { const i = process.argv.indexOf(f); return i === -1 ? d : process.argv[i + 1]; };
 
+const CONTROL_REQUESTS = 6;
+
 async function run(mode) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-purity-'));
     fs.mkdirSync(path.join(dir, '.descix'), { recursive: true });
@@ -65,9 +69,11 @@ async function run(mode) {
     await new Promise((r) => setTimeout(r, 900));
     send({ jsonrpc: '2.0', method: 'notifications/initialized' });
     await new Promise((r) => setTimeout(r, 300));
-    send(mode === 'invoke'
-        ? { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'get_credit_balance', arguments: {} } }
-        : { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} });
+    if (mode === 'invoke') {
+        send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'get_credit_balance', arguments: {} } });
+    } else {
+        for (let i = 0; i < CONTROL_REQUESTS; i++) send({ jsonrpc: '2.0', id: 2 + i, method: 'tools/list', params: {} });
+    }
     await new Promise((r) => setTimeout(r, 4000));
     p.kill('SIGKILL');
     const bad = [];
