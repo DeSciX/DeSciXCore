@@ -1,6 +1,6 @@
 {
   "name": "@descix/cli",
-  "version": "1.0.16",
+  "version": "1.0.17",
   "description": "DeSciX CLI and MCP Server - Unified command-line interface for DeSciX platform",
   "repository": {
     "type": "git",

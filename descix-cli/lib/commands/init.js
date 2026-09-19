@@ -11,7 +11,6 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 // clone.js is imported dynamically inside the invite flow to avoid circular deps
 import { WorkspaceConfig } from '../workspace-config.js';
-import { generateAgentFiles } from '../agent-files.js';
 // The canonical KB-sync surface is owned by retired-kb-sync.js. Consume the constant: a literal
 // spelled here is a second derivation of the same fact, and the removed verb this replaced
 // reached a developer who had done everything right.
@@ -151,11 +150,10 @@ export async function runInit(apiClient, options = {}) {
       }
     }
 
-    const appId = appName.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
     console.log(chalk.cyan('\n─── Summary ───\n'));
     console.log(chalk.white(`  Project:   ${projectPath}`));
     console.log(chalk.white(`  Community: ${communityId}`));
-    console.log(chalk.white(`  App:       ${appName} (${appId})`));
+    console.log(chalk.white(`  App name:  ${appName}`));
 
     const proceed = options.yes ? true : await rl.askYesNo(chalk.white('\nProceed?'), true);
     if (!proceed) {
@@ -170,7 +168,11 @@ export async function runInit(apiClient, options = {}) {
       config.env.products = [];
       delete config.env.platform;
     }
-    config.registerApp(communityId, appId, { localPath: '.', kbId: 'General' });
+    // NO APP IS REGISTERED HERE. The app id is the platform's: `app init` creates the app and
+    // registers the id the server returns (with -c it is composed from the community and the
+    // name). Recording the NAME here as the id left the workspace and CLAUDE.md naming an app the
+    // platform does not have (devx review 2026-09-19, D2). The agent instruction files state that
+    // id, so `app init` writes them too, once it exists.
     await config.save(projectPath);
     // A NEW workspace records the environment this run used (`descix --env dev init …`), through
     // the same owner `config init` uses — otherwise the workspace carried no environment and the
@@ -180,24 +182,16 @@ export async function runInit(apiClient, options = {}) {
       await config.setEnvironment(options.env);
     }
 
-    console.log(chalk.green('Created:'));
+    console.log(chalk.green(`${existingConfig ? 'Updated' : 'Created'}:`));
     console.log(chalk.green('  ✓ .descix/workspace.json'));
 
-    // Generate agent instruction files with correct context
-    try {
-      const agentFilesWritten = await generateAgentFiles(projectPath);
-      for (const f of agentFilesWritten) {
-        console.log(chalk.green(`  ✓ ${f}`));
-      }
-    } catch {
-      // Agent file generation is best-effort
-    }
-
     console.log(chalk.cyan('\n─── Next Steps ───\n'));
-    console.log(chalk.white(`  1. descix app init -a ${appId} -c ${communityId}    # register app on platform`));
-    console.log(chalk.gray(`  2. Create a corpus manifest at .descix/manifests/General.json`));
-    console.log(chalk.white(`  3. ${CANONICAL_KB_SYNC} -a ${appId}   # sync KB to Pinecone`));
-    console.log(chalk.white(`  4. descix chat -c ${communityId} -a ${appId} -q "test"  # verify RAG\n`));
+    console.log(chalk.white(`  1. descix login                                  # if you are not signed in`));
+    console.log(chalk.white(`  2. descix app init -a ${appName} -c ${communityId}`));
+    console.log(chalk.gray(`     Creates the app and registers the id the platform issues for it (with -c the`));
+    console.log(chalk.gray(`     id is ${communityId}-<name>), then writes CLAUDE.md and the other agent files.`));
+    console.log(chalk.gray(`  3. Create the corpus manifest app init names, then:`));
+    console.log(chalk.white(`     ${CANONICAL_KB_SYNC} -a <the id app init printed>\n`));
     console.log(chalk.green('✅ Workspace initialized.\n'));
     rl.close();
     return { created: ['.descix/workspace.json'], skipped: [], warnings: [] };
@@ -208,38 +202,4 @@ export async function runInit(apiClient, options = {}) {
   }
 }
 
-/**
- * Non-interactive init: writes .descix/workspace.json only.
- * @param {Object} options - { path?, communityId, appName? }
- * @returns {Promise<Object>} { created, skipped, warnings }
- */
-export async function initWorkspace(options) {
-  const projectPath = options.path ? path.resolve(options.path) : process.cwd();
-  const communityId = options.communityId;
-  const appName = options.appName || path.basename(projectPath).toLowerCase().replace(/[^a-z0-9]/g, '_');
-  const appId = appName.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
-  if (!communityId) {
-    throw new Error('communityId is required');
-  }
-  const config = new WorkspaceConfig({ version: '2.0', type: 'workspace', communities: {} }, projectPath);
-  config.registerApp(communityId, appId, { localPath: '.', kbId: 'General' });
-  await config.save(projectPath);
-
-  // Generate agent instruction files with workspace context
-  const created = ['.descix/workspace.json'];
-  try {
-    const agentFilesWritten = await generateAgentFiles(projectPath);
-    created.push(...agentFilesWritten);
-  } catch {
-    // Best-effort
-  }
-
-  return {
-    created,
-    skipped: [],
-    warnings: [],
-    nextSteps: [`descix app init -a ${appId} -c ${communityId}`, `${CANONICAL_KB_SYNC} -a ${appId}`]
-  };
-}
-
-export default { runInit, initWorkspace };
+export default { runInit };

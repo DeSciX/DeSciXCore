@@ -190,11 +190,15 @@
     "fetch_my_purchases"
   ],
   "quickstart": [
+    "create_app_for_community",
     "device_check_status",
     "device_request_login",
     "find_communities",
+    "get_product_context",
+    "init_git_mode_kb",
     "resolve_invite",
-    "sync_auto_purchases"
+    "sync_auto_purchases",
+    "update_community_metadata"
   ],
   "reconnect": [
     "reconnect_by_wallet"

@@ -16,10 +16,12 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLI = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'descix.js'), 'utf8');
+// `app init` lives in its one owner, shared with quickstart.
+const APP_INIT = fs.readFileSync(path.resolve(__dirname, '..', 'lib', 'commands', 'appInit.js'), 'utf8');
 
 test('the app init hint names the app\'s REGISTERED directory, not a guessed apps/<id>/', () => {
-    assert.doesNotMatch(CLI, /Create a corpus manifest at apps\/\$\{appId\}/);
-    assert.match(CLI, /const manifestPath = path\.join\(appPath, '\.descix', 'manifests', `\$\{kbId\}\.json`\);/);
+    assert.doesNotMatch(APP_INIT, /Create a corpus manifest at apps\/\$\{appId\}/);
+    assert.match(APP_INIT, /const manifestPath = path\.join\(appPath, '\.descix', 'manifests', `\$\{kbId\}\.json`\);/);
 });
 
 test('site upload reads provenance from where the FILES come from, never the caller\'s cwd', () => {
@@ -33,7 +35,7 @@ test('site upload reads provenance from where the FILES come from, never the cal
 test('app init refuses an unusable -p BEFORE creating anything server-side', () => {
     // Refusing only at local registration came after `-c` had created the app, leaving a platform
     // app with no local registration (measured 2026-09-18, daita-docs with an absolute -p).
-    const init = CLI.slice(CLI.indexOf('Create (if needed) and initialize an app'), CLI.indexOf('App created:'));
+    const init = APP_INIT.slice(APP_INIT.indexOf('export async function runAppInit'), APP_INIT.indexOf('App created:'));
     const check = init.indexOf('resolveWorkspacePath(workspaceConfig?.workspaceRoot || process.cwd(), options.path, appId);');
     const create = init.indexOf("apiClient.invoke('create_app_for_community'");
     assert.ok(check > 0, 'app init must validate -p with the loader\'s own resolver');

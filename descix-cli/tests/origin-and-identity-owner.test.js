@@ -309,18 +309,43 @@ test('GATE I1-no-origin-write: every line in lib/ + bin/ that writes an origin i
     );
 });
 
-// ── I2 GATE 4: the writer STORES the community it was given ──────────────────────────────────
-test('GATE I2-writer-stores-community: init records the community id it was passed', async () => {
-    const { initWorkspace } = await import('../lib/commands/init.js');
-    const dir = tmpdir('i2w');
+/**
+ * Run the ONE app-init owner into `dir` with a stub client whose server composes the id — as
+ * create_app_for_community does ({community}-{short}). Nothing reaches a network.
+ */
+async function appInitInto(dir, { community, app, serverId }) {
+    const { runAppInit } = await import('../lib/commands/appInit.js');
+    const api = {
+        invoke: async (cmd) => {
+            if (cmd === 'get_product_context') throw new Error('not in Products');
+            if (cmd === 'create_app_for_community') return { message: { app_id: serverId, community_id: community } };
+            if (cmd === 'init_git_mode_kb') return { message: { created: true } };
+            throw new Error(`stub: unexpected command ${cmd}`);
+        },
+    };
+    const prev = process.cwd();
+    // Its receipt goes to stdout, which the node --test runner parses as its own channel.
+    const log = console.log;
+    console.log = () => {};
+    process.chdir(dir);
+    try {
+        return await runAppInit(api, { app, community });
+    } finally {
+        process.chdir(prev);
+        console.log = log;
+    }
+}
 
-    const res = await initWorkspace({ path: dir, communityId: 'egpt', appName: 'godsworld' });
-    assert.ok(res?.created?.includes('.descix/workspace.json'),
-        'FIXTURE INVALID: initWorkspace wrote no workspace.json, so nothing below measures it');
+// ── I2 GATE 4: the writer STORES the community it was given ──────────────────────────────────
+test('GATE I2-writer-stores-community: app init records the community, and the id the SERVER issued', async () => {
+    const dir = tmpdir('i2w');
+    await appInitInto(dir, { community: 'egpt', app: 'godsworld', serverId: 'egpt-godsworld' });
 
     const ws = JSON.parse(fs.readFileSync(path.join(dir, '.descix/workspace.json'), 'utf8'));
+    assert.equal(ws.env.products.length, 1, 'FIXTURE INVALID: app init registered nothing, so nothing below measures it');
     const product = ws.env.products[0];
-    assert.equal(product.appId, 'godsworld');
+    assert.equal(product.appId, 'egpt-godsworld',
+        'the workspace names the NAME typed, not the id the platform issued (devx 2026-09-19, D2)');
     assert.equal(product.communityId, 'egpt',
         'registerApp() accepted a communityId and discarded it — the workspace records no community');
 });
@@ -335,20 +360,19 @@ test('GATE I2-writer-stores-community: init records the community id it was pass
 // second fixture is what makes it discriminate: a generator that simply hardcoded the prod
 // origin would pass the first fixture and FAIL the second.
 test('GATE I2-agent-files-name-the-developer: real ids, no my-app, and the RESOLVED origin', async () => {
-    const { initWorkspace } = await import('../lib/commands/init.js');
     const generated = ['CLAUDE.md', '.cursorrules', '.clinerules', '.github/copilot-instructions.md'];
 
     // FIXTURE A — nothing configured. The resolved origin is the declared default, PROD.
     const dirA = tmpdir('i2a');
-    const resA = await initWorkspace({ path: dirA, communityId: 'egpt', appName: 'godsworld' });
+    await appInitInto(dirA, { community: 'egpt', app: 'godsworld', serverId: 'egpt-godsworld' });
     for (const f of generated) {
-        assert.ok(resA.created.includes(f), `FIXTURE INVALID: ${f} was not generated, so it measures nothing`);
+        assert.ok(fs.existsSync(path.join(dirA, f)), `FIXTURE INVALID: ${f} was not generated, so it measures nothing`);
     }
     for (const f of generated) {
         const text = fs.readFileSync(path.join(dirA, f), 'utf8');
         assert.ok(!text.includes('my-app'),
             `${f} names the placeholder app "my-app" instead of the developer's app`);
-        assert.match(text, /godsworld/, `${f} does not name the developer's actual app`);
+        assert.match(text, /egpt-godsworld/, `${f} does not name the app id the platform issued`);
         assert.match(text, /egpt/, `${f} does not name the developer's actual community`);
         assert.ok(text.includes(PROD_ORIGIN),
             `${f} does not name the origin this workspace actually resolves to (the declared default)`);
@@ -361,9 +385,9 @@ test('GATE I2-agent-files-name-the-developer: real ids, no my-app, and the RESOL
     const prior = process.env.DESCIX_API_URL;
     process.env.DESCIX_API_URL = 'https://dev.descix.net';
     try {
-        const resB = await initWorkspace({ path: dirB, communityId: 'egpt', appName: 'godsworld' });
+        await appInitInto(dirB, { community: 'egpt', app: 'godsworld', serverId: 'egpt-godsworld' });
         for (const f of generated) {
-            assert.ok(resB.created.includes(f), `FIXTURE INVALID: ${f} was not generated in fixture B`);
+            assert.ok(fs.existsSync(path.join(dirB, f)), `FIXTURE INVALID: ${f} was not generated in fixture B`);
         }
         for (const f of generated) {
             const text = fs.readFileSync(path.join(dirB, f), 'utf8');
