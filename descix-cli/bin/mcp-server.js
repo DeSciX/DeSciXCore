@@ -31,7 +31,7 @@ import * as path from 'path';
 // This stdio server imports them and CONCATENATES its CLI-LOCAL diagnostics (descix_doctor,
 // platform_health) which are NOT /apifront commands and are intentionally stdio-only.
 // The previously hand-duplicated curated literal in this file is GONE.
-import { toMcpToolList, NATIVE_MCP_TOOLS as SHARED_NATIVE_TOOLS, MCP_HANDSHAKE_INSTRUCTIONS, validateToolParams, toolAcceptsParam, VALIDATION_PHASE } from '@descix/platform-api/mcp-tools';
+import { toMcpToolList, NATIVE_MCP_TOOLS as SHARED_NATIVE_TOOLS, MCP_HANDSHAKE_INSTRUCTIONS, validateToolParams, toolAcceptsParam, VALIDATION_PHASE, isDiscoveryCoreTool } from '@descix/platform-api/mcp-tools';
 
 // ---------------------------------------------------------------------------
 // Tool definitions for the stdio MCP transport.
@@ -77,8 +77,19 @@ const CLI_LOCAL_TOOLS = [
   },
 ];
 
-// Final stdio tool list: CLI-local diagnostics + the shared curated core tools (protocol shape).
+// Every tool this server can DESCRIBE: CLI-local diagnostics + the shared curated core. It seeds
+// the schema-aware tools/call path below, and is NEVER advertised as a whole.
 const TOOLS = [...CLI_LOCAL_TOOLS, ...toMcpToolList(SHARED_NATIVE_TOOLS)];
+
+// What tools/list ADVERTISES when the backend cannot supply the caller's permission-filtered
+// list — which is every UNAUTHENTICATED session, i.e. an outside developer's first contact.
+// It is the ratified DISCOVERY-CORE floor (platform-api isDiscoveryCoreTool, the same floor the
+// server serves a caller with no grant), never the whole static catalogue: advertising all of
+// TOOLS showed 37 tools, 18 of them the internal coordination fabric's (measured 2026-09-19).
+const FALLBACK_ADVERTISED_TOOLS = [
+  ...CLI_LOCAL_TOOLS,
+  ...toMcpToolList(SHARED_NATIVE_TOOLS.filter((t) => isDiscoveryCoreTool(t.name))),
+];
 
 // Live tool surface as last returned by tools/list (permission-filtered by the backend).
 // Seeded with the static curated SSOT so the very first tools/call is schema-aware even if
@@ -410,8 +421,8 @@ try {
       console.error(`[MCP] tools/list — ${backendTools.length} permission-filtered backend tools + ${CLI_LOCAL_TOOLS.length} CLI-local = ${tools.length}`);
       return { tools };
     } catch (err) {
-      console.error(`[MCP] tools/list — backend unreachable (${err.message}); falling back to static curated core (${TOOLS.length} tools)`);
-      return { tools: TOOLS };
+      console.error(`[MCP] tools/list — backend unreachable (${err.message}); advertising the discovery-core floor (${FALLBACK_ADVERTISED_TOOLS.length} tools)`);
+      return { tools: FALLBACK_ADVERTISED_TOOLS };
     }
   });
 
