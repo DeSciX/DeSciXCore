@@ -84,15 +84,18 @@ Use `find_communities` and `list_apps_for_community` to show options, then ask:
 > "Which community and app should this project target?"
 
 ### Checkpoint 3: Environment
-> "Should this run against local dev backend (localhost:4000) or hosted API?"
+> "Should this app be built against DEV (https://dev.descix.net) or production?"
+
+Pin the choice before anything else; every later command reads it from the workspace.
 
 ### Canonical Setup Commands (run in terminal after checkpoints)
 ```bash
-descix whoami                              # confirm identity
-descix app list                            # see available apps
-descix init -c <community> -a <app> -p .   # create workspace.json
-descix app init -a <app> -c <community>    # register app on platform
+descix --env dev config init               # pin the environment (omit --env dev for production)
+descix login                               # sign in
+descix app init -a <name> -c <community>   # create the app; the platform issues its id
 ```
+`app init` prints the app id the platform issued (with `-c` it is `<community>-<name>`). Use that
+id, not the name, as `-a` in every later command.
 
 ### Checkpoint 4: Content Strategy
 > "Should I create a starter KB doc now, or wait for your domain docs?"

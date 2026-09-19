@@ -34,6 +34,7 @@ import { createPromptSession } from '../lib/interactive.js';
 import { registerAllRetiredKbSync, CANONICAL_KB_SYNC } from '../lib/commands/retired-kb-sync.js';
 import { runStatus } from '../lib/commands/status.js';
 import { refreshCommunityIdentity, printIdentityReceipt } from '../lib/commands/communityIdentity.js';
+import { runAppInit } from '../lib/commands/appInit.js';
 import { runDoctor } from '../lib/commands/doctor.js';
 import { runHealth } from '../lib/commands/health.js';
 import * as kbCommands from '../lib/commands/kb.js';
@@ -1082,131 +1083,7 @@ appCommand
     try {
       const apiClient = new DeSciXApiClient();
       await requireAuth(apiClient);
-      let appId = options.app;
-      const kbId = options.kb || 'General';
-
-      // Refuse an unusable -p BEFORE anything is written — server-side included. The same
-      // resolver the workspace loader applies on every read decides it, so a value accepted here
-      // is one the next read accepts too. Refusing only at registration came AFTER a `-c` create,
-      // leaving a platform app with no local registration (measured 2026-09-18, daita-docs).
-      const workspaceConfig = await WorkspaceConfig.tryLoad();
-      if (options.path) {
-        resolveWorkspacePath(workspaceConfig?.workspaceRoot || process.cwd(), options.path, appId);
-      }
-
-      // Resolve community_id from the Products registry to learn whether the app exists yet.
-      let communityId;
-      try {
-        const productCtx = await apiClient.invoke('get_product_context', { app_id: appId });
-        communityId = (productCtx.message || productCtx).community_id;
-      } catch (e) {
-        // Not in Products — either we create it below (-c given) or we fail loud.
-      }
-
-      if (!communityId) {
-        if (!options.community) {
-          throw new Error(
-            `App '${appId}' does not exist yet. Pass -c <community> to create it: ` +
-            `descix app init -a ${appId} -c <community> [-s <short>]`
-          );
-        }
-        // CREATE leg — the canonical server path. It composes the unique app_id
-        // ({community}-{short}) and is authoritative; we never compose it client-side.
-        const response = await apiClient.invoke('create_app_for_community', {
-          community_id: options.community,
-          app_name: appId,
-          short_name: options.short || undefined,
-          create_skeleton: false,
-          overwrite: options.overwrite,
-        });
-        const created = response.message || response;
-        appId = created.app_id || appId;
-        communityId = created.community_id || options.community;
-        console.log(chalk.green(`\n✅ App created: ${appId}`));
-        console.log(chalk.gray(`  Products:   Products/${appId}`));
-        console.log(chalk.gray(`  Firestore:  Community/${communityId}/Apps/${appId}`));
-      } else if (options.community && options.community !== communityId) {
-        throw new Error(
-          `App '${appId}' already exists in community '${communityId}', not '${options.community}'. ` +
-          `Omit -c to initialize the existing app.`
-        );
-      }
-
-      // 1. Workspace.json — register app if not already mapped
-      const alreadyMapped = workspaceConfig?.getAppByAppId(appId);
-      let appPath = alreadyMapped?.absolutePath;
-
-      if (alreadyMapped && options.path) {
-        throw new Error(
-          `App '${appId}' is already mapped to '${alreadyMapped.localPath}'. ` +
-          `Use 'descix app set-localpath -a ${appId} -p <new-path>' to update.`
-        );
-      }
-
-      if (!alreadyMapped) {
-        const localPath = options.path || '.';
-        const wsRoot = workspaceConfig?.workspaceRoot || process.cwd();
-        const cfg = workspaceConfig || new WorkspaceConfig({}, wsRoot);
-        cfg.registerApp(communityId, appId, { localPath, kbId });
-        await cfg.save(wsRoot);
-        appPath = path.resolve(wsRoot, localPath);
-        console.log(chalk.gray(`  workspace.json updated: ${appId} → ${localPath}`));
-      }
-
-      // 2. Create app folder structure (site, microservice, assets)
-      if (appPath) {
-        const siteDir = path.join(appPath, 'site');
-        const msDir = path.join(appPath, 'microservice');
-        const assetsDir = path.join(appPath, 'assets');
-        await fs.mkdir(siteDir, { recursive: true });
-        await fs.mkdir(msDir, { recursive: true });
-        await fs.mkdir(assetsDir, { recursive: true });
-
-        // Create template asset files if they don't exist
-        const siPath = path.join(assetsDir, 'system_instructions.md');
-        const descPath = path.join(assetsDir, 'app_description.md');
-        try {
-          await fs.access(siPath);
-        } catch {
-          await fs.writeFile(siPath, `# System Instructions for ${appId}\n\nYou are an AI assistant for the ${appId} application.\n`);
-        }
-        try {
-          await fs.access(descPath);
-        } catch {
-          await fs.writeFile(descPath, `# ${appId}\n\nApplication description goes here.\n`);
-        }
-        console.log(chalk.gray(`  Created: site/, microservice/, assets/`));
-      }
-
-      // 3. Create KnowledgeBase Firestore doc (Git Mode — no Drive required)
-      const kbResponse = await apiClient.invoke('init_git_mode_kb', { app_id: appId, kb_name: kbId });
-      const kbResult = kbResponse.message || kbResponse;
-
-      console.log(chalk.green(`\n✓ ${appId} initialized`));
-      console.log(chalk.gray(`  Community: ${communityId}`));
-
-      // A community's OWN app (app_id == community_id) mirrors its token symbol and icon from the
-      // env-invariant descix-chain registry into this environment (CEO 2026-09-19). The app is
-      // already initialized; a refusal here (not an admin of the community, or the community not in
-      // the registry) is reported with the command that retries it, not treated as an init failure.
-      if (appId === communityId) {
-        try {
-          printIdentityReceipt(communityId, await refreshCommunityIdentity(apiClient, communityId));
-        } catch (err) {
-          console.log(chalk.yellow(`\n  ⚠ Community identity not mirrored: ${err.message}`));
-          console.log(chalk.gray(`    Retry with: descix community refresh-identity -c ${communityId}`));
-        }
-      }
-      console.log(chalk.gray(`  KB: ${kbId} — ${kbResult.created ? 'created' : 'already exists'}\n`));
-      console.log(chalk.gray(`  (every app is guaranteed a default KB at creation; an empty one`));
-      console.log(chalk.gray(`   says so rather than answering from general knowledge)\n`));
-      console.log(chalk.cyan('Next steps:'));
-      // The manifest lives in THIS app's registered directory — never a guessed `apps/<id>/`,
-      // which named a path that does not exist for any app registered elsewhere.
-      const manifestPath = path.join(appPath, '.descix', 'manifests', `${kbId}.json`);
-      console.log(chalk.gray(`  Create a corpus manifest at ${path.relative(process.cwd(), manifestPath) || manifestPath}`));
-      console.log(chalk.gray(`  then run:`));
-      console.log(chalk.white(`  descix kb corpus sync -a ${appId}\n`));
+      await runAppInit(apiClient, options);
     } catch (error) {
       console.error(chalk.red(error.message));
       process.exit(1);
@@ -4581,10 +4458,10 @@ devCertsCommand
 
 program
   .command('quickstart')
-  .description('One-command setup: auth → workspace → agent files → MCP config')
+  .description('One-command setup: sign in → workspace → app (with -c and -a) → agent files → MCP config')
   .option('-u, --url <url>', 'API URL override')
-  .option('-c, --community <id>', 'Community ID for the new workspace')
-  .option('-a, --app <name>', 'App name for the new workspace')
+  .option('-c, --community <id>', 'Community to create the app in')
+  .option('-a, --app <name>', 'Name of the app to create (the platform issues its id; see app init)')
   .option('-y, --yes', 'Skip the confirmation — with -c and -a, quickstart runs without a terminal')
   .action(async (options) => {
     // Every failure prints as a message and exits 1 — never a stack trace. A new developer's AI
@@ -4652,11 +4529,26 @@ program
       // same one-owner rule that fixed the check above.
       const targetRoot = existingRoot || workspaceRoot;
 
-      // Step 3: Generate agent instruction files
-      console.log(chalk.cyan('\n📋 Generating Agent Instructions\n'));
-      const written = await generateAgentFiles(targetRoot);
-      for (const f of written) {
-        console.log(chalk.green(`  ✓ ${f}`));
+      // Step 3: The app, and the agent instruction files that state its id. The id is the
+      // platform's, so the files are written only once the workspace names one it issued: from the
+      // workspace when an app is already registered, or by `app init` (the one owner, which writes
+      // them itself) when -c and -a name the app to create.
+      const { readIdentity, isIdentityNamed } = await import('../lib/workspace-identity.js');
+      const wsRaw = JSON.parse(await fs.readFile(path.join(targetRoot, '.descix', 'workspace.json'), 'utf-8'));
+      if (isIdentityNamed(readIdentity(wsRaw))) {
+        console.log(chalk.cyan('\n📋 Generating Agent Instructions\n'));
+        const written = await generateAgentFiles(targetRoot);
+        for (const f of written) {
+          console.log(chalk.green(`  ✓ ${f}`));
+        }
+      } else if (options.community && options.app) {
+        console.log(chalk.cyan('\n📋 Create and initialize the app\n'));
+        const apiClient = new DeSciXApiClient();
+        await requireAuth(apiClient);
+        await runAppInit(apiClient, { app: options.app, community: options.community });
+      } else {
+        console.log(chalk.yellow('\n  No app yet, so no agent instruction files (they state its id). Next:'));
+        console.log(chalk.white('    descix app init -a <name> -c <community>'));
       }
 
       // Step 4: Generate .vscode/mcp.json (skipped if DeSciX extension handles MCP)

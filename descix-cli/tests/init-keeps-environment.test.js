@@ -33,23 +33,37 @@ function devWorkspace(t) {
     return dir;
 }
 
-test('init ADDS the app and keeps the chosen environment', (t) => {
+test('init keeps the chosen environment, and registers NO app — the id is the platform\'s', (t) => {
     const dir = devWorkspace(t);
-    run(dir, 'init', '-c', 'daita', '-a', 'firstapp', '--yes');
     run(dir, 'init', '-c', 'daita', '-a', 'myapp', '--yes');
     const w = ws(dir);
     assert.equal(w.env.apiUrl, 'https://dev.descix.net');
     assert.equal(w.env.environment, 'DEV');
-    assert.deepEqual(w.env.products.map((p) => p.appId), ['firstapp', 'myapp']);
+    // `app init` registers the id create_app_for_community returns (daita-myapp here). init used
+    // to record `myapp`, an id the platform never had (devx review 2026-09-19, D2).
+    assert.deepEqual(w.env.products ?? [], []);
 });
 
 test('--force restarts the APP registrations and still keeps the environment', (t) => {
     const dir = devWorkspace(t);
-    run(dir, 'init', '-c', 'daita', '-a', 'firstapp', '--yes');
+    const cfg = path.join(dir, '.descix', 'workspace.json');
+    const seeded = ws(dir);
+    seeded.env.products = [{ appId: 'daita-firstapp', communityId: 'daita', localPath: '.', kbId: 'General' }];
+    fs.writeFileSync(cfg, JSON.stringify(seeded));
     run(dir, 'init', '-c', 'daita', '-a', 'myapp', '--yes', '--force');
     const w = ws(dir);
     assert.equal(w.env.apiUrl, 'https://dev.descix.net', 'THE REGRESSION: --force used to erase this');
-    assert.deepEqual(w.env.products.map((p) => p.appId), ['myapp']);
+    assert.deepEqual(w.env.products ?? [], []);
+});
+
+test('NEGATIVE CONTROL: without --force an existing registration is kept', (t) => {
+    const dir = devWorkspace(t);
+    const cfg = path.join(dir, '.descix', 'workspace.json');
+    const seeded = ws(dir);
+    seeded.env.products = [{ appId: 'daita-firstapp', communityId: 'daita', localPath: '.', kbId: 'General' }];
+    fs.writeFileSync(cfg, JSON.stringify(seeded));
+    run(dir, 'init', '-c', 'daita', '-a', 'myapp', '--yes');
+    assert.deepEqual(ws(dir).env.products.map((p) => p.appId), ['daita-firstapp']);
 });
 
 test('config show agrees: the environment is still DEV after init', (t) => {
@@ -71,5 +85,5 @@ test('NEGATIVE CONTROL: with no --env a new workspace pins nothing — the docum
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'descix-init-noenv-'));
     t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
     run(dir, 'init', '-c', 'daita', '-a', 'myapp', '--yes');
-    assert.equal(ws(dir).env.apiUrl, undefined);
+    assert.equal(ws(dir).env?.apiUrl, undefined);
 });

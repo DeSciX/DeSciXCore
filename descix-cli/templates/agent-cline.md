@@ -56,15 +56,15 @@ Ask the user at each checkpoint — don't assume:
 
 1. **Objective:** "Explore existing apps or build something new?"
 2. **Community/App:** Use `find_communities` + `list_apps_for_community`, then ask which to target
-3. **Environment:** "Local dev (localhost:4000) or hosted API?" (Skip if `app.json` has `api_url`)
+3. **Environment:** "Build against DEV (https://dev.descix.net) or production?" Pin it first.
 
 Canonical setup commands:
 ```bash
-descix whoami                              # confirm identity
-descix app list                            # see available apps
-descix init -c <community> -a <app> -p .   # create workspace.json
-descix app init -a <app> -c <community>    # register app on platform
+descix --env dev config init               # pin the environment (omit --env dev for production)
+descix login                               # sign in
+descix app init -a <name> -c <community>   # create the app; the platform issues its id
 ```
+`app init` prints the issued id (`<community>-<name>` with `-c`); use it as `-a` from then on.
 
 4. **Content strategy:** "Create starter KB now or wait for your docs?"
 5. **Frontend scope:** "Plain HTML or a framework (React, VitePress)?"
