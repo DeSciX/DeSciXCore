@@ -213,7 +213,7 @@ program
         // Continue without API client
       }
       
-      await runInit(apiClient, options);
+      await runInit(apiClient, { ...options, env: program.opts().env });
     } catch (error) {
       console.error(chalk.red(`\n❌ ${error.message}\n`));
       process.exit(1);
@@ -4643,7 +4643,7 @@ program
         // process.cwd() in this action — the argument was in the wrong slot regardless, and would
         // have written the workspace to the wrong directory the moment that stopped being true.
         // This action has no apiClient of its own; null is passed explicitly rather than implied.
-        await runInit(null, { path: workspaceRoot, community: options.community, app: options.app, yes: options.yes });
+        await runInit(null, { path: workspaceRoot, community: options.community, app: options.app, yes: options.yes, env: program.opts().env });
       }
 
       // EVERY REMAINING STEP TARGETS THE RESOLVED ROOT, not the directory the command was typed in.

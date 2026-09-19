@@ -57,3 +57,19 @@ test('config show agrees: the environment is still DEV after init', (t) => {
     run(dir, 'init', '-c', 'daita', '-a', 'myapp', '--yes', '--force');
     assert.match(run(dir, 'config', 'show'), /Environment:\s+dev/i);
 });
+
+test('a NEW workspace records the environment the run named (descix --env dev init …)', (t) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'descix-init-newenv-'));
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    run(dir, '--env', 'dev', 'init', '-c', 'daita', '-a', 'myapp', '--yes');
+    const w = ws(dir);
+    assert.equal(w.env.apiUrl, 'https://dev.descix.net', 'without this the next command fell back to PROD');
+    assert.equal(w.env.environment, 'DEV');
+});
+
+test('NEGATIVE CONTROL: with no --env a new workspace pins nothing — the documented default applies', (t) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'descix-init-noenv-'));
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    run(dir, 'init', '-c', 'daita', '-a', 'myapp', '--yes');
+    assert.equal(ws(dir).env.apiUrl, undefined);
+});
