@@ -29,7 +29,7 @@ export async function requireAuth(apiClient) {
   
   if (!apiClient.hasCredentials()) {
     console.error(chalk.red('\n  Authentication required.\n'));
-    console.error(chalk.white('  Please sign up with DeSciX to use this feature.\n'));
+    console.error(chalk.white('  Sign in to use this. On first use, signing in also creates your DeSciX account.\n'));
     console.error(chalk.cyan('  Run: descix login\n'));
     process.exit(1);
   }
