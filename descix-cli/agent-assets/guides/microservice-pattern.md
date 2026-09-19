@@ -24,12 +24,9 @@ my-service/
 │   ├── app_description.md
 │   ├── icon.png
 │   └── system_instructions.md
-├── kb/
-│   ├── staging/
-│   ├── General/
-│   │   ├── README.md
-│   │   └── api-reference.md
-│   └── chunks/
+├── .descix/
+│   └── manifests/
+│       └── General.json        # Corpus manifest — names the docs `kb corpus sync` publishes
 ├── site/                       # Optional frontend
 │   └── ...
 ├── microservice/
@@ -72,7 +69,7 @@ infrastructure for free, and a service that hand-rolls its own config or reads
 only shows up later, in the environment where it matters.
 
 **This is also why your service is called at its own Cloud Run instance rather than
-through an extra hop at the DeSciX router** (CEO-D-2026-08-21-DIRECT-MICROSERVICE-ROUTING-IS-DESIGN).
+through an extra hop at the DeSciX router** — direct routing is by design.
 Direct routing is the intended path *because* a service built on the SDK already carries
 the infrastructure the extra hop would otherwise have to add. Read a direct call as the
 architecture working, not as a bypass — the correctness precondition is that the service
@@ -110,19 +107,19 @@ descix microservice init
 
 # 2. Implement your commands in commandHandlers/
 
-# 3. Publish the service MANIFEST so its commands are discoverable
-descix microservice register
+# 3. Publish the service MANIFEST and vectorize its SERVICE_README in one step
+descix microservice register -r SERVICE_README_myapp.md
 
-# 4. Vectorize SERVICE_README for discovery
-descix microservice vectorize
-
-# 5. Sync KB
+# 4. Sync KB
 descix kb corpus sync -c <community> -a <app>
 ```
 
 **What registration is, and is not.** It publishes your `manifest.json` — the command list —
-so `tell_me_how` can discover your tools. `scripts/register.js` writes that manifest and logs
-the commands it published. It is a DISCOVERY step.
+and vectorizes the README you pass with `-r`, so `tell_me_how` can discover your tools.
+`scripts/register.js` writes that manifest and logs the commands it published. There is no
+separate developer-facing vectorize step — `descix microservice vectorize` exists but is an
+admin-only utility (for re-vectorizing without re-registering), not part of the normal flow.
+It is a DISCOVERY step.
 
 It is not how your service becomes reachable, and nothing here asks you to declare a route or
 a URL. Do not read this step as wiring up addressing.
@@ -132,7 +129,7 @@ a URL. Do not read this step as wiring up addressing.
 | Capability | Enabled |
 |------------|---------|
 | RAG search | Yes |
-| chat_with_kb | Yes |
+| RAG chat (`ask_question_to_app`) | Yes |
 | Public URL | Yes (via service) |
 | MCP tools | Yes |
 | tell_me_how discovery | Yes |

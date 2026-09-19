@@ -165,13 +165,13 @@ unverified step — see `.descix/sdk-assets/reference/local-dev.md` §3.3.
   `DeSciXAppSDK.js` is GENERATED (from `descix-app-sdk/templates/DeSciXAppSDK.template.js`, with a `--check` drift gate) — copy it in, never hand-edit it; a local patch forks the bridge and stops inheriting its fixes.
 - **React/Vite app:** Wrap root in `<AppShell appId="{{appId}}">` from `@descix/app-sdk/AppShell`.
 - **Auth only (no DeSciX UI):** Use `PowchClient` from `@descix/app-sdk/powch-client`.
-- **Existing docs:** Copy `docs/*.md` to `kb/General/` for sync. Keep originals as source of truth.
+- **Existing docs:** Name the docs' folder as a source in a corpus manifest (`.descix/manifests/<KB>.json`), then `descix kb corpus sync`. Docs stay where they are — no copy step.
 - **Empty repo:** Scaffold from scratch.
 
 ## App Structure
 
 - `site/` — Frontend (any framework)
-- `kb/General/` — Knowledge base source docs (markdown)
+- A corpus manifest (`.descix/manifests/<KB>.json`) — names the git-tracked docs `descix kb corpus sync` publishes (no required folder)
 - `microservice/` — Backend service (optional)
 
 ## Context

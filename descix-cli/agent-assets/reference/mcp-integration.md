@@ -10,7 +10,7 @@ This document covers how AI agents interact with the DeSciX platform via MCP (Mo
 
 ## 1. Architecture Overview
 
-DeSciX operates as a **Federated MCP Service Mesh**. The `DeSciX_Cloud` backend acts as a broker that aggregates tools from all registered microservices into a unified catalog.
+DeSciX operates as a **Federated MCP Service Mesh**. The DeSciX backend acts as a broker that aggregates tools from all registered microservices into a unified catalog.
 
 **Key Innovation:** AI agents discover and invoke capabilities across the entire mesh without knowing where individual services are hosted.
 
@@ -24,7 +24,7 @@ AI Agent (Cursor/MCP Client)
    execute_remote_command
        │
        ▼
-   DeSciX_Cloud (Federated Broker)
+   DeSciX Backend (Federated Broker)
        │
        ├──► Service 1 (Powch)
        ├──► Service 2 (SmartModel)
@@ -42,9 +42,9 @@ MCP provides the communication protocol between AI agents and the DeSciX platfor
 **Key Tools:**
 - `tell_me_how` - Semantic tool discovery
 - `execute_remote_command` - Execute any backend command
-- `descix_init` - Initialize local workspace
-- `chat_with_kb` - Query knowledge bases
-- `search_knowledge_base` - Search specific KBs
+- `descix_doctor` - CLI-local startup diagnostic (auth, workspace, tools, warnings)
+- `ask_question_to_app` - RAG chat with an app's knowledge base (synthesized answer, cited)
+- `query_knowledge_base` - Raw vector search, returns chunks
 
 ### 2.2 Cursor/AI Agent Integration
 
@@ -91,13 +91,17 @@ Once signed in, `tell_me_how` is the **primary entry point** for discovering pla
 
 **Rule:** Sign in, then ask `tell_me_how` first, then execute the recommended command.
 
-### 3.2 Three Scopes
+### 3.2 Scopes
+
+The validated `tell_me_how` scope enum has five values:
 
 | Scope | Description | Use Case |
 |-------|-------------|----------|
-| `entitlements` (default) | Only tools user has access to | Production usage |
+| `entitlements` (default) | Only tools the user has access to | Production usage |
 | `project` | Tools filtered by workspace.json | Working within a project |
 | `discovery` | All available tools | Exploring capabilities |
+| `bootstrap` | Deterministic first-call on-ramp: platform summary, caller context, credit balance, essential tool schemas (no vector search; `question` is optional for this scope only) | First contact / first call in a session |
+| `artifact` | Deterministic build/reproduce provenance for a published app (npm package + spec, artifact/notebook URLs, runnable `npx` commands), no vector search | "How do I build on / reproduce this app?" |
 
 ### 3.3 CLI Usage
 
@@ -151,7 +155,7 @@ After `descix quickstart` completes:
 
 ### 4.1 Federated MCP Broker
 
-`DeSciX_Cloud` aggregates tools from all registered microservices:
+The DeSciX backend aggregates tools from all registered microservices:
 
 ```
 Microservice A
@@ -161,7 +165,7 @@ Microservice A
     Registers with Core
         │
         ▼
-DeSciX_Cloud (Broker)
+DeSciX Backend (Broker)
   └── Aggregated tools/list
         │
         ▼
@@ -199,14 +203,11 @@ execute_remote_command({
 
 ### 4.3 Service Registration
 
-Services self-register with the broker:
+Services self-register with the broker in one step — registration also vectorizes the README you
+pass, so there is no separate developer-facing vectorize step:
 
 ```bash
-# Register service manifest
-descix microservice register -m ./manifest.json
-
-# Vectorize SERVICE_README for discovery
-descix microservice vectorize -r SERVICE_README.md
+descix microservice register -r SERVICE_README.md
 ```
 
 ### 4.4 The execute_remote_command Pattern
@@ -309,11 +310,13 @@ When `--scope project` is used:
 
 ### 6.1 KB Operations via tell_me_how
 
-The new SDK V2 KB commands are discoverable:
+`tell_me_how` can be asked about KB sync in plain language, but the actionable answer for a
+developer is always the CLI verb, not the raw backend command names (`kb_sync_chunks` etc. are
+internal to the backend, not something the CLI calls directly by name):
 
 ```bash
 descix tell-me-how "How do I sync my knowledge base?"
-# Returns: kb_sync_chunks, kb_get_chunk_ids, kb_delete_chunks
+# The developer-facing command either way: descix kb corpus sync
 ```
 
 ### 6.2 workspace.json from Hydration
@@ -324,7 +327,7 @@ descix tell-me-how "How do I sync my knowledge base?"
 {
   "env": { "apiUrl": "https://dev.descix.net", "products": [ /* one entry per app */ ] },
   "driveConfig": {
-    "base_folder_id": "..."  // For tell_me_how project scope
+    "base_folder_id": "..."  // Only used by `descix drive pull/push` — unrelated to tell_me_how scope
   }
 }
 ```
@@ -334,9 +337,9 @@ descix tell-me-how "How do I sync my knowledge base?"
 Custom services integrate with the same pattern:
 
 1. Create `SERVICE_README_{name}.md`
-2. Register with `descix microservice register`
-3. Vectorize with `descix microservice vectorize`
-4. Tools become discoverable via `tell_me_how`
+2. Register with `descix microservice register -r SERVICE_README_{name}.md` — this both publishes
+   the manifest AND vectorizes the README in one step
+3. Tools become discoverable via `tell_me_how`
 
 ---
 
@@ -355,7 +358,8 @@ Custom services integrate with the same pattern:
 1. **Document all commands in SERVICE_README** - Required for discovery
 2. **Use clear descriptions** - "Use when:" is crucial for semantic matching
 3. **Include examples** - Helps AI agents understand usage
-4. **Register after changes** - Re-vectorize when README updates
+4. **Re-register after README changes** - `descix microservice register -r <file>` re-vectorizes
+   automatically; there is no separate vectorize step
 
 ### 7.3 Common Patterns
 
@@ -407,22 +411,11 @@ cd /path/to/workspace
 
 ### 8.3 "Command not found"
 
-**Cause:** Service not registered or command deprecated.
+**Cause:** Service not registered, or the README wasn't vectorized.
 
 **Solution:**
-1. Verify service is registered: `descix microservice list`
-2. Check if command was deprecated in V2
-3. Use `tell_me_how --scope discovery` to find alternatives
-
----
-
-## 9. File References
-
-| Component | Path |
-|-----------|------|
-| MCP Tools | `DeSciX_Core/descix-cli/bin/mcp-server.js` |
-| tell_me_how Implementation | `DeSciX_Cloud/microservice/services/commandHandlers/ragCommands.js` |
-| execute_remote_command | `DeSciX_Cloud/microservice/services/apiFront.js` |
-| SERVICE_README Template | `DeSciX_Core/descix-cli/templates/scaffolds/microservice/templates/SERVICE_README_TEMPLATE.md` |
-| Workspace Config | `DeSciX_Core/descix-cli/lib/workspace-config.js` |
-| Service Registration | `DeSciX_Core/descix-cli/bin/descix.js` |
+1. Re-run `descix microservice register -r SERVICE_README_<name>.md` — it re-publishes the
+   manifest and re-vectorizes the README (`descix microservice list` exists to enumerate
+   registered services, but it is an admin-only command, not something a developer runs)
+2. Check `descix microservice health <name>` to confirm the service itself is reachable
+3. Use `descix tell-me-how --scope discovery "..."` to find alternatives

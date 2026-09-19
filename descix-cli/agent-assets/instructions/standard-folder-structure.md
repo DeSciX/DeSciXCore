@@ -23,13 +23,15 @@ DeSciX uses a "Mono-Repo" style structure where multiple communities and apps ca
 │       │   ├── icon.png
 │       │   └── system_instructions.md (AI Persona)
 │       │
-│       ├── kb/                 # Knowledge Base (RAG)
-│       │   ├── staging/        # Local files to push to Drive
+│       ├── .descix/
+│       │   └── manifests/
+│       │       └── General.json    # Corpus manifest — names the KB's git-tracked sources
+│       │
+│       ├── kb/                 # Knowledge Base content — OPTIONAL location, any path works
+│       │   ├── staging/        # (if using Drive) Local files to push to Drive
 │       │   │   └── new-doc.pdf
-│       │   ├── General/        # Converted markdown (from Drive pull)
-│       │   │   └── *.md
-│       │   └── chunks/         # JSON chunk files (for vectorization)
-│       │       └── *.chunks.json
+│       │   └── General/        # (if using Drive) Converted markdown from `descix drive pull`
+│       │       └── *.md
 │       │
 │       ├── site/               # Frontend UI (Optional)
 │       │   ├── index.html
@@ -66,19 +68,24 @@ Self-contained folder for a single application.
 - **`system_instructions.md`**: Instructions for the AI Agent that interacts with users of this app.
 - **`icon.png`**: App Icon.
 
-#### `kb/` - Knowledge Base
-The KB folder supports both local-first (Git mode) and Drive-based workflows:
+#### `.descix/manifests/<KB>.json` - Corpus Manifest
+**This is what makes a KB syncable — not any folder's existence.** It names the git-tracked
+path(s) `descix kb corpus sync` walks, chunks and upserts to Pinecone. No manifest means nothing
+to sync, regardless of what is under `kb/`.
+
+#### `kb/` - Knowledge Base content (optional convention)
+There is no required KB folder. `kb/` is one common place to keep content, especially if you also
+use Drive-based authoring:
 - **`staging/`**: Place raw files here (PDFs, images) to push them to Drive via `descix drive push`.
-- **`General/`**: The canonical source of text content. Files here are pulled from Drive and converted to Markdown via `descix drive pull`.
-- **`chunks/`**: Processed JSON chunk files ready for vectorization via `descix kb corpus sync`.
+- **`General/`**: Files pulled from Drive and converted to Markdown via `descix drive pull`. Still
+  needs to be named as a source in the corpus manifest to be indexed — pulling alone does not sync.
 
 **CLI-Centric Processing (Git Mode):**
 ```bash
-descix drive push   # Push staging/ -> Drive
-descix drive pull   # Pull Drive -> General/ (converted to markdown)
-descix kb corpus sync  # Generate chunks from General/ -> chunks/
-descix kb corpus sync   # Push chunks to Pinecone via service layer
-descix kb corpus sync  # Convenience: pull → chunk → sync
+descix drive push      # (optional) Push staging/ -> Drive
+descix drive pull      # (optional) Pull Drive -> local markdown, converted
+# Commit the markdown, name its folder in .descix/manifests/<KB>.json, then:
+descix kb corpus sync  # Walk the manifest's sources, chunk what changed, upsert + purge in Pinecone
 ```
 
 #### `site/` - Frontend
@@ -94,34 +101,30 @@ descix kb corpus sync  # Convenience: pull → chunk → sync
 
 ## Configuration Files
 
-### `.descix/workspace.json` (Root)
+### `.descix/workspace.json` (Root) — v2.1, the only supported format
+
 ```json
 {
-  "version": "2.0",
-  "communities": {
-    "my-dao": {
-      "apps": {
-        "governance": { 
-          "localPath": "my-dao/governance",
-          "sync_mode": "git"
-        },
-        "treasury": { 
-          "localPath": "my-dao/treasury",
-          "sync_mode": "drive"
-        }
-      }
-    }
+  "version": "2.1",
+  "env": {
+    "environment": "DEV",
+    "apiUrl": "https://dev.descix.net",
+    "products": [
+      { "appId": "my-dao-governance", "communityId": "my-dao", "localPath": "my-dao/governance", "kbId": "General" },
+      { "appId": "my-dao-treasury", "communityId": "my-dao", "localPath": "my-dao/treasury", "kbId": "General" }
+    ]
   }
 }
 ```
 
-**`sync_mode` Options:**
-| Mode | KB Source | Use Case |
-|------|-----------|----------|
-| `git` | Local files | CLI-managed apps, developers (default for CLI) |
-| `drive` | Pull from Drive | PWA-created apps, non-technical users |
+Written by CLI verbs only — `descix config init`, `descix app init`, `descix app set-site`,
+`descix app set-port`. A `communities`-keyed block with no `env` block is the removed v1 shape and
+is refused on load: `v1 workspace format is not supported. Migrate to v2.1.`
 
-**Note:** The CLI only supports `git` mode operations. If you are using the CLI, you are effectively in `git` mode.
+**Sync mode:** The CLI only performs **git-mode** operations (local files → corpus manifest →
+Pinecone, via `descix kb corpus sync`). Drive-mode (Drive → GCS → Pinecone, fully server-side) is
+PWA-only and is never triggered by the CLI. There is no per-app `sync_mode` switch in workspace.json
+— using the CLI at all means git mode.
 
 ## Agent Workflow for Migration
 

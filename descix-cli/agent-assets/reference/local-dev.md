@@ -169,9 +169,11 @@ the survey outranks the paper for exactly the reader who does not yet know the p
 
 **There is no port-derived step for the API.** An environment NAME never becomes an origin, and
 `env.platform.microservice.port` is not consulted: a local backend is a URL you name
-(`descix config set-env dev --url https://localhost:4000`, or `env.apiUrl` direct). The single
-owner of this order is `lib/origin.js::PRECEDENCE`; this table is a description of it, not a
-second copy of the rule.
+(`descix config set-env dev --url https://localhost:4000`, or `env.apiUrl` direct). **This is
+platform-dev mode** — running your own local backend (Scenario 2 below), not part of standard app
+development, which targets a hosted environment (`descix config set-env dev` with no `--url`, or
+`demo`/`prod`). The single owner of this order is `lib/origin.js::PRECEDENCE`; this table is a
+description of it, not a second copy of the rule.
 
 **Every resolution carries its SOURCE, and every network-bound command prints it on stderr** —
 always, not only when it lands on the default:
@@ -250,83 +252,3 @@ human it is unverified.
 *   **The credential is a body field**, not a cookie and not a header: every call is a relative `POST /apifront/` with the token in the JSON body. There is no `SameSite` problem, no credentialed CORS preflight, and the browser origin is irrelevant to the mesh — same-origin is required for *frame scripting*, not for auth.
 *   **Set your framework's base path to `/p/{appId}`.** The gateway does not rewrite paths, so assets requested at `/` will 404.
 
-## 6. Running from a git worktree
-
-`.descix/workspace.json` is gitignored, so no worktree has one. The gateway walks **up** from cwd to find it, so an in-repo worktree silently inherits the **main checkout's** workspace — its port, its products, its `localPath`s. Copying the file into a worktree does not help: a saved workspace bakes an absolute `workspaceRoot` and prefers it over the discovered root, pointing back at the original checkout. Out-of-repo worktrees fail earlier and more confusingly: a credential-loading command reports **"Authentication required… Run: descix login"** when the real cause is a missing workspace file.
-
-Rules of thumb: run the CLI from the canonical checkout, and treat an auth error raised from a worktree as a workspace-resolution suspect *before* re-authenticating.
-
-### Deploying: probe the credential the action actually uses
-
-`deploy-env.sh` will refuse to start rather than fail halfway:
-
-```
-gcloud credentials are NOT usable (expired user session, or no active account)...
-Refusing to start a real deploy that would fail partway through.
-```
-
-That refusal is the script working correctly, and **an expired gcloud user session alongside live
-ADC is a normal steady state**, not a broken machine. The two are different credentials behind one
-word: the deploy path needs the **user session**, while most quick probes reach for **ADC**.
-
-This is the trap: `gcloud auth application-default print-access-token` returns a token, you record
-"gcloud is fine", and that observation is *true and irrelevant*. **Probe the credential the action
-actually uses, not an adjacent one that happens to answer.**
-
-The remedy is one line, needs no re-auth prompt, and the script prints it itself:
-
-```bash
-export CLOUDSDK_AUTH_ACCESS_TOKEN="$(gcloud auth application-default print-access-token)"
-[ -n "$CLOUDSDK_AUTH_ACCESS_TOKEN" ] || { echo "empty token"; exit 1; }
-```
-
-Assert it non-empty before launching — an empty token reproduces the same refusal one layer later,
-where it is harder to recognise.
-
-**Why this is written down rather than left to be rediscovered:** without it, the next agent reads
-a correct fail-loud refusal as *platform unreachable* and stops under the platform-reachability
-rule — halting a lane and escalating, over a one-line export the script had already told it. A
-fail-loud message nobody knows how to act on still costs a lane.
-
-### Exit codes from wrappers are not evidence
-
-A deploy wrapper ending in `| tail` returns **tail's** status, not the deploy's. A run can report
-exit 0 while the deploy correctly returned 1. Capture the real status *before* anything pipes it:
-
-```bash
-deploy-env.sh dev; rc=$?          # capture FIRST
-deploy-env.sh dev 2>&1 | tail -40 # then look at output separately
-```
-
-To confirm a deploy succeeded, **read the log, not the exit code** — and where the artifact is
-observable (a served object's timestamp, a string in the shipped bundle), check that instead. A
-pipe silently drops information in both directions: `| tail` hides a failure, and `| head` hides
-later matches from a search that looks complete.
-
-### The SDK you edit is not always the SDK you serve
-
-A second, sharper worktree trap, and it is silent. `DeSciX_Cloud/site/node_modules/@descix/app-sdk`
-is a **symlink into the canonical Core checkout**:
-
-```
-$ readlink DeSciX_Cloud/site/node_modules/@descix/app-sdk
-../../../../DeSciX_Core/descix-app-sdk
-```
-
-and `@descix/app-sdk` has **no build step** — its `main` and its `.` export both point straight at
-`./src/index.js`, so Vite serves the package source as-is. Put those two facts together: **`descix
-serve` serves whatever the CANONICAL Core working tree contains**, no matter which worktree you are
-editing in. Change `app-sdk` on a branch, reload, and you are still running canonical `main` — your
-edit is not in the page, nothing errors, and the obvious conclusion ("my change had no effect") is
-wrong.
-
-Verify what is actually being served before you conclude anything about a change:
-
-```bash
-readlink DeSciX_Cloud/site/node_modules/@descix/app-sdk       # where the symlink points
-node -p "require.resolve('@descix/app-sdk')"                  # from the site directory
-```
-
-If it resolves to the canonical checkout and you are editing elsewhere, you are measuring the wrong
-tree. Re-point the symlink at your worktree for the measurement **and restore it afterwards** — it
-is untracked, so nothing will remind you.

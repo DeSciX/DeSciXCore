@@ -160,13 +160,12 @@ descix site status -c egpt -a egpt-mydocs      # site status/list need both when
 
 ---
 
-## 7. File References
+## 7. Where each concept lives (conceptual, not a file map)
 
-| Component | Path | Description |
-|-----------|------|-------------|
-| WorkspaceConfig | `DeSciX_Core/descix-cli/lib/workspace-config.js` | the loader, the v2.1 writer, `registerApp`, `detectContext` |
-| Origin resolution | `DeSciX_Core/descix-cli/lib/origin.js` | flag → `DESCIX_API_URL` → `env.apiUrl` → default |
-| GlobalConfig | `DeSciX_Core/descix-cli/lib/global-config.js` | user-level settings (`~/.descixrc`) |
-| Config commands | `DeSciX_Core/descix-cli/lib/commands/config.js` | `config init/set-env/set-*` |
-| Wallet file | `DeSciX_Core/descix-cli/lib/wallet-file.js` | `.descix/wallet.json` location |
-| Corpus sync | `DeSciX_Core/descix-cli/lib/commands/corpus.js` | manifests, sync-state |
+| Concept | Owner |
+|---|---|
+| Workspace loading, the v2.1 writer, app registration, context detection | `WorkspaceConfig`, internal to `@descix/cli` |
+| Origin resolution precedence | flag → `DESCIX_API_URL` → `env.apiUrl` → default (`descix config` commands) |
+| User-level settings (`~/.descixrc`) | `GlobalConfig`, internal to `@descix/cli` |
+| `.descix/wallet.json` | written by `descix login` |
+| Corpus manifests, sync-state | `descix kb corpus` commands, internal to `@descix/cli` |

@@ -16,25 +16,27 @@ Purpose: Maps local folders to DeSciX apps and stores all configuration.
 
 ```json
 {
-  "version": "2.0",
-  "primaryCommunity": "daita",
-  "communities": {
-    "daita": {
-      "apps": {
-        "appsdk": {
-          "localPath": "daita/appsdk",
-          "absolutePath": "/path/to/workspace/daita/appsdk",
-          "kbId": "General"
-        }
+  "version": "2.1",
+  "env": {
+    "environment": "DEV",
+    "apiUrl": "https://dev.descix.net",
+    "products": [
+      {
+        "appId": "daita-appsdk",
+        "communityId": "daita",
+        "localPath": "daita/appsdk",
+        "kbId": "General"
       }
-    }
+    ]
   },
   "driveConfig": {
-    "base_folder_id": "...",
-    "base_folder_name": "..."
+    "base_folder_id": "..."
   }
 }
 ```
+
+A `communities`-keyed block with no `env` block is the removed v1 shape — the loader refuses it:
+`v1 workspace format is not supported. Migrate to v2.1.`
 
 **Used for:**
 - CLI auto-detection of community/app from current directory
@@ -139,20 +141,12 @@ Which mappings should I create?
 
 For each mapping, create appropriate config:
 
-1. **workspace.json** (root level):
-   ```json
-   {
-     "version": "2.0",
-     "primaryCommunity": "{primary_community_id}",
-     "directoryMappings": {
-       "{folder}": {
-         "communityId": "{community_id}",
-         "appId": "{app_id}",
-         "kbId": "General"
-       }
-     }
-   }
+1. **workspace.json** (root level) — written by CLI verbs, never by hand:
+   ```bash
+   descix config init --env dev                          # creates workspace.json, pins env.apiUrl
+   descix app init -a {app_id} -c {community_id} -p {folder}   # adds env.products[] entry
    ```
+   Each mapping becomes one `env.products[]` entry (`appId`, `communityId`, `localPath`, `kbId`).
 
 ## App Configuration Flow
 
@@ -180,10 +174,13 @@ Would you like to:
 
 For each folder being configured:
 
-1. Read `packaging-types.md` for the decision tree
-2. Read `folder-analysis.md` for detection heuristics
+1. Read [guides/README.md](../guides/README.md) for the decision tree (Knowledge-Only / Static
+   Site / Microservice / Dynamic Site)
+2. Read [app-asset-validation.md](./app-asset-validation.md#folder-analysis-heuristics) for
+   detection heuristics
 3. Present options to user with recommendations
-4. Use appropriate template from `templates/{type}/`
+4. Scaffold with the matching CLI verb: `descix site init` and/or `descix microservice init`
+   (there is no `templates/{type}/` to read directly — the CLI copies the right scaffold)
 
 ### Step 4: Validate Folder Structure
 
@@ -191,11 +188,14 @@ After determining packaging type, ensure the folder follows the [Standard Folder
 
 ```
 {app_folder}/
-├── assets/                    # App identity (required)
-├── kb/General/                # Knowledge base (required)
-├── site/                      # Static site (required)
-└── microservice/              # Backend service (required)
+├── assets/                          # App identity (required)
+├── .descix/manifests/<KB>.json      # Corpus manifest — required for RAG, see below
+├── site/                            # Static site (required)
+└── microservice/                    # Backend service (required)
 ```
+
+There is no required KB folder — a knowledge base is whatever git-tracked source(s) the corpus
+manifest names.
 
 **Validation Steps:**
 
@@ -204,54 +204,37 @@ After determining packaging type, ensure the folder follows the [Standard Folder
 3. Check if kb/ has a README.md
 4. For missing folders/files, offer to create with placeholders
 
-Use `validate_app_structure` command:
-
-```javascript
-execute_remote_command({
-  command: "validate_app_structure",
-  params: { local_path: "/path/to/app" }
-})
-```
+`validate_app_structure` returns a generic checklist — a folder existing does not mean the KB is
+wired up. **The check that actually matters for RAG is `.descix/manifests/<KB>.json` existing with
+at least one source**, per [app-asset-validation.md](./app-asset-validation.md#step-3-check-knowledge-base).
 
 ### Step 5: Pull from Drive (Optional)
 
-If the app already exists remotely, offer to pull existing assets:
+If the app already exists remotely, offer to pull existing content:
 
 ```
-I notice this app ({community_id}/{app_id}) already exists on DeSciX.
+Your app may already have content on DeSciX Drive.
 
-Remote assets found:
-- ✓ app_description.md
-- ✓ icon.png
-- ✓ system_instructions.md
-
-Your local folder is missing some of these.
-
-Would you like me to pull them from Drive?
-[Yes, pull missing assets] [No, I'll create new ones]
+Would you like me to pull it into your local folder?
+[Yes, pull from Drive] [No, I'll create new ones]
 ```
 
-Use `pull_app_assets_from_drive` command:
-
-```javascript
-execute_remote_command({
-  command: "pull_app_assets_from_drive",
-  params: {
-    community_id: "...",
-    app_id: "...",
-    local_path: "/path/to/app",
-    folders: ["assets", "kb"]  // Which folders to pull
-  }
-})
+```bash
+descix drive pull -c <community_id> -a <app_id>
 ```
+
+This downloads and converts Drive content to local markdown and reports what changed. It does not
+sync to Pinecone by itself — follow with `descix kb corpus sync` once the pulled files are named
+in a corpus manifest.
 
 ### Step 6: Create Missing Structure
 
 For any missing folders or files:
 
-1. Create the folder structure
-2. Add placeholder READMEs explaining purpose
-3. Use templates from `templates/common/`
+1. Create `assets/` with starter `app_description.md` / `system_instructions.md` (or run
+   `descix app init`, which scaffolds these for you)
+2. Create a `.descix/manifests/<KB>.json` corpus manifest naming wherever the docs will live
+3. `descix site init` / `descix microservice init` for the code scaffolds
 
 ```
 Creating standard folder structure...
@@ -260,7 +243,7 @@ Created:
 ✓ assets/app_description.md (from template)
 ✓ assets/system_instructions.md (from template)
 ○ assets/icon.png (TODO: add a 512x512 PNG)
-✓ kb/General/README.md
+✓ .descix/manifests/General.json (empty — add sources once you have docs)
 ✓ site/README.md (placeholder)
 ✓ microservice/README.md (placeholder)
 
@@ -307,7 +290,8 @@ Once configured, guide user to:
 ### Sync Commands (in order)
 
 1. **Sync app assets**: `descix app sync-assets`
-   - Uploads app_description.md, icon.png, system_instructions.md to Drive
+   - Syncs app_description.md, icon.png, system_instructions.md to the platform (Firestore/GCS) —
+     not Google Drive
    
 2. **Sync knowledge base**: `descix kb corpus sync`
    - Indexes documents to Pinecone for RAG
@@ -315,14 +299,14 @@ Once configured, guide user to:
 3. **Deploy static site** (if applicable): `descix site upload`
    - Uploads site/ contents to GCS
 
-4. **Register microservice** (if applicable): `descix microservice register`
-   - Registers service with gateway
-   - Run `descix microservice vectorize` for tell_me_how discovery
+4. **Register microservice** (if applicable): `descix microservice register -r SERVICE_README_<name>.md`
+   - Registers the service manifest AND vectorizes the README you pass, in one step —
+     `tell_me_how` discovery needs no separate developer action
 
 ### Ongoing Development
 
 - Use `tell_me_how` for tool discovery and guidance
-- Use `chat_with_kb` to test your AI agent
+- Use `ask_question_to_app` (or `descix chat`) to test your AI agent
 - Use `validate_app_structure` before syncing to catch issues
 
 ---
