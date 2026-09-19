@@ -199,7 +199,7 @@ program
   .option('-c, --community <id>', 'Community ID')
   .option('-a, --app <name>', 'App name')
   .option('-p, --path <path>', 'Project path (defaults to current directory)')
-  .option('-f, --force', 'Overwrite existing workspace.json')
+  .option('-f, --force', 'Restart the app registrations in an existing workspace (its environment settings are kept)')
   .option('-y, --yes', 'Skip the confirmation — with -c and -a, init runs without a terminal')
   .option('--from-invite <token>', 'Resolve an invite token to pre-fill app context')
   .action(async (options) => {
@@ -461,6 +461,23 @@ airdropCommand
 const communityCommand = program
   .command('community')
   .description('Community operations');
+
+communityCommand
+  .command('refresh-identity')
+  .description('Mirror a community\'s token symbol and icon from the descix-chain registry into this environment (the icon only if it serves)')
+  .requiredOption('-c, --community <id>', 'Community ID')
+  .action(async (options) => {
+    try {
+      const apiClient = new DeSciXApiClient();
+      await requireAuth(apiClient);
+      const { refreshCommunityIdentity, printIdentityReceipt } = await import('../lib/commands/communityIdentity.js');
+      printIdentityReceipt(options.community, await refreshCommunityIdentity(apiClient, options.community));
+      console.log();
+    } catch (error) {
+      console.error(chalk.red(`\n❌ ${error.message}\n`));
+      process.exit(1);
+    }
+  });
 
 communityCommand
   .command('list')
@@ -1167,6 +1184,20 @@ appCommand
 
       console.log(chalk.green(`\n✓ ${appId} initialized`));
       console.log(chalk.gray(`  Community: ${communityId}`));
+
+      // A community's OWN app (app_id == community_id) mirrors its token symbol and icon from the
+      // env-invariant descix-chain registry into this environment (CEO 2026-09-19). The app is
+      // already initialized; a refusal here (not an admin of the community, or the community not in
+      // the registry) is reported with the command that retries it, not treated as an init failure.
+      if (appId === communityId) {
+        const { refreshCommunityIdentity, printIdentityReceipt } = await import('../lib/commands/communityIdentity.js');
+        try {
+          printIdentityReceipt(communityId, await refreshCommunityIdentity(apiClient, communityId));
+        } catch (err) {
+          console.log(chalk.yellow(`\n  ⚠ Community identity not mirrored: ${err.message}`));
+          console.log(chalk.gray(`    Retry with: descix community refresh-identity -c ${communityId}`));
+        }
+      }
       console.log(chalk.gray(`  KB: ${kbId} — ${kbResult.created ? 'created' : 'already exists'}\n`));
       console.log(chalk.gray(`  (every app is guaranteed a default KB at creation; an empty one`));
       console.log(chalk.gray(`   says so rather than answering from general knowledge)\n`));
