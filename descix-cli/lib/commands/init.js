@@ -172,6 +172,13 @@ export async function runInit(apiClient, options = {}) {
     }
     config.registerApp(communityId, appId, { localPath: '.', kbId: 'General' });
     await config.save(projectPath);
+    // A NEW workspace records the environment this run used (`descix --env dev init …`), through
+    // the same owner `config init` uses — otherwise the workspace carried no environment and the
+    // very next command fell back to PROD, although the developer had just chosen DEV. An EXISTING
+    // workspace keeps its own environment: that choice belongs to the config verbs.
+    if (!existingConfig && options.env) {
+      await config.setEnvironment(options.env);
+    }
 
     console.log(chalk.green('Created:'));
     console.log(chalk.green('  ✓ .descix/workspace.json'));
