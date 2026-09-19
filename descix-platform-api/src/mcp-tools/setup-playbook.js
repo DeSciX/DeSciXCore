@@ -128,7 +128,7 @@ const FIRST_CONTACT_SCRIPT = Object.freeze([
         // suite may be MENTIONED as what a full checkout adds, never as npx-runnable. Offer-first,
         // ask-before-running, per-surface honesty preserved. HUsr user-type differentiation (airdrop/
         // tokenomics fork) is a BOARDED follow-up — do NOT branch on user type here.
-        do: "Finish by offering the user a way to SEE a claim settle — offer it, and ask before running anything. Be honest about the boundary first: you can't clone the repo or run the Lean proofs here (a full `lake build` checkout belongs in Claude Code or Cowork — refer the user there for that), but the egpt community's libraries ARE npm-installable, so an npm-capable assistant can do two things right now. (1) The double-slit Evidence Contract settlement check: `npx -y -p @descix/frqtl-sdk@0.1.2 frqtl-dse-settlement --check` — it reproduces the detector histogram bin-for-bin against an in-package golden and prints `chi2 (combined histogram) = 0 (df=73)` then `CHECK RESULT: PASS (chi2=0, exact bin match)` in about a minute, entirely offline (the egpt-dse settlement profile — the same χ²=0 exact-bin-match criterion the Evidence Contract names). (2) The constructive-math library `@descix/egpt-math-sdk` is importable now (it exports EGPTFFT, EGPTMath, EGPTMatrix, EGPTPolynomial, EGPTReal) — you can import it and exercise the integer-only math interactively with the user. Say it plainly: \"want me to run the settlement check, or import the math library and try it?\" Per surface: on Claude Code or Cowork, run both directly and show the output; on claude.ai, offer them and run them yourself only if you have npm-capable tooling, otherwise point the user to Claude Code or Cowork. Note honestly what npm does NOT yet include: there is no one-command packaged 157-test suite and no circuit-SAT binary in the published dist — those come from a full repo checkout (Claude Code/Cowork) or the launchable notebook links, so never present them as npx-runnable.",
+        do: "Finish by offering the user a way to SEE a claim settle — offer it, and ask before running anything. Be honest about the boundary first: you can't clone the repo or run the Lean proofs here (a full `lake build` checkout belongs in Claude Code or Cowork — refer the user there for that), but the egpt community's libraries ARE npm-installable, so an npm-capable assistant can do two things right now. (1) The double-slit Evidence Contract settlement check: `npx -y -p @descix/frqtl-sdk frqtl-dse-settlement --check` — it reproduces the detector histogram bin-for-bin against an in-package golden and prints `chi2 (combined histogram) = 0 (df=73)` then `CHECK RESULT: PASS (chi2=0, exact bin match)` in about a minute, entirely offline (the egpt-dse settlement profile — the same χ²=0 exact-bin-match criterion the Evidence Contract names). (2) The constructive-math library `@descix/egpt-math-sdk` is importable now (it exports EGPTFFT, EGPTMath, EGPTMatrix, EGPTPolynomial, EGPTReal) — you can import it and exercise the integer-only math interactively with the user. Say it plainly: \"want me to run the settlement check, or import the math library and try it?\" Per surface: on Claude Code or Cowork, run both directly and show the output; on claude.ai, offer them and run them yourself only if you have npm-capable tooling, otherwise point the user to Claude Code or Cowork. Note honestly what npm does NOT yet include: there is no one-command packaged 157-test suite and no circuit-SAT binary in the published dist — those come from a full repo checkout (Claude Code/Cowork) or the launchable notebook links, so never present them as npx-runnable.",
     }),
 ]);
 
@@ -149,8 +149,13 @@ export const DESCIX_SETUP_PLAYBOOK = Object.freeze({
     // verification command; setup ends with the user having SEEN a claim settle.
     settlement_experience: Object.freeze({
         app_id: 'egpt-dse',
-        package: '@descix/frqtl-sdk@0.1.2',
-        command: 'npx -y -p @descix/frqtl-sdk@0.1.2 frqtl-dse-settlement --check',
+        // NO VERSION IS PINNED HERE. Three copies of these versions disagreed at once (this block,
+        // the bootstrap `build` block, and the registry: 0.1.2 / 0.1.5 / 0.2.0 — measured
+        // 2026-09-19), because a version restated in prose cannot follow a publish. The provenance
+        // surface owns the exact command: tell_me_how({ scope: 'artifact' }).
+        package: '@descix/frqtl-sdk',
+        command_source: "tell_me_how({ scope: 'artifact' }) — take the exact npx command from the registry entry for egpt-dse, which carries the current version.",
+        command: 'npx -y -p @descix/frqtl-sdk frqtl-dse-settlement --check',
         expected_output: 'chi2 (combined histogram) = 0 (df=73); CHECK RESULT: PASS (chi2=0, exact bin match)',
         per_surface: Object.freeze({
             claude_ai: 'Offer it as the thing to run in Claude Code or Cowork; run it directly only if you have npm-capable tooling.',
@@ -167,7 +172,7 @@ export const DESCIX_SETUP_PLAYBOOK = Object.freeze({
     // consumer must not present them as npx-runnable. Coming via the FRQTL lane (rows being boarded).
     constructive_math_experience: Object.freeze({
         app_id: 'egpt',
-        package: '@descix/egpt-math-sdk@0.1.1',
+        package: '@descix/egpt-math-sdk',  // version: see tell_me_how({ scope: 'artifact' })
         importable: true,
         exports: Object.freeze(['EGPTFFT', 'EGPTMath', 'EGPTMatrix', 'EGPTPolynomial', 'EGPTReal']),
         what_you_can_do: 'Import the package and exercise the integer-only constructive math interactively with the user (construct and evaluate the exported types). Offer-first; ask before running.',
@@ -243,6 +248,61 @@ export const DESCIX_SETUP_PLAYBOOK = Object.freeze({
     }),
 });
 
+
+/**
+ * DESCIX_DEVELOPER_PLAYBOOK — the BUILD path (CEO 2026-09-19: the launch audience is Claude Code
+ * developers, and the connector is their first act).
+ *
+ * WHY THIS EXISTS SEPARATELY. The first-contact script above walks a claude.ai RESEARCHER through a
+ * Project. It names no CLI, no app creation, no knowledge base and no site, so a developer who asked
+ * how to build ended in a consumer tour (devx review 2026-09-19, M4). This is the other half.
+ *
+ * THE CONNECTOR DOES NOT BUILD APPS. It is how an assistant ASKS the platform things. Creating an
+ * app, syncing a knowledge base and publishing a site are CLI acts, on the same account.
+ *
+ * NO VERSIONS ARE PINNED and no command is invented: every verb below exists in the published CLI,
+ * and `descix tell-me-how` finds the rest.
+ */
+export const DESCIX_DEVELOPER_PLAYBOOK = Object.freeze({
+    kind: 'descix_developer_playbook',
+    version: '2026-09-19.1',
+    audience: 'A developer who wants to BUILD on DeSciX. For a researcher who wants to read and ask, use the setup playbook instead.',
+    surface_note: 'Written for Claude Code, the supported preview surface. The CLI is identical everywhere; only the connector registration differs by client.',
+    script: Object.freeze([
+        Object.freeze({
+            step: 'connect_first',
+            do: "Establish the connector before anything else, because signing in IS the account creation: the browser passkey ceremony creates the DeSciX account if they have none, and the platform grants the one-time welcome credit when it completes. In Claude Code: `claude mcp list` to see status, `claude mcp add --transport http descix <origin>/mcp` if it is absent, then `claude mcp login <name>` (or the /mcp panel's Authenticate) if it reads 'Needs authentication'. Verify by calling tell_me_how({ scope: 'bootstrap' }) and reading back the caller identity.",
+        }),
+        Object.freeze({
+            step: 'pin_environment',
+            do: "Pin the environment for their project BEFORE they sign in on the CLI, or the CLI signs them into production by default: `npx -y -p @descix/cli descix --env prod config init`. --env is a GLOBAL flag and goes BEFORE the subcommand; there is no default. 'dev' is a separate world with separate accounts and credits.",
+        }),
+        Object.freeze({
+            step: 'cli_login',
+            do: 'Sign the CLI in with `npx -y -p @descix/cli descix login`. It is the same account as the connector, and it creates one if they have none.',
+        }),
+        Object.freeze({
+            step: 'create_app',
+            do: "Create the app: `npx -y -p @descix/cli descix app init -a <name> -c <community>`. With -c the -a value is a NAME and the PLATFORM issues the id (<community>-<name>); the command prints it. Tell the user plainly that the issued id, not the name they typed, is what every later -a takes. app init also creates site/, microservice/ and assets/, and writes the instruction files their coding assistant reads.",
+        }),
+        Object.freeze({
+            step: 'knowledge_base',
+            do: "Fill the app's knowledge base from git-tracked files: create the corpus manifest at the path app init names (<app localPath>/.descix/manifests/General.json) listing the source files, then `descix kb corpus sync -a <issued id> --dry-run` and READ THE PLAN before running it without --dry-run. There is no kb/General/ folder and no kb chunk/push/pull step — corpus sync is the only sync surface.",
+        }),
+        Object.freeze({
+            step: 'publish_site',
+            do: "If the app has a web front end, build it and publish with `descix site upload -a <issued id> -p <built output dir>`. The upload REPLACES the served site and refuses private files. Then verify what is actually served, not what was uploaded.",
+        }),
+        Object.freeze({
+            step: 'verify',
+            do: "Close the loop with a real call: ask the app's own knowledge base a question it should now be able to answer (ask_question_to_app with the issued app id) and show the citations. An empty sources list means the answer did not come from their corpus — check the sync plan rather than re-asking.",
+        }),
+    ]),
+    discovery: "Any other verb: `descix tell-me-how \"<what you want to do>\"` from the terminal, or tell_me_how({ question }) over the connector. --help on a real command prints that command's own help; an unknown command exits non-zero naming itself.",
+    credits_note: 'Platform AI calls are metered in USD credits. A one-time welcome credit is granted when the account finishes setup (paid from a shared pool, so it can be declined when the pool is empty), and a free daily credit applies to the first metered call each day. get_credit_balance reports both — report what it says rather than quoting figures.',
+    not_the_connector: 'Do not look for a tool that creates apps, syncs knowledge bases or uploads sites. Those are CLI acts.',
+});
+
 /**
  * The D4/spec setup-intent route. Returns true when a natural-language question expresses
  * SETUP/ONBOARDING intent (so `tell_me_how` returns DESCIX_SETUP_PLAYBOOK before the scope
@@ -274,4 +334,26 @@ export function isSetupIntent(question) {
         'get setup',
     ];
     return SETUP_PHRASES.some((phrase) => q.includes(phrase));
+}
+
+/**
+ * The BUILD-intent route (CEO 2026-09-19). Returns true when the question is about BUILDING on the
+ * platform, so `tell_me_how` returns DESCIX_DEVELOPER_PLAYBOOK. Checked BEFORE isSetupIntent,
+ * because "help me get started building an app" expresses both and the developer wants the CLI
+ * path, not a Project walkthrough.
+ *
+ * TIGHT BY DESIGN: it requires a build verb AND a platform object, so "how do I query a knowledge
+ * base" (a usage question) does not fire it.
+ *
+ * @param {string} question - the caller's natural-language question.
+ * @returns {boolean}
+ */
+export function isDeveloperIntent(question) {
+    if (typeof question !== 'string') return false;
+    const q = question.toLowerCase().replace(/[-_]/g, ' ');
+    const BUILD_VERBS = ['build', 'create', 'develop', 'make', 'publish', 'deploy', 'write'];
+    const BUILD_OBJECTS = ['an app', 'my app', 'a descix app', 'an application', 'my own app', 'a community app'];
+    const EXPLICIT = ['i am a developer', "i'm a developer", 'developer path', 'developer track', 'build on descix', 'building on descix'];
+    if (EXPLICIT.some((phrase) => q.includes(phrase))) return true;
+    return BUILD_VERBS.some((verb) => q.includes(verb)) && BUILD_OBJECTS.some((obj) => q.includes(obj));
 }

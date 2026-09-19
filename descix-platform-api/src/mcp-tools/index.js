@@ -104,4 +104,6 @@ export {
 export {
     DESCIX_SETUP_PLAYBOOK,
     isSetupIntent,
+    isDeveloperIntent,
+    DESCIX_DEVELOPER_PLAYBOOK,
 } from './setup-playbook.js';

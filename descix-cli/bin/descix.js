@@ -35,6 +35,7 @@ import { registerAllRetiredKbSync, CANONICAL_KB_SYNC } from '../lib/commands/ret
 import { runStatus } from '../lib/commands/status.js';
 import { refreshCommunityIdentity, printIdentityReceipt } from '../lib/commands/communityIdentity.js';
 import { runAppInit } from '../lib/commands/appInit.js';
+import { assertKnownCommandForHelp } from '../lib/help-guard.js';
 import { runDoctor } from '../lib/commands/doctor.js';
 import { runHealth } from '../lib/commands/health.js';
 import * as kbCommands from '../lib/commands/kb.js';
@@ -4649,6 +4650,10 @@ if (!adminMode && isHelpInvocation(program, rawArgv, { valueFlags: ['--env', '--
     clearTimeout(timeoutHandle);
   }
 }
+
+// A command that does not exist must not appear to have help (see lib/help-guard.js). This runs
+// before the parse, because Commander resolves --help before it resolves the command.
+assertKnownCommandForHelp(program, process.argv.slice(2));
 
 // Parse arguments
 await program.parseAsync(process.argv);
