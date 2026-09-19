@@ -58,12 +58,15 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 import { WorkspaceConfig, WorkspaceUnreadableError } from '../lib/workspace-config.js';
+import { npxCommand } from '../lib/invocation.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CLI = path.resolve(HERE, '..', 'bin', 'descix.js');
 
 /** The message that is correct ONLY for a genuinely absent workspace. */
-const NOT_CONFIGURED_RE = /Run "npx descix init" first to initialize your workspace/;
+// The remedy is spelled by the invocation owner — `npx descix` was a 404 (there is no package
+// named `descix`), so the test follows the owner rather than pinning a second copy of the string.
+const NOT_CONFIGURED_RE = new RegExp(`Run "${npxCommand('init').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}" first to initialize your workspace`);
 
 /** Spawn the REAL CLI and return its exit status and streams. */
 function runCli(args, cwd) {

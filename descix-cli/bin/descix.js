@@ -33,6 +33,7 @@ import { runInit } from '../lib/commands/init.js';
 import { createPromptSession } from '../lib/interactive.js';
 import { registerAllRetiredKbSync, CANONICAL_KB_SYNC } from '../lib/commands/retired-kb-sync.js';
 import { runStatus } from '../lib/commands/status.js';
+import { refreshCommunityIdentity, printIdentityReceipt } from '../lib/commands/communityIdentity.js';
 import { runDoctor } from '../lib/commands/doctor.js';
 import { runHealth } from '../lib/commands/health.js';
 import * as kbCommands from '../lib/commands/kb.js';
@@ -470,7 +471,6 @@ communityCommand
     try {
       const apiClient = new DeSciXApiClient();
       await requireAuth(apiClient);
-      const { refreshCommunityIdentity, printIdentityReceipt } = await import('../lib/commands/communityIdentity.js');
       printIdentityReceipt(options.community, await refreshCommunityIdentity(apiClient, options.community));
       console.log();
     } catch (error) {
@@ -1190,7 +1190,6 @@ appCommand
       // already initialized; a refusal here (not an admin of the community, or the community not in
       // the registry) is reported with the command that retries it, not treated as an init failure.
       if (appId === communityId) {
-        const { refreshCommunityIdentity, printIdentityReceipt } = await import('../lib/commands/communityIdentity.js');
         try {
           printIdentityReceipt(communityId, await refreshCommunityIdentity(apiClient, communityId));
         } catch (err) {
@@ -2220,17 +2219,17 @@ const corpusCommand = kbCommand
 
 corpusCommand
   .command('sync')
-  .description('Sync corpus files to Pinecone using manifest definitions')
+  .description('Sync the files a corpus manifest names into the app\'s knowledge base')
   .requiredOption('-a, --app <id>', 'App ID')
   .option('-c, --community <community_id>', 'Community ID (optional; resolved from Products when omitted)')
   .option('-k, --kb <name>', 'KB name (syncs specific manifest; default: all)')
   .option('-v, --verbose', 'Show verbose output')
-  .option('--ref <ref>', 'Override the git ref for ALL manifest sources (e.g., --ref ws-admin-b1). Precedence: --ref > manifest source.ref > "main".')
-  .option('--rebuild', 'Reconcile Pinecone against REMOTE state: enumerate remote file_ids, purge any not in the current corpus, then re-sync from scratch. NOT needed to remove deleted files — an ordinary sync already purges them, diffing the walk against sync-state\'s last_sync_commit (measured: a plain sync purged 1962 chunks across 124 stale blob SHAs). Use --rebuild ONLY when that local sync-state cannot be trusted: it is lost, hand-edited, or vectors were orphaned outside the history it tracks. Prompts before deleting unless --yes is supplied.')
-  .option('--dry-run', 'Enumerate would-be-purged file_ids and would-be-upserted chunks without ANY Pinecone writes. Exit 0 if no drift, 1 if drift. Read-only.')
-  .option('--show-walk', 'Print the resolved ref + the first 50 walked files BEFORE any Pinecone operations. Useful for verifying --ref / manifest source resolution.')
+  .option('--ref <ref>', 'Override the git ref for ALL manifest sources (e.g., --ref my-feature-branch). Precedence: --ref > manifest source.ref > "main".')
+  .option('--rebuild', 'Delete EVERYTHING in the knowledge base, then re-sync the whole corpus. Not needed to remove deleted or changed files — an ordinary sync already removes any corpus file that is live in the knowledge base but no longer in the corpus (see --dry-run, which names them). Use --rebuild only to clear content an ordinary sync cannot see. Prompts before deleting unless --yes is supplied.')
+  .option('--dry-run', 'Show what a sync would add and remove — naming each file it would remove — without changing anything. Exit 0 if nothing would change, 1 if something would.')
+  .option('--show-walk', 'Print the resolved ref and the first 50 files the manifest selects, before syncing anything. Useful for checking --ref and the manifest sources.')
   .option('--yes', 'Skip the interactive purge confirmation in --rebuild mode. Use in scripting/CI.')
-  .option('--skip-retrieval-canary', 'Skip the post-sync retrieval canary that confirms a synced chunk actually retrieves before reporting success (measured 2026-09-17: presence in Pinecone is not the same as searchable — the index can lag ~20 minutes after a large upsert/purge). Skipping costs nothing but SAVES one credit-metered query_knowledge_base call and up to ~25s; the sync then reports success on presence only, same as before this check existed. Prefer leaving this ON for anything user-facing; use it for CI/cost-sensitive automation that will verify separately.')
+  .option('--skip-retrieval-canary', 'Skip the post-sync check that a synced passage is actually searchable (a large sync can take several minutes to become searchable). Skipping saves one credit-metered query and up to ~25 s; the sync then reports success on upload alone. Leave the check on for anything user-facing.')
   .action(async (options) => {
     try {
       const apiClient = new DeSciXApiClient();
@@ -2360,7 +2359,7 @@ driveCommand
 
 const siteCommand = program
   .command('site')
-  .description('Site lifecycle management: init, upload, status, list, delete');
+  .description('Build and publish your app\'s website');
 
 // site init - Copy scaffold to app
 siteCommand
@@ -4320,7 +4319,7 @@ const mcpCommand = program
 mcpCommand
   .command('execute')
   .description('Execute a registered MCP tool by name with JSON parameters')
-  .requiredOption('--tool <name>', 'Tool/command name (e.g., beast_get_initiatives, beast_update_stream)')
+  .requiredOption('--tool <name>', 'Tool/command name (e.g., find_communities, ask_question_to_app)')
   .option('--params <json>', 'JSON parameters for the tool', '{}')
   .option('-a, --app <app_id>', 'App context (sets app_id in params if not already present)')
   .option('--json', 'Output raw JSON response')

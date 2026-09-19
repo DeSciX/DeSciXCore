@@ -11,7 +11,8 @@
   "app init": [
     "create_app_for_community",
     "get_product_context",
-    "init_git_mode_kb"
+    "init_git_mode_kb",
+    "update_community_metadata"
   ],
   "app invite": [
     "create_app_invite"
@@ -90,7 +91,9 @@
   "community list": [
     "find_communities"
   ],
-  "community refresh-identity": [],
+  "community refresh-identity": [
+    "update_community_metadata"
+  ],
   "community rename": [
     "rename_community"
   ],
