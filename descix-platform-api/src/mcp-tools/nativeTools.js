@@ -237,7 +237,7 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
                 scope: {
                     type: 'string',
                     enum: ['bootstrap', 'artifact', 'project', 'entitlements', 'discovery'],
-                    description: '"bootstrap" = deterministic first-call on-ramp (platform summary + caller context + essential tool schemas + next steps; the balance is get_credit_balance's job), "artifact" = deterministic build/reproduce provenance for published apps (npm package + spec, jsdelivr artifact and notebook URLs, runnable npx commands) with no vector search, "project" = restrict the search to the communities/apps named in project_context, "entitlements" = your purchased tools, "discovery" = all platform capabilities. Default: entitlements.',
+                    description: '"bootstrap" = deterministic first-call on-ramp (platform summary + caller context + essential tool schemas + next steps; the balance comes from get_credit_balance), "artifact" = deterministic build/reproduce provenance for published apps (npm package + spec, jsdelivr artifact and notebook URLs, runnable npx commands) with no vector search, "project" = restrict the search to the communities/apps named in project_context, "entitlements" = your purchased tools, "discovery" = all platform capabilities. Default: entitlements.',
                 },
                 // OPT-IN, default OMITTED. `context` is the concatenated raw text of every
                 // matched service doc — measured 18,299 B of a 52,409 B reply (35%), duplicating
