@@ -23,6 +23,7 @@ import path from 'node:path';
 import { execSync } from 'node:child_process';
 
 import { runCorpusSync } from '../lib/commands/corpus.js';
+import { syncStatePath } from '../lib/core/syncState.js';
 
 // Mirrors the constants runCorpusSync hardcodes; used only to price the slow case's skip.
 const MAX_RETRIES = 5;
@@ -48,14 +49,22 @@ const plain = (s) => s.replace(/\[[0-9;]*m/g, '');
  * A store whose kb_sync_chunks / kb_delete_chunks responses are supplied by the caller —
  * those are the ONE variable under test: does the store report a count, or not?
  */
+// A corpus file LIVE in the store that the walk does not produce => one stale file_id => the
+// delete leg runs. Since cli 1.0.14 stale is read from the LIVE KB, not from sync history, so
+// this is where the delete leg is seeded; without it the delete counts are never printed and
+// this file would silently measure half the surface while running green.
+const LIVE_STALE_FILE_ID = 'corpus:ffffffffffffffffffffffffffffffffffffffff';
+
 class FakeStore {
   constructor({ sync, del }) { this.sync = sync; this.del = del; this.calls = []; }
+  // The sync keys its state by the ORIGIN it talks to (cli 1.0.12); any stable origin will do.
+  async ensureBaseUrl() { return 'https://receipt-honesty.test.invalid'; }
   async invoke(command) {
     this.calls.push(command);
     if (command === 'list_knowledge_bases')
       return { status: 'ok', message: { knowledgebases: [{ knowledgebase_name: 'Corpus' }] } };
     if (command === 'get_product_context') return { status: 'ok', community_id: 'testcommunity' };
-    if (command === 'kb_list_file_ids') return { status: 'ok', message: { file_ids: [] } };
+    if (command === 'kb_list_file_ids') return { status: 'ok', message: { file_ids: [LIVE_STALE_FILE_ID] } };
     if (command === 'kb_sync_chunks')
       return typeof this.sync === 'function' ? this.sync(this.calls) : this.sync;
     if (command === 'kb_delete_chunks') return this.del;
@@ -66,9 +75,8 @@ class FakeStore {
 /**
  * A throwaway git workspace with one corpus manifest.
  *
- * PRE-SEEDED with a stale blob sha so the DELETE leg of the run actually executes — without
- * it the delete counts are never printed and this file would silently measure half the
- * surface while running green.
+ * The DELETE leg is seeded in the FakeStore (LIVE_STALE_FILE_ID), not here: stale is read from
+ * the live KB.
  */
 async function makeWorkspace(paragraphs = 1) {
   const wsRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'descix-render-'));
@@ -76,7 +84,6 @@ async function makeWorkspace(paragraphs = 1) {
   const appRoot = path.join(wsRoot, 'apps', appId);
   await fs.mkdir(path.join(wsRoot, '.descix'), { recursive: true });
   await fs.mkdir(path.join(appRoot, '.descix', 'manifests'), { recursive: true });
-  await fs.mkdir(path.join(appRoot, '.descix', 'sync-state'), { recursive: true });
   await fs.mkdir(path.join(appRoot, 'docs'), { recursive: true });
 
   let body = '# Corpus\n\n';
@@ -88,13 +95,6 @@ async function makeWorkspace(paragraphs = 1) {
   await fs.writeFile(path.join(appRoot, '.descix', 'manifests', 'Corpus.json'), JSON.stringify({
     kb_name: 'Corpus', sync_mode: 'local',
     sources: [{ path: `apps/${appId}/docs`, tier: 1, doc_type: 'documentation' }]
-  }, null, 2));
-  // A previous run whose blob sha is gone => one stale file_id => the delete leg runs.
-  // total_chunks must be a real number: readPreviousChunkCount hard-fails on an unknown prior
-  // total BY DESIGN, and that refusal is not what this file measures.
-  await fs.writeFile(path.join(appRoot, '.descix', 'sync-state', 'Corpus.json'), JSON.stringify({
-    last_sync_commit: 'deadbeef', synced_files_count: 1, total_chunks: 100,
-    synced_blob_shas: ['ffffffffffffffffffffffffffffffffffffffff']
   }, null, 2));
   await fs.writeFile(path.join(wsRoot, '.descix', 'workspace.json'), JSON.stringify({
     version: '2.1', workspaceRoot: wsRoot, type: 'workspace',
@@ -230,7 +230,7 @@ test('a reported ZERO is a real count and prints as 0, never as unknown', async 
 test('sync state persists unknown as null, never as a fabricated integer', async () => {
   const { appRoot } = await runSyncCapturing(NOTHING_REPORTED);
   const state = JSON.parse(
-    await fs.readFile(path.join(appRoot, '.descix', 'sync-state', 'Corpus.json'), 'utf8'));
+    await fs.readFile(syncStatePath(appRoot, 'Corpus', await new FakeStore({}).ensureBaseUrl()), 'utf8'));
   assert.equal(state.chunks_upserted, null);
   assert.equal(state.chunks_deleted, null);
   assert.equal(state.total_chunks, null);

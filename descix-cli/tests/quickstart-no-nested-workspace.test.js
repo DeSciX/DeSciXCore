@@ -25,7 +25,7 @@
  *   WHAT IT DOES NOT READ: whether the remaining quickstart steps (agent files, mcp.json, SDK
  *     assets) target the right directory in the nested case. They run in cwd exactly as before
  *     this change; re-pointing them is a separate behaviour decision and is NOT made here.
- *   FIXTURE VALIDITY: C2 is a POSITIVE CONTROL. It proves the stdin script actually drives
+ *   FIXTURE VALIDITY: C2 is a POSITIVE CONTROL. It proves the non-interactive flag form actually drives
  *     runInit to a successful WRITE, so that C1's absence of a file is attributable to the guard
  *     and not to a fixture that could never have produced one. Without C2, C1 passes on a broken
  *     fixture — which is exactly how this gate was nearly built.
@@ -98,19 +98,16 @@ async function runQuickstart({ withParentWorkspace }) {
   // The wallet lives where this command looks for it: getWalletPath(process.cwd()).
   await fs.writeFile(path.join(subdir, '.descix', 'wallet.json'), FIXTURE_WALLET);
 
-  const child = spawn(process.execPath, [BIN_JS, 'quickstart'], {
+  // Every answer as a FLAG: `descix init`/quickstart refuse a non-terminal stdin by design (they
+  // cannot prompt), so the old piped answers could never reach the write and C2 went inert. The
+  // flags are the supported non-interactive form — the same one an AI assistant uses.
+  const child = spawn(process.execPath, [BIN_JS, 'quickstart', '-c', 'testcomm', '-a', 'innerapp', '--yes'], {
     cwd: subdir,
     env: { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0' },
     stdio: ['pipe', 'pipe', 'pipe']
   });
 
-  // Timed writes, because runInit prompts and an EOF'd stdin makes the process exit with the
-  // prompt still pending — which would leave NO file for reasons unrelated to the guard.
-  const w = (ms, s) => setTimeout(() => { try { child.stdin.write(s); } catch { /* gone */ } }, ms);
-  w(1500, 'testcomm\n');
-  w(3500, 'innerapp\n');
-  w(5500, 'y\n');
-  const ender = setTimeout(() => { try { child.stdin.end(); } catch { /* gone */ } }, 12000);
+  const ender = setTimeout(() => { try { child.stdin.end(); } catch { /* gone */ } }, 0);
 
   let out = '', err = '';
   child.stdout.on('data', (d) => { out += d; });
@@ -190,7 +187,7 @@ before(async () => {
     '           modification of the parent; a silent exit-0 success leaving a shadowing file.',
     'DOES NOT : check whether the remaining quickstart steps target the right directory in the',
     '           nested case — they run in cwd as before; re-pointing them is a separate decision.',
-    'FIXTURE  : C2 is a POSITIVE CONTROL proving the stdin script really drives runInit to a',
+    'FIXTURE  : C2 is a POSITIVE CONTROL proving the non-interactive flag form really drives runInit to a',
     '           WRITE. Without it, C1 would pass on a fixture that could never create a file.',
     controlC2.boundaryLine(),
     'NO NET   : shape-only disposable wallet; no platform call, no account state touched.',
@@ -245,6 +242,6 @@ describe('descix quickstart must not create a nested workspace', () => {
     // before() classifier already computed, and the two would drift. See tools/control-predicate.mjs.
     console.log(controlC2.verdictLine());
     controlC2.assertGreen(assert);
-    console.log('[C2] fixture validated: the stdin script drives runInit to a real write.');
+    console.log('[C2] fixture validated: the flag form drives runInit to a real write.');
   });
 });

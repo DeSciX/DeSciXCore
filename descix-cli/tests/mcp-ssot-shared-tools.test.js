@@ -43,6 +43,12 @@ const EXPECTED_SSOT_TOOLS = [
     'app_records_query',
     'app_records_get',
     'app_records_delete',
+    // D9 (Core 9832f52, 2026-08-29): per-entry verbs on an app record. Registered in Cloud
+    // commandHandlers/registry.js (lock-step verified 2026-09-19).
+    'app_record_entry_create',
+    'app_record_entry_get',
+    'app_record_entry_update',
+    'app_record_entry_delete',
     'create_app_for_community',
     // WS-HEADLESS-MVP-A2 (CEO-D-2026-07-01 D2): platform-wide USD AI-credits balance READ.
     // Non-mutating + oauthReadonly (a balance read changes nothing; the commands that
@@ -68,6 +74,10 @@ const EXPECTED_SSOT_TOOLS = [
     'fabric_broadcast_ack',
     'fabric_seat_state_get',
     'fabric_seat_state_put',
+    // G1+G2 (Core de89640, 2026-08-26): contract- and grounding- became first-class fabric keys.
+    // Registered in Cloud commandHandlers/registry.js (lock-step verified 2026-09-19).
+    'fabric_contract_put',
+    'fabric_grounding_put',
     'fabric_watermark_get',
     'fabric_watermark_put',
     'fabric_envelope',

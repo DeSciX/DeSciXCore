@@ -17,7 +17,7 @@ import { generateAgentFiles } from '../agent-files.js';
 // reached a developer who had done everything right.
 import { CANONICAL_KB_SYNC } from './retired-kb-sync.js';
 // "May I prompt?" has ONE OWNER. init does not derive it, and holds no TTY check of its own.
-import { createPromptSession } from '../interactive.js';
+import { createLazyPromptSession } from '../interactive.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -28,13 +28,15 @@ const __dirname = dirname(__filename);
  * @param {Object} options - Command options
  */
 export async function runInit(apiClient, options = {}) {
-  // The session is GATED AT CONSTRUCTION: under a non-TTY this throws NonInteractiveError,
-  // which bin/descix.js's init action prints and exits 1 on. It can no longer hang on an open
-  // pipe/FIFO, nor exit 0 writing nothing on /dev/null.
-  const rl = createPromptSession({
+  // The session is built only when a question is actually asked, and is still gated then: under
+  // a non-TTY an unanswered question throws NonInteractiveError (bin/descix.js prints it and
+  // exits 1) — it can never hang on an open pipe, nor exit 0 having written nothing. With every
+  // answer given as a flag, nothing is asked, so an AI assistant or a script can run init.
+  const rl = createLazyPromptSession({
     what: 'descix init',
     nonInteractiveForm: [
-      'descix init has no non-interactive form today. Run it in a terminal.',
+      'descix init -c <community> -a <app> --yes',
+      '  (add --force to replace an existing .descix/workspace.json)',
       '',
       'Nothing has been changed. An existing .descix/workspace.json is left as it is.'
     ]
@@ -157,7 +159,7 @@ export async function runInit(apiClient, options = {}) {
     console.log(chalk.white(`  Community: ${communityId}`));
     console.log(chalk.white(`  App:       ${appName} (${appId})`));
 
-    const proceed = await rl.askYesNo(chalk.white('\nProceed?'), true);
+    const proceed = options.yes ? true : await rl.askYesNo(chalk.white('\nProceed?'), true);
     if (!proceed) {
       console.log(chalk.gray('\nCancelled.\n'));
       rl.close();

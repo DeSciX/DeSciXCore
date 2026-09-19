@@ -155,4 +155,26 @@ export function createPromptSession({ what, nonInteractiveForm, terminal, destru
   return { ask, askYesNo, askRaw, close: () => rl.close() };
 }
 
+/**
+ * A prompt session that is built only when a question is actually ASKED.
+ *
+ * `createPromptSession` gates at construction, which is right for a command that always
+ * prompts. A command whose every answer can arrive as a FLAG must not refuse a non-terminal
+ * before it knows it needs one: that made `descix init -c <c> -a <a>` impossible to run from an
+ * AI assistant or a script, although nothing was left to ask (measured 2026-09-19). The gate is
+ * unchanged, and still the one owner — this only defers WHEN it is consulted.
+ *
+ * @param {Object} o - exactly createPromptSession's options
+ * @returns {{ask: Function, askYesNo: Function, close: Function}}
+ */
+export function createLazyPromptSession(o = {}) {
+  let session = null;
+  const open = () => (session ||= createPromptSession(o));
+  return {
+    ask: (...args) => open().ask(...args),
+    askYesNo: (...args) => open().askYesNo(...args),
+    close: () => { if (session) session.close(); },
+  };
+}
+
 export default { stdinIsInteractive, requireInteractive, createPromptSession, NonInteractiveError };
