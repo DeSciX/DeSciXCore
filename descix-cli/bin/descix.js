@@ -200,6 +200,7 @@ program
   .option('-a, --app <name>', 'App name')
   .option('-p, --path <path>', 'Project path (defaults to current directory)')
   .option('-f, --force', 'Overwrite existing workspace.json')
+  .option('-y, --yes', 'Skip the confirmation — with -c and -a, init runs without a terminal')
   .option('--from-invite <token>', 'Resolve an invite token to pre-fill app context')
   .action(async (options) => {
     try {
@@ -1067,6 +1068,15 @@ appCommand
       let appId = options.app;
       const kbId = options.kb || 'General';
 
+      // Refuse an unusable -p BEFORE anything is written — server-side included. The same
+      // resolver the workspace loader applies on every read decides it, so a value accepted here
+      // is one the next read accepts too. Refusing only at registration came AFTER a `-c` create,
+      // leaving a platform app with no local registration (measured 2026-09-18, daita-docs).
+      const workspaceConfig = await WorkspaceConfig.tryLoad();
+      if (options.path) {
+        resolveWorkspacePath(workspaceConfig?.workspaceRoot || process.cwd(), options.path, appId);
+      }
+
       // Resolve community_id from the Products registry to learn whether the app exists yet.
       let communityId;
       try {
@@ -1106,7 +1116,6 @@ appCommand
       }
 
       // 1. Workspace.json — register app if not already mapped
-      const workspaceConfig = await WorkspaceConfig.tryLoad();
       const alreadyMapped = workspaceConfig?.getAppByAppId(appId);
       let appPath = alreadyMapped?.absolutePath;
 
@@ -1162,7 +1171,10 @@ appCommand
       console.log(chalk.gray(`  (every app is guaranteed a default KB at creation; an empty one`));
       console.log(chalk.gray(`   says so rather than answering from general knowledge)\n`));
       console.log(chalk.cyan('Next steps:'));
-      console.log(chalk.gray(`  Create a corpus manifest at apps/${appId}/.descix/manifests/${kbId}.json`));
+      // The manifest lives in THIS app's registered directory — never a guessed `apps/<id>/`,
+      // which named a path that does not exist for any app registered elsewhere.
+      const manifestPath = path.join(appPath, '.descix', 'manifests', `${kbId}.json`);
+      console.log(chalk.gray(`  Create a corpus manifest at ${path.relative(process.cwd(), manifestPath) || manifestPath}`));
       console.log(chalk.gray(`  then run:`));
       console.log(chalk.white(`  descix kb corpus sync -a ${appId}\n`));
     } catch (error) {
@@ -2432,7 +2444,13 @@ siteCommand
       // Import mime for content types
       const mime = (await import('mime-types')).default;
       const { GitUtils } = await import('@descix/sdk/integrations/git');
-      const gitUtils = new GitUtils(process.cwd());
+      // Provenance is read from the directory the FILES come from — the app root when a site
+      // manifest names the sources, else the -p directory — never the caller's cwd. Reading cwd
+      // recorded the WRONG repository's commit on every deploy made from outside the app repo
+      // (measured 2026-09-18: daita-docs, whose files live in DeSciX/daita, was stamped with the
+      // Unkamon commit it happened to be run from).
+      const provenanceDir = siteManifest ? appRoot : path.resolve(options.path);
+      const gitUtils = new GitUtils(provenanceDir);
       const gitStatus = await gitUtils.getStatus();
 
       let fileList;      // Array<{ path, hash, size, content_type }>
@@ -4535,94 +4553,104 @@ program
   .command('quickstart')
   .description('One-command setup: auth → workspace → agent files → MCP config')
   .option('-u, --url <url>', 'API URL override')
+  .option('-c, --community <id>', 'Community ID for the new workspace')
+  .option('-a, --app <name>', 'App name for the new workspace')
+  .option('-y, --yes', 'Skip the confirmation — with -c and -a, quickstart runs without a terminal')
   .action(async (options) => {
-    const { generateAgentFiles, generateMcpConfig } = await import('../lib/agent-files.js');
-    const { WalletFileManager } = await import('../lib/wallet-file.js');
-
-    console.log(chalk.cyan('\n🚀 DeSciX Quickstart\n'));
-
-    const workspaceRoot = process.cwd();
-
-    // Step 1: Auth — login if no wallet.json
-    const walletPath = WalletFileManager.getWalletPath(workspaceRoot);
-    let needsLogin = true;
+    // Every failure prints as a message and exits 1 — never a stack trace. A new developer's AI
+    // assistant runs this non-interactively, and an uncaught refusal read as a crash (2026-09-19).
     try {
-      const wallet = await WalletFileManager.loadWalletFile(walletPath);
-      if (wallet && WalletFileManager.hasValidSession(wallet)) {
-        console.log(chalk.green(`✓ Already authenticated as ${wallet.userId}`));
-        needsLogin = false;
+      const { generateAgentFiles, generateMcpConfig } = await import('../lib/agent-files.js');
+      const { WalletFileManager } = await import('../lib/wallet-file.js');
+
+      console.log(chalk.cyan('\n🚀 DeSciX Quickstart\n'));
+
+      const workspaceRoot = process.cwd();
+
+      // Step 1: Auth — login if no wallet.json
+      const walletPath = WalletFileManager.getWalletPath(workspaceRoot);
+      let needsLogin = true;
+      try {
+        const wallet = await WalletFileManager.loadWalletFile(walletPath);
+        if (wallet && WalletFileManager.hasValidSession(wallet)) {
+          console.log(chalk.green(`✓ Already authenticated as ${wallet.userId}`));
+          needsLogin = false;
+        }
+      } catch { /* no wallet */ }
+
+      if (needsLogin) {
+        const loginOptions = {};
+        if (options.url) loginOptions.url = options.url;
+        await authCommands.loginDevice(loginOptions);
       }
-    } catch { /* no wallet */ }
 
-    if (needsLogin) {
-      const loginOptions = {};
-      if (options.url) loginOptions.url = options.url;
-      await authCommands.loginDevice(loginOptions);
-    }
-
-    // Step 2: Workspace init — create workspace.json only when there is none ANYWHERE UP THE TREE.
-    //
-    // WHERE THE WORKSPACE ROOT IS has ONE OWNER: WorkspaceConfig.findWorkspaceRoot, which walks UP
-    // exactly as load() does. This step used to derive it a THIRD time with fs.access on the target
-    // path only (the wizard guard was the second). Run from a SUBDIRECTORY of an existing
-    // workspace, that check saw nothing, runInit created a NESTED workspace.json whose
-    // workspaceRoot pointed at the subdirectory, and it SHADOWED the parent for every later
-    // resolution — silently, with "Quickstart complete!" and exit 0.
-    //
-    // quickstart is an ONBOARDING flow: a user who asked to be set up and already IS set up has
-    // SUCCEEDED, so this SKIPS and REPORTS and continues.
-    const existingRoot = await WorkspaceConfig.findWorkspaceRoot(workspaceRoot);
-    if (existingRoot) {
-      console.log(chalk.green('✓ Workspace already initialized'));
-      if (path.resolve(existingRoot) !== path.resolve(workspaceRoot)) {
-        console.log(chalk.gray(`  Workspace root: ${existingRoot}`));
-        console.log(chalk.gray(`  You are in a subdirectory of it. Not creating a second workspace`));
-        console.log(chalk.gray(`  here — a nested one would shadow the root for every command run`));
-        console.log(chalk.gray(`  from this directory.`));
+      // Step 2: Workspace init — create workspace.json only when there is none ANYWHERE UP THE TREE.
+      //
+      // WHERE THE WORKSPACE ROOT IS has ONE OWNER: WorkspaceConfig.findWorkspaceRoot, which walks UP
+      // exactly as load() does. This step used to derive it a THIRD time with fs.access on the target
+      // path only (the wizard guard was the second). Run from a SUBDIRECTORY of an existing
+      // workspace, that check saw nothing, runInit created a NESTED workspace.json whose
+      // workspaceRoot pointed at the subdirectory, and it SHADOWED the parent for every later
+      // resolution — silently, with "Quickstart complete!" and exit 0.
+      //
+      // quickstart is an ONBOARDING flow: a user who asked to be set up and already IS set up has
+      // SUCCEEDED, so this SKIPS and REPORTS and continues.
+      const existingRoot = await WorkspaceConfig.findWorkspaceRoot(workspaceRoot);
+      if (existingRoot) {
+        console.log(chalk.green('✓ Workspace already initialized'));
+        if (path.resolve(existingRoot) !== path.resolve(workspaceRoot)) {
+          console.log(chalk.gray(`  Workspace root: ${existingRoot}`));
+          console.log(chalk.gray(`  You are in a subdirectory of it. Not creating a second workspace`));
+          console.log(chalk.gray(`  here — a nested one would shadow the root for every command run`));
+          console.log(chalk.gray(`  from this directory.`));
+        }
+      } else {
+        console.log(chalk.cyan('\n📋 Initialize Workspace\n'));
+        // runInit's signature is (apiClient, options). Passing a single object put it in the
+        // apiClient slot and left options defaulting to {}, so `path` was silently discarded and
+        // runInit fell back to process.cwd(). It was MASKED here only because workspaceRoot IS
+        // process.cwd() in this action — the argument was in the wrong slot regardless, and would
+        // have written the workspace to the wrong directory the moment that stopped being true.
+        // This action has no apiClient of its own; null is passed explicitly rather than implied.
+        await runInit(null, { path: workspaceRoot, community: options.community, app: options.app, yes: options.yes });
       }
-    } else {
-      console.log(chalk.cyan('\n📋 Initialize Workspace\n'));
-      // runInit's signature is (apiClient, options). Passing a single object put it in the
-      // apiClient slot and left options defaulting to {}, so `path` was silently discarded and
-      // runInit fell back to process.cwd(). It was MASKED here only because workspaceRoot IS
-      // process.cwd() in this action — the argument was in the wrong slot regardless, and would
-      // have written the workspace to the wrong directory the moment that stopped being true.
-      // This action has no apiClient of its own; null is passed explicitly rather than implied.
-      await runInit(null, { path: workspaceRoot });
+
+      // EVERY REMAINING STEP TARGETS THE RESOLVED ROOT, not the directory the command was typed in.
+      // They read the workspace to learn the app, community and origin they must state, so pointing
+      // them at a subdirectory that deliberately has no workspace.json makes them hard-fail on the
+      // absence this command just chose to preserve. Resolving the root once and ferrying it is the
+      // same one-owner rule that fixed the check above.
+      const targetRoot = existingRoot || workspaceRoot;
+
+      // Step 3: Generate agent instruction files
+      console.log(chalk.cyan('\n📋 Generating Agent Instructions\n'));
+      const written = await generateAgentFiles(targetRoot);
+      for (const f of written) {
+        console.log(chalk.green(`  ✓ ${f}`));
+      }
+
+      // Step 4: Generate .vscode/mcp.json (skipped if DeSciX extension handles MCP)
+      const mcpWritten = await generateMcpConfig(targetRoot);
+      if (mcpWritten) {
+        console.log(chalk.green('  ✓ .vscode/mcp.json'));
+      } else {
+        console.log(chalk.green('  ✓ MCP handled by DeSciX extension (mcp.json skipped)'));
+      }
+
+      // Step 5: Copy SDK assets
+      const { pullSdkAssets } = await import('../lib/sdk-assets.js');
+      await pullSdkAssets(targetRoot);
+      console.log(chalk.green('  ✓ .descix/sdk-assets/'));
+
+      // Done
+      console.log(chalk.green('\n✅ Quickstart complete!\n'));
+      console.log(chalk.white('Open your editor — the AI knows about DeSciX.\n'));
+      console.log(chalk.gray('  Copilot / Cline / Claude Code will have DeSciX MCP tools'));
+      console.log(chalk.gray('  Ask: "What DeSciX tools do I have?"\n'));
+    } catch (error) {
+      console.error(chalk.red(`\n❌ ${error.message}\n`));
+      process.exit(1);
     }
-
-    // EVERY REMAINING STEP TARGETS THE RESOLVED ROOT, not the directory the command was typed in.
-    // They read the workspace to learn the app, community and origin they must state, so pointing
-    // them at a subdirectory that deliberately has no workspace.json makes them hard-fail on the
-    // absence this command just chose to preserve. Resolving the root once and ferrying it is the
-    // same one-owner rule that fixed the check above.
-    const targetRoot = existingRoot || workspaceRoot;
-
-    // Step 3: Generate agent instruction files
-    console.log(chalk.cyan('\n📋 Generating Agent Instructions\n'));
-    const written = await generateAgentFiles(targetRoot);
-    for (const f of written) {
-      console.log(chalk.green(`  ✓ ${f}`));
-    }
-
-    // Step 4: Generate .vscode/mcp.json (skipped if DeSciX extension handles MCP)
-    const mcpWritten = await generateMcpConfig(targetRoot);
-    if (mcpWritten) {
-      console.log(chalk.green('  ✓ .vscode/mcp.json'));
-    } else {
-      console.log(chalk.green('  ✓ MCP handled by DeSciX extension (mcp.json skipped)'));
-    }
-
-    // Step 5: Copy SDK assets
-    const { pullSdkAssets } = await import('../lib/sdk-assets.js');
-    await pullSdkAssets(targetRoot);
-    console.log(chalk.green('  ✓ .descix/sdk-assets/'));
-
-    // Done
-    console.log(chalk.green('\n✅ Quickstart complete!\n'));
-    console.log(chalk.white('Open your editor — the AI knows about DeSciX.\n'));
-    console.log(chalk.gray('  Copilot / Cline / Claude Code will have DeSciX MCP tools'));
-    console.log(chalk.gray('  Ask: "What DeSciX tools do I have?"\n'));
   });
 
 // ============ MCP Server Command (for npx usage) ============

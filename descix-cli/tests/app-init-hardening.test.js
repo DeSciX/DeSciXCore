@@ -181,13 +181,17 @@ test('app init — happy path: new app + valid existing dir registers in workspa
   });
 
   const appId = 'freshapp';
-  await simulateAppInitWorkspaceStep(wsRoot, appId, appDir);
+  // RELATIVE to the workspace root, as the workspace stores it — an absolute -p is refused before
+  // anything is written (localpath-writers-validate.test.js owns that rule; this file must not
+  // contradict it).
+  await simulateAppInitWorkspaceStep(wsRoot, appId, 'my-new-app');
 
   // Reload and verify
   const reloaded = await WorkspaceConfig.load(wsRoot);
   const registered = reloaded.getAppByAppId(appId);
   assert.ok(registered, 'new app must be registered in workspace.json after init');
-  assert.equal(registered.localPath, appDir, 'localPath must match the provided path');
+  assert.equal(registered.localPath, 'my-new-app', 'localPath must match the provided path');
+  assert.equal(registered.absolutePath, appDir, 'and resolve to exactly that directory');
 });
 
 test('app init — happy path: already-mapped app without -p is idempotent (no error)', async (t) => {

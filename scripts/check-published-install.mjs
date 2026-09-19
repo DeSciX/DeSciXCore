@@ -117,8 +117,17 @@ function sleepSync(ms) {
  * Wait for `name@version` to be visible on the registry. A publish is not instantly readable
  * everywhere, and a gate that reports CDN propagation as a broken package is a gate that cries
  * wolf — which trains the operator to ignore it the one time it is right.
+ *
+ * The window is sized from MEASURED propagation, not guessed. It was 10 × 6 s = 54 s, and on
+ * 2026-09-18 all four releases failed here and passed on rerun: npm took up to 8.7 minutes to
+ * list a new version (@descix/app-sdk@0.1.10 published 18:15:32Z, visible 18:24:13Z). A
+ * 54-second window cried wolf on every correct publish. 15 minutes covers the worst measured
+ * case with margin; a version still absent after that is a real unanswered question.
  */
-export function waitForRegistry(name, version, { attempts = 10, delayMs = 6000 } = {}) {
+export const REGISTRY_WAIT_ATTEMPTS = 60;
+export const REGISTRY_WAIT_DELAY_MS = 15000;
+
+export function waitForRegistry(name, version, { attempts = REGISTRY_WAIT_ATTEMPTS, delayMs = REGISTRY_WAIT_DELAY_MS } = {}) {
     for (let i = 1; i <= attempts; i++) {
         if (registryVersions(name).includes(version)) return { visible: true, attempts: i };
         if (i < attempts) sleepSync(delayMs);
