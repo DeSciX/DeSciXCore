@@ -69,6 +69,19 @@ const help = (argv) => {
     } catch (e) { return String(e.stdout || ''); }
 };
 
+/**
+ * Everything `<argv> --help` wrote, on either stream. The EXIT CODE cannot answer "does this
+ * command exist": a registered-but-retired stub (`descix kb chunk`) refuses and exits 1 exactly as
+ * an unknown command does. The guard's own message is what separates them.
+ */
+const helpOutput = (argv) => {
+    try {
+        return execFileSync(process.execPath, [BIN, '--admin', ...argv, '--help'],
+            { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30000 });
+    } catch (e) { return String(e.stdout || '') + String(e.stderr || ''); }
+};
+const UNKNOWN_COMMAND = /error: unknown command/;
+
 /** Parse a `--help` page: child command names and this command's own flags. */
 function parseHelp(text) {
     const cmds = [], flags = new Set();
@@ -159,13 +172,20 @@ function judgeTokens(toks) {
     return { best, violation: null };
 }
 
-/** A hidden-but-registered subcommand (a retired refusal) exists: its --help is not the group's. */
+/**
+ * A hidden-but-registered subcommand (a retired refusal) exists; an unknown one does not.
+ *
+ * THE OLD PROBE READ A DEFECT. It compared the first line of `<group> <name> --help` with the
+ * group's own first line, because Commander resolved --help before the command and printed the
+ * GROUP's help for anything unknown, exiting 0. That defect is fixed (lib/help-guard.js): an
+ * unknown command now exits non-zero NAMING ITSELF — which silently turned this probe's "exists"
+ * to true for every fake name, and the control below caught it. The probe now reads the EXIT CODE,
+ * which is the signal the guard actually publishes.
+ */
 function subcommandExists(group, name) {
     const key = `${group} ${name}`;
     if (probeCache.has(key)) return probeCache.get(key);
-    const groupUsage = (help(group.split(' ')).split('\n')[0] || '').trim();
-    const out = (help([...group.split(' '), name]).split('\n')[0] || '').trim();
-    const exists = out !== groupUsage;
+    const exists = !UNKNOWN_COMMAND.test(helpOutput([...group.split(' '), name]));
     probeCache.set(key, exists);
     return exists;
 }
