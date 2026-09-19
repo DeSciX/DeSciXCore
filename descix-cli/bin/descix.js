@@ -4591,7 +4591,7 @@ program
     // Every failure prints as a message and exits 1 — never a stack trace. A new developer's AI
     // assistant runs this non-interactively, and an uncaught refusal read as a crash (2026-09-19).
     try {
-      const { generateAgentFiles, generateMcpConfig } = await import('../lib/agent-files.js');
+      const { generateAgentFiles, generateMcpConfig, generateClaudeCodeMcpConfig } = await import('../lib/agent-files.js');
       const { WalletFileManager } = await import('../lib/wallet-file.js');
 
       console.log(chalk.cyan('\n🚀 DeSciX Quickstart\n'));
@@ -4667,6 +4667,9 @@ program
       } else {
         console.log(chalk.green('  ✓ MCP handled by DeSciX extension (mcp.json skipped)'));
       }
+      // Claude Code reads project MCP servers from .mcp.json — written regardless of the VS Code case.
+      await generateClaudeCodeMcpConfig(targetRoot);
+      console.log(chalk.green('  ✓ .mcp.json (Claude Code)'));
 
       // Step 5: Copy SDK assets
       const { pullSdkAssets } = await import('../lib/sdk-assets.js');
