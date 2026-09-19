@@ -226,8 +226,9 @@ const user = await powch.auth();
 ### KB Integration
 
 If docs already exist (`docs/`, `README.md`, SDK reference files):
-- Copy markdown files to `kb/General/` for the sync pipeline
-- Keep originals as the source of truth — sync from there
+- Name the docs' folder as a source in a corpus manifest (`.descix/manifests/<KB>.json`), then run
+  `descix kb corpus sync`. The docs stay exactly where they are — there is no copy step and no
+  required KB folder.
 - Ask: "I see docs in `docs/`. Want me to use those as your knowledge base?"
 
 ### Decision Guide
@@ -236,7 +237,7 @@ If docs already exist (`docs/`, `README.md`, SDK reference files):
 |-----------------|---------------|-------------|
 | HTML/JS app with `index.html` | Serve as-is, add DeSciXAppSDK.js | Use any `docs/` or `*.md` files |
 | React/Vite app | Wrap root in `<AppShell>` | Use `docs/` or README |
-| SDK package with docs + demo | Serve the SDK's demo page | Copy docs to `kb/General/` |
+| SDK package with docs + demo | Serve the SDK's demo page | Name docs folder in a corpus manifest |
 | Docs only (no frontend) | Skip or create minimal site | Docs ARE the KB |
 | Empty repo | Scaffold from scratch | Create starter KB doc |
 
@@ -244,7 +245,8 @@ If docs already exist (`docs/`, `README.md`, SDK reference files):
 
 Every app has three parts:
 - `site/` — Frontend (any framework: React, VitePress, vanilla HTML)
-- `kb/General/` — Knowledge base source docs (markdown files)
+- A corpus manifest (`.descix/manifests/<KB>.json`) — names the git-tracked docs `descix kb corpus
+  sync` publishes; there is no required KB folder
 - `microservice/` — Backend service (optional)
 
 ## App Context

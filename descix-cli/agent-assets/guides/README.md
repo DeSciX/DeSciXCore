@@ -44,7 +44,8 @@ Does the user need a public website?
 ### Microservice
 - Backend service with MCP-exposed commands
 - Add `microservice/` folder with `descix microservice init`
-- Commands: `descix microservice register/vectorize`
+- Commands: `descix microservice register -r SERVICE_README.md` (registration also vectorizes the
+  README for `tell_me_how` discovery — there is no separate developer step)
 
 ### Dynamic Site
 - SSR app where microservice serves the site

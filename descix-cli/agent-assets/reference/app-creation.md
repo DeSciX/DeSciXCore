@@ -44,16 +44,9 @@ This separation ensures:
 
 ### Drive Templates
 
-**Location:** Google Drive, owned by `dip@descix.net`  
-**SDK Reference:** `DeSciX_Core/descix-cli/templates/drive/`  
-**Template IDs:** Configured in `DeSciX_Cloud/microservice/defaults-config.json`
-
-```json
-{
-  "DRIVE_COMMUNITY_TEMPLATE_FOLDER_ID": "1ABC...",
-  "DRIVE_AGENT_APP_TEMPLATE_FOLDER_ID": "1XYZ..."
-}
-```
+**Location:** Google Drive, owned by the platform. The CLI ships its own copy of the template
+layout under `templates/drive/`; the platform's Drive folder IDs are server-side config, not
+something the CLI or a developer needs to touch.
 
 **Community Template:**
 ```
@@ -80,9 +73,10 @@ templates/drive/app/
 
 ### Git Scaffolds
 
-**Location:** microservice — `DeSciX_Core/descix-cli/templates/scaffolds/`;
-site — `DeSciX_Core/descix-app-sdk/scaffold/` (owned there, and exported as `SITE_SCAFFOLD_DIR`
-from `@descix/app-sdk/scaffold`, so no caller re-derives the path).
+**Location:** the microservice scaffold ships inside the CLI package (`templates/scaffolds/`); the
+site scaffold ships inside `@descix/app-sdk` and is exported as `SITE_SCAFFOLD_DIR` from
+`@descix/app-sdk/scaffold`, so no caller re-derives the path. `descix microservice init` /
+`descix site init` copy these for you — you do not need to locate them yourself.
 
 **Site Scaffold:**
 ```
@@ -243,11 +237,15 @@ detection.
 | Folder | Purpose | Sync Direction |
 |--------|---------|----------------|
 | `assets/` | App metadata (icon, description) | Bidirectional |
-| `kb/staging/` | Local files to push to Drive | Local → Drive |
-| `kb/General/` | Text-converted files from Drive | Drive → Local |
-| `kb/chunks/` | JSON chunks for Pinecone | Local only |
+| `.descix/manifests/<KB>.json` | Names the KB's git-tracked sources — REQUIRED for a KB to sync | Local, git-tracked |
+| `kb/staging/` (optional) | Local files to push to Drive | Local → Drive |
+| `kb/General/` (optional) | Text-converted files from Drive | Drive → Local |
 | `site/` | Static site files | Local → GCS |
 | `microservice/` | Service code | Local → GCS |
+
+There is no required KB folder and no persisted chunk directory — chunking happens in memory
+during `descix kb corpus sync`. A knowledge base is whatever git-tracked path(s) the corpus
+manifest names; `kb/General/` is a common convention, not a requirement.
 
 ### Required Files
 
@@ -256,9 +254,10 @@ detection.
 - `app_description.md` - Markdown description for App Store
 - `system_instructions.md` - AI agent persona and instructions
 
-**`kb/General/` folder:**
-- Contains reference documents for RAG
-- All formats converted to Markdown/text
+**`.descix/manifests/<KB>.json`:**
+- Names the source path(s) that make up the KB
+- `descix kb corpus sync` walks them at a git ref and publishes to Pinecone — no manifest means
+  nothing to sync
 
 ---
 
@@ -322,17 +321,12 @@ descix site upload -a <app_id>         # deploy the static site
 
 ---
 
-## 9. File References
+## 9. Summary of Verbs
 
-| Component | Path | Description |
-|-----------|------|-------------|
-| Community Management | `DeSciX_Cloud/microservice/services/communityManagement.js` | Community/App creation |
-| App Commands | `DeSciX_Cloud/microservice/services/commandHandlers/appCommands.js` | Server-side app ops |
-| Google Storage Service | `DeSciX_Cloud/microservice/services/googleStorageService.js` | Drive/GCS operations |
-| Template Config | `DeSciX_Cloud/microservice/defaults-config.json` | Template folder IDs |
-| Drive Templates | `DeSciX_Core/descix-cli/templates/drive/` | Content templates |
-| Git Scaffolds | `DeSciX_Core/descix-cli/templates/scaffolds/` | Code scaffolds |
-| Hydrator | `DeSciX_Core/descix-cli/lib/core/Hydrator.js` | `copyScaffold` — copies the site / microservice scaffold into an app |
-| WorkspaceConfig | `DeSciX_Core/descix-cli/lib/workspace-config.js` | CLI configuration |
-| Setup Command | `DeSciX_Core/descix-cli/lib/wizard/setup.js` | Initial setup |
-| Scaffold Command | `DeSciX_Core/descix-cli/bin/descix.js` | CLI scaffolds |
+| Concept | Owned by |
+|---------|----------|
+| Community/App creation | Platform backend (server-side; not part of the SDK you have locally) |
+| Drive/GCS content operations | Platform backend, reached via `descix app init`, `descix drive pull/push` |
+| Content templates (Drive) | Shipped inside the CLI package; copied by `descix app init` |
+| Code scaffolds (site/microservice) | Shipped inside the CLI/app-sdk packages; copied by `descix site init` / `descix microservice init` |
+| Local workspace configuration | `.descix/workspace.json`, written only by CLI verbs — see `workspace-config.md` |

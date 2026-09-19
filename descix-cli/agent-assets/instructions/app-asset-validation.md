@@ -6,16 +6,19 @@ This document guides the AI agent through validating an app's folder structure a
 
 ### Step 1: Check Folder Structure
 
-Verify these folders exist:
+Verify these exist:
 
 ```
 {app_folder}/
-├── assets/           # Required
-├── kb/               # Required
-│   └── General/      # Required (default KB)
-├── site/             # Required (even if placeholder)
-└── microservice/     # Required (even if placeholder)
+├── assets/                          # Required
+├── .descix/manifests/<KB>.json      # Required — the corpus manifest (see Step 3)
+├── site/                            # Required (even if placeholder)
+└── microservice/                    # Required (even if placeholder)
 ```
+
+There is no required KB folder. A knowledge base is whatever git-tracked source(s) the corpus
+manifest names — `kb/General/` is one common convention (especially if the app also uses `descix
+drive pull`), but any path works.
 
 **If folders are missing**, offer to create them with appropriate placeholder content.
 
@@ -76,33 +79,48 @@ I can create a starter template based on your app description.
 
 ### Step 3: Check Knowledge Base
 
-#### `kb/General/README.md`
+#### `.descix/manifests/<KB>.json`
 
-**Check**: File exists with overview content
+**Check**: A corpus manifest exists at `{app_folder}/.descix/manifests/<KB-name>.json` (default KB
+name is `General`) and its `sources` array names at least one git-tracked path.
 
-**If missing**, create from app_description or guide:
+**This is the real check** — the manifest is what `descix kb corpus sync` reads. There is no
+folder-existence check to run instead of it: a `kb/General/` folder with files in it does nothing
+for RAG until a manifest names it.
+
+**If missing**, guide the user:
 
 ```
-Your knowledge base needs a README. This is the first document
-the AI will reference when answering questions.
+Your app doesn't have a knowledge base manifest yet. This file
+(.descix/manifests/General.json) tells `descix kb corpus sync` which
+of your git-tracked files to index for RAG.
 
-I can create one based on your app description, or you can
-provide specific content for the overview.
+Minimal shape:
+{
+  "kb_name": "General",
+  "sync_mode": "local",
+  "sources": [
+    { "path": "docs", "ref": "main", "tier": 1, "doc_type": "documentation" }
+  ]
+}
+
+Which folder(s) in your repo should I name as sources?
 ```
 
-#### KB Content
+#### Manifest Sources
 
-**Check**: At least one documentation file in `kb/General/`
+**Check**: `descix kb corpus status -a <app_id> -k <KB>` reports at least one tracked file (or run
+`descix kb corpus sync --dry-run --show-walk` to preview the walk before syncing).
 
 **If empty**, suggest:
 
 ```
-Your knowledge base is empty. The AI can only answer questions
-based on content in kb/General/.
+Your knowledge base manifest has no sources yet (or its sources walk to zero files).
+The AI can only answer questions based on content the manifest names.
 
 Suggestions:
-- Move existing documentation here
-- Create a getting-started.md
+- Point a source at existing documentation
+- Create a getting-started.md and name its folder
 - Add API reference docs
 - Include user guides
 ```
@@ -160,48 +178,30 @@ This app does not have a backend microservice.
 
 ## Pull from Drive Workflow
 
-If the app already exists on Drive, offer to pull existing assets.
-
-### Check if App Exists Remotely
-
-```
-Use: validate_app_assets({ community_id, app_id, check_drive: true })
-
-Returns:
-{
-  "local_assets": { ... },
-  "remote_assets": { ... },
-  "missing_locally": ["icon.png", "system_instructions.md"],
-  "can_pull": true
-}
-```
+If the app already exists on Drive (Drive-mode authoring), offer to pull existing content.
+**There is no dedicated "check what's on Drive" command** — the canonical tool is `descix drive
+pull` itself, which downloads and converts in one step (nothing to plan around a separate check
+command that doesn't exist).
 
 ### Offer to Pull
 
 ```
-I found your app already exists on DeSciX Drive with these assets:
-- ✓ app_description.md (234 bytes)
-- ✓ icon.png (45KB)
-- ✓ system_instructions.md (1.2KB)
+Your app may already have content on DeSciX Drive.
 
-Your local folder is missing:
-- icon.png
-- system_instructions.md
-
-Would you like me to pull these from Drive to your local folder?
-[Yes, pull missing assets] [No, I'll create new ones]
+Would you like me to pull it into your local folder?
+[Yes, pull from Drive] [No, I'll create new ones]
 ```
 
 ### Execute Pull
 
+```bash
+descix drive pull -c <community_id> -a <app_id>
 ```
-Use: pull_app_assets_from_drive({
-  community_id,
-  app_id,
-  local_path,
-  folders: ["assets", "kb"]  // Optional: specify which folders
-})
-```
+
+This downloads and converts Drive content to local markdown (default KB `General`; pass `-k
+<name>` for another) and reports what it pulled, converted, skipped or left unchanged. Follow up
+with `descix kb corpus sync -a <app_id>` once the pulled files are named in a corpus manifest —
+`descix drive pull` never syncs to Pinecone by itself.
 
 ## Validation Results Format
 
@@ -212,7 +212,7 @@ After validation, report status clearly:
 
 ### Folder Structure
 ✓ assets/ exists
-✓ kb/General/ exists
+✓ .descix/manifests/General.json exists
 ✓ site/ exists
 ✓ microservice/ exists
 
@@ -222,8 +222,8 @@ After validation, report status clearly:
 ✓ assets/system_instructions.md (1.2KB)
 
 ### Knowledge Base
-✓ kb/General/README.md exists
-✓ 5 documents found (12.4KB total)
+✓ .descix/manifests/General.json names 1 source
+✓ 5 documents tracked (`descix kb corpus status -a my-app -k General`)
 
 ### Site
 ○ site/ contains placeholder only (no UI)
@@ -303,7 +303,9 @@ Do NOT:
 {Describe the desired tone: professional, friendly, technical, etc.}
 ```
 
-### kb/README.md Template
+### KB Overview Doc Template
+
+Place this wherever your corpus manifest points (e.g. `docs/README.md`):
 
 ```markdown
 # {App Name} Knowledge Base
@@ -376,10 +378,10 @@ Always run validation:
 
 ### Before `descix kb corpus sync`
 
-1. Check `kb/General/` exists
-2. Verify at least one document exists
-3. Warn if no README.md
-4. Report total document count and size
+1. Check `.descix/manifests/<KB>.json` exists
+2. Run `--dry-run --show-walk` and confirm the manifest's sources resolve to at least one file
+3. Warn if no overview doc is named among the sources
+4. Report total document count from the dry-run output
 
 ### Before `descix site upload`
 

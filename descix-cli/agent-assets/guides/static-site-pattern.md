@@ -24,12 +24,8 @@ my-site/
 │   ├── app_description.md
 │   ├── icon.png
 │   └── system_instructions.md
-├── kb/
-│   ├── staging/
-│   ├── General/
-│   │   ├── README.md
-│   │   └── ... (markdown for RAG)
-│   └── chunks/
+├── docs/                       # Your RAG content — any location works
+│   └── ... (markdown, named in a corpus manifest)
 ├── site/                       # Static files to deploy
 │   ├── index.html
 │   ├── styles.css
@@ -39,6 +35,9 @@ my-site/
 │   └── dist/                   # Build output (if using bundler)
 ├── src/                        # Source files (not deployed)
 │   └── ...
+├── .descix/
+│   └── manifests/
+│       └── General.json        # Corpus manifest — names docs/ as the sync source
 ├── package.json
 └── vite.config.js
 ```
@@ -79,7 +78,7 @@ descix site upload
 | Capability | Enabled |
 |------------|---------|
 | RAG search | Yes |
-| chat_with_kb | Yes |
+| RAG chat (`ask_question_to_app`) | Yes |
 | Public URL | Yes |
 | MCP tools | No |
 | tell_me_how discovery | No |

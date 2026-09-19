@@ -23,18 +23,19 @@ my-docs/
 │   ├── app_description.md      # Required
 │   ├── icon.png                # Required (512x512)
 │   └── system_instructions.md  # Required
-└── kb/
-    ├── staging/                # New files to push
-    ├── General/                # Text-converted content
-    │   ├── README.md
-    │   ├── getting-started.md
-    │   ├── api-reference.md
-    │   └── tutorials/
-    │       └── ...
-    └── chunks/                 # Processed chunks (JSON)
+├── docs/                       # Your content — any location works
+│   ├── getting-started.md
+│   ├── api-reference.md
+│   └── tutorials/
+│       └── ...
+└── .descix/
+    └── manifests/
+        └── General.json        # Corpus manifest — names the docs source(s) above
 ```
 
-**Note:** No `site/` or `microservice/` folders needed.
+**Note:** No `site/` or `microservice/` folders needed. There is no required KB folder — the
+corpus manifest names whichever git-tracked directory holds your docs (`docs/` above is just an
+example; `kb/General/` also works if that's where content ends up, e.g. from `descix drive pull`).
 
 ## Configuration (`workspace.json`)
 
@@ -76,7 +77,7 @@ The git path needs no Drive at all: commit markdown, name it in the manifest, ru
 | Capability | Enabled |
 |------------|---------|
 | RAG search | Yes |
-| chat_with_kb | Yes |
+| RAG chat (`ask_question_to_app`) | Yes |
 | Public URL | No |
 | MCP tools | No |
 | tell_me_how discovery | No |

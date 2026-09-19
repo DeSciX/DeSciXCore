@@ -24,12 +24,8 @@ my-dynamic-app/
 │   ├── app_description.md
 │   ├── icon.png
 │   └── system_instructions.md
-├── kb/
-│   ├── staging/
-│   ├── General/
-│   │   ├── README.md
-│   │   └── user-guide.md
-│   └── chunks/
+├── docs/                        # Your RAG content — any location works
+│   └── user-guide.md            # named in a corpus manifest (.descix/manifests/General.json)
 ├── site/
 │   └── README.md               # "Site served by microservice"
 ├── microservice/
@@ -85,9 +81,9 @@ descix microservice init
 # 2. Add SSR routes to your service, run it locally behind the gateway
 descix serve
 
-# 3. Register and vectorize (after the service is deployed — see Deployment)
-descix microservice register
-descix microservice vectorize
+# 3. Register (after the service is deployed — see Deployment). This also vectorizes the
+#    README you pass with -r, so tell_me_how can discover the service's tools.
+descix microservice register -r SERVICE_README_myapp.md
 
 # 4. Sync KB
 descix kb corpus sync -c <community> -a <app>
@@ -98,7 +94,7 @@ descix kb corpus sync -c <community> -a <app>
 | Capability | Enabled |
 |------------|---------|
 | RAG search | Yes |
-| chat_with_kb | Yes |
+| RAG chat (`ask_question_to_app`) | Yes |
 | Public URL | Yes |
 | MCP tools | Yes |
 | tell_me_how discovery | Yes |
