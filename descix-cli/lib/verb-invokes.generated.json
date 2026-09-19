@@ -90,6 +90,7 @@
   "community list": [
     "find_communities"
   ],
+  "community refresh-identity": [],
   "community rename": [
     "rename_community"
   ],

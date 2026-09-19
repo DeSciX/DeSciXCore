@@ -107,14 +107,12 @@ export async function runInit(apiClient, options = {}) {
       // No existing config
     }
 
-    if (hasExisting && !options.force) {
-      const overwrite = await rl.askYesNo(chalk.yellow('Workspace already initialized. Overwrite?'), false);
-      if (!overwrite) {
-        console.log(chalk.gray('\nInitialization cancelled.\n'));
-        rl.close();
-        return {};
-      }
-    }
+    // An existing workspace is EXTENDED, never replaced. It may carry the environment the developer
+    // chose with `descix config init --env dev` — env.apiUrl / env.environment, owned by the config
+    // verbs — and init used to write a brand-new file over it, silently moving a DEV workspace to
+    // PROD (measured 2026-09-19: DEV before, `config show` said prod after). --force now restarts
+    // only the APP registrations; the environment is kept either way.
+    const existingConfig = hasExisting ? await WorkspaceConfig.load(projectPath) : null;
 
     let communityId = options.community;
     if (!communityId) {
@@ -166,8 +164,12 @@ export async function runInit(apiClient, options = {}) {
       return {};
     }
 
-    console.log(chalk.gray('\nWriting .descix/workspace.json...\n'));
-    const config = new WorkspaceConfig({ version: '2.0', type: 'workspace', communities: {} }, projectPath);
+    console.log(chalk.gray(`\n${existingConfig ? 'Updating' : 'Writing'} .descix/workspace.json...\n`));
+    const config = existingConfig || new WorkspaceConfig({ version: '2.1', type: 'workspace', env: {} }, projectPath);
+    if (existingConfig && options.force && config.env) {
+      config.env.products = [];
+      delete config.env.platform;
+    }
     config.registerApp(communityId, appId, { localPath: '.', kbId: 'General' });
     await config.save(projectPath);
 
