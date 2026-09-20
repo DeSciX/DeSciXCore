@@ -24,6 +24,8 @@ export {
 export {
     SCALAR_FILTER_OPERATORS,
     ARRAY_FILTER_OPERATORS,
+    RANGE_FILTER_OPERATORS,
+    orderedKind,
     SUPPORTED_FILTER_OPERATORS,
     operatorValueKind,
     remedyOperatorFor,
