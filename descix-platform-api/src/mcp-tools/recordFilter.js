@@ -20,7 +20,38 @@
  * the WHOLE array, and the in-memory residual compares by identity — so the store REFUSES them
  * there rather than counting the record as a miss.
  */
-export const SCALAR_FILTER_OPERATORS = Object.freeze(['$eq', '$ne', '$in']);
+export const SCALAR_FILTER_OPERATORS = Object.freeze(['$eq', '$ne', '$in', '$lt', '$lte', '$gt', '$gte']);
+
+/**
+ * The ORDERED subset — the four that compare rather than test equality.
+ *
+ * WHY THEY EXIST (2026-09-20): without them no predicate could express a WINDOW, so every
+ * "records since T", "older than T" or "expired" question had to fetch the whole collection and
+ * filter in the caller. That is O(collection) per sweep for every app that stores dated records,
+ * and the store's own `received_at` — the one timestamp a record's author cannot forge — was the
+ * field it most obviously applied to.
+ *
+ * ISO-8601 IS WHY STRINGS COMPARE. A UTC ISO timestamp sorts correctly under plain string
+ * comparison, so `{ received_at: { $lt: '2026-09-01T00:00:00.000Z' } }` means what it looks like.
+ * That property holds only for a fixed-width UTC format; it is the reason the store stamps one.
+ */
+export const RANGE_FILTER_OPERATORS = Object.freeze(['$lt', '$lte', '$gt', '$gte']);
+
+/**
+ * The ORDERED types. A comparison is defined between two numbers or two strings and NOWHERE else:
+ * booleans, nulls, objects, arrays and MIXED pairs have no meaningful order here, and JavaScript
+ * would happily answer `'10' < 9` or `null >= 0` with a confident wrong boolean. The evaluator
+ * refuses those by name instead — the same rule as the scalar/array type gate, for the same
+ * reason: a predicate that CANNOT be evaluated must never be reported as one that did not match.
+ *
+ * @param {*} value
+ * @returns {'number'|'string'|null} null when the value has no defined order
+ */
+export function orderedKind(value) {
+    if (typeof value === 'number' && Number.isFinite(value)) return 'number';
+    if (typeof value === 'string') return 'string';
+    return null;
+}
 
 /** Operators that test MEMBERSHIP in an ARRAY-valued field (Firestore `array-contains`). */
 export const ARRAY_FILTER_OPERATORS = Object.freeze(['$contains']);
@@ -74,10 +105,15 @@ export function remedyOperatorFor(valueKind) {
  * @returns {string}
  */
 export function filterOperatorClause() {
-    const scalar = SCALAR_FILTER_OPERATORS.join('/');
+    const equality = SCALAR_FILTER_OPERATORS.filter((o) => !RANGE_FILTER_OPERATORS.includes(o)).join('/');
+    const range = RANGE_FILTER_OPERATORS.join('/');
     const array = ARRAY_FILTER_OPERATORS.join('/');
     return (
-        `Supports ${scalar} on SCALAR fields (a bare value means ${SCALAR_FILTER_OPERATORS[0]}) ` +
+        `Supports ${equality} on SCALAR fields (a bare value means ${SCALAR_FILTER_OPERATORS[0]}), ` +
+        `${range} for ORDERED comparison on numbers and strings — UTC ISO-8601 timestamps sort ` +
+        `correctly as strings, so { "received_at": { "$gte": "2026-09-01T00:00:00.000Z" } } is a ` +
+        `time window, and comparing values of different types (or of a type with no order) is ` +
+        `REFUSED rather than answered — ` +
         `and ${array} on ARRAY fields (membership, e.g. { "tags": { "${ARRAY_FILTER_OPERATORS[0]}": "handoff" } }) ` +
         `+ field projection. OPERATOR AND VALUE TYPE MUST AGREE: a scalar comparison against a ` +
         `field that holds an ARRAY, or ${array} against a field that holds a SCALAR, is REFUSED ` +
