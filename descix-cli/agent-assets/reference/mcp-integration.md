@@ -10,7 +10,7 @@ This document covers how AI agents interact with the DeSciX platform via MCP (Mo
 
 ## 1. Architecture Overview
 
-DeSciX operates as a **Federated MCP Service Mesh**. The DeSciX backend acts as a broker that aggregates tools from all registered microservices into a unified catalog.
+DeSciX operates as a **Federated MCP Service Mesh**. The DeSciX backend acts as a broker: it registers tools from all registered microservices alongside its own native commands, dispatches calls to whichever service owns the command, and advertises a small handshake floor of that set at `tools/list` (see §2.2).
 
 **Key Innovation:** AI agents discover and invoke capabilities across the entire mesh without knowing where individual services are hosted.
 
@@ -46,14 +46,29 @@ MCP provides the communication protocol between AI agents and the DeSciX platfor
 - `ask_question_to_app` - RAG chat with an app's knowledge base (synthesized answer, cited)
 - `query_knowledge_base` - Raw vector search, returns chunks
 
-### 2.2 Cursor/AI Agent Integration
+### 2.2 The Two-Hop: Reaching Commands That Are Not In Your Tool List
 
-When an AI agent (e.g., Cursor) is configured with the DeSciX MCP server:
+**Your MCP tool list is a small floor, not the platform's capability surface.** The platform
+registers many more commands than it advertises at the handshake, so that a session pays ~1k
+tokens of catalog instead of ~8.7k. Everything outside the advertised floor stays registered and
+callable — you reach it with two hops:
 
-1. Agent receives user question
-2. Agent uses `tell_me_how` to find relevant tools
-3. Agent calls `execute_remote_command` with discovered tool
-4. Result returned to user
+1. `tell_me_how({ question })` — names the command and its parameters
+2. `execute_remote_command({ command, params })` — invokes it
+
+**Rule for an agent: if a capability is not a tool in your list, do not conclude the platform
+lacks it, and do not guess a command name — ask `tell_me_how`, then `execute_remote_command`
+what it names.** This is the standing integration pattern for every caller, on every transport.
+
+The advertised floor is a **floor, not a ceiling**: `tools/list` serves it UNION the calling
+identity's granted command names, so a caller may see more, never less. The floor's membership
+and its contract are owned by `describeDiscoveryCoreFence()` /
+`DISCOVERY_CORE_TOOL_NAMES` in `@descix/platform-api`
+(`src/mcp-tools/nativeTools.js`) — read your live `tools/list` rather than a copy of it.
+
+The CLI's stdio MCP server additionally concatenates its CLI-local diagnostics (`descix_doctor`,
+`platform_health`) onto whatever the backend advertises; those are local CLI operations, never
+`/apifront` commands, so `execute_remote_command` does not reach them.
 
 ### 2.3 The `_descix` Context Object
 
@@ -155,21 +170,23 @@ After `descix quickstart` completes:
 
 ### 4.1 Federated MCP Broker
 
-The DeSciX backend aggregates tools from all registered microservices:
+The DeSciX backend registers tools from all registered microservices and makes them callable and
+semantically discoverable — the handshake advertises only the floor (§2.2):
 
 ```
 Microservice A
   └── manifest.json (tools: [tool1, tool2])
         │
         ▼
-    Registers with Core
-        │
+    Registers with Core  ──► callable via execute_remote_command
+        │                    + vectorized for tell_me_how
         ▼
 DeSciX Backend (Broker)
-  └── Aggregated tools/list
+  └── tools/list  ──► handshake floor + this caller's grants
         │
         ▼
-    AI Agent sees: [tool1, tool2, core_tools...]
+    AI Agent's tool list: the floor. tool1/tool2 are reached
+    with tell_me_how -> execute_remote_command.
 ```
 
 ### 4.2 SERVICE_README Vectorization
