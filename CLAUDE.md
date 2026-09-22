@@ -54,7 +54,6 @@ Before any change, state which package boundary is being touched and confirm no 
 ### Complete (WS-CLI-V2.1-PURGE Batch 2)
 - `update.js updateKB()`: Drive stages 1-3 removed; delegates to `runKbChunk()` + `runKbSync()` ✓
 - `kb.js`: PathContext replaced with WorkspaceConfig for v2 workspace format support ✓
-- `WorkspaceConfig.getApiUrl()` and `PathContext.getApiUrl()`: now derive from `env.platform.microservice.port` ✓
 - `app init` hardening: hard-fails if app already mapped and `-p` given ✓
 - `kb/General/` scaffold removed from `app init` ✓
 - `descix kb pull/push` removed; moved to `descix drive pull/push` ✓
@@ -113,7 +112,7 @@ Two platform/SDK/CLI deliverables under CEO-D-2026-06-02-EVP-NO-APPDEV-CLI-PLUS-
 ## Key Patterns
 
 ### CLI is HTTP-only
-The CLI never imports backend services directly. All operations are `POST /apifront/` calls to a running backend at `https://localhost:4000`. The backend URL is derived automatically from `env.platform.microservice.port` in `workspace.json` — no `DESCIX_API_URL` env var needed in dev.
+The CLI never imports backend services directly. All operations are `POST /apifront/` calls. The origin is resolved by `lib/origin.js`, in this order: the `--api-url` / `--env` global flags (they set, and therefore outrank, the env var), then `DESCIX_API_URL`, then `.descix/workspace.json` `env.apiUrl`, then `~/.descix/config.json` `api_url`, then the declared default, PROD. **There is no port-derived step** — an environment NAME never becomes an origin, and `env.platform.microservice.port` is not consulted. A local backend is a URL you name. Every network-bound command prints the resolved origin AND the source that chose it on stderr; read that line rather than assuming.
 
 ### CLI testing — use CLI, never curl
 After `descix login` / bootstrap, all testing must use `node DeSciX_Core/descix-cli/bin/descix.js [command]`. Curl bypasses session, auth middleware, and entitlement checks — it is not a valid substitute. This is how real bugs in auth and entitlement are caught.
