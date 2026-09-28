@@ -187,6 +187,70 @@ If you did not initiate this payment, please ignore this email.
 }
 
 /**
+ * Render the receipt for a queued airdrop-wallet migration (the `pending_migrations` lane).
+ *
+ * Honest by construction: it names what was queued, the airdrop wallet it leaves, the DeSciX
+ * wallet it lands in, and that nothing moves until the next administrative batch runs. It
+ * carries no payment fields — a migration is not a purchase.
+ *
+ * @param {Object} migration
+ * @param {string} migration.airdrop_address - Old airdrop wallet (the batch retires this balance)
+ * @param {string} migration.master_wallet_address - The user's DeSciX (passkey master) wallet
+ * @param {Array<{symbol: string, amount: string|number}>} migration.tokens - What was queued
+ * @returns {{subject: string, body: string}}
+ */
+export function renderMigrationQueuedEmail({ airdrop_address, master_wallet_address, tokens }) {
+    if (!airdrop_address) throw new Error('renderMigrationQueuedEmail: airdrop_address is required');
+    if (!master_wallet_address) throw new Error('renderMigrationQueuedEmail: master_wallet_address is required');
+    if (!Array.isArray(tokens) || tokens.length === 0) throw new Error('renderMigrationQueuedEmail: tokens[] is required');
+    for (const t of tokens) {
+        if (!t?.symbol || t.amount === undefined || t.amount === null) {
+            throw new Error('renderMigrationQueuedEmail: every token needs a symbol and an amount');
+        }
+    }
+
+    const subject = 'Your airdrop migration is queued';
+    const tokenLines = tokens.map(t => `  ${t.amount} ${t.symbol}`).join('\n');
+    const body = `Hello,
+
+Your airdropped tokens are queued to move to your DeSciX wallet.
+
+═══════════════════════════════════════════════
+MIGRATION QUEUED
+═══════════════════════════════════════════════
+
+Tokens:
+${tokenLines}
+
+From (airdrop wallet):  ${airdrop_address}
+To (DeSciX wallet):     ${master_wallet_address}
+
+═══════════════════════════════════════════════
+
+Nothing moves yet. The transfer happens when the next administrative batch runs: that batch
+retires the balance at the airdrop wallet and credits the same amount to your DeSciX wallet.
+You don't need to do anything else.
+
+If you did not request this, reply to this email.
+
+— The DeSciX Team
+`;
+    return { subject, body };
+}
+
+/**
+ * Send the queued-migration receipt rendered by `renderMigrationQueuedEmail`.
+ *
+ * @param {Object} migration - See renderMigrationQueuedEmail
+ * @param {string} recipientEmail - Recipient email address
+ * @returns {Promise<void>}
+ */
+export async function sendMigrationQueued(migration, recipientEmail) {
+    const { subject, body } = renderMigrationQueuedEmail(migration);
+    await sendEmail(recipientEmail, subject, body);
+}
+
+/**
  * Send payment confirmation notification.
  *
  * @param {Object} quote - The fulfilled quote object

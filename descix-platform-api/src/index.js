@@ -47,6 +47,8 @@ export {
     sendVerificationEmail,
     sendPaymentPending,
     sendPaymentConfirmation,
+    renderMigrationQueuedEmail,
+    sendMigrationQueued,
     normalizeEmail,
     base64UrlEncode
 } from './email/index.js';
