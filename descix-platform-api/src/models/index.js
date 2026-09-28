@@ -1299,7 +1299,7 @@ export class Community {
         is_public = false, member_count = 1, disccusion_count = 0,
         token_symbol = null, token_contract_address = null, icon_url = "", owner_id = "",
         treasury_wallet_address = null, total_community_rep = 0, total_community_ref = 0, total_community_dip = 0,
-        airdrop_config = null, price = 0,
+        price = 0,
         ref_reward_rate = 10, guild_ref_commission_rate = 0.1,
         guild_rep_commission_rate = 0.1, guild_dip_commission_rate = 0.1,
         mcp_rag_min_tokens = 0, auto_purchase_apps = null,
@@ -1333,9 +1333,6 @@ export class Community {
         this.total_community_rep = total_community_rep;
         this.total_community_ref = total_community_ref;
         this.total_community_dip = total_community_dip;
-        this.airdrop_config = airdrop_config || {
-            next_airdrop_timestamp: null, frequency_days: 30, dip_percentage: 25, ref_percentage: 10
-        };
         this.price = price;
         this.ref_reward_rate = ref_reward_rate;
         this.guild_ref_commission_rate = guild_ref_commission_rate;
@@ -1363,14 +1360,6 @@ export class Community {
     to_dict() {
         const copy = { ...this };
         delete copy.db;
-        if (copy.airdrop_config && copy.airdrop_config.next_airdrop_timestamp instanceof Date) {
-            copy.airdrop_config.next_airdrop_timestamp = Timestamp.fromDate(copy.airdrop_config.next_airdrop_timestamp);
-        } else if (copy.airdrop_config && copy.airdrop_config.next_airdrop_timestamp && !(copy.airdrop_config.next_airdrop_timestamp instanceof Timestamp)) {
-            try {
-                const parsedDate = new Date(copy.airdrop_config.next_airdrop_timestamp);
-                copy.airdrop_config.next_airdrop_timestamp = !isNaN(parsedDate) ? Timestamp.fromDate(parsedDate) : null;
-            } catch (e) { copy.airdrop_config.next_airdrop_timestamp = null; }
-        }
         if (copy.token_symbol) copy.token_symbol = copy.token_symbol.toUpperCase();
         if (copy.ref_reward_rate === undefined) copy.ref_reward_rate = 10;
         if (copy.guild_ref_commission_rate === undefined) copy.guild_ref_commission_rate = 0.1;
@@ -1392,10 +1381,6 @@ export class Community {
     static from_dict(doc) {
         if (!doc) return null;
 
-        let airdrop_config = doc.airdrop_config || null;
-        if (airdrop_config?.next_airdrop_timestamp instanceof Timestamp) {
-            airdrop_config = { ...airdrop_config, next_airdrop_timestamp: airdrop_config.next_airdrop_timestamp.toDate() };
-        }
 
         return new Community(
             doc.community_id,
@@ -1405,7 +1390,7 @@ export class Community {
             doc.token_symbol, doc.token_contract_address || null,
             doc.icon_url, doc.owner_id || "", doc.treasury_wallet_address || null,
             doc.total_community_rep || 0, doc.total_community_ref || 0, doc.total_community_dip || 0,
-            airdrop_config, doc.price || 0,
+            doc.price || 0,
             doc.ref_reward_rate !== undefined ? doc.ref_reward_rate : 10,
             doc.guild_ref_commission_rate !== undefined ? doc.guild_ref_commission_rate : 0.1,
             doc.guild_rep_commission_rate !== undefined ? doc.guild_rep_commission_rate : 0.1,
@@ -1435,10 +1420,6 @@ export class Community {
         const doc = await db.get_doc(FirestoreCollections.COMMUNITY(), community_id);
         if (!doc) return null;
 
-        let airdrop_config = doc.airdrop_config || null;
-        if (airdrop_config?.next_airdrop_timestamp instanceof Timestamp) {
-            airdrop_config = { ...airdrop_config, next_airdrop_timestamp: airdrop_config.next_airdrop_timestamp.toDate() };
-        }
 
         return new Community(
             doc.community_id || community_id,
@@ -1448,7 +1429,7 @@ export class Community {
             doc.token_symbol, doc.token_contract_address || null,
             doc.icon_url, doc.owner_id || "", doc.treasury_wallet_address || null,
             doc.total_community_rep || 0, doc.total_community_ref || 0, doc.total_community_dip || 0,
-            airdrop_config, doc.price || 0,
+            doc.price || 0,
             doc.ref_reward_rate !== undefined ? doc.ref_reward_rate : 10,
             doc.guild_ref_commission_rate !== undefined ? doc.guild_ref_commission_rate : 0.1,
             doc.guild_rep_commission_rate !== undefined ? doc.guild_rep_commission_rate : 0.1,
@@ -1479,19 +1460,6 @@ export class Community {
     }
     async incrementMemberCount(amount = 1) {
         return await this.db.update_doc_field(FirestoreCollections.COMMUNITY(), this.community_id, 'member_count', FieldValue.increment(amount));
-    }
-    async updateAirdropConfig(newConfig) {
-        if (newConfig.next_airdrop_timestamp instanceof Date) {
-            newConfig.next_airdrop_timestamp = Timestamp.fromDate(newConfig.next_airdrop_timestamp);
-        } else if (typeof newConfig.next_airdrop_timestamp === 'string') {
-            try {
-                const parsedDate = new Date(newConfig.next_airdrop_timestamp);
-                newConfig.next_airdrop_timestamp = !isNaN(parsedDate) ? Timestamp.fromDate(parsedDate) : null;
-            } catch (e) { newConfig.next_airdrop_timestamp = null; }
-        } else if (newConfig.next_airdrop_timestamp !== null && !(newConfig.next_airdrop_timestamp instanceof Timestamp)) {
-            newConfig.next_airdrop_timestamp = null;
-        }
-        return await this.db.update_doc_fields(FirestoreCollections.COMMUNITY(), this.community_id, { airdrop_config: newConfig });
     }
 
     /**
