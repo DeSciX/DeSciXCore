@@ -205,9 +205,9 @@ export async function executeQueue(options) {
         if (result.token_contract_address) console.log(`  token_contract:           ${result.token_contract_address}`);
         if (result.abi_source) console.log(`  abi_source:               ${result.abi_source.doc_id} (v${result.abi_source.version || '?'})`);
         console.log(`  transfers_total:          ${chalk.yellow(result.transfers_total)}`);
+        console.log(`  batches_total:            ${result.batches_total}`);
         console.log(`  debit_total:              ${result.debit_total}`);
         console.log(`  credit_total:             ${result.credit_total}`);
-        console.log(`  bonus_total:              ${result.bonus_total}`);
         const nz = result.net_zero_assertion || {};
         const nzLabel = nz.passes ? chalk.green('PASS') : chalk.red('FAIL');
         console.log(`  net_zero_assertion:       ${nzLabel} (Σ=${nz.sum})`);
