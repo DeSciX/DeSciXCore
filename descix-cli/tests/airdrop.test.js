@@ -345,3 +345,33 @@ test('executeQueue — --apply without --signer-pk-file falls back to interactiv
     const call = apiClient._calls.find(c => c.command === 'airdrop_execute_queue');
     assert.equal(call.params.signer_pk_hex, '0x' + 'd'.repeat(64));
 });
+
+test('executeQueue — dry-run prints the pre-batch balance refusals --apply would enforce', async () => {
+    const apiClient = makeFakeApiClient({
+        airdrop_execute_queue: async () => ({
+            status: 'OK',
+            message: {
+                mode: 'dry-run', community: 'daita', transfers_total: 2, batches_total: 1,
+                debit_total: '-50', credit_total: '50', net_zero_assertion: { passes: true, sum: '0' },
+                pre_batch_checks: {
+                    passes: false,
+                    refusals: [{ kind: 'source', wallet: '0xsrc', community_id: 'daita', required: '50', held: '0', pending_ids: ['mig-u1-1-daita'] }],
+                    treasuries: [], sources: []
+                },
+                unique_source_wallets: 1, unique_master_wallets: 1, prospective_batch_id: 'aeq-daita-x',
+                gas_estimate: null, eta: null, caller: { operator_email: 'admin@descix.net', service_account: null }
+            }
+        })
+    });
+    const lines = [];
+    const orig = console.log;
+    console.log = (...a) => { lines.push(a.join(' ')); };
+    try {
+        await executeQueue({ community: 'daita', dryRun: true, apiClient });
+    } finally {
+        console.log = orig;
+    }
+    const out = lines.join('\n');
+    assert.match(out, /pre_batch_checks:.*FAIL/);
+    assert.match(out, /source 0xsrc .*needs 50.*mig-u1-1-daita/);
+});
