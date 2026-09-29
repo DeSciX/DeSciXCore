@@ -117,3 +117,13 @@ test('an unreadable dev-overrides.json STOPS the boot, naming the file', async (
     await fsp.mkdir(file); // present but not a readable file
     assert.throws(() => cfg._loadDevOverrides(), (e) => e.name === 'CloudConfigFatalError' && e.message.includes(file));
 });
+
+test('.env SERVICE_SELF_REGISTER=false arrives as the boolean false, not the string', async (t) => {
+    const { cfg } = await withOverrides(t, {});
+    const prev = process.env.SERVICE_SELF_REGISTER;
+    t.after(() => { if (prev === undefined) delete process.env.SERVICE_SELF_REGISTER; else process.env.SERVICE_SELF_REGISTER = prev; });
+    process.env.SERVICE_SELF_REGISTER = 'false';
+    cfg._loadDevOverrides();
+    assert.strictEqual(cfg.SERVICE_SELF_REGISTER, false);
+    assert.ok(schema.boolean_keys.keys.includes('SERVICE_SELF_REGISTER'), 'the key type is owned by boolean_keys');
+});
