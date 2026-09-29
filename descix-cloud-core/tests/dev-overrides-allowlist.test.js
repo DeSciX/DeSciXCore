@@ -1,10 +1,10 @@
 /**
- * dev-overrides.json applies ONLY config-schema.json dev_override_keys.
+ * dev-overrides.json may set ANY key, by design.
  *
- * _loadDevOverrides() force-wins over Secret Manager when DEPLOY_ENV=dev. It used to apply EVERY
- * non-null key in the file, so a dev overlay could silently replace any Secret Manager value. Now an
- * allowed key applies, and any other key present in the file REFUSES the boot, naming the key and
- * the file, never the value. Logs carry key names only.
+ * _loadDevOverrides() force-wins over Secret Manager when DEPLOY_ENV=dev. A local override can set
+ * any secret (CEO ruling, 2026-09-29) — dev-overrides.json is not restricted to config-schema.json's
+ * dev_override_keys list; every non-null key present in the file applies. A malformed or unreadable
+ * overlay still refuses the boot, naming the file, never the contents. Logs carry key names only.
  *
  * Run: `node --test tests/dev-overrides-allowlist.test.js` from descix-cloud-core/.
  */
@@ -19,7 +19,7 @@ import { createCloudConfig, _resetCloudConfigForTests } from '../src/config.js';
 const require = createRequire(import.meta.url);
 const schema = require('../config-schema.json');
 const ALLOWED = schema.dev_override_keys.keys;
-const NOT_ALLOWED = 'GEMINI_API_KEY';
+const OUTSIDE_ALLOWLIST = 'GEMINI_API_KEY';
 const SENTINEL = 'SENTINEL-OVERRIDE-VALUE-5b1e';
 
 async function withOverrides(t, overrides) {
@@ -44,8 +44,8 @@ async function withOverrides(t, overrides) {
     return { cfg, captured, file: path.join(dir, 'dev-overrides.json') };
 }
 
-test('FIXTURE: the probe key is outside the allowlist and the applied key is inside it', () => {
-    assert.ok(!ALLOWED.includes(NOT_ALLOWED));
+test('FIXTURE: the probe key is outside dev_override_keys (still not restricted to it)', () => {
+    assert.ok(!ALLOWED.includes(OUTSIDE_ALLOWLIST));
     assert.ok(ALLOWED.includes('POWCH_RP_NAME'));
 });
 
@@ -58,31 +58,31 @@ test('an allowed key applies, and only its NAME is logged', async (t) => {
     assert.ok(!out.includes(SENTINEL), 'a value was logged');
 });
 
-test('a key outside dev_override_keys REFUSES the boot by name and file, never by value', async (t) => {
-    const { cfg, captured, file } = await withOverrides(t, { POWCH_RP_NAME: 'ok', [NOT_ALLOWED]: SENTINEL });
-    let err;
-    try { cfg._loadDevOverrides(); } catch (e) { err = e; }
-    assert.ok(err, 'a non-allowed key must refuse, not apply or be skipped');
-    assert.match(err.message, new RegExp(NOT_ALLOWED));
-    assert.ok(err.message.includes(file), 'must name the file');
-    assert.ok(!err.message.includes(SENTINEL), 'must not carry the value');
-    assert.notEqual(cfg[NOT_ALLOWED], SENTINEL, 'the non-allowed value must not have been applied');
-    assert.ok(!captured.join('\n').includes(SENTINEL), 'a value was logged');
+test('a key outside dev_override_keys still applies — a dev overlay may set ANY key, by design', async (t) => {
+    const { cfg, captured } = await withOverrides(t, { POWCH_RP_NAME: 'ok', [OUTSIDE_ALLOWLIST]: SENTINEL });
+    assert.doesNotThrow(() => cfg._loadDevOverrides());
+    assert.equal(cfg[OUTSIDE_ALLOWLIST], SENTINEL);
+    assert.equal(cfg.POWCH_RP_NAME, 'ok');
+    const out = captured.join('\n');
+    assert.match(out, new RegExp(OUTSIDE_ALLOWLIST), 'the key name is logged');
+    assert.ok(!out.includes(SENTINEL), 'a value was logged');
 });
 
-test('a non-allowed key refuses even when its value is null', async (t) => {
-    const { cfg } = await withOverrides(t, { [NOT_ALLOWED]: null });
-    assert.throws(() => cfg._loadDevOverrides(), new RegExp(NOT_ALLOWED));
+test('a non-allowed key with a null value is skipped, same as any other key', async (t) => {
+    const { cfg } = await withOverrides(t, { [OUTSIDE_ALLOWLIST]: null });
+    cfg._loadDevOverrides();
+    assert.notEqual(cfg[OUTSIDE_ALLOWLIST], null);
+    assert.equal(cfg[OUTSIDE_ALLOWLIST], undefined);
 });
 
 test('outside DEPLOY_ENV=dev the file is not read at all', async (t) => {
-    const { cfg } = await withOverrides(t, { [NOT_ALLOWED]: SENTINEL });
+    const { cfg } = await withOverrides(t, { [OUTSIDE_ALLOWLIST]: SENTINEL });
     cfg.DEPLOY_ENV = 'prod';
     assert.doesNotThrow(() => cfg._loadDevOverrides());
-    assert.notEqual(cfg[NOT_ALLOWED], SENTINEL);
+    assert.notEqual(cfg[OUTSIDE_ALLOWLIST], SENTINEL);
 });
 
-test('the scaffold dev-overrides.example.json, copied as-is, passes the allowlist', async (t) => {
+test('the scaffold dev-overrides.example.json, copied as-is, applies cleanly', async (t) => {
     const scaffold = path.join(path.dirname(new URL(import.meta.url).pathname), '..', '..',
         'descix-cli', 'templates', 'scaffolds', 'microservice', 'dev-overrides.example.json');
     const raw = await fsp.readFile(scaffold, 'utf8');
@@ -126,4 +126,13 @@ test('.env SERVICE_SELF_REGISTER=false arrives as the boolean false, not the str
     cfg._loadDevOverrides();
     assert.strictEqual(cfg.SERVICE_SELF_REGISTER, false);
     assert.ok(schema.boolean_keys.keys.includes('SERVICE_SELF_REGISTER'), 'the key type is owned by boolean_keys');
+});
+
+test('.env is still scoped to dev_override_keys — a key outside it is not read from .env', async (t) => {
+    const { cfg } = await withOverrides(t, {});
+    const prev = process.env[OUTSIDE_ALLOWLIST];
+    t.after(() => { if (prev === undefined) delete process.env[OUTSIDE_ALLOWLIST]; else process.env[OUTSIDE_ALLOWLIST] = prev; });
+    process.env[OUTSIDE_ALLOWLIST] = SENTINEL;
+    cfg._loadDevOverrides();
+    assert.notEqual(cfg[OUTSIDE_ALLOWLIST], SENTINEL);
 });
