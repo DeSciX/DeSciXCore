@@ -209,7 +209,7 @@ export async function extract({ env, cliPaths } = {}) {
     ``,
     `**Step 2.** \`descix microservice register\` — writes manifest to Firestore \`ServiceManifests\` so Core dispatches via \`proxyToExternalService\`. Self-registration on boot is equivalent. — \`${CLI_FILE}:${registerMatch.lineNumber}\``,
     ``,
-    `**Platform LB (core platform apps at standup):** \`deploy-backend-env.sh\` → \`provision-platform-lb.js\` — daita broker NEG + powch NEG + apex/peer URL map. \`deploy-service-env.sh powch\` re-runs provision for powch NEG. — \`${LB_FILE}:${ensureCoreNegMatch.lineNumber}\``,
+    `**Platform LB (core platform apps at standup):** \`deploy-backend-env.sh\` → \`provision-platform-lb.js\` — daita broker NEG + powch NEG + apex/peer URL map. \`deploy-service-env.sh\` provisions no LB state for any app: hosted apps are routed by the Cloudflare edge Worker by app id. — \`${LB_FILE}:${ensureCoreNegMatch.lineNumber}\``,
     ``
   ];
 
