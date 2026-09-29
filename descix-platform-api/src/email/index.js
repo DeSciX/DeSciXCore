@@ -34,6 +34,18 @@ export function normalizeEmail(email) {
 }
 
 /**
+ * An address masked for display to someone who is not its owner: the first character of the
+ * local part, then '***', then the domain ('b***@example.com'). Null for a non-address.
+ * @param {*} email
+ * @returns {string|null}
+ */
+export function maskEmail(email) {
+    if (!isValidEmail(email)) return null;
+    const [local, domain] = normalizeEmail(email).split('@');
+    return `${local[0]}***@${domain}`;
+}
+
+/**
  * Whether a value is a mailable address shape: one '@', a non-empty local part, and a dotted
  * domain, with no whitespace. Shape only — deliverability is proven by a verification code.
  * The ONE email-shape check; consumers call it rather than re-deriving `includes('@')`.
