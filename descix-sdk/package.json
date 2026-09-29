@@ -1,6 +1,6 @@
 {
   "name": "@descix/sdk",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "description": "DeSciX SDK - Shared runtime libraries for Node.js and Browser",
   "repository": {
     "type": "git",
@@ -51,7 +51,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.1",
-    "@descix/cloud-core": "^1.1.0"
+    "@descix/cloud-core": "^1.2.0"
   },
   "bin": {
     "descix-app": "bin/descix-app.js"
