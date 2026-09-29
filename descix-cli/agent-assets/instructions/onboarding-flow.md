@@ -89,7 +89,6 @@ execute_remote_command({
 This returns:
 - `communities`: Communities the user belongs to (with roles)
 - `apps`: Apps the user owns or can develop
-- `service_slots`: Available service deployment slots
 
 ### Step 2: Present Entitlements to User
 

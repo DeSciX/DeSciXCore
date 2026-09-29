@@ -29,7 +29,7 @@ const server = http.createServer((req, res) => {
         res.end(JSON.stringify({
             status: 'OK',
             message: { userId: 'census-disposable' },
-            communities: [], apps: [], service_slots: [], results: [], data: {},
+            communities: [], apps: [], results: [], data: {},
         }));
     });
 });

@@ -11,7 +11,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { DeSciXApiClient } from '../lib/api-client.js';
 import { requireAuth } from '../lib/auth-guard.js';
-import { WorkspaceConfig, unmappedAppMessage, resolveWorkspacePath, TOP_LEVEL_API_URL_REMEDY } from '../lib/workspace-config.js';
+import { WorkspaceConfig, unmappedAppMessage, resolveWorkspacePath } from '../lib/workspace-config.js';
 import { CLI_VERSION } from '../lib/cli-version.js';
 import { recordInvocationOrigin } from '../lib/origin.js';
 // Chat session pointer + the ONE rule for when a dead pointer may be self-healed.
@@ -28,10 +28,12 @@ import * as configCommands from '../lib/commands/config.js';
 import * as buyCommands from '../lib/commands/buy.js';
 import * as creditsCommands from '../lib/commands/credits.js';
 import * as airdropCommands from '../lib/commands/airdrop.js';
+import { MICROSERVICE_AUTH_MODEL } from '../lib/commands/microservice-auth-model.js';
 import { runInit } from '../lib/commands/init.js';
 // "May I prompt?" has ONE OWNER. No command in this file derives it.
 import { createPromptSession } from '../lib/interactive.js';
-import { registerAllRetiredKbSync, CANONICAL_KB_SYNC } from '../lib/commands/retired-kb-sync.js';
+import { CANONICAL_KB_SYNC } from '../lib/commands/kb-sync-surface.js';
+import { registerAllRetiredVerbs } from '../lib/commands/retired-verbs.js';
 import { runStatus } from '../lib/commands/status.js';
 import { refreshCommunityIdentity, printIdentityReceipt } from '../lib/commands/communityIdentity.js';
 import { runAppInit } from '../lib/commands/appInit.js';
@@ -455,9 +457,9 @@ airdropCommand
 
 // ============ Sync Commands: REMOVED ============
 // `sync assets`, `sync site` and `sync kb` are all gone, so the `sync` GROUP is gone with
-// them: a registered verb with no working children is dead weight. Every retired surface is
-// registered in ONE place below (search registerAllRetiredKbSync), driven off the owner list
-// in lib/commands/retired-kb-sync.js -- this file names no retired verb itself.
+// them: a registered verb with no working children is dead weight. Every retired verb is
+// registered in ONE place below (search registerAllRetiredVerbs), driven off the owner table
+// in lib/commands/retired-verbs.js -- this file names no retired verb itself.
 
 // ============ Community/App Commands ============
 
@@ -1951,12 +1953,8 @@ kbCommand
   });
 
 // `kb chunk` and `kb sync` (low-level Git-mode steps) are REMOVED. Their implementations
-// runKbChunk/runKbSync are deleted from lib/commands/kb.js. Both names exit non-zero naming
-// `descix kb corpus sync`.
-// EVERY retired kb-sync surface is registered here, by ITERATING the owner list -- no verb
-// name is typed in this file. Adding a surface to RETIRED_KB_SYNC_SURFACES registers it;
-// nothing can be registered without being in that list.
-registerAllRetiredKbSync({ program, kb: kbCommand }, chalk.red);
+// runKbChunk/runKbSync are deleted from lib/commands/kb.js. Both names are rows in
+// lib/commands/retired-verbs.js, registered with the rest of that table below.
 
 
 // app records — APP DATA PLANE structured record store (CEO-D-2026-06-02-APP-DATA-PLANE)
@@ -2929,6 +2927,7 @@ microserviceCommand
 microserviceCommand
   .command('register')
   .description('Register microservice with gateway (-r <local SERVICE_README>; git-mode only — no Drive)')
+  .addHelpText('after', `\nAuthentication:\n  ${MICROSERVICE_AUTH_MODEL}\n`)
   .option('-m, --manifest <path>', 'Path to manifest.json', './manifest.json')
   .option('-r, --readme <path>', 'Path to local SERVICE_README file')
   .option('-c, --community <id>', 'Community ID (auto-detects from context)')
@@ -3285,128 +3284,6 @@ microserviceCommand
       }
     } catch (error) {
       console.error(chalk.red(error.message));
-      process.exit(1);
-    }
-  });
-
-// microservice register-delegate - Register delegate key
-microserviceCommand
-  .command('register-delegate')
-  .description('Provision the service delegate key (SERVICE_KEY) that authenticates mesh/loopback calls — run this if your service gets HTTP 401 calling /apifront or another service')
-  .option('-c, --community <id>', 'Community ID (auto-detects from context)')
-  .option('-a, --app <id>', 'App ID (auto-detects from context)')
-  .option('-s, --slot <id>', 'Service slot ID (uses first available if not provided)')
-  .action(async (options) => {
-    try {
-      const apiClient = new DeSciXApiClient();
-      await requireAuth(apiClient);
-      
-      // Auto-detect context
-      const workspaceConfig = await WorkspaceConfig.load();
-      const ctx = workspaceConfig.resolveContextWithOptions(options);
-      
-      let communityId = ctx.communityId;
-      let appId = ctx.appId;
-      
-      // Try manifest.json if not detected
-      if (!communityId || !appId) {
-        try {
-          const manifestContent = await fs.readFile('./manifest.json', 'utf-8');
-          const manifest = JSON.parse(manifestContent);
-          if (!communityId) communityId = manifest.service?.community_id;
-          if (!appId) appId = manifest.service?.app_id;
-        } catch {
-          // Not found
-        }
-      }
-      
-      if (!communityId || !appId) {
-        console.error(chalk.red('\n❌ Community and App ID required.'));
-        console.log(chalk.gray('  Either provide -c and -a flags, cd into an app directory, or have manifest.json present.\n'));
-        process.exit(1);
-      }
-      
-      console.log(chalk.cyan('\n🔑 Registering Service Delegate Key\n'));
-      
-      // Fetch entitlements
-      const entitlementsResponse = await apiClient.invoke('fetch_my_purchases', {});
-      const entitlements = entitlementsResponse.message || {};
-      const allSlots = entitlements.service_slots || [];
-
-      // Service slots come ONLY from subscriptions right now. NFT-based slots are FUTURE
-      // functionality (app/NFT association is not wired yet) — never select them here.
-      // CEO-D-2026-06-01-MESH-AUTH-DRIVE-REMOVAL (Fix C).
-      const serviceSlots = allSlots.filter(slot => slot.type === 'subscription');
-
-      if (serviceSlots.length === 0) {
-        console.error(chalk.red('❌ No subscription service slot available.'));
-        console.log(chalk.white('   Service slots are provided by a subscription. A subscription is required to'));
-        console.log(chalk.white('   provision a delegate. (NFT-based slots are future functionality and are'));
-        console.log(chalk.white('   not selectable yet.)'));
-        process.exit(1);
-      }
-
-      // Select slot (subscription slots only)
-      let selectedSlot = serviceSlots[0];
-      if (options.slot) {
-        selectedSlot = serviceSlots.find(s => (s.id || s.nft_id) === options.slot);
-        if (!selectedSlot) {
-          console.error(chalk.red(`❌ Subscription slot ${options.slot} not found in your entitlements.`));
-          console.log(chalk.gray('   Only subscription slots are selectable. Run without -s to use the first available.'));
-          process.exit(1);
-        }
-      }
-      
-      console.log(chalk.gray(`  Selected slot: ${selectedSlot.name} (${selectedSlot.type})\n`));
-      
-      // Generate key pair
-      const crypto = await import('crypto');
-      const { publicKey, privateKey } = crypto.generateKeyPairSync('ec', {
-        namedCurve: 'secp256k1',
-        publicKeyEncoding: { type: 'spki', format: 'pem' },
-        privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
-      });
-      
-      console.log(chalk.gray('  Generating key pair...'));
-      
-      // Register with Virtual Registry
-      const registerResponse = await apiClient.invoke('register_delegate', {
-        slot_id: selectedSlot.nft_id || selectedSlot.id,
-        slot_type: selectedSlot.type,
-        public_key: publicKey,
-        app_id: appId,
-        community_id: communityId
-      });
-      
-      console.log(chalk.green('  ✓ Delegate registered with Core\n'));
-      
-      // Save to dev-overrides.json
-      const overridesPath = path.resolve(process.cwd(), 'dev-overrides.json');
-      let overrides = {};
-      
-      try {
-        const content = await fs.readFile(overridesPath, 'utf-8');
-        overrides = JSON.parse(content);
-      } catch (e) {
-        // File doesn't exist, start fresh
-      }
-      
-      overrides.SERVICE_KEY = {
-        privateKey,
-        publicKey,
-        slotId: selectedSlot.nft_id || selectedSlot.id,
-        slotType: selectedSlot.type,
-        appId: appId,
-        communityId: communityId,
-        createdAt: new Date().toISOString()
-      };
-      
-      await fs.writeFile(overridesPath, JSON.stringify(overrides, null, 2));
-      console.log(chalk.green(`✅ Key saved to dev-overrides.json\n`));
-      console.log(chalk.gray(`  Path: ${overridesPath}\n`));
-      
-    } catch (error) {
-      console.error(chalk.red(`\n❌ Error: ${error.message}\n`));
       process.exit(1);
     }
   });
@@ -3861,24 +3738,6 @@ configCommand
     } catch (error) {
       fail(error);
     }
-  });
-
-// `config set-url` is RETIRED, and it is retired LOUDLY rather than deleted outright: a deleted
-// subcommand only earns commander's "unknown command", which names no replacement. It used to
-// assign a top-level `apiUrl` that save() never serialized, then print a success banner over a
-// value that landed nowhere — the file was re-stamped and the origin never moved. Hidden from
-// --help; any invocation exits non-zero naming the three surfaces that actually set the origin.
-configCommand
-  .command('set-url', { hidden: true })
-  .description('retired — see error text')
-  .argument('[url]')
-  .allowUnknownOption()
-  .action(() => {
-    fail(new Error(
-      '"descix config set-url" is retired: it never wrote the origin it reported (a retired top-level\n' +
-      'key that nothing reads). Set the API origin where it is read, env.apiUrl, with one of:\n' +
-      `  ${TOP_LEVEL_API_URL_REMEDY}`
-    ));
   });
 
 configCommand
@@ -4592,6 +4451,11 @@ program
       process.exit(1);
     }
   });
+
+// ============ Retired verbs ============
+// Every retired verb is a row in lib/commands/retired-verbs.js, registered here in one call once
+// every parent exists. No retired verb name is typed in this file.
+registerAllRetiredVerbs({ program, kb: kbCommand, config: configCommand, microservice: microserviceCommand });
 
 // ============ Public-vs-admin help listing (CEO ruling, see lib/command-visibility.js) ============
 //

@@ -25,7 +25,7 @@ Consumed by the CLI and by the microservice scaffold.
 
 `CommunityManager` / `createCommunityManager`, `AppManager` / `createAppManager`,
 `WizardOrchestrator` / `createWizardOrchestrator` / `WIZARD_STEPS`, `GitUtils` /
-`createGitUtils`, `Signer`, `fetchAppAsset`, and `createSDK(apiClient)`.
+`createGitUtils`, `fetchAppAsset`, and `createSDK(apiClient)`.
 
 Most managers come in a class form and a `create*` factory; the factory is the usual entry.
 

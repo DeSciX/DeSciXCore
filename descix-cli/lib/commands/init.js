@@ -11,10 +11,10 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 // clone.js is imported dynamically inside the invite flow to avoid circular deps
 import { WorkspaceConfig } from '../workspace-config.js';
-// The canonical KB-sync surface is owned by retired-kb-sync.js. Consume the constant: a literal
+// The canonical KB-sync surface is owned by kb-sync-surface.js. Consume the constant: a literal
 // spelled here is a second derivation of the same fact, and the removed verb this replaced
 // reached a developer who had done everything right.
-import { CANONICAL_KB_SYNC } from './retired-kb-sync.js';
+import { CANONICAL_KB_SYNC } from './kb-sync-surface.js';
 // "May I prompt?" has ONE OWNER. init does not derive it, and holds no TTY check of its own.
 import { createLazyPromptSession } from '../interactive.js';
 
