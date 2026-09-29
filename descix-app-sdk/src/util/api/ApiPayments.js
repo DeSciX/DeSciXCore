@@ -149,60 +149,12 @@ export const getQuoteStatus = async (quoteId) => {
   }
 };
 
-export const getClaimDetails = async (claimCode) => {
-  try {
-    const data = await makeCommandRequestJSON('get_claim_details', { claim_code: claimCode }, true);
-    return data.status === ResponseStatus.OK ? data.message : null;
-  } catch (error) {
-    console.error('Error getting claim details:', error);
-    throw error;
-  }
-};
-
-export const fulfillClaim = async (params) => {
-  try {
-    const data = await makeCommandRequestJSON('fulfill_claim', params);
-    if (data.status === ResponseStatus.OK) return data.message;
-    throw new Error(data.message || 'Failed to fulfill claim');
-  } catch (error) {
-    console.error('Error fulfilling claim:', error);
-    throw error;
-  }
-};
-
-/**
- * One-time claim transfer, step 1 (no session): email a verification code to the address the
- * claim was issued to. Resolves { sent, expires_in_minutes, requests_remaining }. A refusal
- * throws with err.code (e.g. TRANSFER_RESEND_COOLDOWN with err.data.retry_after_seconds,
- * TRANSFER_REQUEST_LIMIT, TRANSFER_ATTEMPTS_EXHAUSTED, CLAIM_ALREADY_TRANSFERRED).
- */
-export const requestClaimTransfer = async (claimCode) => {
-  const data = await makeCommandRequestJSON('claim_transfer_request', { claim_code: claimCode }, true);
-  return data.message;
-};
-
-/**
- * One-time claim transfer, step 2 (no session): with the emailed code, move the claim to
- * newEmail. Resolves { status: 'transferred', new_email, token_symbol, tokens_amount, expires_at,
- * successor_email_sent } — never a claim code. A refusal throws with err.code (e.g.
- * TRANSFER_CODE_INVALID with err.data.attempts_remaining, TRANSFER_CODE_EXPIRED).
- */
-export const confirmClaimTransfer = async ({ claimCode, verificationCode, newEmail }) => {
-  const data = await makeCommandRequestJSON('claim_transfer_confirm', {
-    claim_code: claimCode, verification_code: verificationCode, new_email: newEmail,
-  }, true);
-  return data.message;
-};
-
-export const getUserClaims = async () => {
-  try {
-    const data = await makeCommandRequestJSON('get_user_claims', {});
-    return data.status === ResponseStatus.OK ? data.message : [];
-  } catch (error) {
-    console.error('Error getting user claims:', error);
-    throw error;
-  }
-};
+// getClaimDetails, fulfillClaim, requestClaimTransfer, confirmClaimTransfer, getUserClaims
+// REMOVED (ws-claims-ui-powch, CEO ruling relayed 2026-09-29: "claim transfer and all token
+// related chain etc. are in powch"). The shell no longer has a claim page; their only caller
+// was the deleted DeSciX_Cloud ClaimPage/ClaimTransferPanel. The command contracts are mirrored
+// in Powch's own PowchNetworkAPI.js (getClaimDetails, fulfillClaim, requestClaimTransfer,
+// confirmClaimTransfer) — getUserClaims had zero callers anywhere and was not mirrored.
 
 export const handlePurchase = async (item, type = ProductTypes.COMMUNITY) => {
   try {
