@@ -205,12 +205,17 @@ export async function executeQueue(options) {
         if (result.token_contract_address) console.log(`  token_contract:           ${result.token_contract_address}`);
         if (result.abi_source) console.log(`  abi_source:               ${result.abi_source.doc_id} (v${result.abi_source.version || '?'})`);
         console.log(`  transfers_total:          ${chalk.yellow(result.transfers_total)}`);
+        console.log(`  batches_total:            ${result.batches_total}`);
         console.log(`  debit_total:              ${result.debit_total}`);
         console.log(`  credit_total:             ${result.credit_total}`);
-        console.log(`  bonus_total:              ${result.bonus_total}`);
         const nz = result.net_zero_assertion || {};
         const nzLabel = nz.passes ? chalk.green('PASS') : chalk.red('FAIL');
         console.log(`  net_zero_assertion:       ${nzLabel} (Σ=${nz.sum})`);
+        const pbc = result.pre_batch_checks || {};
+        console.log(`  pre_batch_checks:         ${pbc.passes ? chalk.green('PASS') : chalk.red('FAIL — --apply would refuse')}`);
+        for (const r of (pbc.refusals || [])) {
+            console.log(chalk.red(`    ${r.kind} ${r.wallet} (${r.community_id}) holds ${r.held}, needs ${r.required} base units — rows ${(r.pending_ids || []).join(', ')}`));
+        }
         console.log(`  unique_source_wallets:    ${result.unique_source_wallets}`);
         console.log(`  unique_master_wallets:    ${result.unique_master_wallets}`);
         console.log(`  prospective_batch_id:     ${result.prospective_batch_id}`);
