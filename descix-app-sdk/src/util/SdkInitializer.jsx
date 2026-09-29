@@ -5,6 +5,7 @@ import { useAppContext } from '../AppContext';
 import { DiscordSDK, DiscordSDKMock, patchUrlMappings } from '@discord/embedded-app-sdk';
 import ErrorBoundary from './ErrorBoundary';
 import { fetchAppBinding, appFrameUrl } from './appBinding';
+import { POWCH_APP_ID, requirePowchUrl } from '../powch/powchOrigin.js';
 
 // Module-level flag for SYNCHRONOUS OAuth detection (prevents race condition)
 let oauthCallbackDetected = false;
@@ -257,10 +258,21 @@ const SdkInitializer = ({ children, standalone = false, appId = null }) => {
         const testMatch = path.match(/\/test\/([a-z-]+)/i);
         const sampleMatch = path.match(/\/samples\/([a-z-]+)/i);
 
+        // A /claim/<code> URL is never a shell VIEW — claim redemption and the one-time email
+        // transfer live in Powch's own PWA (ws-claims-ui-powch, CEO ruling relayed 2026-09-29:
+        // "claim transfer and all token related chain etc. are in powch"). Every OTHER host
+        // (the platform shell, a `descix serve` app binding) forwards there with a browser
+        // redirect, never a view. Powch's own build IS the destination: it detects and routes
+        // this path itself (PowchAppProvider, the same way it already does for /subscribe), so
+        // it is deliberately NOT threaded through deepLinkData below — one fact, one owner.
+        if (claimMatch && standaloneAppId !== POWCH_APP_ID) {
+            const powchUrl = requirePowchUrl(null, 'SdkInitializer');
+            window.location.replace(`${powchUrl}claim/${claimMatch[1].toUpperCase()}`);
+            return;
+        }
+
         let deepLinkData = null;
-        if (claimMatch) {
-            deepLinkData = { type: 'CLAIM', code: claimMatch[1].toUpperCase() };
-        } else if (testMatch) {
+        if (testMatch) {
             deepLinkData = { type: 'TEST', route: testMatch[1] };
         } else if (sampleMatch) {
             deepLinkData = { type: 'SAMPLE', route: sampleMatch[1] };

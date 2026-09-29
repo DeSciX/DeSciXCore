@@ -158,6 +158,9 @@ const GUEST_ALLOWED_COMMANDS = [
     'authenticate_by_signature',
     'get_crypto_price', 'get_all_crypto_prices', 'get_supported_chains', 'crypto_to_usd',
     'usd_to_crypto', 'create_crypto_quote', 'get_quote_status', 'get_claim_details',
+    // Pre-account claim transfer: the claim_code is the bearer credential and the emailed
+    // verification code proves control of the claim's current address — no session exists yet.
+    'claim_transfer_request', 'claim_transfer_confirm',
     'auth_discord', 'auth_google', 'get_google_config', 'get_discord_config', 'get_stripe_config',
     'get_wallet_config', 'send_email_verification', 'verify_email_code', 'register_email_tos',
     'register_native_user', 'reconnect_by_wallet', 'login_wallet_session', 'device_request_login',

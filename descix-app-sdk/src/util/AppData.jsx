@@ -452,7 +452,6 @@ export const AppContextView = {
   DEVICE_LOGIN: 'DEVICE_LOGIN', // CLI/MCP device login flow
   CONNECT_CEREMONY: 'CONNECT_CEREMONY', // WS-FREEMIUM-ONRAMP: browser OAuth connect ceremony (claude.ai) — sibling of DEVICE_LOGIN
   STANDALONE_APP: 'STANDALONE_APP', // Isolated Standalone App mode
-  CLAIM_PAGE: 'CLAIM_PAGE',     // NEW: Claim page view
   ERROR: 'ERROR',
   // Content Management Views
   MY_CONTENT: 'MY_CONTENT',           // User's content folder browser
