@@ -35,8 +35,29 @@ export {
     signMeshContext,
     buildOutboundMeshHeaders,
     verifyMeshContext,
-    createMeshContextVerifier,
+    MESH_TRUST_ANCHORS,
+    MESH_VERIFY_MODES,
+    resolveMeshTrustAnchor,
 } from './meshContext.js';
+
+// The mesh /api surface: one mount, gated by the posture CloudConfig resolved at boot.
+export { mountMeshApi, MESH_API_PATH } from './meshApi.js';
+
+/**
+ * createMeshContextVerifier is no longer a service-facing API. Services built their own verifier
+ * from their own copy of the platform key and decided for themselves whether to mount it — and
+ * one that never set MESH_CTX_VERIFY_MODE served its /api to anyone. The posture is now decided
+ * at boot by CloudConfig and the mount is mountMeshApi. This refusal names the replacement; there
+ * is no compatibility path.
+ */
+export function createMeshContextVerifier() {
+    throw new Error(
+        'createMeshContextVerifier is no longer exported by @descix/cloud-core. A service does not build its ' +
+        'own verifier or carry the platform key: set "MESH_CTX_VERIFY_MODE": "enforce" in defaults-config.json, ' +
+        'delete MESH_CTX_PUBLIC_KEY / MESH_CTX_KEY_ID from every config file, and mount with ' +
+        'mountMeshApi(app, apiRouter) after initializeCloudConfig(). This call site must change.'
+    );
+}
 
 export { getFirestoreInstance } from './firestore.js';
 export { publishMessage } from './pubsub.js';
