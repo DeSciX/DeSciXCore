@@ -174,10 +174,6 @@
   "microservice register": [
     "register_service"
   ],
-  "microservice register-delegate": [
-    "fetch_my_purchases",
-    "register_delegate"
-  ],
   "microservice reload": [
     "reload_service_manifests"
   ],

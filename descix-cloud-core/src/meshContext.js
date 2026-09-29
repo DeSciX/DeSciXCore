@@ -9,11 +9,9 @@
  * (serviceManifestManager.js::proxyToExternalService) it injects a `_descix`
  * envelope as a plain body field with a static `X-DeSciX-Service:'core'` header —
  * no cryptographic proof of origin. Since services are publicly reachable, a
- * forged `_descix` POSTed directly impersonates any user. This module adds the
- * outbound counterpart to the already-signed INBOUND delegate leg
- * (virtualRegistry.js verify_delegate_signature), MIRRORING its exact primitive:
- * a PEM keypair with `crypto.createSign/createVerify('SHA256')` and a base64
- * signature.
+ * forged `_descix` POSTed directly impersonates any user. This module signs that
+ * envelope: a PEM keypair with `crypto.createSign/createVerify('SHA256')` and a
+ * base64 signature.
  *
  * Design: DeSciX/V2_docs/design/proposed/mesh-signed-ctx-design-2026-07-03.md
  */

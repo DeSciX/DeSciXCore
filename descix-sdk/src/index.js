@@ -15,9 +15,6 @@ export { WizardOrchestrator, createWizardOrchestrator, WIZARD_STEPS } from './or
 export { CommunityManager, createCommunityManager } from './managers/communityManager.js';
 export { AppManager, createAppManager } from './managers/appManager.js';
 
-// Auth
-export { Signer } from './auth/signer.js';
-
 // Mesh asset client — service-side fetch-by-reference (media-via-API-surface)
 export { fetchAppAsset } from './mesh/assetClient.js';
 
@@ -27,7 +24,6 @@ import { GitUtils } from './integrations/gitUtils.js';
 import { WizardOrchestrator, WIZARD_STEPS } from './orchestrators/wizardOrchestrator.js';
 import { CommunityManager } from './managers/communityManager.js';
 import { AppManager } from './managers/appManager.js';
-import { Signer } from './auth/signer.js';
 
 /**
  * Create all SDK components with a shared API client
@@ -62,6 +58,5 @@ export default {
   createCommunityManager: (client) => new CommunityManager(client),
   createAppManager: (client) => new AppManager(client),
   createSDK,
-  WIZARD_STEPS,
-  Signer
+  WIZARD_STEPS
 };
