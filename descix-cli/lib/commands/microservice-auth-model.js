@@ -2,9 +2,9 @@
  * ONE OWNER for how an app microservice authenticates, as the CLI states it.
  *
  * CEO-D-2026-06-02-APP-DATA-PLANE: an app microservice writes on the INJECTED CALLER auth
- * (`params._descix`) with per-app_id isolation, never a per-service delegate SERVICE_KEY.
- * `descix microservice register-delegate`, which provisioned that key, is deleted; its name is
- * refused here and nowhere else, and `microservice register --help` prints the same text.
+ * (`params._descix`) with per-app_id isolation, never a per-service delegate key.
+ * `microservice register --help` prints this text, and the retired delegate-key verb's refusal
+ * (lib/commands/retired-verbs.js) prints it too.
  */
 
 export const MICROSERVICE_AUTH_RULING = 'CEO-D-2026-06-02-APP-DATA-PLANE';
@@ -17,27 +17,3 @@ export const MICROSERVICE_AUTH_MODEL =
   `  Outbound: calls from your service to /apifront authenticate as the developer through\n` +
   `            @descix/cli createServiceApiClient (DEVELOPER_WALLET_ADDRESS + DEVELOPER_SIGNATURE).\n` +
   `  HTTP 401 on an outbound call: those two developer-credential values are missing or wrong.`;
-
-/**
- * Register the removed `register-delegate` name so every invocation exits non-zero naming the
- * auth model. Hidden from --help; accepts and ignores the old options so an old script fails
- * with this message rather than a commander parse error. helpOption(false) keeps `--help` from
- * exiting 0 before the action runs.
- *
- * @param {import('commander').Command} microserviceCommand
- * @param {(error: Error) => never} fail
- */
-export function registerRemovedRegisterDelegate(microserviceCommand, fail) {
-  return microserviceCommand
-    .command('register-delegate', { hidden: true })
-    .description('removed — see error text')
-    .allowUnknownOption(true)
-    .helpOption(false)
-    .argument('[args...]', 'ignored')
-    .action(() => {
-      fail(new Error(
-        '"descix microservice register-delegate" has been removed: there is no per-app microservice ' +
-        'delegate key.\n' + MICROSERVICE_AUTH_MODEL
-      ));
-    });
-}

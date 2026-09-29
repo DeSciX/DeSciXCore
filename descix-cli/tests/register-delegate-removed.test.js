@@ -88,7 +88,7 @@ function packedFiles() {
 }
 
 test('nothing the package ships recommends the delegate key', () => {
-  const OWNER = 'lib/commands/microservice-auth-model.js';
+  const OWNER = 'lib/commands/retired-verbs.js';
   const files = packedFiles();
   assert.ok(files.includes('README.md') && files.includes('bin/descix.js'), 'control: the pack manifest was read');
   const offenders = [];

@@ -11,7 +11,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { DeSciXApiClient } from '../lib/api-client.js';
 import { requireAuth } from '../lib/auth-guard.js';
-import { WorkspaceConfig, unmappedAppMessage, resolveWorkspacePath, TOP_LEVEL_API_URL_REMEDY } from '../lib/workspace-config.js';
+import { WorkspaceConfig, unmappedAppMessage, resolveWorkspacePath } from '../lib/workspace-config.js';
 import { CLI_VERSION } from '../lib/cli-version.js';
 import { recordInvocationOrigin } from '../lib/origin.js';
 // Chat session pointer + the ONE rule for when a dead pointer may be self-healed.
@@ -28,11 +28,12 @@ import * as configCommands from '../lib/commands/config.js';
 import * as buyCommands from '../lib/commands/buy.js';
 import * as creditsCommands from '../lib/commands/credits.js';
 import * as airdropCommands from '../lib/commands/airdrop.js';
-import { registerRemovedRegisterDelegate, MICROSERVICE_AUTH_MODEL } from '../lib/commands/microservice-auth-model.js';
+import { MICROSERVICE_AUTH_MODEL } from '../lib/commands/microservice-auth-model.js';
 import { runInit } from '../lib/commands/init.js';
 // "May I prompt?" has ONE OWNER. No command in this file derives it.
 import { createPromptSession } from '../lib/interactive.js';
-import { registerAllRetiredKbSync, CANONICAL_KB_SYNC } from '../lib/commands/retired-kb-sync.js';
+import { CANONICAL_KB_SYNC } from '../lib/commands/kb-sync-surface.js';
+import { registerAllRetiredVerbs } from '../lib/commands/retired-verbs.js';
 import { runStatus } from '../lib/commands/status.js';
 import { refreshCommunityIdentity, printIdentityReceipt } from '../lib/commands/communityIdentity.js';
 import { runAppInit } from '../lib/commands/appInit.js';
@@ -456,9 +457,9 @@ airdropCommand
 
 // ============ Sync Commands: REMOVED ============
 // `sync assets`, `sync site` and `sync kb` are all gone, so the `sync` GROUP is gone with
-// them: a registered verb with no working children is dead weight. Every retired surface is
-// registered in ONE place below (search registerAllRetiredKbSync), driven off the owner list
-// in lib/commands/retired-kb-sync.js -- this file names no retired verb itself.
+// them: a registered verb with no working children is dead weight. Every retired verb is
+// registered in ONE place below (search registerAllRetiredVerbs), driven off the owner table
+// in lib/commands/retired-verbs.js -- this file names no retired verb itself.
 
 // ============ Community/App Commands ============
 
@@ -1952,12 +1953,8 @@ kbCommand
   });
 
 // `kb chunk` and `kb sync` (low-level Git-mode steps) are REMOVED. Their implementations
-// runKbChunk/runKbSync are deleted from lib/commands/kb.js. Both names exit non-zero naming
-// `descix kb corpus sync`.
-// EVERY retired kb-sync surface is registered here, by ITERATING the owner list -- no verb
-// name is typed in this file. Adding a surface to RETIRED_KB_SYNC_SURFACES registers it;
-// nothing can be registered without being in that list.
-registerAllRetiredKbSync({ program, kb: kbCommand }, chalk.red);
+// runKbChunk/runKbSync are deleted from lib/commands/kb.js. Both names are rows in
+// lib/commands/retired-verbs.js, registered with the rest of that table below.
 
 
 // app records — APP DATA PLANE structured record store (CEO-D-2026-06-02-APP-DATA-PLANE)
@@ -3291,9 +3288,6 @@ microserviceCommand
     }
   });
 
-// The removed per-app delegate-key verb is refused by name in its owner module.
-registerRemovedRegisterDelegate(microserviceCommand, fail);
-
 // microservice restart - Kill + relaunch a local microservice (DEV only)
 microserviceCommand
   .command('restart <name>')
@@ -3744,24 +3738,6 @@ configCommand
     } catch (error) {
       fail(error);
     }
-  });
-
-// `config set-url` is RETIRED, and it is retired LOUDLY rather than deleted outright: a deleted
-// subcommand only earns commander's "unknown command", which names no replacement. It used to
-// assign a top-level `apiUrl` that save() never serialized, then print a success banner over a
-// value that landed nowhere — the file was re-stamped and the origin never moved. Hidden from
-// --help; any invocation exits non-zero naming the three surfaces that actually set the origin.
-configCommand
-  .command('set-url', { hidden: true })
-  .description('retired — see error text')
-  .argument('[url]')
-  .allowUnknownOption()
-  .action(() => {
-    fail(new Error(
-      '"descix config set-url" is retired: it never wrote the origin it reported (a retired top-level\n' +
-      'key that nothing reads). Set the API origin where it is read, env.apiUrl, with one of:\n' +
-      `  ${TOP_LEVEL_API_URL_REMEDY}`
-    ));
   });
 
 configCommand
@@ -4475,6 +4451,11 @@ program
       process.exit(1);
     }
   });
+
+// ============ Retired verbs ============
+// Every retired verb is a row in lib/commands/retired-verbs.js, registered here in one call once
+// every parent exists. No retired verb name is typed in this file.
+registerAllRetiredVerbs({ program, kb: kbCommand, config: configCommand, microservice: microserviceCommand });
 
 // ============ Public-vs-admin help listing (CEO ruling, see lib/command-visibility.js) ============
 //
