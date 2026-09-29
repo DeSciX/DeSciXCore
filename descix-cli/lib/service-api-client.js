@@ -13,8 +13,8 @@
  *
  * Difference from the CLI: a Cloud Run service has no `.descix/wallet.json` and no TTY. So:
  *   - the developer credential is supplied EXPLICITLY (read from the service's config — the
- *     GITIGNORED dev-overrides.json in dev / a SECRET in prod, NEVER checked-in
- *     defaults-config.json, because the signature is a credential), and
+ *     app's defaults-config, the developer's choice, or Secret Manager; a defaults-config
+ *     credential ships inside the image and must never be committed to a public repo), and
  *   - on a session-refresh failure it HARD-FAILS (serviceMode) — it never tries interactive
  *     device login.
  *
@@ -50,15 +50,16 @@ export function createServiceApiClient({ baseUrl, walletAddress, signature, user
   }
   if (!walletAddress || typeof walletAddress !== 'string') {
     throw new Error(
-      'createServiceApiClient: walletAddress is required — the developer credential. Put it in the ' +
-      'GITIGNORED dev-overrides.json (dev) / a secret (prod), never defaults-config.json. No fallback.'
+      'createServiceApiClient: walletAddress is required — the developer credential. ' +
+      'It may live in the app defaults-config (your choice, e.g. a private repo) or in Secret Manager. ' +
+      'A credential in defaults-config ships inside the image; never commit it to a repo that is or will be public. No fallback.'
     );
   }
   if (!signature || typeof signature !== 'string') {
     throw new Error(
       'createServiceApiClient: signature is required — the developer durable credential (from their ' +
-      '.descix/wallet.json). Put it in the GITIGNORED dev-overrides.json (dev) / a secret (prod), ' +
-      'never defaults-config.json. No fallback.'
+      '.descix/wallet.json). It may live in the app defaults-config (your choice, e.g. a private repo) or in Secret Manager. ' +
+      'A credential in defaults-config ships inside the image; never commit it to a repo that is or will be public. No fallback.'
     );
   }
 
