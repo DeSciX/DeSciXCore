@@ -16,6 +16,11 @@
  * signature.
  *
  * Design: DeSciX/V2_docs/design/proposed/mesh-signed-ctx-design-2026-07-03.md
+ *
+ * This module also owns the two facts every verifier needs and no app may carry: the
+ * per-environment TRUST ANCHOR (key id + public key the platform signs under) and the /api GATE
+ * built from a resolved posture. WHEN a service must verify is decided in ONE place,
+ * CloudConfig._assertMeshPosture (config.js); an app mounts through mountMeshApi (meshApi.js).
  */
 
 import crypto from 'crypto';
@@ -48,6 +53,72 @@ export const MESH_CTX_HEADERS = Object.freeze({
 
 /** Default replay window (ms). A signature older/newer than this is rejected. */
 export const DEFAULT_MAX_SKEW_MS = 5 * 60 * 1000;
+
+/**
+ * THE platform's mesh trust anchors, one per DEPLOY_ENV: the key id apifront signs under and the
+ * PUBLIC key every downstream verifier checks against. Public keys only — the private halves are
+ * MESH_CTX_SIGNING_KEY in descix_config_{env}, read by the signer and nothing else.
+ *
+ * One owner for a platform fact. These values used to be hand-copied into every app's
+ * defaults-config*.json (and into Cloud's, from which the deploy lane layered them into every
+ * bundle); a rotation would have silently broken every copy nobody re-made. CloudConfig now
+ * REFUSES a consumer config that carries MESH_CTX_KEY_ID or MESH_CTX_PUBLIC_KEY, and resolves
+ * both from this table by DEPLOY_ENV. The signer proves at boot that its private key derives the
+ * anchor for its env, so a mismatch is a boot refusal at apifront rather than a 401 at every
+ * verifier. Rotation = change this table, publish, redeploy signer and services.
+ *
+ * Measured 2026-09-29: PROD apifront-signed traffic is accepted by an enforcing service
+ * verifying under mesh-prod-1; DEV apifront-signed traffic by one verifying under mesh-dev-1.
+ * No demo apifront is deployed, so mesh-demo-1 is unmeasured.
+ */
+export const MESH_TRUST_ANCHORS = Object.freeze({
+    dev: Object.freeze({
+        keyId: 'mesh-dev-1',
+        publicKeyPem: '-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEDWrDg8Q7eOROcPT8u1JQJvTRo7nX\niQWPVTq/WNE532byWXvDpfQw+pDSJbO4X3AEme1hqVFEJW5DTG2HPtjonA==\n-----END PUBLIC KEY-----\n',
+    }),
+    demo: Object.freeze({
+        keyId: 'mesh-demo-1',
+        publicKeyPem: '-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEOEGp/NoqaeGeFlFbb0bOhkBs55zC\n68kksLmxyB7MapEIDpyeNyQtVqwXzYFsECG9j30V+RR8TknGvZyKxhSuvA==\n-----END PUBLIC KEY-----\n',
+    }),
+    prod: Object.freeze({
+        keyId: 'mesh-prod-1',
+        publicKeyPem: '-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEWcMImLkyCip9NUAcrX23ktnQaOby\nBaFVq7VBpZi7cWj9yv5k2PT00djUIQ0UWP3Mluq7ZSTYx8nGSuuXXrAL8Q==\n-----END PUBLIC KEY-----\n',
+    }),
+});
+
+/** Config keys that name a platform trust fact. A consumer config carrying either is refused. */
+export const MESH_TRUST_CONFIG_KEYS = Object.freeze(['MESH_CTX_KEY_ID', 'MESH_CTX_PUBLIC_KEY']);
+
+/** The verification modes a verifier accepts. On a managed runtime only 'enforce' boots. */
+export const MESH_VERIFY_MODES = Object.freeze(['warn', 'enforce']);
+
+/**
+ * The trust anchor for an environment, or null when the platform publishes none for it.
+ * @param {string} deployEnv
+ * @param {object} [anchors=MESH_TRUST_ANCHORS]
+ * @returns {{keyId: string, publicKeyPem: string}|null}
+ */
+export function resolveMeshTrustAnchor(deployEnv, anchors = MESH_TRUST_ANCHORS) {
+    if (!deployEnv || !Object.prototype.hasOwnProperty.call(anchors, deployEnv)) return null;
+    return anchors[deployEnv];
+}
+
+/**
+ * TRUE when `privateKeyPem` is the private half of `publicKeyPem` (compared as SPKI DER).
+ * Throws a MeshContextError when either key cannot be parsed — an unparseable key is a
+ * misconfiguration, not a mismatch.
+ */
+export function privateKeyMatchesPublicKey(privateKeyPem, publicKeyPem) {
+    let derived;
+    let published;
+    try {
+        derived = crypto.createPublicKey(crypto.createPrivateKey(privateKeyPem)).export({ type: 'spki', format: 'der' });
+        published = crypto.createPublicKey(publicKeyPem).export({ type: 'spki', format: 'der' });
+    } catch (err) {
+        throw new MeshContextError(`Mesh key could not be parsed: ${err.message}`, 'MESH_CTX_BAD_KEY');
+    }
+    return derived.length === published.length && crypto.timingSafeEqual(derived, published);
+}
 
 /** Typed error for all signer/verifier failures. */
 export class MeshContextError extends Error {
@@ -220,8 +291,9 @@ export function verifyMeshContext(bag, signature, { publicKeyPem, keyId, present
 
 /**
  * Build an Express middleware that verifies the signed `_descix` on inbound
- * proxied requests. Per-service OPT-IN with an explicit mode: a service that
- * does not mount this is unchanged (migration safety).
+ * proxied requests. The low-level primitive: an app does not call this — it mounts
+ * through mountMeshApi (meshApi.js), which builds the verifier from the posture
+ * CloudConfig resolved at boot.
  *
  *   - mode 'enforce': missing/invalid/expired signature → 401, handler not run.
  *   - mode 'warn'   : logs the failure, stamps req.meshContextVerified=false, next().
@@ -241,13 +313,13 @@ export function createMeshContextVerifier({ mode, publicKeyPem, keyId, maxSkewMs
     }
     if (!publicKeyPem) {
         throw new MeshContextError(
-            'createMeshContextVerifier requires publicKeyPem (set MESH_CTX_PUBLIC_KEY in defaults-config-{env}.json).',
+            'createMeshContextVerifier requires publicKeyPem (the platform trust anchor for this DEPLOY_ENV — MESH_TRUST_ANCHORS).',
             'MESH_CTX_NO_PUBLIC_KEY'
         );
     }
     if (!keyId) {
         throw new MeshContextError(
-            'createMeshContextVerifier requires keyId (set MESH_CTX_KEY_ID in defaults-config-{env}.json).',
+            'createMeshContextVerifier requires keyId (the platform trust anchor for this DEPLOY_ENV — MESH_TRUST_ANCHORS).',
             'MESH_CTX_NO_KEY_ID'
         );
     }
@@ -275,6 +347,43 @@ export function createMeshContextVerifier({ mode, publicKeyPem, keyId, maxSkewMs
     };
 }
 
+/**
+ * Build the /api gate from a posture CloudConfig resolved at boot (config.meshPosture).
+ *
+ *   posture.verify === true  -> the signed-context verifier in posture.mode, under the anchor.
+ *   posture.verify === false -> a LOCAL-ONLY pass-through: stamps req.meshContextVerified=false
+ *                               on every request so a handler can never mistake an unverified
+ *                               bag for a verified one, and says so at mount. CloudConfig never
+ *                               resolves verify:false for a mesh service on a managed runtime.
+ *
+ * @param {{verify: boolean, mode?: string, keyId?: string, publicKeyPem?: string, reason?: string}} posture
+ * @param {{logger?: object}} [opts]
+ * @returns {import('express').RequestHandler}
+ */
+export function createMeshApiGate(posture, { logger = console } = {}) {
+    if (!posture || typeof posture.verify !== 'boolean') {
+        throw new MeshContextError(
+            'createMeshApiGate requires the posture CloudConfig resolved at boot (config.meshPosture). ' +
+            'Mount through mountMeshApi after initializeCloudConfig() has resolved.',
+            'MESH_CTX_NO_POSTURE'
+        );
+    }
+    if (posture.verify) {
+        logger.log?.(`[meshContext] /api VERIFIED (mode=${posture.mode}, keyId=${posture.keyId})`);
+        return createMeshContextVerifier({
+            mode: posture.mode,
+            publicKeyPem: posture.publicKeyPem,
+            keyId: posture.keyId,
+            logger,
+        });
+    }
+    logger.warn?.(`[meshContext] /api UNVERIFIED — ${posture.reason}. Every request is stamped meshContextVerified=false.`);
+    return function meshContextUnverified(req, res, next) {
+        req.meshContextVerified = false;
+        next();
+    };
+}
+
 export default {
     MESH_CTX_FIELDS,
     MESH_CTX_HEADERS,
@@ -286,4 +395,10 @@ export default {
     buildOutboundMeshHeaders,
     verifyMeshContext,
     createMeshContextVerifier,
+    MESH_TRUST_ANCHORS,
+    MESH_TRUST_CONFIG_KEYS,
+    MESH_VERIFY_MODES,
+    resolveMeshTrustAnchor,
+    privateKeyMatchesPublicKey,
+    createMeshApiGate,
 };

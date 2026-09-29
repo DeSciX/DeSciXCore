@@ -10,8 +10,10 @@
  * @descix/cloud-core@1.0.1 tarball, 2026-08-27):
  *   createCloudConfig / getCloudConfig / initializeCloudConfig  — the config bootstrap
  *   killExistingProcess                                          — dev port reclamation
- *   createMeshContextVerifier                                    — INBOUND mesh caller auth
- *                                                                  (the signed _descix envelope)
+ *   mountMeshApi                                                 — the /api mount, gated by the
+ *                                                                  mesh posture CloudConfig
+ *                                                                  resolved at boot (INBOUND
+ *                                                                  caller auth: the signed _descix)
  *   createServiceBootstrap                                       — manifest registration THROUGH
  *                                                                  the register_service door
  *   buildManifestFromHandlers / validateManifest /               — the self-describing manifest
@@ -63,6 +65,8 @@ export {
     buildOutboundMeshHeaders,
     verifyMeshContext,
     createMeshContextVerifier,
+    mountMeshApi,
+    MESH_API_PATH,
     getFirestoreInstance,
     publishMessage,
     killExistingProcess,

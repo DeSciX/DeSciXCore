@@ -21,6 +21,11 @@
  *
  * WS-CONFIG-BOOTSTRAP-FIX item #2: required_keys enforcement at end of initialize().
  * WS-CONFIG-BOOTSTRAP-FIX item #11: dev file-watcher + boot-time SHA drift check.
+ *
+ * Mesh posture (_assertMeshPosture): the ONE place that decides whether this process verifies
+ * the signed mesh context on /api. A mesh SERVICE on a managed cloud runtime must run
+ * MESH_CTX_VERIFY_MODE=enforce or it refuses to boot; the verification key is the platform's
+ * (meshContext.js MESH_TRUST_ANCHORS), never a consumer config value.
  */
 
 import { fileURLToPath } from 'url';
@@ -33,6 +38,13 @@ import crypto from 'crypto';
 import { EventEmitter } from 'events';
 import { createRequire } from 'module';
 import chokidar from 'chokidar';
+import {
+    MESH_TRUST_ANCHORS,
+    MESH_TRUST_CONFIG_KEYS,
+    MESH_VERIFY_MODES,
+    resolveMeshTrustAnchor,
+    privateKeyMatchesPublicKey,
+} from './meshContext.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -196,13 +208,27 @@ function stripInvalidAndLower(username) {
 }
 
 let _instance = null;
+
+/** Trust anchors CloudConfig resolves against. Replaceable ONLY in a test process. */
+let _meshTrustAnchors = MESH_TRUST_ANCHORS;
+
+/** The roles a cloud-core consumer can declare in createCloudConfig({ meshRole }). */
+const MESH_ROLES = Object.freeze(['service', 'signer']);
 let _rootPath = null;
 
 /**
  * Create or get CloudConfig singleton.
  * Call with rootPath before any other config access. rootPath is the directory
  * containing .env, defaults-config.json, dev-overrides.json.
- * @param {{ rootPath: string }} options
+ *
+ * meshRole — what this process is on the mesh. 'service' (the default, and every app
+ * microservice) serves the mesh-proxied /api surface and must verify the signed context:
+ * on a managed runtime it boots only with MESH_CTX_VERIFY_MODE=enforce. 'signer' is the
+ * platform apifront that SIGNS the context; it serves no mesh /api, and instead proves at boot
+ * that its MESH_CTX_SIGNING_KEY derives the platform trust anchor. A 'signer' declaration is not
+ * an escape hatch: on a managed runtime it boots only holding the platform's private key.
+ *
+ * @param {{ rootPath: string, additionalRequiredKeys?: string[], meshRole?: 'service'|'signer' }} options
  * @returns {CloudConfig}
  */
 export function createCloudConfig(options = {}) {
@@ -213,12 +239,19 @@ export function createCloudConfig(options = {}) {
     if (!rootPath) {
         throw new Error('[CloudConfig] rootPath is required on first call: createCloudConfig({ rootPath: "path/to/app" })');
     }
+    const meshRole = options.meshRole === undefined ? 'service' : options.meshRole;
+    if (!MESH_ROLES.includes(meshRole)) {
+        throw new CloudConfigFatalError(
+            `[CloudConfig] FATAL: createCloudConfig({ meshRole: ${JSON.stringify(options.meshRole)} }) is not a mesh role. ` +
+            `Accepted: ${MESH_ROLES.join(', ')}. Omit it for an app microservice (role 'service').`
+        );
+    }
     _rootPath = rootPath;
     // additionalRequiredKeys: per-service required keys NOT in the shared schema's
     // required_keys (which applies to every cloud-core consumer). e.g. Powch requires
     // CORE_API_URL for its Cloud loopback, but the Cloud service does not — so it
     // cannot live in the global schema. Enforced at boot by _assertRequiredKeys.
-    _instance = new CloudConfig(rootPath, options.additionalRequiredKeys || []);
+    _instance = new CloudConfig(rootPath, options.additionalRequiredKeys || [], meshRole);
     return _instance;
 }
 
@@ -236,6 +269,13 @@ export function getCloudConfig() {
  * TEST-ONLY: reset the singleton so anti-regression tests can construct a fresh
  * instance against a temp-dir rootPath. Production code MUST NOT call this.
  */
+function _isTestProcess() {
+    return !!process.env.NODE_TEST_CONTEXT
+        || !!process.env.DESCIX_ALLOW_CONFIG_RESET
+        || (Array.isArray(process.execArgv) && process.execArgv.some(a => a === "--test" || a.startsWith("--test")))
+        || process.argv.includes("--test");
+}
+
 export function _resetCloudConfigForTests() {
     // CEO-D-2026-06-01-RAG-PATHJOIN-GUARD isolation guardrail: the org RAG read path
     // went down because a config negative-test nulled STORAGE_BUCKET in the LIVE
@@ -244,11 +284,7 @@ export function _resetCloudConfigForTests() {
     // in a test process (node:test sets NODE_TEST_CONTEXT) or the caller explicitly
     // opts in. A live service NEVER sets these — so this hard-fails the dangerous path
     // instead of silently corrupting a running backend.
-    const inTestProcess = !!process.env.NODE_TEST_CONTEXT
-        || !!process.env.DESCIX_ALLOW_CONFIG_RESET
-        || (Array.isArray(process.execArgv) && process.execArgv.some(a => a === "--test" || a.startsWith("--test")))
-        || process.argv.includes("--test");
-    if (!inTestProcess) {
+    if (!_isTestProcess()) {
         throw new Error(
             "[CloudConfig] _resetCloudConfigForTests() called outside a test process. " +
             "Resetting the config singleton in a live service nulls config (e.g. STORAGE_BUCKET) " +
@@ -269,10 +305,26 @@ export function _resetCloudConfigForTests() {
     }
     _instance = null;
     _rootPath = null;
+    _meshTrustAnchors = MESH_TRUST_ANCHORS;
+}
+
+/**
+ * TEST-ONLY: verify against a test keypair instead of the platform's anchors (a test holds no
+ * platform private key). Refuses outside a test process: in a live service this would replace
+ * the trust root. Restored by _resetCloudConfigForTests().
+ */
+export function _overrideMeshTrustAnchorsForTests(anchors) {
+    if (!_isTestProcess()) {
+        throw new Error(
+            '[CloudConfig] _overrideMeshTrustAnchorsForTests() called outside a test process. ' +
+            'It replaces the platform mesh trust root; a live service must never call it.'
+        );
+    }
+    _meshTrustAnchors = anchors;
 }
 
 class CloudConfig {
-    constructor(rootPath, additionalRequiredKeys = []) {
+    constructor(rootPath, additionalRequiredKeys = [], meshRole = 'service') {
         this.__rootPath = path.resolve(rootPath);
         this.__appDir = this.__rootPath;
         this.__servicesDir = path.resolve(this.__appDir, 'services');
@@ -280,6 +332,10 @@ class CloudConfig {
         // Per-service required keys layered on top of the shared schema's
         // required_keys. Enforced in _assertRequiredKeys.
         this.__additionalRequiredKeys = Array.isArray(additionalRequiredKeys) ? additionalRequiredKeys : [];
+
+        // Mesh role (createCloudConfig validated it) and the posture _assertMeshPosture resolves.
+        this.__meshRole = meshRole;
+        this.__meshPosture = null;
 
         // Internal EventEmitter for config:reloaded events. We do NOT extend
         // EventEmitter directly because CloudConfig dynamically assigns config keys
@@ -407,6 +463,28 @@ class CloudConfig {
      */
     get isManagedCloudRuntime() {
         return Boolean(process.env.GAE_ENV || process.env.GAE_SERVICE || process.env.K_SERVICE);
+    }
+
+    /**
+     * The platform's mesh key id / public key for this DEPLOY_ENV (meshContext.js
+     * MESH_TRUST_ANCHORS), or null when the platform publishes no anchor for the env. Read-only:
+     * no config layer may supply either (_refuseMeshTrustFrom).
+     */
+    get MESH_CTX_KEY_ID() {
+        return resolveMeshTrustAnchor(this.DEPLOY_ENV, _meshTrustAnchors)?.keyId ?? null;
+    }
+
+    get MESH_CTX_PUBLIC_KEY() {
+        return resolveMeshTrustAnchor(this.DEPLOY_ENV, _meshTrustAnchors)?.publicKeyPem ?? null;
+    }
+
+    /**
+     * What this process does about the signed mesh context, resolved at the end of initialize():
+     * `{ role, verify, mode?, keyId?, publicKeyPem?, reason? }`. Null until then. Consumed by
+     * mountMeshApi; never re-derived by a service.
+     */
+    get meshPosture() {
+        return this.__meshPosture;
     }
 
     get GOOGLE_APPLICATION_CREDENTIALS() {
@@ -580,7 +658,28 @@ class CloudConfig {
      */
     _ingestConfigSecretPayload(parsed) {
         this._refuseWalletPkFrom(parsed, `the config secret '${this.CONFIG_SECRET_NAME}'`);
+        this._refuseMeshTrustFrom(parsed, `the config secret '${this.CONFIG_SECRET_NAME}'`);
         this._mergeConfig(parsed);
+    }
+
+    /**
+     * Refuse a config source that carries the platform's mesh verification key. The key id and
+     * public key are ONE platform fact per environment, owned by @descix/cloud-core
+     * (meshContext.js MESH_TRUST_ANCHORS) and resolved from DEPLOY_ENV. A copy in a consumer's
+     * config is a second derivation that a key rotation would silently leave behind — so it is
+     * a boot failure naming the owner, not a value that quietly wins or loses a precedence race.
+     * (MESH_CTX_SIGNING_KEY, the private half, is a signer secret and is not refused here.)
+     */
+    _refuseMeshTrustFrom(parsed, sourceLabel) {
+        if (!parsed || typeof parsed !== 'object') return;
+        const carried = MESH_TRUST_CONFIG_KEYS.filter(k => Object.prototype.hasOwnProperty.call(parsed, k));
+        if (carried.length === 0) return;
+        throw new CloudConfigFatalError(
+            `[CloudConfig] FATAL: ${sourceLabel} sets ${carried.join(' and ')}. The mesh verification key is a ` +
+            `platform fact owned by @descix/cloud-core (meshContext.js MESH_TRUST_ANCHORS), resolved from ` +
+            `DEPLOY_ENV — a service never carries its own copy. Delete ${carried.join(' and ')} from ${sourceLabel}; ` +
+            `read them as utils.MESH_CTX_KEY_ID / utils.MESH_CTX_PUBLIC_KEY if you need them.`
+        );
     }
 
     /**
@@ -697,6 +796,7 @@ class CloudConfig {
             const raw = fs.readFileSync(envDefaultsPath, 'utf8');
             const parsed = JSON.parse(raw);
             this._refuseWalletPkFrom(parsed, `defaults-config-${this.DEPLOY_ENV}.json`);
+            this._refuseMeshTrustFrom(parsed, `defaults-config-${this.DEPLOY_ENV}.json`);
             this._mergeConfig(parsed);
             const sha = crypto.createHash('sha256').update(raw).digest('hex');
             console.log(`[Config] Loaded defaults-config-${this.DEPLOY_ENV}.json (sha256=${sha.slice(0, 12)}…) — env layer wins over base defaults.`);
@@ -719,6 +819,7 @@ class CloudConfig {
                 const raw = fs.readFileSync(defaultsPath, 'utf8');
                 const parsed = JSON.parse(raw);
                 this._refuseWalletPkFrom(parsed, 'defaults-config.json');
+                this._refuseMeshTrustFrom(parsed, 'defaults-config.json');
                 this._mergeConfig(parsed);
                 this.__defaults_config_sha = crypto.createHash('sha256').update(raw).digest('hex');
                 // Boot snapshot of the parsed disk defaults — used by _reloadDefaults
@@ -846,6 +947,10 @@ class CloudConfig {
             // "change" and clobber the Secret Manager value with null on reload.
             // The correct semantic: if disk value changed (snapshot vs fresh), apply.
             // If disk value is unchanged (still null, still old non-null), leave alone.
+            // Refused before any key is applied: the running process keeps its boot values and the
+            // warn below names the refusal; the next boot refuses fatally.
+            this._refuseMeshTrustFrom(fresh, 'defaults-config.json');
+
             const snapshot = this.__defaults_config_snapshot || {};
             const changedKeys = [];
             // A secret should never legitimately land in defaults-config.json (that file is
@@ -924,6 +1029,10 @@ class CloudConfig {
             if (!overrides || typeof overrides !== 'object' || Array.isArray(overrides)) {
                 throw new CloudConfigFatalError(`[CloudConfig] FATAL: ${overridesPath} must hold a JSON object.`);
             }
+            // Mesh trust anchors have ONE owner (meshContext.js) — not even a dev overlay may
+            // carry a copy. This guards key OWNERSHIP, not secrecy; the any-key rule above is
+            // about secrets (CEO ruling, 2026-09-29).
+            this._refuseMeshTrustFrom(overrides, 'dev-overrides.json');
             // A dev overlay may force-win over Secret Manager for ANY key, by design (CEO ruling,
             // 2026-09-29) — a local override is not restricted to a pre-declared allowlist. Logs
             // still carry key NAMES only, never values (secret-valued keys are classified in
@@ -1012,6 +1121,115 @@ class CloudConfig {
         );
     }
 
+    /**
+     * THE ONE OWNER of "does this process verify the signed mesh context on /api?".
+     *
+     * MEASURED 2026-09-29: an unsigned public POST to a PROD app's /api/<command> reached its
+     * dispatch, because each app decided for itself whether to mount the verifier and one never
+     * set the key. A service on a managed runtime is publicly reachable, so an unverified /api
+     * lets anyone run its commands as any user. That is no longer an app's choice:
+     *
+     *   service, managed runtime : MESH_CTX_VERIFY_MODE must be 'enforce' — unset, empty and
+     *                              'warn' REFUSE BOOT — and the env must have a trust anchor.
+     *   service, developer host  : unset/empty -> unverified (every request stamped
+     *                              meshContextVerified=false); 'warn'|'enforce' -> verified
+     *                              under the env's anchor.
+     *   signer (apifront)        : serves no mesh /api, so it sets no verify mode. On a managed
+     *                              runtime it must hold MESH_CTX_SIGNING_KEY; whenever it holds
+     *                              one, the key must derive this env's anchor.
+     *
+     * Runs after every config source (Secret Manager, dev-overrides) so it judges final values.
+     * Resolves `this.__meshPosture`, which mountMeshApi consumes.
+     */
+    _assertMeshPosture() {
+        const env = this.DEPLOY_ENV;
+        const managed = this.isManagedCloudRuntime;
+        const where = managed
+            ? `a managed cloud runtime (${['GAE_ENV', 'GAE_SERVICE', 'K_SERVICE'].filter(k => process.env[k]).map(k => `${k}=${process.env[k]}`).join(', ')})`
+            : 'a developer host (no GAE_ENV/GAE_SERVICE/K_SERVICE)';
+        const anchor = resolveMeshTrustAnchor(env, _meshTrustAnchors);
+        const knownEnvs = Object.keys(_meshTrustAnchors).join(', ');
+        const mode = this.MESH_CTX_VERIFY_MODE;
+        const modeSet = !(mode === undefined || mode === null || mode === '');
+
+        if (modeSet && !MESH_VERIFY_MODES.includes(mode)) {
+            throw new CloudConfigFatalError(
+                `[CloudConfig] FATAL: MESH_CTX_VERIFY_MODE=${JSON.stringify(mode)} is not a verification mode. ` +
+                `Accepted: ${MESH_VERIFY_MODES.join(', ')} (and, on a developer host only, unset).`
+            );
+        }
+
+        if (this.__meshRole === 'signer') {
+            if (modeSet) {
+                throw new CloudConfigFatalError(
+                    `[CloudConfig] FATAL: MESH_CTX_VERIFY_MODE=${JSON.stringify(mode)} is set on the mesh SIGNER. ` +
+                    `The signer serves no mesh-proxied /api surface and verifies nothing; remove the key.`
+                );
+            }
+            const signingKey = this.MESH_CTX_SIGNING_KEY;
+            if (!signingKey) {
+                if (managed) {
+                    throw new CloudConfigFatalError(
+                        `[CloudConfig] FATAL: the mesh signer runs on ${where} with no MESH_CTX_SIGNING_KEY. It would proxy ` +
+                        `every command UNSIGNED, and every enforcing service would refuse it. Provision MESH_CTX_SIGNING_KEY ` +
+                        `(the private half of the ${anchor ? anchor.keyId : `DEPLOY_ENV=${env}`} trust anchor) in the ` +
+                        `descix_config_${env} secret with the merge-safe updater.`
+                    );
+                }
+                this.__meshPosture = { role: 'signer', verify: false, signs: false, reason: 'no MESH_CTX_SIGNING_KEY on a developer host' };
+                console.warn(`[CloudConfig] mesh signer on ${where} holds no MESH_CTX_SIGNING_KEY — it proxies UNSIGNED.`);
+                return;
+            }
+            if (!anchor) {
+                throw new CloudConfigFatalError(
+                    `[CloudConfig] FATAL: the mesh signer holds MESH_CTX_SIGNING_KEY but the platform publishes no trust ` +
+                    `anchor for DEPLOY_ENV=${env} (anchors exist for: ${knownEnvs}). No service could verify what it signs. ` +
+                    `Publish the anchor in @descix/cloud-core meshContext.js MESH_TRUST_ANCHORS.`
+                );
+            }
+            let matches;
+            try {
+                matches = privateKeyMatchesPublicKey(signingKey, anchor.publicKeyPem);
+            } catch (err) {
+                throw new CloudConfigFatalError(`[CloudConfig] FATAL: MESH_CTX_SIGNING_KEY could not be checked against the ${anchor.keyId} anchor: ${err.message}`);
+            }
+            if (!matches) {
+                throw new CloudConfigFatalError(
+                    `[CloudConfig] FATAL: MESH_CTX_SIGNING_KEY does not derive the DEPLOY_ENV=${env} trust anchor ` +
+                    `${anchor.keyId}. Every enforcing service would reject what this signer signs (MESH_CTX_INVALID). ` +
+                    `Either the descix_config_${env} secret holds the wrong key or the anchor in @descix/cloud-core ` +
+                    `meshContext.js MESH_TRUST_ANCHORS is stale — rotate them together.`
+                );
+            }
+            this.__meshPosture = { role: 'signer', verify: false, signs: true, keyId: anchor.keyId };
+            console.log(`[CloudConfig] mesh signer: MESH_CTX_SIGNING_KEY derives the ${anchor.keyId} trust anchor.`);
+            return;
+        }
+
+        // role 'service' — serves the mesh-proxied /api surface.
+        if (managed && mode !== 'enforce') {
+            throw new CloudConfigFatalError(
+                `[CloudConfig] FATAL: this mesh service runs on ${where} with MESH_CTX_VERIFY_MODE=` +
+                `${JSON.stringify(mode ?? null)}. Its /api surface is publicly reachable; without enforced ` +
+                `verification of the platform-signed context anyone can run its commands as any user. ` +
+                `Required: "MESH_CTX_VERIFY_MODE": "enforce" in the service's defaults-config.json. ` +
+                `Unset and "warn" are developer-host settings only.`
+            );
+        }
+        if (!modeSet) {
+            this.__meshPosture = { role: 'service', verify: false, reason: `MESH_CTX_VERIFY_MODE unset on ${where}` };
+            return;
+        }
+        if (!anchor) {
+            throw new CloudConfigFatalError(
+                `[CloudConfig] FATAL: MESH_CTX_VERIFY_MODE=${mode} but the platform publishes no mesh trust anchor ` +
+                `for DEPLOY_ENV=${env} (anchors exist for: ${knownEnvs}). There is no key to verify against; ` +
+                `deploy to an environment the platform signs for.`
+            );
+        }
+        this.__meshPosture = { role: 'service', verify: true, mode, keyId: anchor.keyId, publicKeyPem: anchor.publicKeyPem };
+    }
+
     async initialize() {
         if (!this.DEPLOY_ENV) {
             throw new CloudConfigFatalError('[CloudConfig] FATAL: DEPLOY_ENV not set. Cannot determine environment before Secret Manager call. Provide DEPLOY_ENV via .env (local dev), deployment env vars (cloud deploy), or ensure .descix/workspace.json is reachable from the service root.');
@@ -1095,6 +1313,9 @@ class CloudConfig {
         // Runs AFTER Secret Manager + dev-overrides so it sees the FINAL value from
         // every source (env var, secret, leaked .env / dev-overrides.json).
         this._assertLocalDebugNotOnCloud();
+
+        // Mesh posture: a mesh service on a managed runtime enforces, or does not boot.
+        this._assertMeshPosture();
 
         // WS-CONFIG-BOOTSTRAP-FIX item #2: enforce required_keys at end of bootstrap.
         // Must be the last action — runs AFTER Secret Manager + dev-overrides so any
