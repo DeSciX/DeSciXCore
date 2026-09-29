@@ -48,6 +48,8 @@ export {
     sendVerificationEmail,
     sendPaymentPending,
     sendPaymentConfirmation,
+    renderMigrationQueuedEmail,
+    sendMigrationQueued,
     normalizeEmail,
     isValidEmail,
     maskEmail,
