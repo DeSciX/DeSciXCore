@@ -149,37 +149,6 @@ export const getQuoteStatus = async (quoteId) => {
   }
 };
 
-export const getClaimDetails = async (claimCode) => {
-  try {
-    const data = await makeCommandRequestJSON('get_claim_details', { claim_code: claimCode }, true);
-    return data.status === ResponseStatus.OK ? data.message : null;
-  } catch (error) {
-    console.error('Error getting claim details:', error);
-    throw error;
-  }
-};
-
-export const fulfillClaim = async (params) => {
-  try {
-    const data = await makeCommandRequestJSON('fulfill_claim', params);
-    if (data.status === ResponseStatus.OK) return data.message;
-    throw new Error(data.message || 'Failed to fulfill claim');
-  } catch (error) {
-    console.error('Error fulfilling claim:', error);
-    throw error;
-  }
-};
-
-export const getUserClaims = async () => {
-  try {
-    const data = await makeCommandRequestJSON('get_user_claims', {});
-    return data.status === ResponseStatus.OK ? data.message : [];
-  } catch (error) {
-    console.error('Error getting user claims:', error);
-    throw error;
-  }
-};
-
 export const handlePurchase = async (item, type = ProductTypes.COMMUNITY) => {
   try {
     let response;

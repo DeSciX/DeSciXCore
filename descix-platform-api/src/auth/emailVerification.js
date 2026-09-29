@@ -23,6 +23,25 @@ const EMAIL_CODE_EXPIRY_MINUTES = 15;
 const EMAIL_CODE_MAX_ATTEMPTS = 5;
 
 /**
+ * The machine-readable reason a verifyEmailCode call refused. Every ERROR result carries one of
+ * these as `code`, so a consumer branches on the code and never on the message text.
+ */
+export const EmailVerificationRefusal = Object.freeze({
+    INPUT_REQUIRED: 'VERIFICATION_INPUT_REQUIRED',
+    NOT_FOUND: 'VERIFICATION_NOT_FOUND',
+    EXPIRED: 'VERIFICATION_EXPIRED',
+    ATTEMPTS_EXHAUSTED: 'VERIFICATION_ATTEMPTS_EXHAUSTED',
+    INVALID: 'VERIFICATION_INVALID',
+});
+
+/** An ERROR networkResponse that carries the refusal code (networkResponse ferries `code`). */
+function verificationRefusal(code, message) {
+    return networkResponse(NetworkStatus.ERROR, LoginStatus.AUTH_FAILED, {
+        status: NetworkStatus.ERROR, message, code,
+    });
+}
+
+/**
  * Send an email verification code to the given address.
  * Generates a 6-digit code, hashes and stores it in Firestore, then emails it.
  *
@@ -79,20 +98,20 @@ export async function verifyEmailCode(params) {
     const { email, code } = params;
     const normalized = normalizeEmail(email);
     if (!normalized || !code) {
-        return networkResponse(NetworkStatus.ERROR, LoginStatus.AUTH_FAILED, 'Email and code are required.');
+        return verificationRefusal(EmailVerificationRefusal.INPUT_REQUIRED, 'Email and code are required.');
     }
     const db = new CacheFirestore();
     const record = await db.get_doc(FirestoreCollections.EMAIL_VERIFICATIONS(), normalized);
     if (!record) {
-        return networkResponse(NetworkStatus.ERROR, LoginStatus.AUTH_FAILED, 'No verification code found. Please request a new code.');
+        return verificationRefusal(EmailVerificationRefusal.NOT_FOUND, 'No verification code found. Please request a new code.');
     }
     const now = new Date();
     const expiresAt = record.expires_at?.toDate ? record.expires_at.toDate() : null;
     if (expiresAt && expiresAt < now) {
-        return networkResponse(NetworkStatus.ERROR, LoginStatus.AUTH_FAILED, 'Verification code expired. Please request a new code.');
+        return verificationRefusal(EmailVerificationRefusal.EXPIRED, 'Verification code expired. Please request a new code.');
     }
     if (record.attempts >= EMAIL_CODE_MAX_ATTEMPTS) {
-        return networkResponse(NetworkStatus.ERROR, LoginStatus.AUTH_FAILED, 'Too many attempts. Please request a new code.');
+        return verificationRefusal(EmailVerificationRefusal.ATTEMPTS_EXHAUSTED, 'Too many attempts. Please request a new code.');
     }
     const codeHash = crypto.createHash('sha256').update(code).digest('hex');
     const matches = record.code_hash === codeHash;
@@ -102,7 +121,7 @@ export async function verifyEmailCode(params) {
         verified_at: matches ? Timestamp.now() : record.verified_at || null
     });
     if (!matches) {
-        return networkResponse(NetworkStatus.ERROR, LoginStatus.AUTH_FAILED, 'Invalid verification code.');
+        return verificationRefusal(EmailVerificationRefusal.INVALID, 'Invalid verification code.');
     }
     return networkResponse(NetworkStatus.OK, LoginStatus.CONNECTED, { verified: true });
 }

@@ -38,6 +38,7 @@ export {
     createUserSession,
     sendEmailVerification,
     verifyEmailCode,
+    EmailVerificationRefusal,
     migrateUserIfNeeded
 } from './auth/index.js';
 
@@ -48,6 +49,8 @@ export {
     sendPaymentPending,
     sendPaymentConfirmation,
     normalizeEmail,
+    isValidEmail,
+    maskEmail,
     base64UrlEncode
 } from './email/index.js';
 
