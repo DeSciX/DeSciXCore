@@ -305,15 +305,6 @@ export const AppProvider = ({ children }) => {
               url: payload.url
             };
 
-            // Handle deep links in standalone mode
-            if (payload.deepLink) {
-              console.log('AppContext: Handling standalone deep link:', payload.deepLink);
-              if (payload.deepLink.type === 'CLAIM') {
-                setViewEventData({ claimCode: payload.deepLink.code });
-                // We don't change view here, the STANDALONE_APP view will handle it or we stay in STANDALONE_APP
-              }
-            }
-
             setAppState(AppContextState.READY);
             triggerViewChange(AppContextView.STANDALONE_APP);
             return;
