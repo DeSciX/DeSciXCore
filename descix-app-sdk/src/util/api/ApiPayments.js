@@ -170,6 +170,30 @@ export const fulfillClaim = async (params) => {
   }
 };
 
+/**
+ * One-time claim transfer, step 1 (no session): email a verification code to the address the
+ * claim was issued to. Resolves { sent, expires_in_minutes, requests_remaining }. A refusal
+ * throws with err.code (e.g. TRANSFER_RESEND_COOLDOWN with err.data.retry_after_seconds,
+ * TRANSFER_REQUEST_LIMIT, TRANSFER_ATTEMPTS_EXHAUSTED, CLAIM_ALREADY_TRANSFERRED).
+ */
+export const requestClaimTransfer = async (claimCode) => {
+  const data = await makeCommandRequestJSON('claim_transfer_request', { claim_code: claimCode }, true);
+  return data.message;
+};
+
+/**
+ * One-time claim transfer, step 2 (no session): with the emailed code, move the claim to
+ * newEmail. Resolves { status: 'transferred', new_email, token_symbol, tokens_amount, expires_at,
+ * successor_email_sent } — never a claim code. A refusal throws with err.code (e.g.
+ * TRANSFER_CODE_INVALID with err.data.attempts_remaining, TRANSFER_CODE_EXPIRED).
+ */
+export const confirmClaimTransfer = async ({ claimCode, verificationCode, newEmail }) => {
+  const data = await makeCommandRequestJSON('claim_transfer_confirm', {
+    claim_code: claimCode, verification_code: verificationCode, new_email: newEmail,
+  }, true);
+  return data.message;
+};
+
 export const getUserClaims = async () => {
   try {
     const data = await makeCommandRequestJSON('get_user_claims', {});
