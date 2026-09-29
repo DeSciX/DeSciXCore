@@ -34,6 +34,19 @@ export function normalizeEmail(email) {
 }
 
 /**
+ * Whether a value is a mailable address shape: one '@', a non-empty local part, and a dotted
+ * domain, with no whitespace. Shape only — deliverability is proven by a verification code.
+ * The ONE email-shape check; consumers call it rather than re-deriving `includes('@')`.
+ *
+ * @param {*} email - candidate address (any type; non-strings are not addresses)
+ * @returns {boolean}
+ */
+export function isValidEmail(email) {
+    if (typeof email !== 'string') return false;
+    return /^[^\s@]+@[^\s@.]+(\.[^\s@.]+)+$/.test(email.trim());
+}
+
+/**
  * Core Gmail email sending function using service account with domain-wide delegation.
  *
  * Uses DESCIX_ROUTER_COMMUNITY_MANAGER as the impersonated user (sender).
