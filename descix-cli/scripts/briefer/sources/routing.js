@@ -202,7 +202,7 @@ export async function extract({ env, cliPaths } = {}) {
   const markdown = [
     `Broker-first mesh (WS-MESH-BROKER-ONLY): sites call \`/apifront\`; Core validates entitlements and dispatches via Firestore \`ServiceManifests\`. **No NEG on routine deploy for non-core apps.** No runtime LB lookup for new apps.`,
     ``,
-    `Platform LB (\`descix-discord-app-lb\`) is provisioned at platform standup by \`deploy-backend-env.sh\` → \`provision-platform-lb.js\` (re-run after \`deploy-service-env.sh powch\` for powch NEG):`,
+    `Platform LB (\`descix-discord-app-lb\`) is provisioned at platform standup by \`deploy-backend-env.sh\` → \`provision-platform-lb.js\`; the per-app lane \`deploy-service-env.sh\` provisions no LB state (hosted apps are routed by the Cloudflare edge Worker by app id):`,
     ``,
     `- **daita** broker NEG: \`apifront-http-{env}-neg\` → \`{env}-api-backend\` → Cloud Function \`apiFront-http-{env}\` — \`${LB_FILE}:${ensureCoreNegMatch.lineNumber}\``,
     `- Apex singleton (\`daita\`): \`demo.descix.net\` / \`descix.net\` → GCS \`/{env}/daita/site/\` + \`/apifront\`, \`/mcp\`, \`/api\` → daita broker — \`${LB_FILE}:${singletonMatcherMatch.lineNumber}\``,
