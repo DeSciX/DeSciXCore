@@ -36,6 +36,7 @@ export class AppData {
   static _deviceUserCode = null; // For device login only
   static _referralData = null; // For referral: { custom_id, referrer_id, guild_id }
   static _appModeConfig = null; // NEW: Config for standalone app mode (appId, url)
+  static _platformHomeAppId = null; // The store bundle's platform_home_app_id (util/frontPage.js reads this)
   static _workspaceProducts = typeof __WORKSPACE_PRODUCTS__ !== 'undefined' ? __WORKSPACE_PRODUCTS__ : null;
 
   static get workspaceProducts() {
@@ -105,6 +106,7 @@ export class AppData {
     AppData._deviceUserCode = null;
     AppData._referralData = null;
     AppData._appModeConfig = null;
+    AppData._platformHomeAppId = null;
 
     // Clear localStorage
     localStorage.removeItem('sessionInfo');
@@ -118,6 +120,7 @@ export class AppData {
     localStorage.removeItem('myCommunities');
     localStorage.removeItem('myTransactions');
     localStorage.removeItem('myApps');
+    localStorage.removeItem('platformHomeAppId');
 
     // Clear chat thread data (dynamic keys: descix_threads_{communityId}_{appId})
     const keysToRemove = [];
@@ -241,6 +244,27 @@ export class AppData {
     localStorage.setItem('selectedCommunityToken', value);
   }
 
+
+  // --- Platform Home App Id Getter/Setter ---
+  // The store bundle's `platform_home_app_id` field (server config PLATFORM_HOME_APP_ID,
+  // one owner: get_store_bundle). Hydrated by fetchStoreBundle/fetchStoreAndPurchases
+  // alongside availableCommunities; util/frontPage.js's configuredHomeAppId() reads it
+  // through the caller that injects AppData (shellHome.js), never a build-time define.
+  static get platformHomeAppId() {
+    if (AppData._platformHomeAppId) {
+      return AppData._platformHomeAppId;
+    }
+    const stored = localStorage.getItem('platformHomeAppId');
+    return stored || null;
+  }
+  static set platformHomeAppId(value) {
+    AppData._platformHomeAppId = value || null;
+    if (AppData._platformHomeAppId) {
+      localStorage.setItem('platformHomeAppId', AppData._platformHomeAppId);
+    } else {
+      localStorage.removeItem('platformHomeAppId');
+    }
+  }
 
   // --- Login Status Getter/Setter ---
   static get loginStatus() {
@@ -416,7 +440,8 @@ export const NetworkLoadingType = {
 export const AppContextView = {
   LOADING: 'LOADING',
   WELCOME: 'WELCOME',
-  TRADING_DASHBOARD: 'TRADING_DASHBOARD', // NEW: Crypto exchange-style trading dashboard
+  HOME: 'HOME', // The platform shell's front page: a designated app's site (the shell's own config names it)
+  TRADING_DASHBOARD: 'TRADING_DASHBOARD', // Crypto exchange-style trading dashboard
   COMMUNITY_LOBBY: 'COMMUNITY_LOBBY',
   COMMUNITY_STORE: 'COMMUNITY_STORE',
   MY_APPS: 'MY_APPS',
