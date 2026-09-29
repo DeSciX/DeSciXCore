@@ -149,13 +149,6 @@ export const getQuoteStatus = async (quoteId) => {
   }
 };
 
-// getClaimDetails, fulfillClaim, requestClaimTransfer, confirmClaimTransfer, getUserClaims
-// REMOVED (ws-claims-ui-powch, CEO ruling relayed 2026-09-29: "claim transfer and all token
-// related chain etc. are in powch"). The shell no longer has a claim page; their only caller
-// was the deleted DeSciX_Cloud ClaimPage/ClaimTransferPanel. The command contracts are mirrored
-// in Powch's own PowchNetworkAPI.js (getClaimDetails, fulfillClaim, requestClaimTransfer,
-// confirmClaimTransfer) — getUserClaims had zero callers anywhere and was not mirrored.
-
 export const handlePurchase = async (item, type = ProductTypes.COMMUNITY) => {
   try {
     let response;
