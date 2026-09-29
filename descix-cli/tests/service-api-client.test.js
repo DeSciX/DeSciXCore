@@ -82,3 +82,24 @@ describe('createServiceApiClient — package shape', () => {
     assert.equal(typeof createServiceApiClient, 'function');
   });
 });
+
+// The developer chooses where the credential lives: the app's defaults-config (e.g. in a private
+// repo) or Secret Manager. The refusal names both and never forbids defaults-config; it keeps the
+// one factual caution that a defaults-config credential ships inside the image.
+describe('createServiceApiClient — credential refusal names both sources', () => {
+  for (const [missing, cfg] of [
+    ['walletAddress', { baseUrl: CRED.baseUrl, signature: CRED.signature }],
+    ['signature', { baseUrl: CRED.baseUrl, walletAddress: CRED.walletAddress }],
+  ]) {
+    it(`missing ${missing}: allows defaults-config or Secret Manager, forbids neither`, () => {
+      assert.throws(() => createServiceApiClient(cfg), (err) => {
+        assert.doesNotMatch(err.message, /never\s+defaults-config/i, 'must not forbid defaults-config');
+        assert.match(err.message, /defaults-config/);
+        assert.match(err.message, /Secret Manager/);
+        assert.match(err.message, /ships inside the image/);
+        assert.match(err.message, /public/);
+        return true;
+      });
+    });
+  }
+});
