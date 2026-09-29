@@ -42,12 +42,30 @@ That three-call shape is the contract: construct, await, then read. `getCloudCon
 |---|---|
 | Config | `createCloudConfig`, `initializeCloudConfig`, `getCloudConfig`, `CloudConfigFatalError` |
 | Constants | `ProductTypes`, `LoginStatus`, `NetworkStatus`, `PERMISSIONS`, `GUEST_ALLOWED_COMMANDS` |
-| Mesh context | `normalizeMeshContext`, `serializeMeshContext`, `signMeshContext`, `verifyMeshContext`, `buildOutboundMeshHeaders`, `createMeshContextVerifier`, `MeshContextError` |
+| Mesh context | `mountMeshApi`, `MESH_API_PATH`, `MESH_TRUST_ANCHORS`, `MESH_VERIFY_MODES`, `resolveMeshTrustAnchor`, `normalizeMeshContext`, `serializeMeshContext`, `signMeshContext`, `verifyMeshContext`, `buildOutboundMeshHeaders`, `MeshContextError` |
 | Infrastructure | `getFirestoreInstance`, `publishMessage`, `registerServiceManifest`, `killExistingProcess` |
 | Helpers | `networkResponse`, `stripInvalidAndLower` |
 
-Source modules: `config.js`, `firestore.js`, `meshContext.js`, `pubsub.js`, `serviceManifest.js`,
-`processUtils.js`, `storageUtils.js`.
+Source modules: `config.js`, `firestore.js`, `meshContext.js`, `meshApi.js`, `pubsub.js`,
+`serviceManifest.js`, `processUtils.js`, `storageUtils.js`.
+
+## Mesh services verify, or do not boot
+
+A service's `/api` is where the platform proxies mesh commands, and it is publicly reachable.
+Mount it with `mountMeshApi(app, apiRouter)` after `initializeCloudConfig()` resolves and after the
+JSON body parser. Whether it verifies the platform-signed context is decided at boot, not by the
+service:
+
+| Where | `MESH_CTX_VERIFY_MODE` | Result |
+|---|---|---|
+| Managed runtime (App Engine, Cloud Run, Cloud Functions) | `enforce` | boots; unsigned or forged requests get `401` before any handler |
+| Managed runtime | unset, `""` or `warn` | refuses to boot (`CloudConfigFatalError`) |
+| Developer machine | `enforce` or `warn` | verifies (warn logs and proceeds) |
+| Developer machine | unset or `""` | unverified; every request carries `req.meshContextVerified === false` |
+
+Set `"MESH_CTX_VERIFY_MODE": "enforce"` in the service's `defaults-config.json`. The key the
+service verifies against is the platform's, resolved from `DEPLOY_ENV` (`MESH_TRUST_ANCHORS`); a
+config file that sets `MESH_CTX_PUBLIC_KEY` or `MESH_CTX_KEY_ID` refuses boot.
 
 ## Config
 
