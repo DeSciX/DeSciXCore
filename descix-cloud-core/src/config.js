@@ -901,13 +901,28 @@ class CloudConfig {
         const { boolean_keys, dev_override_keys } = configSchema;
         const overridesPath = path.resolve(this.__appDir, 'dev-overrides.json');
         if (fs.existsSync(overridesPath)) {
-            let overrides = null;
+            // A present-but-unreadable overlay is not an absent one: it stops the boot. The message
+            // names the file and the failure, never the contents (V8's JSON.parse message quotes
+            // the input, so only its position is carried).
+            let raw;
             try {
-                overrides = JSON.parse(fs.readFileSync(overridesPath, 'utf8'));
+                raw = fs.readFileSync(overridesPath, 'utf8');
             } catch (e) {
-                console.error('[Config] Error loading dev-overrides.json:', e.message);
+                throw new CloudConfigFatalError(`[CloudConfig] FATAL: cannot read ${overridesPath} (${e.code || e.name}).`);
             }
-            if (overrides) {
+            let overrides;
+            try {
+                overrides = JSON.parse(raw);
+            } catch (e) {
+                const at = /position \d+(?: \(line \d+ column \d+\))?/.exec(e.message)?.[0];
+                throw new CloudConfigFatalError(
+                    `[CloudConfig] FATAL: ${overridesPath} is not valid JSON${at ? ` (${at})` : ''}. Fix or remove it, then re-run.`
+                );
+            }
+            if (!overrides || typeof overrides !== 'object' || Array.isArray(overrides)) {
+                throw new CloudConfigFatalError(`[CloudConfig] FATAL: ${overridesPath} must hold a JSON object.`);
+            }
+            {
                 // ONLY config-schema.json dev_override_keys may force-win over Secret Manager. Any other
                 // key in the file refuses the boot, named with the file, never with its value.
                 const notAllowed = Object.keys(overrides)
