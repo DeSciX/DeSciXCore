@@ -140,7 +140,7 @@ test('applyVisibility: a group is hidden when every one of its children is hidde
 
 test('applyVisibility: never REVEALS a command the CLI itself registered hidden (e.g. a retired-verb refusal), even with no generated-map entry', () => {
   const program = new Command().name('descix').exitOverride();
-  // Mirrors lib/commands/retired-kb-sync.js: `program.command('sync', { hidden: true })`.
+  // Mirrors lib/commands/retired-verbs.js: `program.command('sync', { hidden: true })`.
   program.command('sync', { hidden: true }).action(() => {});
   program.command('login').action(() => {});
 

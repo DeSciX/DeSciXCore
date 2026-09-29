@@ -32,7 +32,7 @@ import * as driveADC from '../google-storage-adc.js';
 // The one canonical KB-sync surface, from its owner. Never spell it as a literal here: these
 // commands' next steps are read by a developer as instructions, so they must name the live verb
 // and nothing else.
-import { CANONICAL_KB_SYNC } from './retired-kb-sync.js';
+import { CANONICAL_KB_SYNC } from './kb-sync-surface.js';
 import { loadSyncState, syncStatePath } from '../core/syncState.js';
 
 // ============ Pull Command ============

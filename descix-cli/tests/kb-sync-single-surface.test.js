@@ -15,8 +15,9 @@
  * never on the child name in prose. Comments are deliberately NOT stripped before matching: a
  * grep that skips comment-looking lines has let a live defect through before.
  *
- * The retired set and the deleted-symbol set are imported from lib/commands/retired-kb-sync.js —
- * the ONE owner both the registration and this gate read, so they cannot drift apart.
+ * The retired set and the deleted-symbol set are imported from lib/commands/retired-verbs.js —
+ * the ONE owner both the registration and this gate read, so they cannot drift apart. The KB
+ * rows are the ones whose refusal names the canonical KB sync surface.
  *
  * Run: `node --test tests/kb-sync-single-surface.test.js` from descix-cli/.
  */
@@ -27,11 +28,10 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { spawnSync } from 'child_process';
-import {
-  RETIRED_KB_SYNC_SURFACES,
-  DELETED_KB_SYNC_SYMBOLS,
-  CANONICAL_KB_SYNC,
-} from '../lib/commands/retired-kb-sync.js';
+import { RETIRED_VERBS, DELETED_KB_SYNC_SYMBOLS, retiredVerbRefusal } from '../lib/commands/retired-verbs.js';
+import { CANONICAL_KB_SYNC } from '../lib/commands/kb-sync-surface.js';
+
+const RETIRED_KB_SYNC_SURFACES = RETIRED_VERBS.filter((v) => retiredVerbRefusal(v).includes(CANONICAL_KB_SYNC));
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLI_ROOT = path.resolve(__dirname, '..');
@@ -127,14 +127,14 @@ test('I2: the `sync` command GROUP is gone (no syncCommand, no `sync kb`)', () =
 
 test('I2: bin/descix.js names NO retired verb itself — it iterates the owner list', () => {
   // The one-owner claim is only true if the entrypoint cannot register a surface that is
-  // absent from RETIRED_KB_SYNC_SURFACES. Hand-typed registerRetiredKbSync(parent,'chunk',...)
-  // calls would close list->registration drift but NOT registration->list drift.
+  // absent from RETIRED_VERBS. A hidden registration typed in bin would close list->registration
+  // drift but NOT registration->list drift.
   assert.ok(
-    !/registerRetiredKbSync\s*\(/.test(SRC),
-    'bin/descix.js must not call registerRetiredKbSync per-surface; it must iterate the list'
+    !/\.command\([^)]*hidden\s*:\s*true/.test(SRC),
+    'bin/descix.js must not register a hidden (retired) verb itself; it must iterate the table'
   );
-  const bootstraps = [...SRC.matchAll(/registerAllRetiredKbSync\s*\(/g)];
-  assert.equal(bootstraps.length, 1, 'exactly one registerAllRetiredKbSync call is expected');
+  const bootstraps = [...SRC.matchAll(/registerAllRetiredVerbs\s*\(/g)];
+  assert.equal(bootstraps.length, 1, 'exactly one registerAllRetiredVerbs call is expected');
 });
 
 test('I2 CONFORMANCE: every surface in the owner list actually refuses at runtime', () => {
@@ -174,7 +174,7 @@ test('I3: every deleted kb-sync symbol is absent from lib/ and bin/', () => {
     // Comments are still scanned — a real call inside a commented-out block would be caught.
     const callOrDef = new RegExp(`(function\\s+${sym}\\b|\\b${sym}\\s*\\(|\\.${sym}\\b|\\b${sym}\\s*,)`);
     const offenders = FILES
-      .filter((f) => !f.path.endsWith('retired-kb-sync.js'))
+      .filter((f) => !f.path.endsWith('retired-verbs.js'))
       .filter((f) => callOrDef.test(f.text))
       .map((f) => path.relative(CLI_ROOT, f.path));
     assert.deepEqual(

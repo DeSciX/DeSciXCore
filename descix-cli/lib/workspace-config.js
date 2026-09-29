@@ -5,7 +5,7 @@ import { resolveOrigin } from './origin.js';
 // The one canonical KB-sync surface, from its owner. The example in requireContext() is a remedy
 // a stuck developer will copy verbatim, so it must resolve to the live verb rather than a literal
 // that can go stale where nobody is watching.
-import { CANONICAL_KB_SYNC } from './commands/retired-kb-sync.js';
+import { CANONICAL_KB_SYNC } from './commands/kb-sync-surface.js';
 import { npxCommand } from './invocation.js';
 
 /**
