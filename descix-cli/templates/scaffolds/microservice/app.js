@@ -8,7 +8,7 @@ import express from 'express';
 import http from 'http';
 import cors from 'cors';
 import { initializeServiceConfig, utils } from './services/utils.js';
-import { killExistingProcess } from '@descix/cloud-core';
+import { killExistingProcess, mountMeshApi } from '@descix/cloud-core';
 import apiRouter from './services/apiFront.js';
 
 const app = express();
@@ -72,8 +72,12 @@ initializeServiceConfig().then(() => {
         res.status(200).send('OK');
     });
 
-    // Mount API Router
-    app.use('/api', apiRouter);
+    // Mount the API router on /api — the surface the platform proxies mesh commands to. The
+    // mount is @descix/cloud-core's: it puts the signed-context verifier in front of the router,
+    // in the mode config resolved at boot. A deployed service boots only with
+    // MESH_CTX_VERIFY_MODE=enforce (defaults-config.json), so an unsigned request is refused
+    // before it reaches a handler. Do not mount /api yourself.
+    mountMeshApi(app, apiRouter);
 
     // Start Server
     if (!port || port === 'auto') {
