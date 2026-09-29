@@ -25,7 +25,8 @@ const SENTINEL = 'SENTINEL-OVERRIDE-VALUE-5b1e';
 async function withOverrides(t, overrides) {
     const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'cloud-core-devov-'));
     await fsp.writeFile(path.join(dir, 'defaults-config.json'), '{}');
-    await fsp.writeFile(path.join(dir, 'dev-overrides.json'), JSON.stringify(overrides));
+    await fsp.writeFile(path.join(dir, 'dev-overrides.json'),
+        typeof overrides === 'string' ? overrides : JSON.stringify(overrides));
     const prev = process.env.DEPLOY_ENV;
     delete process.env.DEPLOY_ENV;
     const captured = [];
@@ -79,4 +80,40 @@ test('outside DEPLOY_ENV=dev the file is not read at all', async (t) => {
     cfg.DEPLOY_ENV = 'prod';
     assert.doesNotThrow(() => cfg._loadDevOverrides());
     assert.notEqual(cfg[NOT_ALLOWED], SENTINEL);
+});
+
+test('the scaffold dev-overrides.example.json, copied as-is, passes the allowlist', async (t) => {
+    const scaffold = path.join(path.dirname(new URL(import.meta.url).pathname), '..', '..',
+        'descix-cli', 'templates', 'scaffolds', 'microservice', 'dev-overrides.example.json');
+    const raw = await fsp.readFile(scaffold, 'utf8');
+    const { cfg } = await withOverrides(t, raw);
+    assert.doesNotThrow(() => cfg._loadDevOverrides());
+    for (const k of Object.keys(JSON.parse(raw)).filter((k) => !k.startsWith('_'))) {
+        assert.ok(cfg[k] !== undefined, `${k} did not apply`);
+    }
+});
+
+test('SERVICE_SELF_REGISTER (powch local-dev registration toggle) applies as a boolean', async (t) => {
+    const { cfg } = await withOverrides(t, { SERVICE_SELF_REGISTER: false });
+    cfg._loadDevOverrides();
+    assert.equal(cfg.SERVICE_SELF_REGISTER, false);
+});
+
+test('a malformed dev-overrides.json STOPS the boot, naming the file and the parse error, never its contents', async (t) => {
+    const { cfg, captured, file } = await withOverrides(t, `{ "DEVELOPER_SIGNATURE": ${SENTINEL} }`);
+    let err;
+    try { cfg._loadDevOverrides(); } catch (e) { err = e; }
+    assert.ok(err, 'a present-but-malformed overlay must refuse, not be skipped');
+    assert.equal(err.name, 'CloudConfigFatalError');
+    assert.ok(err.message.includes(file), 'must name the file');
+    assert.match(err.message, /not valid JSON/);
+    assert.ok(!err.message.includes(SENTINEL), 'the parse error must not quote file contents');
+    assert.ok(!captured.join('\n').includes(SENTINEL), 'contents were logged');
+});
+
+test('an unreadable dev-overrides.json STOPS the boot, naming the file', async (t) => {
+    const { cfg, file } = await withOverrides(t, '{}');
+    await fsp.rm(file);
+    await fsp.mkdir(file); // present but not a readable file
+    assert.throws(() => cfg._loadDevOverrides(), (e) => e.name === 'CloudConfigFatalError' && e.message.includes(file));
 });

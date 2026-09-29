@@ -65,6 +65,9 @@
   "dev_override_keys": {
     "description": "Keys that can be overridden via .env or dev-overrides.json in dev for pre-testing before Secret Manager deployment",
     "keys": [
+      "DEVELOPER_WALLET_ADDRESS",
+      "DEVELOPER_SIGNATURE",
+      "SERVICE_SELF_REGISTER",
       "DEBUG_LOCAL",
       "DEBUG_PROXY",
       "DEBUG_STREAMING",
