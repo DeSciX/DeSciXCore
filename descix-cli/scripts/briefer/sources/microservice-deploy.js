@@ -141,8 +141,7 @@ export async function extract({ env, cliPaths } = {}) {
     section: `§${SECTION.number} ${SECTION.heading}`
   });
   // Per-line scan: find `.command('register')` whose preceding non-empty line
-  // contains `microserviceCommand`. Disambiguates from program.command('register-delegate')
-  // which also exists.
+  // contains `microserviceCommand`.
   let registerLine = -1;
   for (let i = 1; i < cli.lines.length; i++) {
     if (/\.command\(['"]register['"]\)/.test(cli.lines[i])) {

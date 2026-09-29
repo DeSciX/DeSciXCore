@@ -25,8 +25,9 @@ descix microservice register                     # register the service manifest
 > + `DEVELOPER_SIGNATURE` (the developer's own wallet credential, from
 > `.descix/wallet.json`) and calls `reconnect_by_wallet` to mint a session —
 > exactly like the CLI. Put the credential in the GITIGNORED `dev-overrides.json`
-> (dev) / a secret (prod), NEVER `defaults-config.json`. There is NO
-> `register-delegate`, NO `SERVICE_KEY`, NO service account for the data plane.
+> (dev) / a secret (prod), NEVER `defaults-config.json`. There is NO per-service
+> key and NO service account for the data plane. Inbound calls carry the caller's
+> identity as `params._descix`, isolated per app_id (CEO-D-2026-06-02-APP-DATA-PLANE).
 > **HTTP 401?** The developer credential is missing or wrong — check those two keys.
 
 ## Prerequisites

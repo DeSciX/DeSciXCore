@@ -153,7 +153,7 @@ descix kb corpus sync -a myapp -k General
 
 ### Calling /apifront from your microservice (data plane)
 
-**The microservice IS the CLI's api-client running in the cloud** (CEO-D-2026-06-02-APP-MICROSERVICE-IS-CLI-CLIENT-WALLET-SIG). To call Core commands (`app_records_*`, `get_app_asset`, `get_asset_upload_token`, RAG, ...) the scaffold's `mcpClient` authenticates to `/apifront` **exactly like the CLI**: it holds the **developer's own durable credential** (`wallet_address` + `signature`) and calls `reconnect_by_wallet` to mint a session — then makes calls **as the developer**. There is NO `register-delegate`, NO `SERVICE_KEY`, NO service account, NO OIDC.
+**The microservice IS the CLI's api-client running in the cloud** (CEO-D-2026-06-02-APP-MICROSERVICE-IS-CLI-CLIENT-WALLET-SIG). To call Core commands (`app_records_*`, `get_app_asset`, `get_asset_upload_token`, RAG, ...) the scaffold's `mcpClient` authenticates to `/apifront` **exactly like the CLI**: it holds the **developer's own durable credential** (`wallet_address` + `signature`) and calls `reconnect_by_wallet` to mint a session — then makes calls **as the developer**. There is NO per-service key, NO service account, NO OIDC.
 
 **Provide the developer credential (gitignored / secret — never checked in):**
 1. Copy `dev-overrides.example.json` → `dev-overrides.json` (this file is `.gitignore`d).
@@ -170,7 +170,7 @@ descix microservice register
 # then: cp dev-overrides.example.json dev-overrides.json  and fill in the developer credential
 ```
 
-> `descix microservice register-delegate` still exists for genuine **service-slot** mesh calls (one service calling another's tools as a delegate). It is NOT used for the app **data plane** — that authenticates as the developer per the model above.
+**Inbound calls carry the caller, not a service identity** (CEO-D-2026-06-02-APP-DATA-PLANE). `/apifront` forwards each call to your service with the caller's identity injected as `params._descix`, isolated per `app_id`; your handler acts on that caller. `descix microservice register --help` prints this model.
 
 ---
 
@@ -334,9 +334,10 @@ A single-app (non-monorepo) workspace uses the same v2.1 shape with only `env.pl
 3. Check `.vscode/mcp.json` exists with a `descix` server (this file is skipped, by design, if the DeSciX VS Code extension is installed — it registers MCP natively)
 
 ### "401 Unauthorized on a loopback / mesh call"
-For the app data plane, your service authenticates AS the developer (wallet_address + signature). A 401 means the
-developer credential is missing or wrong: check `DEVELOPER_WALLET_ADDRESS` + `DEVELOPER_SIGNATURE` in the gitignored
-`dev-overrides.json` (dev) / the secret (prod). Then restart the service.
+Outbound, your service authenticates AS the developer (wallet_address + signature) through `createServiceApiClient`. A 401
+means the developer credential is missing or wrong: check `DEVELOPER_WALLET_ADDRESS` + `DEVELOPER_SIGNATURE` in the
+gitignored `dev-overrides.json` (dev) / the secret (prod). Then restart the service. Inbound, the caller's identity
+arrives as `params._descix`; no key is provisioned for your service.
 Discover it via `descix tell-me-how "my service gets 401 on a loopback call"`.
 
 ### "Session expired"
