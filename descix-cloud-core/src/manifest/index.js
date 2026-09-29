@@ -263,11 +263,76 @@ export function buildManifestFromStatic(manifestPath) {
 // ─── Validation ──────────────────────────────────────────────────────────────
 
 /**
+ * service.runtime — THE ONE OWNER of the runtime vocabulary an app may declare in its manifest:
+ *
+ *   "service": { ..., "runtime": { "profile": "media", "system_packages": ["ffmpeg"] } }
+ *
+ * The Cloud deploy lane consumes resolveServiceRuntime(); it keeps no list of its own.
+ * SERVICE_RUNTIME_PROFILES: the Cloud Run --memory/--cpu/--timeout and the image's V8 heap.
+ *   default — control-plane services whose requests return well under a minute.
+ *   media   — a synchronous request that fetches a large asset, runs an ffmpeg loudnorm + libmp3lame
+ *             transcode of a long lecture and embeds ID3 over the whole MP3 in memory.
+ * SERVICE_SYSTEM_PACKAGES: apt packages an app may request (curl is always installed).
+ *   ffmpeg — provides ffmpeg and ffprobe; node:24-slim ships neither.
+ */
+export const SERVICE_RUNTIME_PROFILES = Object.freeze({
+    default: Object.freeze({ memory: '1Gi', cpu: '1', timeout: '60s', maxOldSpaceMb: 900 }),
+    media: Object.freeze({ memory: '2Gi', cpu: '2', timeout: '3600s', maxOldSpaceMb: 1536 }),
+});
+export const SERVICE_SYSTEM_PACKAGES = Object.freeze(['ffmpeg']);
+const SERVICE_RUNTIME_KEYS = Object.freeze(['profile', 'system_packages']);
+
+/** Every problem with a declared service.runtime, each naming the offending value. Empty when valid. */
+function serviceRuntimeErrors(runtime) {
+    if (runtime === undefined) return [];
+    if (!runtime || typeof runtime !== 'object' || Array.isArray(runtime)) {
+        return [`service.runtime must be an object, got ${JSON.stringify(runtime)}`];
+    }
+    const errors = [];
+    const unknownKeys = Object.keys(runtime).filter((k) => !SERVICE_RUNTIME_KEYS.includes(k));
+    if (unknownKeys.length) {
+        errors.push(`unknown service.runtime key(s) ${unknownKeys.join(', ')} (known: ${SERVICE_RUNTIME_KEYS.join(', ')})`);
+    }
+    if (runtime.profile !== undefined && !Object.hasOwn(SERVICE_RUNTIME_PROFILES, runtime.profile)) {
+        errors.push(`unknown service.runtime.profile '${runtime.profile}' (known: ${Object.keys(SERVICE_RUNTIME_PROFILES).join(', ')})`);
+    }
+    const packages = runtime.system_packages;
+    if (packages !== undefined && !Array.isArray(packages)) {
+        errors.push(`service.runtime.system_packages must be an array, got ${JSON.stringify(packages)}`);
+    } else if (packages) {
+        const unknown = packages.filter((p) => !SERVICE_SYSTEM_PACKAGES.includes(p));
+        if (unknown.length) {
+            errors.push(`unknown service.runtime.system_packages ${unknown.join(', ')} (known: ${SERVICE_SYSTEM_PACKAGES.join(', ')})`);
+        }
+    }
+    return errors;
+}
+
+/**
+ * The runtime a manifest declares. No declaration -> the default profile and no extra packages.
+ * Anything outside the vocabulary throws, naming it.
+ * @param {Object} manifest
+ * @returns {{ profileName: string, profile: Object, systemPackages: string[] }}
+ */
+export function resolveServiceRuntime(manifest) {
+    const runtime = manifest?.service?.runtime;
+    const errors = serviceRuntimeErrors(runtime);
+    if (errors.length) throw new Error(`service runtime: ${errors.join('; ')}`);
+    const profileName = runtime?.profile ?? 'default';
+    return {
+        profileName,
+        profile: SERVICE_RUNTIME_PROFILES[profileName],
+        systemPackages: [...new Set(runtime?.system_packages ?? [])],
+    };
+}
+
+/**
  * Validate a manifest object for completeness.
  *
  * Rules:
  *   - service.name is required
  *   - Every command must have a non-empty description
+ *   - service.runtime, when declared, uses only the SERVICE_RUNTIME_* vocabulary
  *
  * service.domain is NOT checked here. A service does not declare its own domain — the platform
  * derives it from app_id + env (naming/resolveServiceDomain, the ONE owner, called by both
@@ -297,6 +362,7 @@ export function validateManifest(manifest) {
     if (missingDescriptions > 0) {
         errors.push(`${missingDescriptions} command(s) missing description`);
     }
+    errors.push(...serviceRuntimeErrors(manifest?.service?.runtime));
 
     return { valid: errors.length === 0, errors };
 }
