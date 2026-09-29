@@ -10,7 +10,9 @@ import {
 
 /**
  * Fetch store bundle + purchases in a single call (authenticated users).
- * Hydrates AppData.availableCommunities, myCommunities, and myApps.
+ * Hydrates AppData.availableCommunities, myCommunities, myApps, and platformHomeAppId
+ * (fetch_my_purchases spreads the store bundle into its response — communityManagement.js's
+ * get_store_bundle is the one owner of platform_home_app_id).
  */
 export const fetchStoreAndPurchases = async () => {
   try {
@@ -19,6 +21,7 @@ export const fetchStoreAndPurchases = async () => {
       const msg = data.message;
       // Hydrate store data
       AppData.availableCommunities = msg.communities || [];
+      AppData.platformHomeAppId = msg.platform_home_app_id || null;
       // Hydrate user purchases (filter from store bundle using overlay IDs)
       const myCommIds = new Set(msg.my_community_ids || []);
       const myAppIds = new Set(msg.my_app_ids || []);
@@ -35,13 +38,15 @@ export const fetchStoreAndPurchases = async () => {
 
 /**
  * Fetch store bundle only (guest path — no auth required).
- * Hydrates AppData.availableCommunities.
+ * Hydrates AppData.availableCommunities and platformHomeAppId (the ONE data-driven source
+ * for the shell's HOME front page — see util/frontPage.js configuredHomeAppId()).
  */
 export const fetchStoreBundle = async () => {
   try {
     const data = await makeCommandRequestJSON('get_store_bundle', {}, true);
     if (data.status === ResponseStatus.OK) {
       AppData.availableCommunities = data.message.communities || [];
+      AppData.platformHomeAppId = data.message.platform_home_app_id || null;
       return data.message;
     }
     return null;
