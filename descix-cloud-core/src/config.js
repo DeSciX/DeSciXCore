@@ -898,13 +898,28 @@ class CloudConfig {
 
     _loadDevOverrides() {
         if (this.DEPLOY_ENV !== 'dev') return;
+        const { boolean_keys, dev_override_keys } = configSchema;
         const overridesPath = path.resolve(this.__appDir, 'dev-overrides.json');
         if (fs.existsSync(overridesPath)) {
+            let overrides = null;
             try {
-                const overrides = JSON.parse(fs.readFileSync(overridesPath, 'utf8'));
+                overrides = JSON.parse(fs.readFileSync(overridesPath, 'utf8'));
+            } catch (e) {
+                console.error('[Config] Error loading dev-overrides.json:', e.message);
+            }
+            if (overrides) {
+                // ONLY config-schema.json dev_override_keys may force-win over Secret Manager. Any other
+                // key in the file refuses the boot, named with the file, never with its value.
+                const notAllowed = Object.keys(overrides)
+                    .filter((key) => !key.startsWith('_') && !dev_override_keys.keys.includes(key));
+                if (notAllowed.length) {
+                    throw new CloudConfigFatalError(
+                        `[CloudConfig] FATAL: ${overridesPath} sets key(s) outside config-schema.json ` +
+                        `dev_override_keys: ${notAllowed.join(', ')}. A dev overlay may override only those ` +
+                        'keys. Remove them from the file (or declare them in dev_override_keys), then re-run.'
+                    );
+                }
                 console.log('[Config] Applying dev-overrides.json');
-                // Force-assign: dev-overrides must win over Secret Manager
-                const { boolean_keys } = configSchema;
                 for (const [key, value] of Object.entries(overrides)) {
                     if (key.startsWith('_')) continue;
                     if (value === null) continue; // null in dev-overrides means "don't override"
@@ -913,11 +928,8 @@ class CloudConfig {
                         ? value === 'true'
                         : value;
                 }
-            } catch (e) {
-                console.error('[Config] Error loading dev-overrides.json:', e.message);
             }
         }
-        const { boolean_keys, dev_override_keys } = configSchema;
         dev_override_keys.keys.forEach(key => {
             const envValue = process.env[key];
             if (envValue !== undefined) {
