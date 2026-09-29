@@ -10,8 +10,9 @@
  *   2. defaults-config-{env}.json     — per-env NON-SECRET config (_loadEnvDefaults)
  *   3. defaults-config.json           — env-invariant NON-SECRET base (_loadDefaults)
  *   4. Secret Manager                 — SECRETS ONLY (_mergeConfig in initialize())
- *   + dev only: dev-overrides.json + .env FORCE-WIN over all the above for keys in
- *     config-schema.json dev_override_keys (_loadDevOverrides).
+ *   + dev only: dev-overrides.json + .env FORCE-WIN over all the above (_loadDevOverrides).
+ *     dev-overrides.json may set ANY key, by design — a local override can set any
+ *     secret (CEO ruling, 2026-09-29). .env picks up config-schema.json dev_override_keys.
  * Merge is first-write-wins (_mergeConfig), so more-specific layers load FIRST.
  * "Secret Manager is for secrets only" — non-secret per-env config belongs in the
  * defaults-config-{env}.json layer, not in descix_config_{env} (CEO-D-2026-05-30-
@@ -671,8 +672,9 @@ class CloudConfig {
      *   3. defaults-config.json              (_loadDefaults, constructor)
      *   4. Secret Manager (secrets ONLY)     (_mergeConfig in initialize())
      *   + In dev only, dev-overrides.json and .env FORCE-WIN over all of the
-     *     above for keys listed in config-schema.json dev_override_keys
-     *     (_loadDevOverrides, after Secret Manager).
+     *     above (_loadDevOverrides, after Secret Manager). dev-overrides.json may
+     *     set ANY key by design (a local override can set any secret); .env picks
+     *     up config-schema.json dev_override_keys.
      *
      * No hardcoded fallbacks: if DEPLOY_ENV is unset or the file is absent, this
      * is a no-op. A required key that ends up null is caught by _assertRequiredKeys
@@ -898,26 +900,44 @@ class CloudConfig {
 
     _loadDevOverrides() {
         if (this.DEPLOY_ENV !== 'dev') return;
+        const { boolean_keys, dev_override_keys } = configSchema;
         const overridesPath = path.resolve(this.__appDir, 'dev-overrides.json');
         if (fs.existsSync(overridesPath)) {
+            // A present-but-unreadable overlay is not an absent one: it stops the boot. The message
+            // names the file and the failure, never the contents (V8's JSON.parse message quotes
+            // the input, so only its position is carried).
+            let raw;
             try {
-                const overrides = JSON.parse(fs.readFileSync(overridesPath, 'utf8'));
-                console.log('[Config] Applying dev-overrides.json');
-                // Force-assign: dev-overrides must win over Secret Manager
-                const { boolean_keys } = configSchema;
-                for (const [key, value] of Object.entries(overrides)) {
-                    if (key.startsWith('_')) continue;
-                    if (value === null) continue; // null in dev-overrides means "don't override"
-                    console.log(`[Config] Dev override from JSON: ${key}`);
-                    this[key] = boolean_keys.keys.includes(key) && typeof value === 'string'
-                        ? value === 'true'
-                        : value;
-                }
+                raw = fs.readFileSync(overridesPath, 'utf8');
             } catch (e) {
-                console.error('[Config] Error loading dev-overrides.json:', e.message);
+                throw new CloudConfigFatalError(`[CloudConfig] FATAL: cannot read ${overridesPath} (${e.code || e.name}).`);
+            }
+            let overrides;
+            try {
+                overrides = JSON.parse(raw);
+            } catch (e) {
+                const at = /position \d+(?: \(line \d+ column \d+\))?/.exec(e.message)?.[0];
+                throw new CloudConfigFatalError(
+                    `[CloudConfig] FATAL: ${overridesPath} is not valid JSON${at ? ` (${at})` : ''}. Fix or remove it, then re-run.`
+                );
+            }
+            if (!overrides || typeof overrides !== 'object' || Array.isArray(overrides)) {
+                throw new CloudConfigFatalError(`[CloudConfig] FATAL: ${overridesPath} must hold a JSON object.`);
+            }
+            // A dev overlay may force-win over Secret Manager for ANY key, by design (CEO ruling,
+            // 2026-09-29) — a local override is not restricted to a pre-declared allowlist. Logs
+            // still carry key NAMES only, never values (secret-valued keys are classified in
+            // config-schema.json secret_keys and consulted by loggableConfigValue elsewhere).
+            console.log('[Config] Applying dev-overrides.json');
+            for (const [key, value] of Object.entries(overrides)) {
+                if (key.startsWith('_')) continue;
+                if (value === null) continue; // null in dev-overrides means "don't override"
+                console.log(`[Config] Dev override from JSON: ${key}`);
+                this[key] = boolean_keys.keys.includes(key) && typeof value === 'string'
+                    ? value === 'true'
+                    : value;
             }
         }
-        const { boolean_keys, dev_override_keys } = configSchema;
         dev_override_keys.keys.forEach(key => {
             const envValue = process.env[key];
             if (envValue !== undefined) {
