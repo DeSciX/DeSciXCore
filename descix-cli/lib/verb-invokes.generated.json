@@ -103,7 +103,6 @@
   "config set-gateway-port": [],
   "config set-powch-url": [],
   "config set-site-url": [],
-  "config set-url": [],
   "config show": [],
   "credits balance": [
     "get_credit_balance"

@@ -135,7 +135,7 @@ export function applyVisibility(program, surfaceCommands) {
     const hasChildren = Array.isArray(cmd.commands) && cmd.commands.length > 0;
     // ADDITIVE ONLY. Some commands are registered `{ hidden: true }` by the CLI itself for
     // reasons that have nothing to do with server admin-gating — see the retired-surface
-    // registrations in lib/commands/retired-kb-sync.js, each a deliberate loud-refusal stub kept
+    // registrations in lib/commands/retired-verbs.js, each a deliberate loud-refusal stub kept
     // out of the default listing so it doesn't clutter it, while still working and refusing
     // clearly when typed. This layer may HIDE a visible command; it must never REVEAL a command
     // the CLI already chose to hide. MEASURED: an early version unconditionally overwrote
