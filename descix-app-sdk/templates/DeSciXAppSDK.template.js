@@ -188,6 +188,22 @@ __BRIDGE_RESOLVER__
         },
 
         /**
+         * The shell's Powch wallet bridge — login, logout, sign, send/receive,
+         * isAuthenticated(), getAddress(). Published by the App Shell host
+         * (postMessage protocol; no Powch internals cross this boundary):
+         *
+         *     await DeSciX.ready();
+         *     if (DeSciX.powch) await DeSciX.powch.login();
+         *
+         * On successful login the SHELL routes the view (e.g. to the dashboard);
+         * the app does not redirect. Null when standalone or when this host
+         * publishes no wallet bridge — check before use.
+         */
+        get powch() {
+            return member('powch', 'Wallet auth is a shell capability (this host publishes no Powch bridge).');
+        },
+
+        /**
          * Call a platform command through the shell's authenticated session.
          * Throws when there is no shell — a call that cannot possibly be delivered
          * must not resolve as though it were.
