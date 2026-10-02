@@ -79,9 +79,11 @@ npm view @descix/app-sdk versions
 Run them separately. Passing several names to a single `npm view` prints the versions of the first
 one and exits 0, which reads as an answer about all of them.
 
-*Not published, deliberately:* `cryptoapis-sdk`, which is vendored third-party code and must
-never reach the registry under our scope, and `descix-vscode`, which ships to the VS Code
-Marketplace instead. The workflow refuses both by name.
+*Not published, deliberately:* `descix-vscode`, which ships to the VS Code Marketplace
+instead. The workflow refuses it by name.
+
+The vendored cryptoapis-sdk fork lives at DeSciX_Powch/packages/cryptoapis-sdk, outside this
+repo, and is likewise never published.
 
 **CI-PUBLISHED IS NOT THE PUBLIC STORY, and the two were conflated until 2026-08-30.** The
 public story remains ONE package (CEO 2026-08-21): `@descix/sdk`, with cloud-core and app-sdk as

@@ -10,7 +10,7 @@ npm install
 npm run link
 ```
 
-This registers all packages globally: `cryptoapis-sdk`, `@descix/app-sdk`, `@descix/cli`, `@descix/cloud-core`, `@descix/sdk`.
+This registers all packages globally: `@descix/app-sdk`, `@descix/cli`, `@descix/cloud-core`, `@descix/sdk`.
 
 ## 2. In each peer project
 
@@ -20,8 +20,11 @@ Replace `file:` dependencies with `npm link`:
 
 ```bash
 cd DeSciX_Cloud/microservice
-npm link @descix/cloud-core @descix/platform-api cryptoapis-sdk
+npm link @descix/cloud-core @descix/platform-api
 ```
+
+(`cryptoapis-sdk` lives at `DeSciX_Powch/packages/cryptoapis-sdk` and is consumed only via its
+`file:` dependency — never npm-link it.)
 
 Keep the existing `file:` entries in `package.json`; `npm link` overrides them at resolve time with the globally registered packages. When you move DeSciX Core elsewhere, switch to version ranges (`^1.0.0`) and use `npm link` for local dev.
 
@@ -58,7 +61,7 @@ npm link @descix/cloud-core @descix/platform-api
 To restore published/registry versions:
 
 ```bash
-npm unlink @descix/cloud-core cryptoapis-sdk   # etc.
+npm unlink @descix/cloud-core   # etc.
 npm install
 ```
 
@@ -69,7 +72,6 @@ With `npm link`, DeSciX Core can be a sibling of DeSciX or live in a separate di
 ```
 ~/Code/
 ├── DeSciXCore/          # This repo (packages only)
-│   ├── cryptoapis-sdk/
 │   ├── descix-app-sdk/
 │   ├── descix-cli/
 │   ├── descix-cloud-core/
