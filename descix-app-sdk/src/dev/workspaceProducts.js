@@ -21,6 +21,7 @@ import fs from 'fs';
 import path from 'path';
 import { resolveGatewayPort } from './gatewayPort.js';
 import { POWCH_APP_ID } from './powchUrl.js';
+import { localUpstreamOrigin } from './localOrigin.js';
 
 /**
  * The local gateway origin. ONE owner of the shape, so the map and
@@ -145,11 +146,16 @@ export function resolveAppGatewayUrl(workspaceRoot, appId) {
 
   const url = gatewayProductUrl(gatewayPort, appId);
 
+  // Same preference as the proxy builder (createViteProxyConfig): when a product carries
+  // BOTH site.port and site.static, the DEV SERVER is what the gateway serves — this
+  // resolver must report the mode the gateway actually routes, not a second opinion.
+  // The upstream origin string comes from the ONE owner (localUpstreamOrigin), so a
+  // declared site.protocol shows here exactly as the proxy composes it.
+  if (product.site?.port) {
+    return { url, gatewayPort, kind: 'dev-server', via: 'gateway /p/' + appId + ' → ' + localUpstreamOrigin(product.site, 'env.products[' + appId + '].site') };
+  }
   if (product.site?.static !== undefined && product.site?.static !== null) {
     return { url, gatewayPort, kind: 'static', via: 'gateway /p/' + appId + ' (staticSitePlugin → ' + product.site.static + ')' };
-  }
-  if (product.site?.port) {
-    return { url, gatewayPort, kind: 'dev-server', via: 'gateway /p/' + appId + ' → https://localhost:' + product.site.port };
   }
 
   throw new Error('App \'' + appId + '\' has no site config (no site.static or site.port) in workspace.json. Nothing to open. Set one with `descix app set-site`.');

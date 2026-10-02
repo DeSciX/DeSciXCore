@@ -1641,35 +1641,41 @@ appCommand
 
 // ============ App: set-site (WS-SSGPOD — site.static workspace gap) ============
 //
-// Canonical write path for an app's site config in workspace.json — specifically site.static,
-// the relative path the dev gateway's staticSitePlugin serves at /p/{appId}/ (resolved against
-// the app's localPath; "." means the localPath itself). Optionally sets site.port for
-// dev-server sites. Parallel to `descix app set-port` (microservice.port); closes the
-// site.static gap so workspace.json never needs hand-editing (CEO-D-2026-06-02-SSGPOD-SITE-PREPROD).
-// Backed by WorkspaceConfig.setStaticSite (parallel to setMicroservicePort).
-// It writes ONLY the local workspace.json site.{} slot.
+// Canonical write path for an app's site.{} slot in workspace.json. TWO MODES, one active
+// per write:
+//   static mode (--static):      site.static — the relative dir (under the app's localPath;
+//                                "." = the localPath itself) the gateway's staticSitePlugin
+//                                serves at /p/{appId}/.
+//   dev-server mode (--port):    site.port [+ site.protocol] — the local dev server the
+//                                gateway proxies /p/{appId} to (vite-style hotserving).
+// Setting one mode CLEARS the other's fields; passing BOTH flags in one invocation is the
+// explicit combined write and keeps both (the gateway then serves the DEV SERVER — site.port
+// wins — and says so on the serve banner). Parallel to `descix app set-port`
+// (microservice.port); no hand-editing of workspace.json (CEO-D-2026-06-02-SSGPOD-SITE-PREPROD).
+// Backed by WorkspaceConfig.setStaticSite. It writes ONLY the local workspace.json site.{} slot.
 appCommand
   .command('set-site')
-  .description("Set a mapped app static-site config (writes env.products[<app>].site.static, the relative dir served at /p/<app>/). Optionally --port; --unset clears site.{}.")
+  .description("Set a mapped app's site config (env.products[<app>].site). One active mode per write: --static <dir> (built site served at /p/<app>/) or --port <n> [--protocol http|https] (dev server proxied at /p/<app>); setting one clears the other. Pass both flags together to keep both — the gateway then serves the dev server (site.port wins). --unset clears site.{} entirely.")
   .requiredOption('-a, --app <app_id>', 'App ID (must be mapped in workspace.json)')
-  .option('--static <path>', 'Relative static-site path under the app localPath (e.g. "site"; "." = the localPath itself)')
-  .option('--port <port>', 'Site dev-server port (1-65535) for framework dev sites; mutually optional with --static')
-  .option('--unset', 'Remove site.static (and site.port) for the app, clearing the site.{} slot')
+  .option('--static <path>', 'Static mode: relative dir under the app localPath (e.g. "site"; "." = the localPath itself). Alone, it clears site.port and site.protocol (one active mode per write).')
+  .option('--port <port>', 'Dev-server mode: proxy /p/<app> to your local dev server on this port (1-65535). Alone, it clears site.static. With --static in the same call, both are kept and the gateway serves the dev server.')
+  .option('--protocol <scheme>', 'Dev-server upstream scheme: "http" or "https" (default https when unset). Dev-server mode only — requires site.port. A wrong scheme fails loud at the gateway (502); there is no auto-detection.')
+  .option('--unset', 'Remove site.static, site.port and site.protocol for the app, clearing the site.{} slot')
   .action(async (options) => {
     try {
       const appId = options.app;
       const workspaceConfig = await WorkspaceConfig.load();
 
-      // --unset: remove both site.static and site.port (setStaticSite cleans up empty site.{})
+      // --unset: remove all site.{} fields (setStaticSite cleans up the empty slot)
       if (options.unset) {
-        await workspaceConfig.setStaticSite(appId, { static: null, port: null });
-        console.log(chalk.green(`\n✓ site config cleared for ${appId}\n`));
+        await workspaceConfig.setStaticSite(appId, { static: null, port: null, protocol: null });
+        console.log(chalk.green(`\n✓ site config cleared for ${appId} (site.static, site.port, site.protocol removed)\n`));
         return;
       }
 
       // Require at least one field to set — do not silently no-op.
-      if (options.static === undefined && options.port === undefined) {
-        console.error(chalk.red('\n❌ Nothing to set. Provide --static <path> and/or --port <n>, or --unset to clear.\n'));
+      if (options.static === undefined && options.port === undefined && options.protocol === undefined) {
+        console.error(chalk.red('\n❌ Nothing to set. Provide --static <path> (static mode), --port <n> [--protocol http|https] (dev-server mode), or --unset to clear.\n'));
         process.exit(1);
       }
 
@@ -1692,15 +1698,34 @@ appCommand
         fields.port = portNum;
       }
 
-      // setStaticSite mutates the live env entry and saves — and hard-fails (canonical
-      // "not mapped in workspace.json" error) for an unmapped app, surfaced in the catch below.
+      if (options.protocol !== undefined) {
+        if (options.protocol !== 'http' && options.protocol !== 'https') {
+          console.error(chalk.red(`\n❌ Invalid --protocol ${JSON.stringify(options.protocol)}. Only "http" or "https" are valid (it names the scheme of your app's own dev server behind /p/${appId}).\n`));
+          process.exit(1);
+        }
+        fields.protocol = options.protocol;
+      }
+
+      // setStaticSite applies ONE-ACTIVE-MODE-PER-WRITE and saves — it hard-fails (canonical
+      // "not mapped in workspace.json" error, or protocol-without-port) in the catch below.
       await workspaceConfig.setStaticSite(appId, fields);
 
       console.log(chalk.green(`\n✓ site config set for ${appId}`));
-      if (fields.static !== undefined) console.log(chalk.cyan(`  site.static: ${fields.static}`));
-      if (fields.port !== undefined)   console.log(chalk.cyan(`  site.port:   ${fields.port}`));
-      console.log(chalk.gray(`  Written to env.products[${appId}].site in workspace.json.`));
-      console.log(chalk.gray(`  The gateway serves site.static at /p/${appId}/ (staticSitePlugin); \`descix serve\` picks it up.\n`));
+      // Print the RESULTING slot, not just the fields passed: a dev-server write keeps a
+      // previously declared site.protocol (same mode, new port), and a retained field the
+      // output does not show is invisible state — the whole defect class this command fixes.
+      const entryNow = workspaceConfig.env?.platform?.appId === appId
+        ? workspaceConfig.env.platform
+        : (workspaceConfig.env?.products || []).find(p => p.appId === appId);
+      console.log(chalk.cyan(`  site is now:   ${JSON.stringify(entryNow?.site)}`));
+      if (fields.static !== undefined && fields.port === undefined) {
+        console.log(chalk.gray(`  site.port and site.protocol cleared (one active mode per write) — /p/${appId}/ now serves the static dir.`));
+      } else if (fields.port !== undefined && fields.static === undefined) {
+        console.log(chalk.gray(`  site.static cleared (one active mode per write) — /p/${appId} now proxies to your dev server.`));
+      } else if (fields.static !== undefined && fields.port !== undefined) {
+        console.log(chalk.yellow(`  Combined write: BOTH modes kept. The gateway serves the DEV SERVER (site.port wins); site.static is used only after you clear site.port (--static alone, or --unset).`));
+      }
+      console.log(chalk.gray(`  Written to env.products[${appId}].site in workspace.json; \`descix serve\` picks it up.\n`));
     } catch (error) {
       console.error(chalk.red(error.message));
       process.exit(1);
