@@ -33,6 +33,15 @@ test('a declared protocol is the only thing that changes the scheme', () => {
   assert.equal(localUpstreamOrigin({ port: 8081, protocol: 'http' }, 'x'), 'http://localhost:8081');
 });
 
+test('a protocol that is not http/https fails loud naming the entry — no silent dead target', () => {
+  for (const protocol of ['ftp', 'HTTPS', 'ws', ' ']) {
+    assert.throws(
+      () => localUpstreamOrigin({ port: 5612, protocol }, 'env.products[egpt].site'),
+      /env\.products\[egpt\]\.site declares protocol .* only "http" or "https" are valid/s,
+    );
+  }
+});
+
 test('a missing port fails loud, naming the entry — there is no port to default to', () => {
   for (const entry of [undefined, null, {}, { port: '' }, { protocol: 'http' }]) {
     assert.throws(() => localUpstreamOrigin(entry, 'env.products[demo].microservice'),
