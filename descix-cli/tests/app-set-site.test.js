@@ -9,10 +9,15 @@
  *
  * Coverage:
  *  - happy path: set site.static → workspace.json env.products[<app>].site.static persisted
- *  - combined: set static + port together
+ *  - combined: set static + port together (explicit combined write keeps both)
+ *  - ONE ACTIVE MODE PER WRITE (measured 2026-10-02, EGPT-Evidence: --port then --static left
+ *    both fields and the gateway silently served the dead dev-server port):
+ *      - setting static alone CLEARS site.port and site.protocol
+ *      - setting port alone CLEARS site.static
+ *  - site.protocol: set with port, validated ("http"|"https" only), refused without a port,
+ *    cleared on mode switch to static and on unset
  *  - disable case: static:null removes site.static; empty site.{} cleaned up
- *  - disable case: static:null + port:null on app with no site.{} does not throw
- *  - preserves an existing site.port when only static is set (no clobber)
+ *  - disable case: static:null + port:null + protocol:null on app with no site.{} does not throw
  *  - hard-fail: unmapped app → throws with canonical error (not TypeError)
  *  - platform app: setStaticSite works for env.platform entry as well
  *  - anti-regression: WorkspaceConfig exposes setStaticSite as a function
@@ -120,21 +125,131 @@ test('setStaticSite — disable case: static:null + port:null on app with no sit
   );
 });
 
-test('setStaticSite — preserves existing site.port when only static is set', async (t) => {
+test('ONE ACTIVE MODE PER WRITE — the measured sequence (--port then --static) leaves STATIC only', async (t) => {
   const { wsRoot, productAppId } = await makeTestWorkspace(t);
 
-  // Set a port first
+  // The measured defect sequence (EGPT-Evidence, 2026-10-02): author on a dev server...
   const wc = await WorkspaceConfig.load(wsRoot);
-  await wc.setStaticSite(productAppId, { port: 5599 });
+  await wc.setStaticSite(productAppId, { port: 5612 });
 
-  // Now set static only — must not clobber the existing port
+  // ...then preview the build via --static. Pre-fix this kept BOTH fields and the gateway
+  // silently proxied /p/{app} to the (now dead) dev-server port.
   const wc2 = await WorkspaceConfig.load(wsRoot);
   await wc2.setStaticSite(productAppId, { static: 'site' });
 
   const reloaded = await WorkspaceConfig.load(wsRoot);
   const product = reloaded.env.products.find(p => p.appId === productAppId);
   assert.equal(product.site?.static, 'site', 'site.static must be set');
-  assert.equal(product.site?.port, 5599, 'pre-existing site.port must be preserved');
+  assert.equal(product.site?.port, undefined, 'site.port must be CLEARED by the static write (one active mode per write)');
+  assert.equal(product.site?.protocol, undefined, 'site.protocol must be cleared with the dev-server mode');
+});
+
+test('ONE ACTIVE MODE PER WRITE — setting port alone clears an existing site.static', async (t) => {
+  const { wsRoot, productAppId } = await makeTestWorkspace(t);
+
+  const wc = await WorkspaceConfig.load(wsRoot);
+  await wc.setStaticSite(productAppId, { static: 'site' });
+
+  const wc2 = await WorkspaceConfig.load(wsRoot);
+  await wc2.setStaticSite(productAppId, { port: 5612 });
+
+  const reloaded = await WorkspaceConfig.load(wsRoot);
+  const product = reloaded.env.products.find(p => p.appId === productAppId);
+  assert.equal(product.site?.port, 5612, 'site.port must be set');
+  assert.equal(product.site?.static, undefined, 'site.static must be CLEARED by the port write (one active mode per write)');
+});
+
+test('explicit combined write (static + port in ONE call) keeps both fields', async (t) => {
+  const { wsRoot, productAppId } = await makeTestWorkspace(t);
+
+  const wc = await WorkspaceConfig.load(wsRoot);
+  await wc.setStaticSite(productAppId, { static: 'site', port: 5612 });
+
+  const reloaded = await WorkspaceConfig.load(wsRoot);
+  const product = reloaded.env.products.find(p => p.appId === productAppId);
+  assert.equal(product.site?.static, 'site', 'combined write keeps site.static');
+  assert.equal(product.site?.port, 5612, 'combined write keeps site.port');
+});
+
+test('site.protocol — set with port, persisted; cleared on mode switch to static', async (t) => {
+  const { wsRoot, productAppId } = await makeTestWorkspace(t);
+
+  const wc = await WorkspaceConfig.load(wsRoot);
+  await wc.setStaticSite(productAppId, { port: 5612, protocol: 'http' });
+
+  let reloaded = await WorkspaceConfig.load(wsRoot);
+  let product = reloaded.env.products.find(p => p.appId === productAppId);
+  assert.equal(product.site?.protocol, 'http', 'site.protocol must be persisted');
+  assert.equal(product.site?.port, 5612, 'site.port must be persisted');
+
+  // Mode switch to static clears port AND protocol
+  const wc2 = await WorkspaceConfig.load(wsRoot);
+  await wc2.setStaticSite(productAppId, { static: 'site' });
+
+  reloaded = await WorkspaceConfig.load(wsRoot);
+  product = reloaded.env.products.find(p => p.appId === productAppId);
+  assert.equal(product.site?.protocol, undefined, 'site.protocol must be cleared on mode switch to static');
+  assert.equal(product.site?.port, undefined, 'site.port must be cleared on mode switch to static');
+});
+
+test('site.protocol — invalid value refused loud, nothing written', async (t) => {
+  const { wsRoot, productAppId } = await makeTestWorkspace(t);
+
+  const wc = await WorkspaceConfig.load(wsRoot);
+  await assert.rejects(
+    () => wc.setStaticSite(productAppId, { port: 5612, protocol: 'ftp' }),
+    /site\.protocol must be "http" or "https"/
+  );
+
+  const reloaded = await WorkspaceConfig.load(wsRoot);
+  const product = reloaded.env.products.find(p => p.appId === productAppId);
+  assert.equal(product.site, undefined, 'a refused write must persist nothing');
+});
+
+test('site.protocol — refused without a port (protocol describes the dev-server upstream)', async (t) => {
+  const { wsRoot, productAppId } = await makeTestWorkspace(t);
+
+  const wc = await WorkspaceConfig.load(wsRoot);
+  await assert.rejects(
+    () => wc.setStaticSite(productAppId, { protocol: 'http' }),
+    /only valid in dev-server mode/
+  );
+
+  // And the static+protocol contradiction is refused too (static clears the port lane).
+  const wc2 = await WorkspaceConfig.load(wsRoot);
+  await assert.rejects(
+    () => wc2.setStaticSite(productAppId, { static: 'site', protocol: 'http' }),
+    /only valid in dev-server mode/
+  );
+});
+
+test('site.protocol — allowed alone when site.port already exists', async (t) => {
+  const { wsRoot, productAppId } = await makeTestWorkspace(t);
+
+  const wc = await WorkspaceConfig.load(wsRoot);
+  await wc.setStaticSite(productAppId, { port: 5612 });
+
+  const wc2 = await WorkspaceConfig.load(wsRoot);
+  await wc2.setStaticSite(productAppId, { protocol: 'http' });
+
+  const reloaded = await WorkspaceConfig.load(wsRoot);
+  const product = reloaded.env.products.find(p => p.appId === productAppId);
+  assert.equal(product.site?.port, 5612, 'existing site.port preserved');
+  assert.equal(product.site?.protocol, 'http', 'site.protocol set onto the existing dev-server config');
+});
+
+test('unset — static:null + port:null + protocol:null clears the whole site.{} slot', async (t) => {
+  const { wsRoot, productAppId } = await makeTestWorkspace(t);
+
+  const wc = await WorkspaceConfig.load(wsRoot);
+  await wc.setStaticSite(productAppId, { port: 5612, protocol: 'http' });
+
+  const wc2 = await WorkspaceConfig.load(wsRoot);
+  await wc2.setStaticSite(productAppId, { static: null, port: null, protocol: null });
+
+  const reloaded = await WorkspaceConfig.load(wsRoot);
+  const product = reloaded.env.products.find(p => p.appId === productAppId);
+  assert.equal(product.site, undefined, 'site.{} must be fully removed by unset');
 });
 
 test('setStaticSite — hard-fail: unmapped app throws with canonical error text', async (t) => {

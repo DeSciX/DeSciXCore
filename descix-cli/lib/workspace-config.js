@@ -845,15 +845,27 @@ export class WorkspaceConfig {
   /**
    * Update an app's site config in env.products[] (or env.platform if it is the platform app).
    *
-   * Parallel to setMicroservicePort(), but operates on the entry's site.{} slot's
-   * static-site fields. This is the canonical write path for site.static — the relative path the
-   * dev gateway's staticSitePlugin serves at /p/{appId}/ (see createViteProxyConfig:
-   * site.static is resolved against the app's localPath; "." means the localPath itself).
+   * Parallel to setMicroservicePort(), but operates on the entry's site.{} slot. This is the
+   * canonical write path for site.static — the relative path the dev gateway's
+   * staticSitePlugin serves at /p/{appId}/ (see createViteProxyConfig: site.static is
+   * resolved against the app's localPath; "." means the localPath itself) — and for
+   * site.port / site.protocol, the dev-server upstream the gateway proxies /p/{appId} to.
    * Backs the `descix app set-site` command, closing the site.static workspace gap without
    * hand-editing workspace.json (the org rule forbids hand edits — CEO-D-2026-06-02-SSGPOD-SITE-PREPROD).
    *
-   * Mutates site.static and/or site.port. Pass static === null to remove site.static; pass
-   * port === null to remove site.port. If site.{} becomes empty after removals it is deleted.
+   * ONE ACTIVE MODE PER WRITE (measured 2026-10-02, EGPT-Evidence: `set-site --port` then
+   * `set-site --static` left BOTH fields, and the gateway silently served the dead dev-server
+   * port). Setting `static` without `port` in the same call CLEARS site.port and
+   * site.protocol; setting `port` without `static` CLEARS site.static. Passing BOTH in one
+   * call is the explicit combined write and keeps both — the gateway then serves the dev
+   * server (site.port wins; createViteProxyConfig), stated on the serve banner.
+   *
+   * site.protocol ("http" | "https", default https when absent) names the scheme of the
+   * dev-server upstream. It is meaningless without site.port, and a write that would leave
+   * protocol without port is refused loud — no auto-detection, no try-both fallback.
+   *
+   * Pass null for a field to remove it (what `--unset` does for all three). Removals clear
+   * only the named field. If site.{} becomes empty after removals it is deleted.
    * Persists via save() at the end — same auto-save pattern as setMicroservicePort().
    * Hard-fails if appId is not mapped in env.platform or env.products.
    *
@@ -861,37 +873,64 @@ export class WorkspaceConfig {
    * @param {Object} fields - Fields to set on site.{}
    * @param {string|null} [fields.static] - Relative static-site path to set, or null to remove site.static
    * @param {number|string|null} [fields.port] - Site dev-server port to set, or null to remove site.port
+   * @param {string|null} [fields.protocol] - Dev-server upstream scheme "http"|"https", or null to remove site.protocol
    * @returns {Promise<string>} Path to saved config (from save())
    */
   async setStaticSite(appId, fields = {}) {
     if (!appId) throw new Error('appId is required');
     if (!fields || typeof fields !== 'object') throw new Error('fields object is required');
 
+    const settingStatic = 'static' in fields && fields.static !== null && fields.static !== undefined;
+    const settingPort = 'port' in fields && fields.port !== null && fields.port !== undefined;
+    const settingProtocol = 'protocol' in fields && fields.protocol !== null && fields.protocol !== undefined;
+
+    if (settingProtocol && fields.protocol !== 'http' && fields.protocol !== 'https') {
+      throw new Error(
+        `site.protocol must be "http" or "https" (got ${JSON.stringify(fields.protocol)}). ` +
+        `It names the scheme of the app's own dev server behind the gateway's /p/${appId} proxy.`
+      );
+    }
+
     const entry = this._liveEnvEntry(appId);
 
-    if (!entry.site) entry.site = {};
+    // Compute the resulting site.{} first, so validation failures write NOTHING.
+    const site = { ...(entry.site || {}) };
 
-    // site.static — set or remove
+    // One active mode per write (see doc comment above).
+    if (settingStatic && !settingPort) {
+      delete site.port;
+      delete site.protocol;
+    }
+    if (settingPort && !settingStatic) {
+      delete site.static;
+    }
+
     if ('static' in fields) {
-      if (fields.static === null || fields.static === undefined) {
-        delete entry.site.static;
-      } else {
-        entry.site.static = fields.static;
-      }
+      if (fields.static === null || fields.static === undefined) delete site.static;
+      else site.static = fields.static;
     }
-
-    // site.port — set or remove (for static+devCommand sites)
     if ('port' in fields) {
-      if (fields.port === null || fields.port === undefined) {
-        delete entry.site.port;
-      } else {
-        entry.site.port = fields.port;
-      }
+      if (fields.port === null || fields.port === undefined) delete site.port;
+      else site.port = fields.port;
+    }
+    if ('protocol' in fields) {
+      if (fields.protocol === null || fields.protocol === undefined) delete site.protocol;
+      else site.protocol = fields.protocol;
     }
 
-    // Clean up an empty site.{} so we never leave a bare {} behind
-    if (Object.keys(entry.site).length === 0) {
+    // protocol describes the dev-server upstream — without a port it describes nothing.
+    if ('protocol' in site && !('port' in site)) {
+      throw new Error(
+        `site.protocol is only valid in dev-server mode: set it together with --port ` +
+        `(or on an app whose site.port is already set). Nothing was written for ${appId}.`
+      );
+    }
+
+    if (Object.keys(site).length === 0) {
+      // Clean up an empty site.{} so we never leave a bare {} behind
       delete entry.site;
+    } else {
+      entry.site = site;
     }
 
     return this.save();

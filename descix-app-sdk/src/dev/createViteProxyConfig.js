@@ -16,6 +16,8 @@ import path from 'path';
 import { resolveApiTarget, proxyEntry } from './resolveGatewayTargets.js';
 import { resolvePowchUrl } from './powchUrl.js';
 import { localUpstreamOrigin } from './localOrigin.js';
+import { devServerProxyGuard } from './devServerProxyGuard.js';
+import { invokedBin } from './invokedBin.js';
 
 /**
  * @param {string} workspacePath - Path to workspace root (contains .descix/workspace.json)
@@ -48,6 +50,7 @@ export function createViteProxyConfig(workspacePath, options = {}) {
   const localAppRoutes = {};
   const serviceRoutes = {};
   const staticRoutes = {};
+  const modeNotes = [];
 
   // v2.1 workspace format: env.platform + env.products[]
   const envBlock = config.env || {};
@@ -65,7 +68,20 @@ export function createViteProxyConfig(workspacePath, options = {}) {
     for (const p of envBlock.products) {
       const appId = p.appId;
       if (!appId) continue;
-      if (p.site?.port)        localAppRoutes[appId] = { port: p.site.port, protocol: p.site.protocol };
+      // One active mode per product: a site.port serves the DEV SERVER; site.static serves
+      // the built dir. `descix app set-site` keeps the slot single-mode per write; BOTH
+      // fields exist only after an explicit combined write, and then the dev server wins —
+      // said out loud (modeNotes → the serve banner), never silently.
+      if (p.site?.port) {
+        localAppRoutes[appId] = { port: p.site.port, protocol: p.site.protocol };
+        if (p.site.static) {
+          modeNotes.push(
+            `/p/${appId} has BOTH site.port and site.static — the DEV SERVER (site.port ${p.site.port}) is served; ` +
+            `site.static "${p.site.static}" is ignored while site.port is set. ` +
+            `Switch to the built site: ${invokedBin()} app set-site -a ${appId} --static ${p.site.static}`
+          );
+        }
+      }
       else if (p.site?.static) {
         // Static site: resolve path relative to product localPath from workspace root
         const localPath = p.localPath || '.';
@@ -119,9 +135,12 @@ export function createViteProxyConfig(workspacePath, options = {}) {
 
   // Product site dev server routes: /p/{productId} -> the site's local origin.
   // NO path rewrite — each app must configure its framework's base path to match.
+  // An unreachable or protocol-mismatched upstream answers a LOUD 502 naming the target and
+  // the remedy (devServerProxyGuard), never the empty body Vite's default handler sends.
   Object.entries(localAppRoutes).forEach(([productId, route]) => {
     const pathPrefix = `/p/${productId}`;
-    proxy[pathPrefix] = proxyEntry(localUpstreamOrigin(route, `env.products[${productId}].site`), { ws: true });
+    const target = localUpstreamOrigin(route, `env.products[${productId}].site`);
+    proxy[pathPrefix] = proxyEntry(target, { ws: true, configure: devServerProxyGuard(productId, target) });
   });
 
   // GCS fallback for remote Community assets
@@ -146,6 +165,9 @@ export function createViteProxyConfig(workspacePath, options = {}) {
   // Attach staticRoutes to the proxy object so gateway.js can access them
   // without changing the function signature (backward compatible)
   proxy._staticRoutes = staticRoutes;
+  // Mode notes (same channel as _staticRoutes): lines the gateway banner prints so the
+  // active site mode is visible whenever a product carries both site.port and site.static.
+  proxy._modeNotes = modeNotes;
 
   return proxy;
 }
