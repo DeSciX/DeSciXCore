@@ -24,7 +24,9 @@ npm link @descix/cloud-core @descix/platform-api
 ```
 
 (`cryptoapis-sdk` lives at `DeSciX_Powch/packages/cryptoapis-sdk` and is consumed only via its
-`file:` dependency — never npm-link it.)
+`file:` dependency — never npm-link it. On a fresh checkout run `npm install` at the
+`DeSciX_Powch` root FIRST: the workspace install hoists the SDK's own dependencies, and without
+it both microservices fail at import with `Cannot find module 'request'`.)
 
 Keep the existing `file:` entries in `package.json`; `npm link` overrides them at resolve time with the globally registered packages. When you move DeSciX Core elsewhere, switch to version ranges (`^1.0.0`) and use `npm link` for local dev.
 
