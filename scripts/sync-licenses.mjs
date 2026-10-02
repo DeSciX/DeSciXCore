@@ -35,10 +35,11 @@ const SOURCE = join(REPO_ROOT, 'LICENSE.md');
 /**
  * Packages that ship the DeSciX Community License.
  *
- * cryptoapis-sdk is DELIBERATELY ABSENT: it is vendored third-party code and correctly declares
+ * Vendored third-party code (e.g. the cryptoapis-sdk fork, now at
+ * DeSciX_Powch/packages/cryptoapis-sdk) is never listed here: it correctly declares
  * UNLICENSED (proprietary). Note UNLICENSED is not the `Unlicense` public-domain licence — that
- * one-keystroke difference had dedicated this vendored code to the public domain until it was
- * corrected in Core 768320d. Do not "fix" cryptoapis by adding it here.
+ * one-keystroke difference had dedicated that vendored code to the public domain until it was
+ * corrected in Core 768320d.
  */
 const PACKAGES = [
     'descix-cloud-core',
