@@ -92,7 +92,7 @@ function runbookSets(text, nameToDir) {
   const toDir = (tok) => {
     const t = tok.replace(/`/g, '').trim();
     if (nameToDir.has(t)) return nameToDir.get(t);
-    return t; // already a directory name (e.g. cryptoapis-sdk, descix-vscode)
+    return t; // already a directory name (e.g. descix-vscode)
   };
 
   // The registry table: a header row carrying both "package" and "directory".

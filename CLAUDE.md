@@ -11,7 +11,6 @@ Shared packages consumed by `DeSciX_Cloud` and `DeSciX_Powch` via npm link. This
 
 | Package | Entry | Consumers |
 |---------|-------|-----------|
-| `cryptoapis-sdk` | OpenAPI-generated SDK | DeSciX_Cloud microservice, DeSciX_Powch microservice |
 | `@descix/sdk` | MCP server, RAG orchestrators, Git integrations | CLI, backend services |
 | `@descix/cloud-core` | Firestore, Pub/Sub, Secret Manager bootstrap | All GCP microservices |
 | `@descix/platform-api` | Shared business logic: Firestore models, auth/session, email, permissions, entitlements | DeSciX_Cloud microservice, DeSciX_Powch microservice |
@@ -27,7 +26,7 @@ Shared packages consumed by `DeSciX_Cloud` and `DeSciX_Powch` via npm link. This
 npm run link   # in DeSciX_Core/
 
 # Then in each consuming project:
-npm link @descix/cloud-core cryptoapis-sdk   # DeSciX_Cloud/microservice
+npm link @descix/cloud-core                  # DeSciX_Cloud/microservice
 npm link @descix/app-sdk                     # DeSciX_Cloud/site, DeSciX_Powch/site
 npm link @descix/cli                         # global CLI
 ```

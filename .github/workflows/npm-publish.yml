@@ -187,15 +187,15 @@ jobs:
           npm --version
           node --version
 
-      # FAIL LOUD BEFORE PUBLISHING. cryptoapis-sdk is vendored THIRD-PARTY code and must never
-      # reach the registry under our scope; it is not in the dispatch choices, but a choice list is
+      # FAIL LOUD BEFORE PUBLISHING. descix-vscode ships to the VS Code Marketplace, never the npm
+      # registry; it is not in the dispatch choices, but a choice list is
       # a UI affordance, not an enforcement boundary — and a release tag is not a choice list at
       # all. Keyed on the GUARD'S resolved package, so it works on the release path too: a refusal
       # keyed on `inputs.package` would be empty on every release and could never fail.
       - name: Refuse to publish excluded packages
         run: |
           case "$PKG" in
-            cryptoapis-sdk|descix-vscode|.)
+            descix-vscode|.)
               echo "::error::'$PKG' is NOT publishable to npm under @descix."
               exit 1
               ;;
