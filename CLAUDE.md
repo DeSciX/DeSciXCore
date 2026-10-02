@@ -77,11 +77,11 @@ Before any change, state which package boundary is being touched and confirm no 
 - Test coverage in `tests/app-set-port.test.js` (happy path, disable/cleanup, disable-no-op, unmapped hard-fail, platform-app, plus a method-exists anti-regression assertion) ✓
 
 ### Complete (WS-SSGPOD — `descix app set-site` closes the site.static gap)
-- `WorkspaceConfig.setStaticSite(appId, { static, port })` added — parallel to `setMicroservicePort()`; mutates the live `env.products[]`/`env.platform` entry's `site.{}` slot, auto-saves; pass `static: null` / `port: null` to remove a field (empty `site.{}` cleaned up); hard-fails with the canonical "not mapped in workspace.json" error for an unmapped app ✓
-- `descix app set-site -a <id> --static <path>` command added (`bin/descix.js`, in the `app` group next to `set-port`/`set-localpath`/`unmap`) — wired to `setStaticSite`; also accepts `--port <n>` (1-65535) and `--unset` to clear `site.{}`; hard-fails clearly on unmapped app / bad port / nothing-to-set ✓
+- `WorkspaceConfig.setStaticSite(appId, { static, port, protocol })` added — parallel to `setMicroservicePort()`; mutates the live `env.products[]`/`env.platform` entry's `site.{}` slot, auto-saves; ONE ACTIVE MODE PER WRITE (setting `static` alone clears `site.port`+`site.protocol`; setting `port` alone clears `site.static`; passing both in one call keeps both — the gateway then serves the dev server, site.port wins); `protocol` is "http"|"https" (default https), dev-server mode only, refused without a port; pass `null` to remove a field (empty `site.{}` cleaned up); hard-fails with the canonical "not mapped in workspace.json" error for an unmapped app ✓
+- `descix app set-site -a <id> --static <path>` command added (`bin/descix.js`, in the `app` group next to `set-port`/`set-localpath`/`unmap`) — wired to `setStaticSite`; also accepts `--port <n>` (1-65535), `--protocol <http|https>` (dev-server upstream scheme) and `--unset` to clear `site.{}`; prints the RESULTING `site.{}` slot and which fields a mode switch cleared; hard-fails clearly on unmapped app / bad port / bad protocol / nothing-to-set ✓
 - This is the canonical write path for `site.static` — the relative path (under the app's `localPath`; `.` = the localPath itself) that the dev gateway's `staticSitePlugin` serves at `/p/{appId}/`. It closes the `site.static` workspace gap the same way `set-port` closed `microservice.port`: no more hand-editing workspace.json (the org rule forbids it; CEO-D-2026-06-02-SSGPOD-SITE-PREPROD) ✓
 - `set-site` writes ONLY the local workspace.json `site.{}` slot ✓
-- Test coverage in `tests/app-set-site.test.js` (mirrors `app-set-port.test.js`: happy path, static+port combined, disable/cleanup, disable-no-op, port-preservation, unmapped hard-fail, platform-app, plus a method-exists anti-regression assertion) ✓
+- Test coverage in `tests/app-set-site.test.js` (mirrors `app-set-port.test.js`: happy path, static+port combined, one-active-mode-per-write both directions, protocol set/validate/refuse-without-port/clear-on-mode-switch, disable/cleanup, disable-no-op, unmapped hard-fail, platform-app, plus a method-exists anti-regression assertion) ✓
 
 ### Complete (WS-SSGPOD — workspace product-map live-refresh (HMR) + `descix app open`)
 Two platform/SDK/CLI deliverables under CEO-D-2026-06-02-EVP-NO-APPDEV-CLI-PLUS-DEV-URL. EVP builds + unit-tests these; COS/CEO run app-setup CLI (`set-site` etc.) against real apps as dogfood — EVP never does.
@@ -99,7 +99,7 @@ Two platform/SDK/CLI deliverables under CEO-D-2026-06-02-EVP-NO-APPDEV-CLI-PLUS-
 - **Tested** in `descix-cli/tests/app-open.test.js` (temp workspace): static, dev-server, platform, custom gateway port, unmapped hard-fail, no-site hard-fail, missing-workspace hard-fail. ✓
 
 ### WorkspaceConfig — additional canonical method (v2.1)
-- **`workspaceConfig.env`** — raw `env` object from workspace.json. Use for reading `env.platform.microservice.port` / `env.products[i].microservice.port` when injecting port into scaffold files. Do not mutate directly — use `setStaticSite()` for `site.static` and `site.port` mutations, and `setMicroservicePort()` for microservice port mutations.
+- **`workspaceConfig.env`** — raw `env` object from workspace.json. Use for reading `env.platform.microservice.port` / `env.products[i].microservice.port` when injecting port into scaffold files. Do not mutate directly — use `setStaticSite()` for `site.static` / `site.port` / `site.protocol` mutations, and `setMicroservicePort()` for microservice port mutations.
 
 ### Pending (other)
 - ~~`descix-cli/bin/mcp-server.js`: imports non-existent `vendor/mcp/tools.js`~~ — CLOSED (stale, WS-V1-PURGE Phase 2): `mcp-server.js` imports `@modelcontextprotocol/sdk` directly; no `DeSciXMCPServer`/`vendor/mcp/tools.js` exists.
@@ -123,7 +123,7 @@ After `descix login` / bootstrap, all testing must use `node DeSciX_Core/descix-
 
 ### WorkspaceConfig — canonical methods (v2.1)
 - **`getAppByAppId(appId)`** — primary app lookup. Returns `{ localPath, absolutePath, communityId, kbId }` or `null`. Use this everywhere.
-- **`setStaticSite(appId, { static, port })`** — mutates the live `env.products[]` (or `env.platform`) entry's `site.{}` and calls `save()`. Pass `null` for a field to remove it; empty `site.{}` is cleaned up. Hard-fails if `appId` is not mapped. Always use this (not direct mutation of `getAppByAppId()` return value, which is a constructed copy).
+- **`setStaticSite(appId, { static, port, protocol })`** — mutates the live `env.products[]` (or `env.platform`) entry's `site.{}` and calls `save()`. ONE ACTIVE MODE PER WRITE: `static` alone clears `port`+`protocol`, `port` alone clears `static`, both in one call keeps both (the gateway serves the dev server — site.port wins). `protocol` is "http"|"https" (default https when absent), dev-server mode only. Pass `null` for a field to remove it; empty `site.{}` is cleaned up. Hard-fails if `appId` is not mapped. Always use this (not direct mutation of `getAppByAppId()` return value, which is a constructed copy).
 - **`getSitePath(appId)`** / **`getMicroservicePath(appId)`** — convenience wrappers returning `absolutePath/site` and `absolutePath/microservice` respectively.
 - **`setEnvironment(envName)`** — canonical way to persist environment to workspace.json.
 - **NEVER call `getApp(communityId, appId)`** — this method was removed in WS-CLI-V2.1-PURGE PR #7. `getAppByAppId(appId)` is the replacement. The meta-test `removed-methods-anti-regression.test.js` enforces this.

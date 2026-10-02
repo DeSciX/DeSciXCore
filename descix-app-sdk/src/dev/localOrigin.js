@@ -38,5 +38,15 @@ export function localUpstreamOrigin(entry, what) {
     );
   }
   const proto = entry.protocol || LOCAL_DEFAULT_PROTOCOL;
+  // A declared protocol is "http" or "https" — anything else is a misconfiguration that
+  // would compose an origin no proxy can reach, and it fails loud HERE naming the entry,
+  // not as a silent dead target deep inside the proxy. No auto-detection, no try-both.
+  if (proto !== 'http' && proto !== 'https') {
+    throw new Error(
+      `[localOrigin] ${what} declares protocol ${JSON.stringify(entry.protocol)} — ` +
+      'only "http" or "https" are valid. Fix it in .descix/workspace.json ' +
+      '(via the descix config/app verbs, e.g. `descix app set-site --protocol`).'
+    );
+  }
   return `${proto}://${LOCAL_HOST}:${port}`;
 }

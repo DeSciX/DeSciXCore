@@ -164,7 +164,9 @@ export async function runGateway(options = {}) {
 
   const proxyRules = buildGatewayProxy(workspaceRoot, targets);
   const staticRoutes = proxyRules._staticRoutes || {};
+  const modeNotes = proxyRules._modeNotes || [];
   delete proxyRules._staticRoutes;
+  delete proxyRules._modeNotes;
   // Dev certs — ONE owner, shared with every app dev server behind this gateway
   // (createViteServerConfig). They used to diverge, so a workspace-configured
   // trusted cert reached :5173 and nothing else — and passkey login is
@@ -181,6 +183,7 @@ export async function runGateway(options = {}) {
     }
     log('');
   }
+  logModeNotes(modeNotes, log);
 
   // Model V: the proxy engine is exact-pinned by this package. Refuse to boot
   // the local mesh on a version the gateway was not verified on.
@@ -231,10 +234,13 @@ export async function runGateway(options = {}) {
     const newTargets = resolveGatewayTargets(newConfig, targetOverrides);
     const newProxy = buildGatewayProxy(workspaceRoot, newTargets);
     const newStaticRoutes = newProxy._staticRoutes || {};
+    const newModeNotes = newProxy._modeNotes || [];
     delete newProxy._staticRoutes;
+    delete newProxy._modeNotes;
 
     log('\n  workspace.json changed — restarting gateway...\n');
     logProxyTable(newProxy, log);
+    logModeNotes(newModeNotes, log);
 
     // Re-resolve the binding too: a renamed or moved app must not keep serving
     // the previous answer at APP_BINDING_PATH.
@@ -404,6 +410,18 @@ export function formatDevCertBanner(certStatus, certPath) {
   // does not) — normalize to exactly one so the sentence always reads clean.
   const reason = certStatus.detail.trim().replace(/\.+$/, '');
   return `  ⚠ Passkey sign-in will fail: ${reason}. Run: descix dev-certs trust\n`;
+}
+
+/**
+ * Print the site-mode notes createViteProxyConfig attached — one line per product that
+ * carries BOTH site.port and site.static, naming which mode is actually served and the
+ * command that switches it. The active mode is never left implicit.
+ */
+function logModeNotes(modeNotes, log) {
+  if (!modeNotes || modeNotes.length === 0) return;
+  log('  Site modes:');
+  for (const note of modeNotes) log(`    ${note}`);
+  log('');
 }
 
 function logProxyTable(proxy, log) {
