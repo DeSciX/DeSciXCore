@@ -92,7 +92,7 @@ test('EGPT settlement profile: capstones enumerated inline + axiom closure + rep
     ]);
     assert.deepEqual(p.axiom_closure.capstones, ['propext', 'Quot.sound']);
     // repo is the PUBLIC contributable seed, never the private research remote.
-    assert.equal(p.repo, 'https://github.com/eabadir/EGPT');
+    assert.equal(p.repo, 'https://github.com/DeSciX/egpt-lean');
     assert.ok(!JSON.stringify(p).includes('egpt_research'), 'private remote must not be surfaced');
     // Every verification command has a stated root (repo+cwd) and the renamed field.
     for (const cmd of p.verification_commands) {
@@ -170,8 +170,8 @@ test('EVIDENCE_CONTRACT_ECHO is a single compaction-proof line naming the re-fet
 });
 
 test('contributionInstallBlock: agent-directed block when url set; null (omit) when unset', () => {
-    const block = contributionInstallBlock('https://github.com/eabadir/EGPT');
-    assert.equal(block.repo, 'https://github.com/eabadir/EGPT');
+    const block = contributionInstallBlock('https://github.com/DeSciX/egpt-lean');
+    assert.equal(block.repo, 'https://github.com/DeSciX/egpt-lean');
     assert.ok(Array.isArray(block.instruction_to_you_the_agent));
     // Second-person, imperative, to the CONSUMING agent — and the user never runs installs by hand.
     const joined = block.instruction_to_you_the_agent.join(' ');

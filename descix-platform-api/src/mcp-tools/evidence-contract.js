@@ -84,6 +84,12 @@ export const EVIDENCE_CONTRACT_FRAME = Object.freeze({
 });
 
 /**
+ * The ONE owner of the EGPT public seed repo URL (GitHub transfer 2026-10-09:
+ * eabadir/EGPT -> DeSciX/egpt-lean, old URLs 301). Every repo field below consumes it.
+ */
+const EGPT_SEED_REPO = 'https://github.com/DeSciX/egpt-lean';
+
+/**
  * PER-APP SETTLEMENT PROFILES, keyed by app_id/community_id. EGPT (the formal-mathematics
  * community) is the first instance — it settles on the Lean 4 kernel. Every field is
  * grounded in EGPT-research (cited inline).
@@ -94,9 +100,10 @@ export const SETTLEMENT_PROFILES = Object.freeze({
         domain: 'formal-mathematics (Lean 4)',
         settles_on:
             'The Lean 4 kernel typechecking the proof chains sorry-free, plus an axiom-closure audit on the capstone theorems.',
-        // The PUBLIC contributable seed users clone (full Lean/EGPT + EGPTMath trees).
+        // The PUBLIC contributable seed users clone (the Lean/EGPT tree; measured 2026-10-09
+        // post-transfer: the EGPTMath tree is NOT in this repo — see egpt_tests below).
         // The private research remote (egpt_research) is intentionally NOT surfaced here.
-        repo: 'https://github.com/eabadir/EGPT',
+        repo: EGPT_SEED_REPO,
         burden_of_proof: Object.freeze({
             // R3 (voice round 2): LEAD with the verifiability invitation — you can check this
             // yourself, here is the exact command, it takes minutes — and present the default
@@ -131,21 +138,21 @@ export const SETTLEMENT_PROFILES = Object.freeze({
         verification_commands: Object.freeze([
             Object.freeze({
                 id: 'lean_build',
-                repo: 'https://github.com/eabadir/EGPT',
+                repo: EGPT_SEED_REPO,
                 cwd: 'Lean/EGPT',
                 cmd: 'lake build',
                 expected_when_green: 'The Lean 4 proof chain typechecks sorry-free (~2 min).',
             }),
             Object.freeze({
                 id: 'egpt_tests',
-                repo: 'https://github.com/eabadir/EGPT',
+                repo: EGPT_SEED_REPO,
                 cwd: 'EGPTMath',
                 cmd: 'node test/EGPTTestSuite.js',
                 expected_when_green: 'The integer-only (IOP, not FLOP) JS math library passes its main suite (157 tests).',
             }),
             Object.freeze({
                 id: 'axiom_audit',
-                repo: 'https://github.com/eabadir/EGPT',
+                repo: EGPT_SEED_REPO,
                 cwd: 'Lean/EGPT',
                 cmd: '#print axioms InformationTheory.P_eq_NP   (and .P_eq_NP_info, .P_eq_NP_info_standard)',
                 expected_when_green: 'Axiom closure is {propext, Quot.sound} on all three capstones — no Classical.choice, no sorryAx, no custom axioms.',
