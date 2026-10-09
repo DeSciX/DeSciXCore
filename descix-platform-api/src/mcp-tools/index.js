@@ -36,6 +36,13 @@ export {
     MCP_HANDSHAKE_INSTRUCTIONS,
     PLATFORM_BOOTSTRAP_SUMMARY,
 } from './handshake.js';
+// CEO 2026-10-09 — PLATFORM BASICS SSOT: the app-lane-safe identity model + naming rules.
+// One owner, two consumers: tellMeHowBootstrap serves the SUMMARY on scope:'bootstrap';
+// DeSciX/scripts/generate-platform-basics.mjs renders the DOC into V2_docs (→ KB tier-1).
+export {
+    PLATFORM_BASICS_SUMMARY,
+    PLATFORM_BASICS_DOC,
+} from './platform-basics.js';
 // ws-chat-multimodal-image-attach — THE canonical media-on-a-chat-turn contract: kinds, MIME
 // vocabulary, byte policy, normalize(partial)->bag, and the ONE provider-block encoder. Both
 // the Cloud chat pipeline and the advertised nativeTools schema consume this; nobody
