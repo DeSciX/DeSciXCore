@@ -1,6 +1,6 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { ENV_ORIGINS } from '@descix/app-sdk/dev';
+import { ENV_ORIGINS, resolveWorkspaceApps } from '@descix/app-sdk/dev';
 import { resolveOrigin } from './origin.js';
 // The one canonical KB-sync surface, from its owner. The example in requireContext() is a remedy
 // a stuck developer will copy verbatim, so it must resolve to the live verb rather than a literal
@@ -54,6 +54,25 @@ export function resolveWorkspacePath(workspaceRoot, localPath, label = 'app') {
         );
     }
     return path.resolve(workspaceRoot, localPath);
+}
+
+/**
+ * The local app set of a loaded workspace — THE one CLI-side entry to resolveWorkspaceApps.
+ * Every command that enumerates local apps (health, microservice restart) goes through here, so
+ * a config that carries no workspaceRoot FAILS LOUD in one place instead of each caller quietly
+ * substituting the cwd and enumerating a different workspace than the one it was handed.
+ *
+ * @param {WorkspaceConfig} wsConfig
+ * @returns {{ shellApp: Object|null, apps: Object[] }} see resolveWorkspaceApps
+ */
+export function resolveLocalApps(wsConfig) {
+    if (!wsConfig?.workspaceRoot) {
+        throw new Error(
+            'Cannot enumerate the workspace apps: the workspace config carries no workspaceRoot. ' +
+            'Load it with WorkspaceConfig.load() (which sets it) rather than constructing it bare.'
+        );
+    }
+    return resolveWorkspaceApps(wsConfig.workspaceRoot);
 }
 
 /**
@@ -255,34 +274,13 @@ export class WorkspaceConfig {
     return null;
   }
 
-  /**
-   * The RAW registry entry for an app — `localPath` exactly as workspace.json carries it, with NO
-   * path resolution and therefore no possibility of throwing on a bad stored value.
-   *
-   * This exists for exactly one caller shape: a command that is about to REPLACE an app's
-   * localPath. Such a command must not resolve the OUTGOING value. getAppByAppId() resolves, and
-   * resolving the value you are on your way to overwrite is what made `descix app set-localpath`
-   * unusable precisely when it was needed — a workspace already carrying a rejected localPath
-   * could not be repaired by the one verb whose job is repairing it, while the rejection itself
-   * forbade hand-editing. The verb was the prescribed remedy and the verb refused.
-   *
-   * It reads the SAME map getAppByAppId reads (_buildAppIdMap is still the one owner of "what is
-   * mapped"); it simply stops short of resolution. Do NOT use it to obtain a usable path — take
-   * getAppByAppId().absolutePath for that, so the loader's rejection still runs.
-   *
-   * @param {string} appId - App/product identifier
-   * @returns {{ localPath: string, communityId: string|null, kbId: string }|null}
-   */
-  getAppEntry(appId) {
-    if (!appId) return null;
-    return this._appIdToConfig?.[appId] || null;
-  }
+
 
   /**
    * THE ONE OWNER of "find the LIVE env entry for this app, or hard-fail".
    *
    * Live means the actual object inside this.env — mutate it and save() persists the mutation.
-   * getAppByAppId() and getAppEntry() both return copies and are useless for writing.
+   * getAppByAppId() returns copies and is useless for writing.
    *
    * The one lookup every entry setter (setMicroservicePort, setStaticSite) uses. In v3 the only
    * live entry is env.app; any other id hard-fails with the canonical unmapped message.
@@ -774,7 +772,7 @@ export class WorkspaceConfig {
       throw new Error(
         `"${dottedKey}" is not a workspace-level env key.\n` +
         `  Settable here: ${ALLOWED.join(', ')}\n` +
-        '  Per-app keys have their own verbs: descix app set-site / set-port / set-localpath.'
+        '  Per-app keys have their own verbs: descix app set-site / set-port.'
       );
     }
 

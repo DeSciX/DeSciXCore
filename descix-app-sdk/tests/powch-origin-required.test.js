@@ -64,7 +64,7 @@ test('an UNKNOWN origin throws — it never resolves to production', () => {
 test('the failure is ACTIONABLE — it names every legitimate way to set the origin', () => {
   const msg = powchUrlUnknownMessage('T');
   assert.match(msg, /^\[T\]/, 'the message says which module failed');
-  for (const way of ['config.powch.bridgeUrl', 'env.powchUrl', 'env.products[]', 'VITE_POWCH_APP_URL']) {
+  for (const way of ['config.powch.bridgeUrl', 'env.powchUrl', 'env.gateway.appRepos', 'VITE_POWCH_APP_URL']) {
     assert.ok(msg.includes(way), `the message must name ${way}`);
   }
   assert.match(msg, /no default/, 'and must say the absence is deliberate');

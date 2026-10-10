@@ -165,18 +165,18 @@ class CanarySpyApiClient {
 async function makeFixture(t) {
     const wsRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'canary-fixture-'));
     const appId = 'testapp-canary';
-    const appRoot = path.join(wsRoot, 'apps', appId);
+    const appRoot = wsRoot; // v3: the app repo root IS the workspace root
     await fs.mkdir(path.join(wsRoot, '.descix'), { recursive: true });
     await fs.mkdir(path.join(appRoot, '.descix', 'manifests'), { recursive: true });
     await fs.mkdir(path.join(appRoot, 'docs'), { recursive: true });
     await fs.writeFile(path.join(appRoot, 'docs', 'intro.md'), '# Hello\n\nSome content to chunk.\n');
     await fs.writeFile(path.join(appRoot, '.descix', 'manifests', 'Corpus.json'), JSON.stringify({
         kb_name: 'Corpus', sync_mode: 'local',
-        sources: [{ path: `apps/${appId}/docs`, tier: 1, doc_type: 'documentation' }],
+        sources: [{ path: 'docs', tier: 1, doc_type: 'documentation' }],
     }, null, 2));
     await fs.writeFile(path.join(wsRoot, '.descix', 'workspace.json'), JSON.stringify({
-        version: '2.1', workspaceRoot: wsRoot, type: 'workspace',
-        env: { products: [{ appId, localPath: `apps/${appId}`, kbId: 'Corpus' }] },
+        version: '3.0', workspaceRoot: wsRoot, type: 'workspace',
+        env: { app: { appId, communityId: 'testcomm', kbId: 'Corpus' } },
     }, null, 2));
     execSync('git init -q -b main', { cwd: wsRoot, stdio: 'pipe' });
     execSync('git config user.email "test@test"', { cwd: wsRoot, stdio: 'pipe' });

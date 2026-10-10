@@ -30,6 +30,7 @@
  */
 import path from 'path';
 import { gatewayProductUrl } from './workspaceProducts.js';
+import { resolveWorkspaceApps } from './workspaceApps.js';
 // ONE owner of the bin name: two bins reach this gateway and a hardcoded one misleads half
 // the readers. See invokedBin.js.
 import { invokedBin } from './invokedBin.js';
@@ -40,21 +41,14 @@ import { APP_BINDING_PATH } from '../util/appBinding.js';
 export { APP_BINDING_PATH };
 
 /**
- * Every app the workspace could bind to, with the directory that means "I am
- * working on this one".
- * @param {Object} config - parsed workspace.json
- * @returns {Array<{appId: string, localPath: string, isPlatform: boolean}>}
+ * Every app this workspace serves locally, with the directory that means "I am
+ * working on this one" — from the ONE owner (workspaceApps, v3 fork (b)).
+ * @param {string} workspaceRoot
+ * @returns {Array<{appId: string, dir: string, isPlatform: boolean}>}
  */
-export function bindableApps(config) {
-  const env = config?.env || {};
-  const out = [];
-  if (env.platform?.appId) {
-    out.push({ appId: env.platform.appId, localPath: env.platform.localPath || '.', isPlatform: true });
-  }
-  for (const p of Array.isArray(env.products) ? env.products : []) {
-    if (p.appId) out.push({ appId: p.appId, localPath: p.localPath || '.', isPlatform: false });
-  }
-  return out;
+export function bindableApps(workspaceRoot) {
+  const { shellApp, apps } = resolveWorkspaceApps(workspaceRoot);
+  return apps.map((a) => ({ appId: a.appId, dir: a.dir, isPlatform: a === shellApp }));
 }
 
 /**
@@ -62,11 +56,11 @@ export function bindableApps(config) {
  * nested inside another product's tree resolves to the inner one.
  * @returns {{appId: string, isPlatform: boolean}|null}
  */
-export function detectAppFromCwd(workspaceRoot, config, cwd) {
+export function detectAppFromCwd(workspaceRoot, cwd) {
   const here = path.resolve(cwd);
   let best = null;
-  for (const app of bindableApps(config)) {
-    const dir = path.resolve(workspaceRoot, app.localPath);
+  for (const app of bindableApps(workspaceRoot)) {
+    const dir = path.resolve(app.dir);
     if (here === dir || here.startsWith(dir + path.sep)) {
       if (!best || dir.length > best.dir.length) best = { ...app, dir };
     }
@@ -90,7 +84,7 @@ export function resolveServeBinding(workspaceRoot, config, options = {}) {
   const { app, cwd = process.cwd(), gatewayPort } = options;
   if (!gatewayPort) throw new Error('[serve binding] gatewayPort is required — resolve it with resolveGatewayPort first');
 
-  const apps = bindableApps(config);
+  const apps = bindableApps(workspaceRoot);
   const names = apps.map((a) => a.appId).sort();
 
   let appId, source;
@@ -112,7 +106,7 @@ export function resolveServeBinding(workspaceRoot, config, options = {}) {
     appId = hit.appId;
     source = '--app';
   } else {
-    const detected = detectAppFromCwd(workspaceRoot, config, cwd);
+    const detected = detectAppFromCwd(workspaceRoot, cwd);
     if (!detected || detected.isPlatform) {
       throw new Error(
         `[serve binding] cannot tell which app to serve from ${path.resolve(cwd)}.\n` +

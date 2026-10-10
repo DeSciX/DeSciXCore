@@ -34,7 +34,6 @@
   "app set-listed": [
     "update_app"
   ],
-  "app set-localpath": [],
   "app set-name": [
     "update_app"
   ],
@@ -49,7 +48,6 @@
   "app sync-assets": [
     "sync_app_assets"
   ],
-  "app unmap": [],
   "buy chains": [],
   "buy poll": [
     "get_quote_status"
@@ -218,7 +216,8 @@
   "site upload": [
     "confirm_site_deploy",
     "get_site_build_config",
-    "get_site_deploy_token"
+    "get_site_deploy_token",
+    "get_site_manifest"
   ],
   "stats": [
     "get_user_community_stats"

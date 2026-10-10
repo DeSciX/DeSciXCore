@@ -110,7 +110,7 @@ function tmpWorkspace(apiUrl, { wallet = false } = {}) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-origin-stamp-'));
     fs.mkdirSync(path.join(dir, '.descix'), { recursive: true });
     fs.writeFileSync(path.join(dir, '.descix/workspace.json'), JSON.stringify({
-        version: '2.1', type: 'workspace', env: { products: [], apiUrl },
+        version: '3.0', type: 'workspace', env: { apiUrl },
     }));
     if (wallet) {
         // A session token already present short-circuits ensureSession()'s own network call

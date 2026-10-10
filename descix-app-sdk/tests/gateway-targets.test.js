@@ -22,21 +22,21 @@ import {
 } from '../src/dev/resolveGatewayTargets.js';
 import { ENV_ORIGINS, DEFAULT_ENV, DEFAULT_API_URL, PROD_URL, CLOUD_DEV_URL } from '../src/dev/envOrigins.js';
 import { buildGatewayProxy } from '../src/dev/gateway.js';
+import { withV3Tree } from './support/v3Tree.js';
 
-const CONSUMER = { version: '2.1', type: 'workspace', env: { products: [] } };
-const LOCAL_PLATFORM = {
-  version: '2.1',
-  type: 'workspace',
-  env: {
-    platform: {
-      appId: 'daita',
-      localPath: 'DeSciX_Cloud',
-      site: { port: 5174 },
-      microservice: { port: 4000 },
-    },
-    products: [],
-  },
+// v3 fixtures. A consumer workspace owns no app and lists no gateway repo; a LOCAL PLATFORM
+// is a gateway workspace whose env.gateway.shell names the platform shell repo, and THAT
+// repo's own workspace.json carries its site and microservice (workspace v3, fork (b)) —
+// so it is a directory tree, built by withV3Tree, not an inline config object.
+const CONSUMER = { version: '3.0', type: 'workspace', env: {} };
+const SHELL_REPO = {
+  cloud: { appId: 'daita', communityId: 'daita', site: { port: 5174 }, microservice: { port: 4000 } },
 };
+
+/** A gateway workspace with a local platform shell; fn gets { dir, config } for resolver calls. */
+function withLocalPlatform(env, fn) {
+  return withV3Tree({ env, gateway: { shell: 'cloud' }, repos: SHELL_REPO }, fn);
+}
 
 test('the shipped SDK default is PROD; dev/demo are named, localhost is not an env', () => {
   assert.equal(DEFAULT_ENV, 'prod');
@@ -66,7 +66,7 @@ test('mode 2 — an empty workspace object still resolves (no platform block at 
 });
 
 test('set-env dev shape (env.apiUrl = cloud DEV) points BOTH targets at dev', () => {
-  const t = resolveGatewayTargets({ env: { environment: 'DEV', apiUrl: CLOUD_DEV_URL, products: [] } });
+  const t = resolveGatewayTargets({ env: { environment: 'DEV', apiUrl: CLOUD_DEV_URL } });
   assert.equal(t.apiUrl, CLOUD_DEV_URL);
   assert.equal(t.siteUrl, CLOUD_DEV_URL);
 });
@@ -88,41 +88,55 @@ test('explicit env.siteUrl wins for the root route', () => {
 });
 
 test('mode 1 — an ALL-LOCAL platform checkout still serves the local shell', () => {
-  const t = resolveGatewayTargets(LOCAL_PLATFORM);
-  assert.equal(t.apiUrl, 'https://localhost:4000');
-  assert.match(t.apiSource, /local platform/);
-  assert.equal(t.siteUrl, 'https://localhost:5174');
-  assert.match(t.siteSource, /local shell/);
+  withLocalPlatform({}, ({ dir, config }) => {
+    const t = resolveGatewayTargets(config, { workspaceRoot: dir });
+    assert.equal(t.apiUrl, 'https://localhost:4000');
+    assert.match(t.apiSource, /local platform/);
+    assert.equal(t.siteUrl, 'https://localhost:5174');
+    assert.match(t.siteSource, /local shell/);
+  });
 });
 
 test('a platform checkout does NOT hijack the root once the API is remote', () => {
   // CEO ruling: the general SDK user wins the default. Owning a platform checkout
   // is not by itself a request to serve it.
-  const config = { env: { apiUrl: CLOUD_DEV_URL, ...LOCAL_PLATFORM.env } };
-  const t = resolveGatewayTargets(config);
-  assert.equal(t.apiUrl, CLOUD_DEV_URL);
-  assert.equal(t.siteUrl, CLOUD_DEV_URL, 'remote API must outrank env.platform.site.port');
-  assert.match(t.siteSource, /same origin as API/);
+  withLocalPlatform({ apiUrl: CLOUD_DEV_URL }, ({ dir, config }) => {
+    const t = resolveGatewayTargets(config, { workspaceRoot: dir });
+    assert.equal(t.apiUrl, CLOUD_DEV_URL);
+    assert.equal(t.siteUrl, CLOUD_DEV_URL, "remote API must outrank the shell repo's site.port");
+    assert.match(t.siteSource, /same origin as API/);
+  });
 });
 
 test('a platform dev opts IN to the local shell by naming it', () => {
-  const config = { env: { apiUrl: CLOUD_DEV_URL, ...LOCAL_PLATFORM.env } };
-  const viaFlag = resolveSiteTarget(config, { siteUrl: 'https://localhost:5174' });
-  assert.equal(viaFlag.siteUrl, 'https://localhost:5174');
-  const viaWorkspace = resolveSiteTarget({ env: { ...config.env, siteUrl: 'https://localhost:5174' } });
-  assert.equal(viaWorkspace.siteUrl, 'https://localhost:5174');
-  assert.equal(viaWorkspace.siteSource, 'workspace env.siteUrl');
+  withLocalPlatform({ apiUrl: CLOUD_DEV_URL }, ({ dir, config }) => {
+    const viaFlag = resolveSiteTarget(config, { siteUrl: 'https://localhost:5174', workspaceRoot: dir });
+    assert.equal(viaFlag.siteUrl, 'https://localhost:5174');
+  });
+  withLocalPlatform({ apiUrl: CLOUD_DEV_URL, siteUrl: 'https://localhost:5174' }, ({ dir, config }) => {
+    const viaWorkspace = resolveSiteTarget(config, { workspaceRoot: dir });
+    assert.equal(viaWorkspace.siteUrl, 'https://localhost:5174');
+    assert.equal(viaWorkspace.siteSource, 'workspace env.siteUrl');
+  });
 });
 
 test('local API with NO local shell fails loud instead of proxying root to the API port', () => {
-  const config = { env: { platform: { appId: 'daita', microservice: { port: 4000 } } } };
-  assert.equal(resolveApiTarget(config).apiUrl, 'https://localhost:4000');
-  assert.throws(() => resolveSiteTarget(config), (err) => {
-    assert.match(err.message, /Cannot determine the site \(root "\/"\) target/);
-    assert.match(err.message, /--site-url https:\/\/descix\.net/);
-    assert.match(err.message, /env\.siteUrl/);
-    assert.match(err.message, /env\.platform\.site\.port/);
-    return true;
+  // The shell repo's own workspace carries a microservice but NO site.
+  const spec = {
+    gateway: { shell: 'cloud' },
+    repos: { cloud: { appId: 'daita', microservice: { port: 4000 } } },
+  };
+  withV3Tree(spec, ({ dir, config }) => {
+    const options = { workspaceRoot: dir };
+    assert.equal(resolveApiTarget(config, options).apiUrl, 'https://localhost:4000');
+    assert.throws(() => resolveSiteTarget(config, options), (err) => {
+      assert.match(err.message, /Cannot determine the site \(root "\/"\) target/);
+      assert.match(err.message, /--site-url https:\/\/descix\.net/);
+      assert.match(err.message, /env\.siteUrl/);
+      assert.match(err.message, /env\.gateway\.shell/);
+      assert.match(err.message, /site\.port/);
+      return true;
+    });
   });
 });
 
@@ -134,9 +148,11 @@ test('an explicit localhost env.apiUrl does not silently become the shell either
 });
 
 test('a caller-supplied apiGatewayUrl outranks workspace config', () => {
-  const t = resolveApiTarget(LOCAL_PLATFORM, { apiGatewayUrl: 'https://dev.descix.net' });
-  assert.equal(t.apiUrl, 'https://dev.descix.net');
-  assert.equal(t.apiSource, 'caller option apiGatewayUrl');
+  withLocalPlatform({}, ({ dir, config }) => {
+    const t = resolveApiTarget(config, { apiGatewayUrl: 'https://dev.descix.net', workspaceRoot: dir });
+    assert.equal(t.apiUrl, 'https://dev.descix.net');
+    assert.equal(t.apiSource, 'caller option apiGatewayUrl');
+  });
 });
 
 test('the removed top-level apiUrl key fails loud, naming its replacement', () => {
@@ -195,7 +211,7 @@ test('mode-2 route table: root AND /apifront both point at the default platform'
 });
 
 test('mode-2 route table after set-env dev: every API prefix and root ride cloud DEV', () => {
-  const config = { version: '2.1', env: { environment: 'DEV', apiUrl: CLOUD_DEV_URL, products: [] } };
+  const config = { version: '3.0', env: { environment: 'DEV', apiUrl: CLOUD_DEV_URL } };
   withWorkspace(config, (dir) => {
     const proxy = buildGatewayProxy(dir, resolveGatewayTargets(config));
     for (const route of ['/', '/apifront', '/api', '/mcp', '/oauth',
@@ -216,8 +232,8 @@ test('the root route is LAST so specific prefixes keep priority', () => {
 });
 
 test('mode-1 route table keeps the local shell at root and the local API on /apifront', () => {
-  withWorkspace(LOCAL_PLATFORM, (dir) => {
-    const proxy = buildGatewayProxy(dir, resolveGatewayTargets(LOCAL_PLATFORM));
+  withLocalPlatform({}, ({ dir, config }) => {
+    const proxy = buildGatewayProxy(dir, resolveGatewayTargets(config, { workspaceRoot: dir }));
     assert.equal(proxy['/'].target, 'https://localhost:5174');
     assert.equal(proxy['/'].secure, false);
     assert.equal(proxy['/apifront'].target, 'https://localhost:4000');
@@ -226,16 +242,14 @@ test('mode-1 route table keeps the local shell at root and the local API on /api
 });
 
 test('a static product keeps its /p/<app> static route alongside the cloud root', () => {
-  const config = {
-    version: '2.1',
-    env: { products: [{ appId: 'egpt-godsworld', localPath: 'godsworld/codesite', site: { static: '.' } }] },
+  // The static dir resolves against the APP'S OWN repo root (its workspace owns it).
+  const spec = {
+    gateway: { appRepos: ['egpt-godsworld'] },
+    repos: { 'egpt-godsworld': { appId: 'egpt-godsworld', communityId: 'egpt', site: { static: '.' } } },
   };
-  withWorkspace(config, (dir) => {
-    const proxy = buildGatewayProxy(dir, resolveGatewayTargets(config));
+  withV3Tree(spec, ({ dir, repos, config }) => {
+    const proxy = buildGatewayProxy(dir, resolveGatewayTargets(config, { workspaceRoot: dir }));
     assert.equal(proxy['/'].target, DEFAULT_API_URL);
-    assert.equal(
-      proxy._staticRoutes['egpt-godsworld'],
-      path.resolve(dir, 'godsworld/codesite')
-    );
+    assert.equal(proxy._staticRoutes['egpt-godsworld'], path.resolve(repos['egpt-godsworld']));
   });
 });

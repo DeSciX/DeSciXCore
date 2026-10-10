@@ -42,8 +42,8 @@
  * @returns {import('vite').Plugin}
  */
 import fs from 'fs';
-import path from 'path';
 import { buildWorkspaceProducts } from './workspaceProducts.js';
+import { workspaceWatchDirs } from './workspaceApps.js';
 
 export const WORKSPACE_PRODUCTS_HMR_EVENT = 'descix:workspace-products';
 export const WORKSPACE_PRODUCTS_VIRTUAL_ID = 'virtual:descix/workspace-products-hmr';
@@ -78,11 +78,10 @@ if (import.meta.hot) {
 export function workspaceProductsPlugin(workspaceRoot, options = {}) {
   const debounceMs = options.debounceMs ?? 200;
   const log = options.log || (() => {});
-  const configPath = path.resolve(workspaceRoot, '.descix/workspace.json');
 
   let lastSerialized = serialize(buildWorkspaceProducts(workspaceRoot));
   let debounceTimer = null;
-  let watcher = null;
+  let watchers = [];
 
   return {
     name: 'descix-workspace-products-hmr',
@@ -112,38 +111,51 @@ export function workspaceProductsPlugin(workspaceRoot, options = {}) {
     },
 
     configureServer(server) {
-      // Watch the workspace.json directory (atomic writes replace the file, so
-      // watching the file directly can miss events — watch the parent dir).
-      try {
-        watcher = fs.watch(path.dirname(configPath), (_event, filename) => {
-          if (filename && filename !== 'workspace.json') return;
-          if (debounceTimer) clearTimeout(debounceTimer);
-          debounceTimer = setTimeout(() => {
-            let products;
-            try {
-              products = buildWorkspaceProducts(workspaceRoot);
-            } catch (e) {
-              log(`[descix-workspace-products-hmr] error reading workspace.json: ${e.message}`);
-              return;
-            }
-            const serialized = serialize(products);
-            if (serialized === lastSerialized) return; // no product/site change
-            lastSerialized = serialized;
-            server.hot.send({
-              type: 'custom',
-              event: WORKSPACE_PRODUCTS_HMR_EVENT,
-              data: { products: products || {} },
-            });
-            log(`[descix-workspace-products-hmr] product map changed — pushed live update (${products ? Object.keys(products).length : 0} products)`);
-          }, debounceMs);
-        });
-      } catch (e) {
-        log(`[descix-workspace-products-hmr] could not watch workspace.json: ${e.message}`);
-      }
+      // Watch EVERY workspace.json that feeds the product map — the gateway's own AND each
+      // listed repo's (v3: `descix app set-site` writes the APP REPO'S file). The set comes
+      // from its owner (workspaceWatchDirs) and is re-derived on every effective change, so a
+      // newly listed repo is covered from that moment on. Directories are watched, not files:
+      // atomic writes replace the file and a file watch misses those events.
+      const onEvent = (_event, filename) => {
+        if (filename && filename !== 'workspace.json') return;
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          let products;
+          try {
+            products = buildWorkspaceProducts(workspaceRoot);
+          } catch (e) {
+            log(`[descix-workspace-products-hmr] error reading workspace.json: ${e.message}`);
+            return;
+          }
+          arm(); // the gateway listing may have changed — re-derive coverage either way
+          const serialized = serialize(products);
+          if (serialized === lastSerialized) return; // no product/site change
+          lastSerialized = serialized;
+          server.hot.send({
+            type: 'custom',
+            event: WORKSPACE_PRODUCTS_HMR_EVENT,
+            data: { products: products || {} },
+          });
+          log(`[descix-workspace-products-hmr] product map changed — pushed live update (${products ? Object.keys(products).length : 0} products)`);
+        }, debounceMs);
+      };
+      const arm = () => {
+        for (const w of watchers) w.close();
+        watchers = [];
+        try {
+          for (const dir of workspaceWatchDirs(workspaceRoot)) {
+            watchers.push(fs.watch(dir, onEvent));
+          }
+        } catch (e) {
+          log(`[descix-workspace-products-hmr] could not watch workspace.json: ${e.message}`);
+        }
+      };
+      arm();
 
       const close = () => {
         if (debounceTimer) clearTimeout(debounceTimer);
-        if (watcher) watcher.close();
+        for (const w of watchers) w.close();
+        watchers = [];
       };
       server.httpServer?.once('close', close);
     },

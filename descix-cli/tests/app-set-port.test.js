@@ -7,11 +7,10 @@
  * if missing).
  *
  * Coverage:
- *  - happy path: set port → workspace.json env.products[<app>].microservice.port persisted
+ *  - happy path: set port → workspace.json env.app.microservice.port persisted
  *  - disable case: port null → microservice.port removed; empty microservice.{} cleaned up
  *  - disable case on app with no microservice.{} → does not throw
- *  - hard-fail: unmapped app → throws with canonical error (not TypeError)
- *  - platform app: setMicroservicePort works for env.platform entry as well
+ *  - hard-fail: an app id that is not THE workspace app → throws with canonical error (not TypeError)
  *  - anti-regression: WorkspaceConfig exposes setMicroservicePort as a function
  *
  * Design: operates directly against WorkspaceConfig using a temp workspace.
@@ -28,25 +27,21 @@ import path from 'path';
 import { WorkspaceConfig } from '../lib/workspace-config.js';
 
 /**
- * Create an isolated temp workspace with one product and one platform app mapped.
- * Returns { wsRoot, productAppId, platformAppId }.
+ * Create an isolated temp v3 workspace holding its ONE app (env.app).
+ * Returns { wsRoot, productAppId }.
  */
 async function makeTestWorkspace(t) {
   const wsRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'descix-test-setport-'));
   await fs.mkdir(path.join(wsRoot, '.descix'), { recursive: true });
-  await fs.mkdir(path.join(wsRoot, 'my-product'), { recursive: true });
-  await fs.mkdir(path.join(wsRoot, 'my-platform'), { recursive: true });
 
   const productAppId = 'descix-ssgpod';
-  const platformAppId = 'daita';
 
   const workspace = {
-    version: '2.1',
+    version: '3.0',
     workspaceRoot: wsRoot,
     type: 'workspace',
     env: {
-      platform: { appId: platformAppId, localPath: 'my-platform', kbId: 'General' },
-      products: [{ appId: productAppId, localPath: 'my-product', kbId: 'General' }]
+      app: { appId: productAppId, communityId: 'descix', kbId: 'General' }
     }
   };
   await fs.writeFile(
@@ -58,12 +53,12 @@ async function makeTestWorkspace(t) {
     await fs.rm(wsRoot, { recursive: true, force: true });
   });
 
-  return { wsRoot, productAppId, platformAppId };
+  return { wsRoot, productAppId };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('setMicroservicePort — happy path: port saved to env.products[app].microservice.port', async (t) => {
+test('setMicroservicePort — happy path: port saved to env.app.microservice.port', async (t) => {
   const { wsRoot, productAppId } = await makeTestWorkspace(t);
 
   const wc = await WorkspaceConfig.load(wsRoot);
@@ -71,7 +66,7 @@ test('setMicroservicePort — happy path: port saved to env.products[app].micros
 
   // Reload from disk and verify persistence
   const reloaded = await WorkspaceConfig.load(wsRoot);
-  const product = reloaded.env.products.find(p => p.appId === productAppId);
+  const product = reloaded.env.app;
   assert.ok(product, 'product entry must exist');
   assert.equal(product.microservice?.port, 3015, 'microservice.port must be 3015 after save');
 });
@@ -89,7 +84,7 @@ test('setMicroservicePort — disable case: null removes microservice.port and c
 
   // Reload and verify microservice.port is gone and microservice.{} is cleaned up
   const reloaded = await WorkspaceConfig.load(wsRoot);
-  const product = reloaded.env.products.find(p => p.appId === productAppId);
+  const product = reloaded.env.app;
   assert.ok(product, 'product entry must still exist');
   assert.equal(product.microservice, undefined, 'microservice.{} must be deleted when empty after port removal');
 });
@@ -105,7 +100,7 @@ test('setMicroservicePort — disable case: null on app with no microservice.{} 
   );
 });
 
-test('setMicroservicePort — hard-fail: unmapped app throws with canonical error text', async (t) => {
+test('setMicroservicePort — hard-fail: an app id that is not THE workspace app throws with canonical error text', async (t) => {
   const { wsRoot } = await makeTestWorkspace(t);
 
   const wc = await WorkspaceConfig.load(wsRoot);
@@ -113,22 +108,11 @@ test('setMicroservicePort — hard-fail: unmapped app throws with canonical erro
     () => wc.setMicroservicePort('totally-unknown-app', 3015),
     (err) => {
       assert.ok(!(err instanceof TypeError), 'must not be a TypeError');
-      assert.match(err.message, /not mapped in workspace\.json/);
-      assert.match(err.message, /descix app init/);
-      assert.match(err.message, /descix app set-localpath/);
+      assert.match(err.message, /is not this workspace's app \(workspace\.json env\.app\)/);
+      assert.match(err.message, /descix app init -a <id>/);
       return true;
     }
   );
-});
-
-test('setMicroservicePort — platform app: port saved to env.platform.microservice.port', async (t) => {
-  const { wsRoot, platformAppId } = await makeTestWorkspace(t);
-
-  const wc = await WorkspaceConfig.load(wsRoot);
-  await wc.setMicroservicePort(platformAppId, 4000);
-
-  const reloaded = await WorkspaceConfig.load(wsRoot);
-  assert.equal(reloaded.env.platform?.microservice?.port, 4000, 'platform microservice.port must be persisted');
 });
 
 test('anti-regression: WorkspaceConfig exposes setMicroservicePort as a function', async (t) => {

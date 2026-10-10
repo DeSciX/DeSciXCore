@@ -94,7 +94,7 @@ class ResilienceSpyApiClient {
 async function makeFixture(t, { files = { 'docs/intro.md': '# Hello\n\nSome content to chunk.\n' } } = {}) {
   const wsRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'corpus-resil-'));
   const appId = 'testapp-corpus-resil';
-  const appRoot = path.join(wsRoot, 'apps', appId);
+  const appRoot = wsRoot; // v3: the app repo root IS the workspace root
 
   await fs.mkdir(path.join(wsRoot, '.descix'), { recursive: true });
   await fs.mkdir(path.join(appRoot, '.descix', 'manifests'), { recursive: true });
@@ -108,13 +108,13 @@ async function makeFixture(t, { files = { 'docs/intro.md': '# Hello\n\nSome cont
   const manifest = {
     kb_name: 'Corpus',
     sync_mode: 'local',
-    sources: [{ path: `apps/${appId}/docs`, tier: 1, doc_type: 'documentation' }]
+    sources: [{ path: 'docs', tier: 1, doc_type: 'documentation' }]
   };
   await fs.writeFile(path.join(appRoot, '.descix', 'manifests', 'Corpus.json'), JSON.stringify(manifest, null, 2));
 
   const workspace = {
-    version: '2.1', workspaceRoot: wsRoot, type: 'workspace',
-    env: { products: [{ appId, localPath: `apps/${appId}`, kbId: 'Corpus' }] }
+    version: '3.0', workspaceRoot: wsRoot, type: 'workspace',
+    env: { app: { appId, communityId: 'testcomm', kbId: 'Corpus' } }
   };
   await fs.writeFile(path.join(wsRoot, '.descix', 'workspace.json'), JSON.stringify(workspace, null, 2));
 

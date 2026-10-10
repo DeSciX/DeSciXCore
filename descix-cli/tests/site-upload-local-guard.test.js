@@ -6,7 +6,7 @@
  * local AND was NOT reached via an explicit DESCIX_API_URL/--api-url/--env override.
  *
  * NOTE (env-model ruling, 2026-08-18): the ORIGINAL trigger — a DEV workspace with no
- * apiUrl silently deriving https://localhost:{platform.microservice.port} — is gone by
+ * apiUrl silently deriving https://localhost:{app.microservice.port} — is gone by
  * construction: getApiUrl() no longer derives localhost from an environment NAME, and
  * every named env writes a cloud URL. localhost is now only ever an explicitly pinned
  * env.apiUrl, which is the shape these tests pin the guard against.
@@ -31,10 +31,9 @@ const CLI = path.resolve(__dirname, '../bin/descix.js');
 async function makeDevWorkspace(t) {
   const wsRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'descix-test-site-upload-guard-'));
   await fs.mkdir(path.join(wsRoot, '.descix'), { recursive: true });
-  await fs.mkdir(path.join(wsRoot, 'platform-app'), { recursive: true });
 
   const workspace = {
-    version: '2.1',
+    version: '3.0',
     workspaceRoot: wsRoot,
     type: 'workspace',
     env: {
@@ -42,12 +41,10 @@ async function makeDevWorkspace(t) {
       // Explicitly pinned local backend — the only way a workspace resolves to
       // localhost now that environment names never derive a local URL.
       apiUrl: 'https://localhost:4000',
-      platform: {
+      app: {
         appId: 'daita',
-        localPath: 'platform-app',
         microservice: { port: 4000, devCommand: 'npm run dev:service' }
-      },
-      products: []
+      }
     }
   };
   await fs.writeFile(

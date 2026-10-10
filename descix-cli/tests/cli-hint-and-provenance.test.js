@@ -32,12 +32,14 @@ test('site upload reads provenance from where the FILES come from, never the cal
     assert.match(upload, /new GitUtils\(provenanceDir\)/);
 });
 
-test('app init refuses an unusable -p BEFORE creating anything server-side', () => {
+test('app init refuses a nested checkout BEFORE creating anything server-side', () => {
     // Refusing only at local registration came after `-c` had created the app, leaving a platform
-    // app with no local registration (measured 2026-09-18, daita-docs with an absolute -p).
+    // app with no local registration (measured 2026-09-18, daita-docs with an absolute -p). The
+    // v3 equivalent is a workspace at an ANCESTOR: assertNoParentWorkspace must run first.
+    // (app-init-hardening.test.js drives the real runAppInit and asserts no platform call is made.)
     const init = APP_INIT.slice(APP_INIT.indexOf('export async function runAppInit'), APP_INIT.indexOf('App created:'));
-    const check = init.indexOf('resolveWorkspacePath(workspaceConfig?.workspaceRoot || process.cwd(), options.path, appId);');
+    const check = init.indexOf('await assertNoParentWorkspace(process.cwd());');
     const create = init.indexOf("apiClient.invoke('create_app_for_community'");
-    assert.ok(check > 0, 'app init must validate -p with the loader\'s own resolver');
+    assert.ok(check > 0, 'app init must refuse a parent workspace with the loader\'s own owner');
     assert.ok(create > 0 && check < create, 'and do it before the server-side create');
 });

@@ -67,7 +67,7 @@ export function powchUrlUnknownMessage(caller) {
     '      client you construct yourself), or\n' +
     '    - set env.powchUrl in .descix/workspace.json — `descix serve` and the\n' +
     '      shell build both inject __POWCH_APP_URL__ from it, or\n' +
-    '    - run Powch as a workspace product (env.products[] entry with\n' +
+    '    - list the Powch repo in env.gateway.appRepos (its own workspace carries\n' +
     `      appId "${POWCH_APP_ID}" and a site.port), or\n` +
     '    - set VITE_POWCH_APP_URL for the shell build.\n' +
     '  There is deliberately no default: Powch holds passkeys and the HD wallet,\n' +

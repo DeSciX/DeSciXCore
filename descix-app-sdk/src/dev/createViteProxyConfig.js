@@ -15,6 +15,7 @@ import fs from 'fs';
 import path from 'path';
 import { resolveApiTarget, proxyEntry } from './resolveGatewayTargets.js';
 import { resolvePowchUrl } from './powchUrl.js';
+import { resolveWorkspaceApps } from './workspaceApps.js';
 import { localUpstreamOrigin } from './localOrigin.js';
 import { devServerProxyGuard } from './devServerProxyGuard.js';
 import { invokedBin } from './invokedBin.js';
@@ -38,13 +39,13 @@ export function createViteProxyConfig(workspacePath, options = {}) {
   }
 
   // API target — resolved by the one owner (resolveGatewayTargets.js), never re-derived here.
-  const { apiUrl: apiGatewayUrl } = resolveApiTarget(config, options);
+  const { apiUrl: apiGatewayUrl } = resolveApiTarget(config, { ...options, workspaceRoot: path.dirname(path.dirname(workspaceConfigPath)) });
   // Powch URL — resolved by its ONE owner (powchUrl.js), the same function the
   // gateway and the shell build use. The hand-rolled copy of that precedence that
   // stood here was a second owner for the wallet's location. The trailing slash
   // is stripped because this value is an http-proxy TARGET, where it would be
   // joined with the request path.
-  const resolvedPowchUrl = resolvePowchUrl(config);
+  const resolvedPowchUrl = resolvePowchUrl(config, { workspaceRoot: path.dirname(path.dirname(workspaceConfigPath)) });
   const powchUrl = resolvedPowchUrl ? resolvedPowchUrl.replace(/\/$/, '') : null;
 
   const localAppRoutes = {};
@@ -52,44 +53,35 @@ export function createViteProxyConfig(workspacePath, options = {}) {
   const staticRoutes = {};
   const modeNotes = [];
 
-  // v2.1 workspace format: env.platform + env.products[]
-  const envBlock = config.env || {};
+  // v3 fork (b): the local app set has ONE owner (workspaceApps) — the workspace's own
+  // env.app plus the repos env.gateway lists, each read from its OWN workspace.json.
   const workspaceRoot = path.dirname(path.dirname(workspaceConfigPath)); // up from .descix/
+  const { shellApp, apps } = resolveWorkspaceApps(workspaceRoot);
 
-  // Platform: only register microservice route (site is handled by gateway's root proxy)
-  if (envBlock.platform) {
-    const p = envBlock.platform;
-    const appId = p.appId;
-    if (appId) {
-      if (p.microservice?.port) serviceRoutes[appId] = { port: p.microservice.port, protocol: p.microservice.protocol };
-    }
-  }
-  if (Array.isArray(envBlock.products)) {
-    for (const p of envBlock.products) {
-      const appId = p.appId;
-      if (!appId) continue;
-      // One active mode per product: a site.port serves the DEV SERVER; site.static serves
-      // the built dir. `descix app set-site` keeps the slot single-mode per write; BOTH
-      // fields exist only after an explicit combined write, and then the dev server wins —
-      // said out loud (modeNotes → the serve banner), never silently.
-      if (p.site?.port) {
-        localAppRoutes[appId] = { port: p.site.port, protocol: p.site.protocol };
-        if (p.site.static) {
-          modeNotes.push(
-            `/p/${appId} has BOTH site.port and site.static — the DEV SERVER (site.port ${p.site.port}) is served; ` +
-            `site.static "${p.site.static}" is ignored while site.port is set. ` +
-            `Switch to the built site: ${invokedBin()} app set-site -a ${appId} --static ${p.site.static}`
-          );
-        }
+  for (const app of apps) {
+    const appId = app.appId;
+    // The shell's SITE is handled by the gateway's root proxy; its microservice route
+    // still registers below like any other app's.
+    const isShell = app === shellApp;
+    // One active mode per app: a site.port serves the DEV SERVER; site.static serves
+    // the built dir. `descix app set-site` keeps the slot single-mode per write; BOTH
+    // fields exist only after an explicit combined write, and then the dev server wins —
+    // said out loud (modeNotes → the serve banner), never silently.
+    if (!isShell && app.site?.port) {
+      localAppRoutes[appId] = { port: app.site.port, protocol: app.site.protocol };
+      if (app.site.static) {
+        modeNotes.push(
+          `/p/${appId} has BOTH site.port and site.static — the DEV SERVER (site.port ${app.site.port}) is served; ` +
+          `site.static "${app.site.static}" is ignored while site.port is set. ` +
+          `Switch to the built site: ${invokedBin()} app set-site -a ${appId} --static ${app.site.static}`
+        );
       }
-      else if (p.site?.static) {
-        // Static site: resolve path relative to product localPath from workspace root
-        const localPath = p.localPath || '.';
-        const staticDir = p.site.static === '.' ? localPath : path.join(localPath, p.site.static);
-        staticRoutes[appId] = path.resolve(workspaceRoot, staticDir);
-      }
-      if (p.microservice?.port) serviceRoutes[appId] = { port: p.microservice.port, protocol: p.microservice.protocol };
+    } else if (!isShell && app.site?.static) {
+      // Static site: the path is relative to the APP'S OWN repo root (its workspace owns it).
+      const staticDir = app.site.static === '.' ? app.dir : path.join(app.dir, app.site.static);
+      staticRoutes[appId] = path.resolve(staticDir);
     }
+    if (app.microservice?.port) serviceRoutes[appId] = { port: app.microservice.port, protocol: app.microservice.protocol };
   }
 
   const proxy = {};
@@ -139,7 +131,7 @@ export function createViteProxyConfig(workspacePath, options = {}) {
   // the remedy (devServerProxyGuard), never the empty body Vite's default handler sends.
   Object.entries(localAppRoutes).forEach(([productId, route]) => {
     const pathPrefix = `/p/${productId}`;
-    const target = localUpstreamOrigin(route, `env.products[${productId}].site`);
+    const target = localUpstreamOrigin(route, `env.app.site (${productId})`);
     proxy[pathPrefix] = proxyEntry(target, { ws: true, configure: devServerProxyGuard(productId, target) });
   });
 
