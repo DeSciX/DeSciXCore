@@ -34,10 +34,24 @@ export async function show() {
       console.log(chalk.yellow(`   ⚠ This workspace pins ${normalizeOrigin(pinned)} (${environmentNameFor(pinned)}), but ${effective.source} overrides it for this shell.`));
     }
 
-    // v3 single-app: the one app this workspace holds
-    const appId = workspaceConfig.env?.app?.appId;
-    if (appId) {
-      console.log(chalk.white(`   App:           ${appId}`));
+    // v3 single-app: the one app this workspace holds. Every fact a verb can set is shown here,
+    // so the verb's effect is verifiable without hand-reading workspace.json (field, 2026-10-10:
+    // neither the adopted kbId nor env.gateway.port was printed by anything).
+    const app = workspaceConfig.env?.app;
+    if (app?.appId) {
+      console.log(chalk.white(`   App:           ${app.appId}`));
+      if (app.kbId) {
+        console.log(chalk.white(`   KB:            ${app.kbId}`));
+      }
+      if (app.site?.static) {
+        console.log(chalk.white(`   Site:          static ${app.site.static}`));
+      } else if (app.site?.port) {
+        console.log(chalk.white(`   Site:          dev server on port ${app.site.port} (${app.site.protocol || 'https'})`));
+      }
+    }
+    const gatewayPort = workspaceConfig.env?.gateway?.port;
+    if (gatewayPort) {
+      console.log(chalk.white(`   Gateway port:  ${gatewayPort}`));
     }
 
     console.log('');
