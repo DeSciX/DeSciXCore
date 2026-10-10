@@ -172,110 +172,28 @@ test('executeQueue — no flags → defaults to dry-run mode (CEO-D-B1-FIX-DESIG
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// WS-ADMIN-B1-FIX (CEO-D-B1-FIX-DESIGN-LOCK 2026-04-28) — code-only split round.
-// New tests for: --community, --dry-run, --apply, --signer-pk-file, prompt-password.
+// SML STRIKE (CEO 2026-10-10, Unkamon#11; daita-sam M2 envelope constraint 6): the apply leg
+// (admin PK forwarded through the server) is REMOVED, CLI and server both. The CLI refuses any
+// apply-shaped invocation naming daita-sam, and no PK helper exists to read or prompt one.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
-import { readSignerPkFromFile, promptSignerPkInteractive } from '../lib/commands/airdrop.js';
-
-test('readSignerPkFromFile — accepts well-formed 0x + 64 hex', () => {
-    const tmp = path.join(os.tmpdir(), `pk-test-${Date.now()}.txt`);
-    fs.writeFileSync(tmp, '0x' + 'a'.repeat(64) + '\n');
-    try {
-        const pk = readSignerPkFromFile(tmp);
-        assert.equal(pk, '0x' + 'a'.repeat(64));
-    } finally {
-        fs.unlinkSync(tmp);
-    }
-});
-
-test('readSignerPkFromFile — rejects malformed key (no PK echo in error)', () => {
-    const tmp = path.join(os.tmpdir(), `pk-test-bad-${Date.now()}.txt`);
-    fs.writeFileSync(tmp, 'not-a-valid-pk');
-    try {
-        let err;
-        try { readSignerPkFromFile(tmp); } catch (e) { err = e; }
-        assert.ok(err, 'must throw');
-        assert.match(err.message, /do not match expected 0x \+ 64 hex format/);
-        // CRITICAL: error message must NOT echo the contents.
-        assert.ok(!err.message.includes('not-a-valid-pk'), 'error must not leak contents');
-    } finally {
-        fs.unlinkSync(tmp);
-    }
-});
-
-test('readSignerPkFromFile — rejects too-short hex', () => {
-    const tmp = path.join(os.tmpdir(), `pk-test-short-${Date.now()}.txt`);
-    fs.writeFileSync(tmp, '0x' + 'a'.repeat(63));
-    try {
-        assert.throws(
-            () => readSignerPkFromFile(tmp),
-            /do not match expected 0x \+ 64 hex format/
-        );
-    } finally {
-        fs.unlinkSync(tmp);
-    }
-});
-
-test('executeQueue — --dry-run + --apply mutually exclusive', async () => {
-    const apiClient = makeFakeApiClient({});
+test('executeQueue — the struck apply leg refuses loudly, naming daita-sam, before any server call', async () => {
+    const apiClient = makeFakeApiClient();
     await assert.rejects(
-        () => executeQueue({ dryRun: true, apply: true, apiClient }),
-        /mutually exclusive/
+        () => executeQueue({ apply: true, community: 'sml', apiClient }),
+        /DRY-RUN ONLY.*daita-sam/s
     );
-    // No invoke call to airdrop_execute_queue.
-    const calls = apiClient._calls.filter(c => c.command === 'airdrop_execute_queue');
-    assert.equal(calls.length, 0);
-});
-
-test('executeQueue — --apply without --community throws', async () => {
-    const apiClient = makeFakeApiClient({});
-    // Use a stub promptFn so it doesn't try to read stdin.
     await assert.rejects(
-        () => executeQueue({
-            apply: true,
-            signerPkFile: '/nonexistent/should/not/be/read',
-            apiClient
-        }),
-        /--community <slug> is required/
+        () => executeQueue({ signerPkFile: '/nonexistent/never/read', apiClient }),
+        /DRY-RUN ONLY.*daita-sam/s
     );
+    assert.equal(apiClient._calls.length, 0, 'a refused apply call must never reach the server');
 });
 
-test('executeQueue — --apply with --community + --signer-pk-file forwards signer_pk_hex to server', async () => {
-    const tmp = path.join(os.tmpdir(), `pk-test-apply-${Date.now()}.txt`);
-    fs.writeFileSync(tmp, '0x' + 'c'.repeat(64));
-    try {
-        const apiClient = makeFakeApiClient({
-            airdrop_execute_queue: async (params) => ({
-                status: 'OK',
-                message: {
-                    batches_executed: 1,
-                    total_users: 2,
-                    per_community: { sml: 2 },
-                    dry_run: false,
-                    caller: { operator_email: 'admin@descix.net' }
-                }
-            })
-        });
-
-        await executeQueue({
-            apply: true,
-            community: 'sml',
-            signerPkFile: tmp,
-            apiClient
-        });
-
-        const call = apiClient._calls.find(c => c.command === 'airdrop_execute_queue');
-        assert.ok(call, 'invoked');
-        assert.equal(call.params.community, 'sml');
-        assert.equal(call.params.mode, 'apply');
-        assert.equal(call.params.signer_pk_hex, '0x' + 'c'.repeat(64));
-    } finally {
-        fs.unlinkSync(tmp);
-    }
+test('executeQueue — the PK helpers are gone from the module surface', async () => {
+    const mod = await import('../lib/commands/airdrop.js');
+    assert.equal(mod.readSignerPkFromFile, undefined);
+    assert.equal(mod.promptSignerPkInteractive, undefined);
 });
 
 test('executeQueue — --dry-run with --community does NOT prompt and does NOT include signer_pk_hex', async () => {
@@ -316,37 +234,7 @@ test('executeQueue — --dry-run with --community does NOT prompt and does NOT i
     assert.equal(result.mode, 'dry-run');
 });
 
-test('executeQueue — --apply without --signer-pk-file falls back to interactive prompt', async () => {
-    let promptCalled = false;
-    const apiClient = makeFakeApiClient({
-        airdrop_execute_queue: async (params) => ({
-            status: 'OK',
-            message: {
-                batches_executed: 0,
-                total_users: 0,
-                per_community: {},
-                dry_run: false,
-                caller: { operator_email: 'admin@descix.net' }
-            }
-        })
-    });
-
-    await executeQueue({
-        apply: true,
-        community: 'sml',
-        apiClient,
-        promptFn: async () => {
-            promptCalled = true;
-            return '0x' + 'd'.repeat(64);
-        }
-    });
-
-    assert.equal(promptCalled, true, 'apply without --signer-pk-file must call promptFn fallback');
-    const call = apiClient._calls.find(c => c.command === 'airdrop_execute_queue');
-    assert.equal(call.params.signer_pk_hex, '0x' + 'd'.repeat(64));
-});
-
-test('executeQueue — dry-run prints the pre-batch balance refusals --apply would enforce', async () => {
+test('executeQueue — dry-run prints the pre-batch balance refusals an execute would enforce', async () => {
     const apiClient = makeFakeApiClient({
         airdrop_execute_queue: async () => ({
             status: 'OK',

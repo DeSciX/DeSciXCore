@@ -442,11 +442,9 @@ const airdropCommand = program
 
 airdropCommand
   .command('execute-queue')
-  .description('Manually trigger airdrop_execute_queue on the target env (admin-only)')
-  .option('--community <slug>', 'Community slug for per-community batch scoping (REQUIRED for --apply)')
-  .option('--dry-run', 'Read-only preview: encode calldata, estimate gas, validate net-zero invariant. No PK, no tx, no state mutation.')
-  .option('--apply', 'Live execution: requires --signer-pk-file or interactive prompt-password. Mutually exclusive with --dry-run.')
-  .option('--signer-pk-file <path>', 'Path to file containing admin signer PK (0x + 64 hex). Required for --apply unless prompted interactively.')
+  .description('DRY-RUN ONLY preview of the airdrop migration queue (admin-only). Execution lives in daita-sam (act plan + the role holder\'s own wallet) — the apply leg is removed.')
+  .option('--community <slug>', 'Community slug for per-community batch scoping')
+  .option('--dry-run', 'Read-only preview: encode calldata, estimate gas, validate net-zero invariant. No PK, no tx, no state mutation. (The default; the flag is accepted for scripts.)')
   .option('--batch-size <n>', 'Cap on users processed this run (server caps at AIRDROP_MAX_RUN_USERS)')
   .action(async (options) => {
     try {
