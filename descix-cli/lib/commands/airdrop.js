@@ -1,149 +1,47 @@
 /**
- * Airdrop Commands
+ * Airdrop Commands — DRY-RUN ONLY.
  *
- * Admin-facing CLI commands for WS-ADMIN-B1 airdrop migration operations.
- * Per CEO-D-MANUAL-TRIGGER-NO-CRON (2026-04-20), Cloud Scheduler cron was dropped
- * from Round B in favor of operator-invoked manual triggers via this CLI.
+ *   descix airdrop execute-queue [--community <slug>] [--dry-run] [--batch-size <n>]
  *
- * Per CEO-D-B1-FIX-DESIGN-LOCK (2026-04-28), the CLI signature is:
- *   descix airdrop execute-queue --community <slug> [--dry-run | --signer-pk-file <path> --apply]
+ * The apply leg (an admin PK forwarded through the server to Powch's broadcast) is REMOVED,
+ * CLI and server both (CEO 2026-10-10, daita-sam M2 envelope constraint 6): migration batches
+ * execute in daita-sam — act plan + typed confirm + the role holder's own wallet, client-signed.
  *
- *   --community <slug>      REQUIRED for --apply mode (per-community batch scoping). Optional
- *                           in --dry-run mode (returns aggregate-across-communities preview).
- *   --dry-run               Read-only preview path. No PK prompt. No tx. No state mutation.
- *   --apply                 Live execution path. Requires --signer-pk-file or interactive
- *                           prompt-password. Mutually exclusive with --dry-run.
- *   --signer-pk-file <path> File containing the admin's per-invocation signer PK (0x + 64 hex,
- *                           one line). Inline --signer-pk and env vars REJECTED on security
- *                           grounds (process listing leak).
- *
- * Access: requires admin session (platform-admin group membership enforced server-side
- * in `airdrop_execute_queue` via `isPlatformAdmin(user)`). CLI-side, we require an
- * authenticated session (`requireAuth`). The server rejects non-admin users.
- *
- * Safety: the `BATCH_UPDATE_BALANCES_BROADCAST_ENABLED` flag gates the actual on-chain
- * broadcast in Powch. While that flag is false, `airdrop_execute_queue --apply` will assemble
- * batches but Powch returns `stopped_at_broadcast_boundary` — useful for verifying queue
- * assembly without spending MATIC.
+ * Access: requires an authenticated session (`requireAuth`); the server additionally requires
+ * platform admin for the preview.
  */
 
-import fs from 'fs';
-// "May I prompt?" has ONE OWNER. This site holds no TTY check of its own.
-import { requireInteractive } from '../interactive.js';
-import readline from 'readline';
 import chalk from 'chalk';
 import { DeSciXApiClient } from '../api-client.js';
 import { requireAuth } from '../auth-guard.js';
 
-const PK_REGEX = /^0x[a-fA-F0-9]{64}$/;
-
 /**
- * Read a signer PK from a file. Validates 0x + 64-hex format. Trims trailing whitespace
- * and a trailing newline only — does NOT mutate any other formatting.
- *
- * @param {string} path - Filesystem path to the PK file.
- * @returns {string} Validated PK in `0x` + 64 hex form.
- * @throws {Error} If the file is missing or contents are malformed.
- */
-export function readSignerPkFromFile(path) {
-    let raw;
-    try {
-        raw = fs.readFileSync(path, 'utf8');
-    } catch (e) {
-        throw new Error(`--signer-pk-file: cannot read ${path}: ${e.message}`);
-    }
-    const trimmed = raw.trim();
-    if (!PK_REGEX.test(trimmed)) {
-        // CRITICAL: do not echo the contents (even partial) into the error message.
-        throw new Error(`--signer-pk-file: contents do not match expected 0x + 64 hex format`);
-    }
-    return trimmed;
-}
-
-/**
- * Interactive password prompt (no echo). Reads a line of stdin with terminal echo disabled
- * so the typed PK never appears on screen. Validates 0x + 64-hex format.
- *
- * @returns {Promise<string>} Validated PK in `0x` + 64 hex form.
- */
-export async function promptSignerPkInteractive({ stdin = process.stdin, stdout = process.stdout } = {}) {
-    // Gate FIRST: a non-TTY here previously hung forever holding a secret prompt open. This site
-    // keeps its own readline because it must disable terminal echo so the PK is never displayed;
-    // the DECISION of whether prompting is allowed is still the owner's alone.
-    requireInteractive({
-        what: 'descix airdrop',
-        question: 'signer private key',
-        nonInteractiveForm: ['descix airdrop --signer-pk-file <path>   # reads the key from a file, never echoed']
-    });
-    return await new Promise((resolve, reject) => {
-        const rl = readline.createInterface({ input: stdin, output: stdout, terminal: true });
-        // Disable echo so the PK isn't visible while typing.
-        const originalWrite = stdout.write.bind(stdout);
-        stdout.write = (str, ...rest) => {
-            // Suppress only the echoed characters during the prompt; allow our prompt to render.
-            if (typeof str === 'string' && str.length === 1) return true;
-            return originalWrite(str, ...rest);
-        };
-        stdout.write('Enter signer PK (0x + 64 hex, will not be echoed): ');
-        rl.question('', (answer) => {
-            stdout.write = originalWrite;
-            stdout.write('\n');
-            rl.close();
-            const trimmed = (answer || '').trim();
-            if (!PK_REGEX.test(trimmed)) {
-                reject(new Error('prompt-password: input does not match expected 0x + 64 hex format'));
-                return;
-            }
-            resolve(trimmed);
-        });
-    });
-}
-
-/**
- * Execute the airdrop migration batch queue on the target environment.
+ * Preview (dry-run) the airdrop migration batch queue on the target environment.
  *
  * @param {Object} options
- * @param {string} [options.community] - Community slug for per-community batch scoping.
- *   REQUIRED for --apply mode; optional for --dry-run mode (omitted = aggregate preview).
- * @param {boolean} [options.dryRun] - If true, read-only preview path. Mutually exclusive with --apply.
- * @param {boolean} [options.apply] - If true, live execution path. Requires --signer-pk-file or
- *   interactive prompt-password. Mutually exclusive with --dry-run.
- * @param {string} [options.signerPkFile] - Path to file containing the admin's signer PK.
+ * @param {string} [options.community] - Community slug scoping the preview (omitted = aggregate).
+ * @param {boolean} [options.dryRun] - Accepted for scripts; dry-run is the only mode.
  * @param {number} [options.batchSize] - Optional cap on number of users processed this run.
  * @param {Object} [options.apiClient] - Optional injected API client (for tests).
- * @param {Function} [options.promptFn] - Optional injected interactive PK prompt (for tests).
  */
 export async function executeQueue(options) {
+    // THE APPLY LEG IS STRUCK — refused before auth, before any network touch (CEO 2026-10-10, daita-sam M2 envelope constraint 6; the server
+    // refuses it too): migration batches execute in daita-sam — act plan + the role holder's own
+    // wallet signs, client-side. No PK ever transits this CLI again.
+    if (options.apply || options.signerPkFile) {
+        throw new Error(
+            'airdrop execute-queue is DRY-RUN ONLY: the apply leg (admin PK forwarded through the ' +
+            'server) is removed. Execute migration batches in daita-sam (act plan + your own wallet).'
+        );
+    }
+    const isDryRun = true;
+
     const apiClient = options.apiClient || new DeSciXApiClient();
     await requireAuth(apiClient);
 
-    // Mode resolution: --dry-run and --apply are mutually exclusive. Default is dry-run when
-    // no --apply is provided (read-only is the safer default per CEO-D-B1-FIX-DESIGN-LOCK §4.A).
-    if (options.dryRun && options.apply) {
-        throw new Error('--dry-run and --apply are mutually exclusive (CEO-D-B1-FIX-DESIGN-LOCK Decision 1).');
-    }
-    const isDryRun = options.dryRun === true || (!options.apply && options.dryRun !== false);
-    const isApply = options.apply === true;
-
-    if (isApply && !options.community) {
-        throw new Error('--community <slug> is required for --apply mode (per-community batch scoping per CEO-D-B1-FIX-DESIGN-LOCK Decision 3).');
-    }
-
-    // Resolve signer PK for --apply mode: --signer-pk-file (default) or interactive prompt fallback.
-    let signerPkHex = null;
-    if (isApply) {
-        if (options.signerPkFile) {
-            signerPkHex = readSignerPkFromFile(options.signerPkFile);
-        } else {
-            const promptFn = options.promptFn || promptSignerPkInteractive;
-            signerPkHex = await promptFn();
-        }
-    }
-
     const params = {};
     if (options.community) params.community = options.community;
-    params.mode = isApply ? 'apply' : 'dry-run';
-    if (signerPkHex) params.signer_pk_hex = signerPkHex;
+    params.mode = 'dry-run';
     if (options.batchSize !== undefined && options.batchSize !== null) {
         const bs = Number(options.batchSize);
         if (!Number.isFinite(bs) || bs <= 0) {
@@ -157,17 +55,12 @@ export async function executeQueue(options) {
     }
 
     const envLabel = process.env.DESCIX_API_URL || '(workspace default)';
-    const mode = isApply ? chalk.green('APPLY') : chalk.yellow('DRY-RUN');
-    console.log(chalk.cyan(`\nairdrop execute-queue [${mode}] target=${envLabel}`));
+    console.log(chalk.cyan(`\nairdrop execute-queue [${chalk.yellow('DRY-RUN')}] target=${envLabel}`));
     if (options.community) {
         console.log(chalk.gray(`  community:        ${options.community}`));
     }
     if (params.batch_size) {
         console.log(chalk.gray(`  batch_size:       ${params.batch_size}`));
-    }
-    if (signerPkHex) {
-        // Just confirm a PK is loaded; never echo any portion of it.
-        console.log(chalk.gray(`  signer_pk:        loaded (0x${signerPkHex.slice(2,6)}…${signerPkHex.slice(-4)})`));
     }
     console.log('');
 
@@ -184,12 +77,6 @@ export async function executeQueue(options) {
             console.error(chalk.gray('  Verify your membership in the DESCIX_ADMIN_GROUP Google Group.\n'));
         }
         throw error;
-    } finally {
-        // Belt-and-suspenders: clear local PK var after the single use. We deliberately
-        // do NOT mutate `params.signer_pk_hex` here because the api-client/axios layer may
-        // still be serializing the body, and modern axios keeps no reference after the
-        // request resolves anyway. The local var nulling is the meaningful action.
-        signerPkHex = null;
     }
 
     const result = response?.message || response;
@@ -212,7 +99,7 @@ export async function executeQueue(options) {
         const nzLabel = nz.passes ? chalk.green('PASS') : chalk.red('FAIL');
         console.log(`  net_zero_assertion:       ${nzLabel} (Σ=${nz.sum})`);
         const pbc = result.pre_batch_checks || {};
-        console.log(`  pre_batch_checks:         ${pbc.passes ? chalk.green('PASS') : chalk.red('FAIL — --apply would refuse')}`);
+        console.log(`  pre_batch_checks:         ${pbc.passes ? chalk.green('PASS') : chalk.red('FAIL — an execute would refuse')}`);
         for (const r of (pbc.refusals || [])) {
             console.log(chalk.red(`    ${r.kind} ${r.wallet} (${r.community_id}) holds ${r.held}, needs ${r.required} base units — rows ${(r.pending_ids || []).join(', ')}`));
         }
@@ -226,8 +113,8 @@ export async function executeQueue(options) {
             }
         }
         console.log('');
-        console.log(chalk.gray('No PK supplied. No tx submitted. No DB rows mutated.'));
-        console.log(chalk.gray('Re-run with --apply --signer-pk-file <path> to commit.'));
+        console.log(chalk.gray('No tx submitted. No DB rows mutated.'));
+        console.log(chalk.gray('To execute migration batches: daita-sam (act plan + your own wallet).'));
         console.log('');
         return result;
     }
@@ -254,13 +141,9 @@ export async function executeQueue(options) {
     }
 
     console.log('');
-    if (isApply) {
-        console.log(chalk.gray('Apply complete. See on_chain_log for the trigger audit row.'));
-    } else {
-        console.log(chalk.gray('Dry-run complete. No broadcast attempted. No on_chain_log broadcast row written.'));
-    }
+    console.log(chalk.gray('Dry-run complete. No broadcast attempted. No on_chain_log broadcast row written.'));
     console.log('');
     return result;
 }
 
-export default { executeQueue, readSignerPkFromFile, promptSignerPkInteractive };
+export default { executeQueue };
