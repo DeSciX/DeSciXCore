@@ -77,7 +77,7 @@ export function registerServiceManifest() {
         'ServiceManifests collection directly, which bypassed the registration door where the ' +
         'platform derives service.domain — producing manifests that routed to ' +
         '"https://undefined/api" and were never vectorized for tell_me_how discovery. ' +
-        'Use createServiceBootstrap({ manifest, selfRegister, coreApiUrl }).register() instead: ' +
+        'Use createServiceBootstrap({ manifest, selfRegister, coreApiUrl, meshSelfUrl }).register() instead: ' +
         'it consumes the register_service door. There is no compatibility path — this call site ' +
         'must change.'
     );
