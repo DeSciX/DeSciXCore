@@ -159,12 +159,10 @@ export async function runStatus(options = {}) {
     console.log(`Config File:    ${path.join(workspaceRoot, '.descix', 'workspace.json')}`);
 
     try {
-      // List all configured apps from env.platform + env.products
-      const platform = workspaceConfig.env?.platform;
-      const products = workspaceConfig.env?.products || [];
-      const allApps = [platform?.appId, ...products.map(p => p.appId)].filter(Boolean);
-      if (allApps.length > 0) {
-        console.log(`Local Apps:     ${allApps.join(', ')}`);
+      // v3 single-app: the one app this workspace holds
+      const wsAppId = workspaceConfig.env?.app?.appId;
+      if (wsAppId) {
+        console.log(`App:            ${wsAppId}`);
       }
 
       // WHAT THE WORKSPACE FILE ITSELF SAYS — deliberately NOT a resolved origin. The resolved

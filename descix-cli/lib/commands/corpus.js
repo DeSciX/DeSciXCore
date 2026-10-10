@@ -373,7 +373,7 @@ export async function runCorpusSync(apiClient, options) {
     const appConfig = workspaceConfig.getAppByAppId(appId);
     if (!appConfig) {
       spinner.fail(`App not found: ${appId}`);
-      throw new Error(`App "${appId}" not found in workspace.json. Check env.products[].`);
+      throw new Error(`App "${appId}" is not this workspace's app (workspace.json env.app).`);
     }
 
     const appRoot = appConfig.absolutePath;
