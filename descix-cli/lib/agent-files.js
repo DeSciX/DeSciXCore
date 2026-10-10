@@ -12,6 +12,7 @@ import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { readIdentity, isIdentityNamed } from './workspace-identity.js';
 import { mcpServerEntry } from './invocation.js';
+import { CLI_VERSION } from './cli-version.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -71,7 +72,7 @@ async function loadContext(workspaceRoot) {
   // Friendly name: capitalize app_id or use as-is
   const appName = appId.charAt(0).toUpperCase() + appId.slice(1);
 
-  return { appId, communityId, apiUrl: originLine, appName, originSource };
+  return { appId, communityId, apiUrl: originLine, appName, originSource, cliVersion: CLI_VERSION };
 }
 
 /**
@@ -82,7 +83,9 @@ function render(template, vars) {
     .replace(/\{\{appId\}\}/g, vars.appId)
     .replace(/\{\{communityId\}\}/g, vars.communityId)
     .replace(/\{\{apiUrl\}\}/g, vars.apiUrl)
-    .replace(/\{\{appName\}\}/g, vars.appName);
+    .replace(/\{\{appName\}\}/g, vars.appName)
+    .replace(/\{\{originSource\}\}/g, vars.originSource)
+    .replace(/\{\{cliVersion\}\}/g, vars.cliVersion);
 }
 
 /**
