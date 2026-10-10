@@ -61,18 +61,21 @@ The CLI never imports backend services directly. All operations are `POST /apifr
 ### CLI testing — use CLI, never curl
 After `descix login` / bootstrap, all testing must use `node DeSciX_Core/descix-cli/bin/descix.js [command]`. Curl bypasses session, auth middleware, and entitlement checks — it is not a valid substitute. This is how real bugs in auth and entitlement are caught.
 
-### workspace.json format — v2.1 (canonical)
-- **v2.1 format** (current, canonical): `env.platform` + `env.products[]` — app UUIDs in unified product registry. `WorkspaceConfig._buildAppIdMap()` and `getAppByAppId()` read this. **Use this for all CLI workspace resolution.**
-- **v1 format** (`communities`-based JSON) is not supported. Loading a v1 workspace.json hard-errors: `"v1 workspace format is not supported. Migrate to v2.1."`
+### workspace.json format — v3 single-app (canonical)
+- **v3 format** (current, canonical): one `env.app` `{appId, communityId, kbId, site{static|port,protocol}, microservice{port,devCommand}}` per repo; the repo root IS the workspace root (`descix app init` runs from it, and a checkout nested inside another workspace is refused by `assertNoParentWorkspace`). A GATEWAY workspace instead carries `env.gateway.{port, shell, appRepos[]}` — each listed repo holds its own v3 file, which is the sole authority for that app.
+- **v1 (`communities`) and v2.1-multi (`env.platform`/`env.products`) are retired.** Loading either throws the typed `WorkspaceRetiredFormatError` naming the migration, and `tryLoad` RETHROWS it — retired is not absent.
+- `registerApp(communityId, appId, {kbId})` is single-slot: the same id is idempotent, a different id refuses loudly.
 - When reading workspace config in CLI commands: use `WorkspaceConfig` only — `PathContext` is removed.
 
-### WorkspaceConfig — canonical methods (v2.1)
-- **`getAppByAppId(appId)`** — primary app lookup. Returns `{ localPath, absolutePath, communityId, kbId }` or `null`. Use this everywhere.
-- **`setStaticSite(appId, { static, port, protocol })`** — mutates the live `env.products[]` (or `env.platform`) entry's `site.{}` and calls `save()`. ONE ACTIVE MODE PER WRITE: `static` alone clears `port`+`protocol`, `port` alone clears `static`, both in one call keeps both (the gateway serves the dev server — site.port wins). `protocol` is "http"|"https" (default https when absent), dev-server mode only. Pass `null` for a field to remove it; empty `site.{}` is cleaned up. Hard-fails if `appId` is not mapped. Always use this (not direct mutation of `getAppByAppId()` return value, which is a constructed copy).
+### WorkspaceConfig — canonical methods (v3)
+- **`getAppByAppId(appId)`** — primary app lookup, resolved from `env.app`. Returns a COPY `{ localPath, absolutePath, communityId, kbId }` or `null`.
+- **`_liveEnvEntry(appId)`** — the one owner of "find the LIVE env.app entry or hard-fail"; every entry setter (`setStaticSite`, `setMicroservicePort`) goes through it.
+- **`setStaticSite(appId, { static, port, protocol })`** — mutates the live `env.app` entry's `site.{}` and calls `save()`. ONE ACTIVE MODE PER WRITE: `static` alone clears `port`+`protocol`, `port` alone clears `static`, both in one call keeps both (the gateway serves the dev server — site.port wins). `protocol` is "http"|"https" (default https when absent), dev-server mode only. Pass `null` for a field to remove it; empty `site.{}` is cleaned up. Hard-fails if `appId` is not THE app.
 - **`getSitePath(appId)`** / **`getMicroservicePath(appId)`** — convenience wrappers returning `absolutePath/site` and `absolutePath/microservice` respectively.
 - **`setEnvironment(envName)`** — canonical way to persist environment to workspace.json.
-- **`workspaceConfig.env`** is read-only — mutate `site.{}` via `setStaticSite()` and `microservice.port` via `setMicroservicePort()` (`descix app set-site` / `set-port`, explicit only, no auto-allocation); never hand-edit workspace.json.
-- **NEVER call `getApp(communityId, appId)`** — this method was removed in WS-CLI-V2.1-PURGE PR #7. `getAppByAppId(appId)` is the replacement. The meta-test `removed-methods-anti-regression.test.js` enforces this.
+- **`setEnvKey(dottedKey, value)`** — workspace-level env keys (`gateway.port`, `devCerts.*`, `powchUrl`, `siteUrl`); each has a `descix config set-*` verb.
+- **`workspaceConfig.env`** is read-only — mutate through the setters (`descix app set-site` / `set-port`, explicit only, no auto-allocation); never hand-edit workspace.json.
+- The app-set owner for multi-repo dev is `@descix/app-sdk`'s `resolveWorkspaceApps(workspaceRoot)` (`src/dev/workspaceApps.js`) — gateway and watchers consume it, never a second derivation.
 
 ### KB Mode — ONE sync surface
 - `descix kb corpus sync` is the ONLY KB sync surface: corpus manifest → chunks → Pinecone.
