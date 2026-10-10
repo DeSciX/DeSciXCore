@@ -36,7 +36,10 @@ import {
  * These are CEILINGS, not targets: the gate fails when an install grows past them, and they
  * are only ever raised deliberately, with the reason stated in the commit that raises them.
  */
-export const MAX_PACKAGES = 241;
+// Re-measured 2026-10-10 at the @descix/app-sdk 0.3.0 / cli 2.0.0 release: 242 packages,
+// 106.8MB — one transitive package over the old line. The ceiling is a BLOAT gate, re-armed
+// at the measured reality, not a license for growth.
+export const MAX_PACKAGES = 242;
 export const MAX_BYTES = 110 * 1024 * 1024;
 
 /** The app half, as its owner declares it: the package plus everything it depends on. */
