@@ -239,6 +239,7 @@ test('v1 workspace still raises the v1 migration error, not UNREADABLE', async (
     }
   );
 
-  // tryLoad keeps soft-failing on v1 (existing contract, asserted by workspace-config-v1-hard-error).
-  assert.equal(await WorkspaceConfig.tryLoad(root), null);
+  // tryLoad THROWS on a retired format too (superseded 2026-10-10: the old soft-null let a
+  // stale file silently resolve to the DEFAULT origin — the wrong-env hazard).
+  await assert.rejects(() => WorkspaceConfig.tryLoad(root), /v1 workspace format is not supported/);
 });

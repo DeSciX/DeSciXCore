@@ -195,6 +195,22 @@ export class WorkspaceUnreadableError extends Error {
 }
 
 /**
+ * A workspace.json in a RETIRED format (v1, v2.1 multi-app). It is a TYPE, like
+ * WorkspaceUnreadableError, because tryLoad() has to branch on it: "there is no workspace
+ * here" and "the workspace here is in a retired format" are different answers, and only the
+ * first is a soft null. Measured 2026-10-10: the refusal threw a PLAIN Error, tryLoad
+ * swallowed it, and five app repos' stale v2.1 files silently resolved to the DEFAULT origin —
+ * the exact wrong-env hazard the loader exists to prevent.
+ */
+export class WorkspaceRetiredFormatError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'WorkspaceRetiredFormatError';
+    this.code = 'WORKSPACE_RETIRED_FORMAT';
+  }
+}
+
+/**
  * WorkspaceConfig - Manages workspace-specific configuration
  *
  * This is the SOLE configuration methodology for DeSciX CLI.
@@ -407,11 +423,11 @@ export class WorkspaceConfig {
     // `error.message.includes('v1 workspace format')` re-throw was narrow string matching
     // (DeSciX anti-pattern #6) guarding a catch that should never have been this wide.
     if (parsed.communities && !parsed.env) {
-      throw new Error(
-        'v1 workspace format is not supported. Migrate to v2.1.\n' +
+      throw new WorkspaceRetiredFormatError(
+        'v1 workspace format is not supported. Migrate to v3.\n' +
         `  File:   ${configPath}\n` +
         '\n' +
-        'This file is still on disk and has NOT been modified. There is no automatic v1 → v2.1\n' +
+        'This file is still on disk and has NOT been modified. There is no automatic v1 → v3\n' +
         'migration: no surviving code reads the v1 layout, so its contents cannot be converted\n' +
         'for you — but they are still readable BY YOU, and this file is the only copy of them.\n' +
         moveAsideRemedy(configPath, 'descix app init')
@@ -424,7 +440,7 @@ export class WorkspaceConfig {
     // multi-app dev is sibling checkouts behind one gateway config. Same posture as the v1
     // refusal above: loud, non-destructive, the remedy is one command per app repo.
     if (parsed.env && (parsed.env.platform || parsed.env.products)) {
-      throw new Error(
+      throw new WorkspaceRetiredFormatError(
         'v2.1 multi-app workspace format is not supported. Migrate to v3 (single-app).\n' +
         `  File:   ${configPath}\n` +
         '\n' +
@@ -464,8 +480,9 @@ export class WorkspaceConfig {
    * Try to load workspace configuration, return null if not found
    * Useful for commands that need to check if workspace exists
    *
-   * RETURNS NULL FOR ABSENT, THROWS FOR UNREADABLE. "There is no workspace here" and "the
-   * workspace here is damaged" are different answers and only the first one is a soft no.
+   * RETURNS NULL FOR ABSENT, THROWS FOR UNREADABLE AND FOR RETIRED FORMATS. "There is no
+   * workspace here", "the workspace here is damaged" and "the workspace here is in a retired
+   * format" are different answers and only the first one is a soft no.
    * Swallowing the second made a corrupt workspace look like a fresh directory, which is how a
    * damaged workspace silently fell back to the DEFAULT (prod) origin instead of stopping.
    *
@@ -478,6 +495,7 @@ export class WorkspaceConfig {
       return await WorkspaceConfig.load(startDir);
     } catch (error) {
       if (error instanceof WorkspaceUnreadableError) throw error;
+      if (error instanceof WorkspaceRetiredFormatError) throw error;
       return null;
     }
   }
