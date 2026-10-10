@@ -32,6 +32,7 @@
 
 import { POWCH_APP_ID, normalizePowchUrl } from '../powch/powchOrigin.js';
 import { localUpstreamOrigin } from './localOrigin.js';
+import { resolveWorkspaceApps } from './workspaceApps.js';
 
 export { POWCH_APP_ID };
 
@@ -51,10 +52,16 @@ export function resolvePowchUrl(config, options = {}) {
   const env = config?.env || {};
   if (env.powchUrl) return normalizePowchUrl(env.powchUrl);
 
-  const powch = (Array.isArray(env.products) ? env.products : []).find((p) => p.appId === POWCH_APP_ID);
-  if (powch?.site?.port) {
-    // The product's OWN origin — deliberately not the gateway route.
-    return `${localUpstreamOrigin(powch.site, `env.products[${POWCH_APP_ID}].site`)}/`;
+  // A LOCAL Powch is one of the gateway's listed app repos (v3 fork (b)) — its own
+  // workspace owns its dev-server port. Reachable only when the caller names the
+  // workspace root; without it there is no local candidate and the answer is null.
+  if (options.workspaceRoot) {
+    const { apps } = resolveWorkspaceApps(options.workspaceRoot);
+    const powch = apps.find((a) => a.appId === POWCH_APP_ID);
+    if (powch?.site?.port) {
+      // Powch's OWN origin — deliberately not the gateway route (cross-origin by design).
+      return `${localUpstreamOrigin(powch.site, `env.app.site (${POWCH_APP_ID})`)}/`;
+    }
   }
   return null;
 }

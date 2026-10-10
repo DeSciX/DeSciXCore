@@ -89,7 +89,7 @@ async function loadLintManifest(t, { manifestObj, files = {} }) {
 async function makeSyncFixture(t, { manifestObj, files }) {
   const wsRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'deny-sync-'));
   const appId = 'testapp-deny-lint';
-  const appRoot = path.join(wsRoot, 'apps', appId);
+  const appRoot = wsRoot; // v3: the app repo root IS the workspace root
   await fs.mkdir(path.join(wsRoot, '.descix'), { recursive: true });
   await fs.mkdir(path.join(appRoot, '.descix', 'manifests'), { recursive: true });
 
@@ -103,8 +103,8 @@ async function makeSyncFixture(t, { manifestObj, files }) {
     JSON.stringify(manifestObj, null, 2)
   );
   const workspace = {
-    version: '2.1', workspaceRoot: wsRoot, type: 'workspace',
-    env: { products: [{ appId, localPath: `apps/${appId}`, kbId: manifestObj.kb_name }] }
+    version: '3.0', workspaceRoot: wsRoot, type: 'workspace',
+    env: { app: { appId, communityId: 'testcomm', kbId: manifestObj.kb_name } }
   };
   await fs.writeFile(path.join(wsRoot, '.descix', 'workspace.json'), JSON.stringify(workspace, null, 2));
 
@@ -169,7 +169,7 @@ for (const pattern of DENY_PATH_PATTERNS) {
 // K2.2 — Wired through a real sync, a deny-class Tier-P manifest NEVER writes.
 // ─────────────────────────────────────────────────────────────────────────────
 test('sync of a Tier-P manifest with an archive source THROWS before any Pinecone write', async (t) => {
-  const relPath = `apps/testapp-deny-lint/content/archive/leak.md`;
+  const relPath = 'content/archive/leak.md';
   const manifestObj = { kb_name: 'Pub', publish_tier: 'P', sources: [{ path: relPath, doc_class: 'guide' }] };
   const { appId } = await makeSyncFixture(t, { manifestObj, files: { [relPath]: '# leak\n\nbody\n' } });
   const spy = new SpyApiClient({ registeredKbs: ['Pub'] });

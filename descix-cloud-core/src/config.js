@@ -716,32 +716,18 @@ class CloudConfig {
     }
 
     _autoDetectPort(workspace) {
-        // Match current directory to an app in workspace (v2.1 format: env.platform + env.products[])
+        // v3 single-app: the workspace this walk found belongs to ONE app and its root is the
+        // app's repo root, so a service started from that repo (or its microservice/ subdir)
+        // takes env.app.microservice.port. No entry list to search — the retired v2.1 registry
+        // (env.platform + env.products[]) carried other repos' apps; v3 does not.
         try {
+            const app = workspace.env?.app;
+            if (!app?.microservice?.port) return;
             const wsRoot = workspace.workspaceRoot || path.dirname(path.dirname(this.__rootPath));
-            const entries = [];
-
-            // Platform entry
-            if (workspace.env?.platform) {
-                entries.push(workspace.env.platform);
-            }
-            // Product entries
-            if (Array.isArray(workspace.env?.products)) {
-                entries.push(...workspace.env.products);
-            }
-
-            for (const entry of entries) {
-                if (!entry.localPath || !entry.microservice?.port) continue;
-                const entryAbs = path.resolve(wsRoot, entry.localPath);
-                // Match if __appDir is the entry root or its microservice subdirectory
-                if (this.__appDir === entryAbs ||
-                    this.__appDir === path.resolve(entryAbs, 'microservice') ||
-                    this.__appDir.endsWith(entry.localPath) ||
-                    this.__appDir.endsWith(entry.localPath + '/microservice')) {
-                    this.LOCAL_PORT = entry.microservice.port;
-                    console.log(`[Config] Auto-detected port ${this.LOCAL_PORT} for ${entry.appId || 'platform'} from workspace`);
-                    return;
-                }
+            const rootAbs = path.resolve(wsRoot);
+            if (this.__appDir === rootAbs || this.__appDir === path.resolve(rootAbs, 'microservice')) {
+                this.LOCAL_PORT = app.microservice.port;
+                console.log(`[Config] Auto-detected port ${this.LOCAL_PORT} for ${app.appId} from workspace`);
             }
         } catch (e) {
             // Ignore path resolution errors

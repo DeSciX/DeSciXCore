@@ -61,7 +61,7 @@ class SpyApiClient {
 async function makeFixture(t, { startBranch = 'main' } = {}) {
   const wsRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'corpus-ref-'));
   const appId = 'testapp-ref';
-  const appRoot = path.join(wsRoot, 'apps', appId);
+  const appRoot = wsRoot; // v3: the app repo root IS the workspace root
   await fs.mkdir(path.join(wsRoot, '.descix'), { recursive: true });
   await fs.mkdir(path.join(appRoot, '.descix', 'manifests'), { recursive: true });
   await fs.mkdir(path.join(appRoot, 'docs'), { recursive: true });
@@ -73,16 +73,16 @@ async function makeFixture(t, { startBranch = 'main' } = {}) {
     JSON.stringify({
       kb_name: 'Corpus',
       sync_mode: 'local',
-      sources: [{ path: `apps/${appId}/docs`, tier: 1, doc_type: 'documentation' }]
+      sources: [{ path: 'docs', tier: 1, doc_type: 'documentation' }]
     }, null, 2)
   );
   await fs.writeFile(
     path.join(wsRoot, '.descix', 'workspace.json'),
     JSON.stringify({
-      version: '2.1',
+      version: '3.0',
       workspaceRoot: wsRoot,
       type: 'workspace',
-      env: { products: [{ appId, localPath: `apps/${appId}`, kbId: 'Corpus' }] }
+      env: { app: { appId, communityId: 'testcomm', kbId: 'Corpus' } }
     }, null, 2)
   );
 
@@ -191,7 +191,7 @@ test('B6 — sync output names the ref source for "manifest" (explicit non-main 
     JSON.stringify({
       kb_name: 'Corpus',
       sync_mode: 'local',
-      sources: [{ path: `apps/${appId}/docs`, ref: 'main', tier: 1, doc_type: 'documentation' }]
+      sources: [{ path: 'docs', ref: 'main', tier: 1, doc_type: 'documentation' }]
     }, null, 2)
   );
   // Re-commit so the manifest is in HEAD too (otherwise blob-sha computation

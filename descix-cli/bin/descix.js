@@ -1082,7 +1082,6 @@ appCommand
   .option('-s, --short <short_name>', 'SHORT id segment (no hyphens) used when creating; the app_id is composed server-side as {community}-{short}. Defaults to --app.')
   .option('--overwrite', 'When creating, overwrite an existing app record intentionally')
   .option('--kb <name>', 'Knowledge base name', 'General')
-  .option('-p, --path <dir>', 'Local app directory (default: auto-detected or cwd)')
   .action(async (options) => {
     try {
       const apiClient = new DeSciXApiClient();
@@ -1501,111 +1500,15 @@ appCommand
     }
   });
 
-appCommand
-  .command('set-localpath')
-  .description('Update the local directory path for a mapped app')
-  .requiredOption('-a, --app <app_id>', 'App ID')
-  .requiredOption('-p, --path <dir>', 'New local directory path')
-  .action(async (options) => {
-    try {
-      const appId = options.app;
-      const newPath = options.path;
-
-      const workspaceConfig = await WorkspaceConfig.load();
-      const wsRoot = workspaceConfig.workspaceRoot || process.cwd();
-
-      // Read the RAW registry entry, never the RESOLVED one. getAppByAppId() resolves the stored
-      // localPath, so on a workspace already carrying a rejected value it throws here — before
-      // any write is attempted. That is what made this verb refuse exactly when it was needed,
-      // while the rejection told the user to fix it with the config verb and never by hand.
-      // This command is about to REPLACE that value; it has no business resolving it.
-      //
-      // Display value only. setLocalPath() is the SINGLE authority on whether the app is mapped
-      // and refuses if it is not — deciding that here as well would be two derivations of one
-      // fact, and they would not even agree: _buildAppIdMap (behind getAppEntry) requires BOTH
-      // appId and localPath, while the live-entry walk matches on appId alone.
-      const oldPath = workspaceConfig.getAppEntry(appId)?.localPath;
-
-      // VALIDATE AT THE WRITE, through the LOADER'S OWN resolver — not a second copy of its rules.
-      // If resolveWorkspacePath would reject this value on the next read, it is rejected now, and
-      // nothing reaches disk. Writing a value the loader will refuse is what bricks a workspace.
-      const absPath = resolveWorkspacePath(wsRoot, newPath, appId);
-
-      // Hard-fail if path doesn't exist or is not a directory — checked at the path the LOADER
-      // will resolve to, not at a CWD-relative path that only exists from where you happened to
-      // be standing when you typed it.
-      let stat;
-      try {
-        stat = await fs.stat(absPath);
-      } catch {
-        throw new Error(
-          `Path does not exist: ${absPath}\n` +
-          `  (localPath '${newPath}' resolved against workspace root ${wsRoot})`
-        );
-      }
-      if (!stat.isDirectory()) {
-        throw new Error(
-          `Path is not a directory: ${absPath}\n` +
-          `  (localPath '${newPath}' resolved against workspace root ${wsRoot})`
-        );
-      }
-
-      // Write through the canonical setter, which covers env.platform AND env.products[]. The
-      // loop this replaces walked env.products ONLY: on the platform app it matched nothing,
-      // wrote nothing, and still printed success — a loud failure turned into a silent lie at
-      // the one entry that matters most.
-      await workspaceConfig.setLocalPath(appId, newPath);
-
-      console.log(chalk.green(`\n✓ ${appId} local path updated`));
-      console.log(chalk.gray(`  ${oldPath} → ${newPath}\n`));
-    } catch (error) {
-      console.error(chalk.red(error.message));
-      process.exit(1);
-    }
-  });
-
-appCommand
-  .command('unmap')
-  .description('Remove an app from the local workspace mapping (does not delete Firestore/Pinecone data)')
-  .requiredOption('-a, --app <app_id>', 'App ID')
-  .action(async (options) => {
-    try {
-      const appId = options.app;
-
-      const workspaceConfig = await WorkspaceConfig.load();
-      const appConfig = workspaceConfig.getAppByAppId(appId);
-      if (!appConfig) {
-        throw new Error(`App '${appId}' is not mapped.`);
-      }
-
-      // Remove from env.products
-      const products = workspaceConfig.env?.products || [];
-      const idx = products.findIndex(p => p.appId === appId || p.app_id === appId);
-      if (idx === -1) {
-        throw new Error(`App '${appId}' is not found in env.products.`);
-      }
-      products.splice(idx, 1);
-
-      const wsRoot = workspaceConfig.workspaceRoot || process.cwd();
-      await workspaceConfig.save(wsRoot);
-
-      console.log(chalk.green(`\n✓ ${appId} removed from workspace mapping`));
-      console.log(chalk.gray(`  Pinecone vectors, Firestore docs, and Drive data are not affected.\n`));
-    } catch (error) {
-      console.error(chalk.red(error.message));
-      process.exit(1);
-    }
-  });
-
 // ============ App: set-port (WS-CLI-MESH-ROUTING-GAP) ============
 //
 // Canonical write path for an app's microservice.port in workspace.json.
-// `descix microservice init` READS env.products[<app>].microservice.port and hard-fails
+// `descix microservice init` READS env.app.microservice.port and hard-fails
 // if it is missing; this command is how that port is set, without hand-editing workspace.json.
 // Backed by WorkspaceConfig.setMicroservicePort.
 appCommand
   .command('set-port')
-  .description('Set the microservice port for a mapped app (writes env.products[<app>].microservice.port). Pass "n" to remove.')
+  .description('Set the microservice port for this workspace\'s app (writes env.app.microservice.port). Pass "n" to remove.')
   .requiredOption('-a, --app <app_id>', 'App ID (must be mapped in workspace.json)')
   .requiredOption('-p, --port <port>', 'Microservice port number (1-65535), or "n" to remove')
   .action(async (options) => {
@@ -1632,7 +1535,7 @@ appCommand
 
       console.log(chalk.green(`\n✓ Microservice port set for ${appId}`));
       console.log(chalk.cyan(`  Port: ${portNum}`));
-      console.log(chalk.gray(`  Written to env.products[${appId}].microservice.port in workspace.json.`));
+      console.log(chalk.gray(`  Written to env.app.microservice.port in workspace.json.`));
       console.log(chalk.gray(`  The gateway routes the microservice on this port; \`descix microservice init -a ${appId}\` can now scaffold it.\n`));
     } catch (error) {
       console.error(chalk.red(error.message));
@@ -1656,7 +1559,7 @@ appCommand
 // Backed by WorkspaceConfig.setStaticSite. It writes ONLY the local workspace.json site.{} slot.
 appCommand
   .command('set-site')
-  .description("Set a mapped app's site config (env.products[<app>].site). One active mode per write: --static <dir> (built site served at /p/<app>/) or --port <n> [--protocol http|https] (dev server proxied at /p/<app>); setting one clears the other. Pass both flags together to keep both — the gateway then serves the dev server (site.port wins). --unset clears site.{} entirely.")
+  .description("Set this workspace app's site config (env.app.site). One active mode per write: --static <dir> (built site served at /p/<app>/) or --port <n> [--protocol http|https] (dev server proxied at /p/<app>); setting one clears the other. Pass both flags together to keep both — the gateway then serves the dev server (site.port wins). --unset clears site.{} entirely.")
   .requiredOption('-a, --app <app_id>', 'App ID (must be mapped in workspace.json)')
   .option('--static <path>', 'Static mode: relative dir under the app localPath (e.g. "site"; "." = the localPath itself). Alone, it clears site.port and site.protocol (one active mode per write).')
   .option('--port <port>', 'Dev-server mode: proxy /p/<app> to your local dev server on this port (1-65535). Alone, it clears site.static. With --static in the same call, both are kept and the gateway serves the dev server.')
@@ -1715,9 +1618,7 @@ appCommand
       // Print the RESULTING slot, not just the fields passed: a dev-server write keeps a
       // previously declared site.protocol (same mode, new port), and a retained field the
       // output does not show is invisible state — the whole defect class this command fixes.
-      const entryNow = workspaceConfig.env?.platform?.appId === appId
-        ? workspaceConfig.env.platform
-        : (workspaceConfig.env?.products || []).find(p => p.appId === appId);
+      const entryNow = workspaceConfig.env?.app?.appId === appId ? workspaceConfig.env.app : null;
       console.log(chalk.cyan(`  site is now:   ${JSON.stringify(entryNow?.site)}`));
       if (fields.static !== undefined && fields.port === undefined) {
         console.log(chalk.gray(`  site.port and site.protocol cleared (one active mode per write) — /p/${appId}/ now serves the static dir.`));
@@ -1726,7 +1627,7 @@ appCommand
       } else if (fields.static !== undefined && fields.port !== undefined) {
         console.log(chalk.yellow(`  Combined write: BOTH modes kept. The gateway serves the DEV SERVER (site.port wins); site.static is used only after you clear site.port (--static alone, or --unset).`));
       }
-      console.log(chalk.gray(`  Written to env.products[${appId}].site in workspace.json; \`descix serve\` picks it up.\n`));
+      console.log(chalk.gray(`  Written to env.app.site in workspace.json; \`descix serve\` picks it up.\n`));
     } catch (error) {
       console.error(chalk.red(error.message));
       process.exit(1);
@@ -1741,9 +1642,9 @@ appCommand
 // Reuses the SDK resolver resolveAppGatewayUrl() — the same workspace.json read path
 // behind buildWorkspaceProducts() that the PWA bakes into __WORKSPACE_PRODUCTS__ — so
 // the URL matches what the app store routes to:
-//   - env.platform        → https://localhost:{gatewayPort}/
-//   - product (static)    → https://localhost:{gatewayPort}/p/{appId}
-//   - product (dev-server)→ https://localhost:{gatewayPort}/p/{appId}
+//   - the gateway shell   → https://localhost:{gatewayPort}/
+//   - an app (static)     → https://localhost:{gatewayPort}/p/{appId}
+//   - an app (dev-server) → https://localhost:{gatewayPort}/p/{appId}
 // Hard-fails clearly if the app is unmapped or has no site config.
 appCommand
   .command('open')
@@ -2857,13 +2758,7 @@ microserviceCommand
       // Hard-fail early if missing — a scaffolded microservice without a known port
       // cannot be routed by the gateway and cannot start on a deterministic port.
       const env = workspaceConfig.env || {};
-      let microservicePort = null;
-      if (env.platform?.appId === ctx.appId) {
-        microservicePort = env.platform?.microservice?.port || null;
-      } else if (Array.isArray(env.products)) {
-        const productEntry = env.products.find(p => p.appId === ctx.appId);
-        microservicePort = productEntry?.microservice?.port || null;
-      }
+      const microservicePort = env.app?.appId === ctx.appId ? (env.app.microservice?.port || null) : null;
 
       if (!microservicePort) {
         console.error(chalk.red(`\n❌ App '${ctx.appId}' has no microservice.port in workspace.json.`));
@@ -4206,7 +4101,7 @@ program
       // app_ids". `--scope project` was dead on this surface for exactly as long as v2.1 has been
       // the format.
       //
-      // v2.1 carries APP IDS ONLY (env.platform.appId, env.products[].appId) — no community ids.
+      // v3 carries ONE APP ID (env.app.appId) — no community ids.
       // We therefore send app_ids alone and let the server resolve ownership from Products.
       // Deriving a community_id by splitting an app_id would violate the platform invariant that
       // app ids are OPAQUE to routing and lookups.
@@ -4226,14 +4121,11 @@ program
           process.exit(1);
         }
         const appIds = new Set();
-        if (wsConfig?.env?.platform?.appId) appIds.add(wsConfig.env.platform.appId);
-        for (const product of wsConfig?.env?.products || []) {
-          if (product?.appId) appIds.add(product.appId);
-        }
+        if (wsConfig?.env?.app?.appId) appIds.add(wsConfig.env.app.appId);
         // Fail LOUD rather than sending an empty context the server can only reject.
         if (appIds.size === 0) {
-          console.error(chalk.red("project scope: no apps found in .descix/workspace.json (env.platform.appId / env.products[].appId)."));
-          console.error(chalk.gray("    Use --scope entitlements, or add products to the workspace."));
+          console.error(chalk.red("project scope: this workspace holds no app (workspace.json env.app)."));
+          console.error(chalk.gray("    Use --scope entitlements, or run `descix app init` in this repo."));
           process.exit(1);
         }
         project_context = { app_ids: Array.from(appIds) };

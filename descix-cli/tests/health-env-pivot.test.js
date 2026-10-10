@@ -11,7 +11,7 @@
  *
  * Design: inject `_exec` and `_httpsProbe` adapters to mock gcloud + HTTPS without
  * touching the network or the gcloud CLI. Workspace config is injected via `_wsConfig`
- * so tests don't depend on cwd discovery.
+ * (loaded from a temp v3 tree) so tests don't depend on cwd discovery.
  *
  * Run: `node --test tests/health-env-pivot.test.js` from descix-cli/.
  */
@@ -19,24 +19,25 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { runHealth, __internals } from '../lib/commands/health.js';
+import { WorkspaceConfig } from '../lib/workspace-config.js';
+import { makeV3Tree } from './tools/v3-tree.mjs';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /**
- * Build a synthetic WorkspaceConfig-shaped object (we only read .env).
- * Skips disk IO entirely — the cloud path doesn't need apiUrl or save().
+ * Build a real v3 gateway tree on disk and load it through WorkspaceConfig.load: the platform
+ * app is the gateway SHELL repo, every product is a sibling app repo the gateway lists (named
+ * after its appId), each with its own single-app workspace.json. The app set the probes see is
+ * whatever resolveWorkspaceApps makes of that tree — never hand-expanded here.
  */
-function fakeWsConfig({ platformAppId = 'daita', products = [] } = {}) {
-    return {
-        env: {
-            platform: {
-                appId: platformAppId,
-                microservice: { port: 4000 },
-                site: { port: 5174 },
-            },
-            products,
-        },
-    };
+async function fakeWsConfig(t, { platformAppId = 'daita', products = [] } = {}) {
+    const repos = { [platformAppId]: { appId: platformAppId, microservice: { port: 4000 }, site: { port: 5174 } } };
+    for (const product of products) repos[product.appId] = product;
+    const { dir } = await makeV3Tree(t, {
+        gateway: { shell: platformAppId, appRepos: products.map((p) => p.appId) },
+        repos,
+    });
+    return WorkspaceConfig.load(dir);
 }
 
 /**
@@ -81,11 +82,11 @@ function mockHttpsProbe(byHost) {
 
 // ─── AC1: --env=dev runs local-port path ────────────────────────────────────
 
-test('AC1: --env=dev runs the LOCAL path (lsof + local route probes, no gcloud calls)', async () => {
+test('AC1: --env=dev runs the LOCAL path (lsof + local route probes, no gcloud calls)', async (t) => {
     // 2026-09-16: the dev path now probes routes as well as ports — a bound port answering 500
     // used to report PASS. The invariant this test guards is unchanged: NO gcloud in dev.
     // Local probes are exercised in tests/health-dev-serves.test.js; here they are all green.
-    const wsConfig = fakeWsConfig({
+    const wsConfig = await fakeWsConfig(t, {
         products: [
             { appId: 'beast', microservice: { port: 3011 } },
         ],
@@ -135,8 +136,8 @@ test('AC1: --env=dev runs the LOCAL path (lsof + local route probes, no gcloud c
 
 // ─── AC2: --env=demo invokes gcloud probes ──────────────────────────────────
 
-test('AC2: --env=demo invokes gcloud probes (URL map + Cloud Run + CF) + synthetic HTTPS', async () => {
-    const wsConfig = fakeWsConfig({
+test('AC2: --env=demo invokes gcloud probes (URL map + Cloud Run + CF) + synthetic HTTPS', async (t) => {
+    const wsConfig = await fakeWsConfig(t, {
         platformAppId: 'daita',
         products: [
             { appId: 'powch' },
@@ -227,8 +228,8 @@ test('AC2: --env=demo invokes gcloud probes (URL map + Cloud Run + CF) + synthet
 
 // ─── AC3: HARD-FAIL on missing gcloud auth ──────────────────────────────────
 
-test('AC3: --env=demo HARD-FAILS when gcloud auth list returns empty (no active account)', async () => {
-    const wsConfig = fakeWsConfig();
+test('AC3: --env=demo HARD-FAILS when gcloud auth list returns empty (no active account)', async (t) => {
+    const wsConfig = await fakeWsConfig(t);
     const exec = mockExec([
         { match: /^gcloud auth list/, stdout: '[]' },
     ]);
@@ -261,8 +262,8 @@ test('AC3: --env=demo HARD-FAILS when gcloud auth list returns empty (no active 
     assert.equal(httpsProbe.calls.length, 0, 'no HTTPS probe should run when auth fails');
 });
 
-test('AC3b: --env=demo HARD-FAILS when gcloud CLI is not installed', async () => {
-    const wsConfig = fakeWsConfig();
+test('AC3b: --env=demo HARD-FAILS when gcloud CLI is not installed', async (t) => {
+    const wsConfig = await fakeWsConfig(t);
     const exec = mockExec([
         { match: /^gcloud auth list/, throw: Object.assign(new Error('command not found: gcloud'), { code: 127 }) },
     ]);
@@ -291,8 +292,8 @@ test('AC3b: --env=demo HARD-FAILS when gcloud CLI is not installed', async () =>
 
 // ─── AC4: Output format consistency ─────────────────────────────────────────
 
-test('AC4: every probe line matches `PASS|FAIL <name> [<env>] (<probe>)` in JSON output', async () => {
-    const wsConfig = fakeWsConfig({
+test('AC4: every probe line matches `PASS|FAIL <name> [<env>] (<probe>)` in JSON output', async (t) => {
+    const wsConfig = await fakeWsConfig(t, {
         platformAppId: 'daita',
         products: [{ appId: 'powch' }],
     });
@@ -355,8 +356,8 @@ test('AC4: every probe line matches `PASS|FAIL <name> [<env>] (<probe>)` in JSON
 
 // ─── AC5: PROD scope guard ──────────────────────────────────────────────────
 
-test('AC5: --env=prod -m <out-of-scope-app> hard-fails before any probe', async () => {
-    const wsConfig = fakeWsConfig({
+test('AC5: --env=prod -m <out-of-scope-app> hard-fails before any probe', async (t) => {
+    const wsConfig = await fakeWsConfig(t, {
         platformAppId: 'daita',
         products: [{ appId: 'beast' }, { appId: 'smile' }],
     });
@@ -390,9 +391,9 @@ test('AC5: --env=prod -m <out-of-scope-app> hard-fails before any probe', async 
     }
 });
 
-test('AC5b: --env=prod (no filter) only probes the three in-scope hosts', async () => {
+test('AC5b: --env=prod (no filter) only probes the three in-scope hosts', async (t) => {
     // Workspace has many apps, but only daita/egpt/powch should be probed in PROD.
-    const wsConfig = fakeWsConfig({
+    const wsConfig = await fakeWsConfig(t, {
         platformAppId: 'daita',
         products: [
             { appId: 'powch' },
@@ -448,10 +449,10 @@ test('AC5b: --env=prod (no filter) only probes the three in-scope hosts', async 
 
 // ─── Probe-surface mismatch must HARD-FAIL ─────────────────────────────────
 
-test('--env=demo HARD-FAILS when gcloud Cloud Run list throws (no silent fallback to local-port)', async () => {
+test('--env=demo HARD-FAILS when gcloud Cloud Run list throws (no silent fallback to local-port)', async (t) => {
     // Per feedback_no-hardcoded-fallbacks: cloud probe must not silently
     // degrade to local-port checks when --env=demo|prod.
-    const wsConfig = fakeWsConfig({ platformAppId: 'daita', products: [{ appId: 'powch' }] });
+    const wsConfig = await fakeWsConfig(t, { platformAppId: 'daita', products: [{ appId: 'powch' }] });
     const exec = mockExec([
         { match: /^gcloud auth list/, stdout: JSON.stringify([{ account: 'a@b.c', status: 'ACTIVE' }]) },
         { match: /^gcloud compute url-maps describe/, stdout: JSON.stringify({ hostRules: [{}] }) },
@@ -494,8 +495,8 @@ test('--env=demo HARD-FAILS when gcloud Cloud Run list throws (no silent fallbac
 
 // ─── Unsupported env hard-fails ────────────────────────────────────────────
 
-test('unsupported --env hard-fails with clear error', async () => {
-    const wsConfig = fakeWsConfig();
+test('unsupported --env hard-fails with clear error', async (t) => {
+    const wsConfig = await fakeWsConfig(t);
     const origErr = console.error;
     console.error = () => {};
     try {

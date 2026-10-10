@@ -22,50 +22,42 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { resolvePowchUrl, POWCH_APP_ID } from '../src/dev/powchUrl.js';
 import { buildWorkspaceProducts, gatewayOrigin } from '../src/dev/workspaceProducts.js';
+import { withV3Tree } from './support/v3Tree.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SDK_ROOT = path.resolve(__dirname, '..');
 const GW = 5173;
 
-const CONFIG = {
-  env: {
-    gateway: { port: GW },
-    platform: { appId: 'daita', site: { port: 5174 } },
-    products: [
-      { appId: 'powch', localPath: 'DeSciX/DeSciX_Powch', site: { port: 5175 } },
-      { appId: 'egpt-frqtl', localPath: 'FRAQTL', site: { port: 5511 } },
-    ],
+// v3: the gateway workspace lists the shell and the app repos (Powch is one of them); each
+// repo's OWN workspace.json carries its appId and site.
+const TREE = {
+  gateway: { port: GW, shell: 'cloud', appRepos: ['powch', 'egpt-frqtl'] },
+  repos: {
+    cloud: { appId: 'daita', site: { port: 5174 } },
+    powch: { appId: 'powch', site: { port: 5175 } },
+    'egpt-frqtl': { appId: 'egpt-frqtl', site: { port: 5511 } },
   },
 };
-
-function withWorkspace(config, fn) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'powch-iso-'));
-  try {
-    fs.mkdirSync(path.join(dir, '.descix'), { recursive: true });
-    fs.writeFileSync(path.join(dir, '.descix', 'workspace.json'), JSON.stringify(config, null, 2));
-    return fn(dir);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-}
+const withWorkspace = (fn) => withV3Tree(TREE, fn);
 
 // ------------------------------------------------------------ THE INVARIANT
 
 test('Powch resolves to a DIFFERENT origin than the shell — the whole point', () => {
-  const powch = resolvePowchUrl(CONFIG);
-  assert.equal(new URL(powch).origin, 'https://localhost:5175');
-  assert.notEqual(new URL(powch).origin, gatewayOrigin(GW),
-    'Powch on the gateway origin means every hosted app can read the wallet');
+  withWorkspace(({ dir, config }) => {
+    const powch = resolvePowchUrl(config, { workspaceRoot: dir });
+    assert.equal(new URL(powch).origin, 'https://localhost:5175');
+    assert.notEqual(new URL(powch).origin, gatewayOrigin(GW),
+      'Powch on the gateway origin means every hosted app can read the wallet');
+  });
 });
 
 test('Powch is NOT in the shell-origin product map', () => {
-  withWorkspace(CONFIG, (dir) => {
+  withWorkspace(({ dir }) => {
     const map = buildWorkspaceProducts(dir);
     assert.equal(map[POWCH_APP_ID], undefined,
       'anything in this map is same-origin with the shell; Powch must never be');
@@ -75,7 +67,7 @@ test('Powch is NOT in the shell-origin product map', () => {
 });
 
 test('no entry in the product map could ever BE Powch by another name', () => {
-  withWorkspace(CONFIG, (dir) => {
+  withWorkspace(({ dir }) => {
     const map = buildWorkspaceProducts(dir);
     for (const url of Object.values(map)) {
       assert.ok(!url.includes('5175'), `the product map leaks Powch's origin: ${url}`);
@@ -86,23 +78,37 @@ test('no entry in the product map could ever BE Powch by another name', () => {
 // --------------------------------------------------------------- precedence
 
 test('explicit env.powchUrl wins', () => {
-  const cfg = { env: { ...CONFIG.env, powchUrl: 'https://powch.dev.descix.net' } };
-  assert.equal(resolvePowchUrl(cfg), 'https://powch.dev.descix.net/');
+  // wins over the listed local Powch repo too
+  withV3Tree({ ...TREE, env: { powchUrl: 'https://powch.dev.descix.net' } }, ({ dir, config }) => {
+    assert.equal(resolvePowchUrl(config, { workspaceRoot: dir }), 'https://powch.dev.descix.net/');
+  });
 });
 
 test('an explicit override (VITE_POWCH_APP_URL) beats everything', () => {
-  const cfg = { env: { ...CONFIG.env, powchUrl: 'https://powch.dev.descix.net' } };
-  assert.equal(resolvePowchUrl(cfg, { override: 'https://powch.example.com/' }), 'https://powch.example.com/');
+  withV3Tree({ ...TREE, env: { powchUrl: 'https://powch.dev.descix.net' } }, ({ dir, config }) => {
+    assert.equal(
+      resolvePowchUrl(config, { workspaceRoot: dir, override: 'https://powch.example.com/' }),
+      'https://powch.example.com/',
+    );
+  });
 });
 
 test('the product\'s OWN origin is the fallback — never the gateway route', () => {
-  const url = resolvePowchUrl(CONFIG);
-  assert.equal(url, 'https://localhost:5175/');
-  assert.ok(!url.includes('/p/powch'), 'the gateway route would be same-origin with the shell');
+  withWorkspace(({ dir, config }) => {
+    const url = resolvePowchUrl(config, { workspaceRoot: dir });
+    assert.equal(url, 'https://localhost:5175/');
+    assert.ok(!url.includes('/p/powch'), 'the gateway route would be same-origin with the shell');
+  });
 });
 
 test('unknown is null — not a guess', () => {
-  assert.equal(resolvePowchUrl({ env: { products: [] } }), null);
+  assert.equal(resolvePowchUrl({ env: {} }), null);
+  // A workspace that lists no Powch repo has no local Powch candidate.
+  withV3Tree({ gateway: { shell: 'cloud' }, repos: { cloud: TREE.repos.cloud } }, ({ dir, config }) => {
+    assert.equal(resolvePowchUrl(config, { workspaceRoot: dir }), null);
+  });
+  // Without the workspace root the caller has named no local candidate at all.
+  withWorkspace(({ config }) => assert.equal(resolvePowchUrl(config), null));
   assert.equal(resolvePowchUrl({}), null);
   assert.equal(resolvePowchUrl(null), null);
 });

@@ -19,17 +19,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WorkspaceConfig } from '../lib/workspace-config.js';
 
-/** A v2.1 workspace carrying keys this writer owns AND keys it has never heard of. */
+/** A v3 workspace carrying keys this writer owns AND keys it has never heard of. */
 async function seedWorkspace(extra = {}) {
   const root = await mkdtemp(join(tmpdir(), 'descix-ws-'));
   await mkdir(join(root, '.descix'), { recursive: true });
   const doc = {
-    version: '2.1',
+    version: '3.0',
     workspaceRoot: root,
     type: 'workspace',
     env: {
-      platform: { appId: 'daita', communityId: 'daita', localPath: '.', kbId: 'General' },
-      products: [{ appId: 'egpt-frqtl', communityId: 'egpt', localPath: 'frqtl', kbId: 'General' }],
+      app: { appId: 'egpt-frqtl', communityId: 'egpt', kbId: 'General' },
     },
     ...extra,
   };
@@ -66,14 +65,13 @@ test('an unknown key survives the canonical mutating verb, not just a bare save'
 
   const after = await readDoc(root);
   assert.deepEqual(after.customRegistry, ['a', 'b'], 'set-port destroyed an unowned key');
-  const product = after.env.products.find((p) => p.appId === 'egpt-frqtl');
-  assert.equal(product.microservice.port, 4310, 'the port write itself must still land');
+  assert.equal(after.env.app.microservice.port, 4310, 'the port write itself must still land');
 });
 
 test('the keys this writer OWNS are still authored from memory, not carried stale', async () => {
   // The fix must not overcorrect into preserving everything: an owned key has to reflect the
   // in-memory state, or a legitimate change would be silently reverted by the carry-through.
-  const root = await seedWorkspace({ version: '2.1', type: 'stale-type-on-disk' });
+  const root = await seedWorkspace({ version: '3.0', type: 'stale-type-on-disk' });
 
   const cfg = await WorkspaceConfig.load(root);
   cfg.type = 'workspace';
@@ -81,7 +79,7 @@ test('the keys this writer OWNS are still authored from memory, not carried stal
 
   const after = await readDoc(root);
   assert.equal(after.type, 'workspace', 'an OWNED key must come from memory, not from disk');
-  assert.equal(after.version, '2.1');
+  assert.equal(after.version, '3.0');
 });
 
 test('FAIL LOUD: an unreadable existing file is not silently overwritten', async () => {
@@ -91,7 +89,7 @@ test('FAIL LOUD: an unreadable existing file is not silently overwritten', async
   await mkdir(join(root, '.descix'), { recursive: true });
   await writeFile(join(root, '.descix', 'workspace.json'), '{ this is not json');
 
-  const cfg = new WorkspaceConfig({ version: '2.1', type: 'workspace', env: {} }, root);
+  const cfg = new WorkspaceConfig({ version: '3.0', type: 'workspace', env: {} }, root);
   await assert.rejects(() => cfg.save(), /could not be read as JSON/);
 
   // and the bytes are still there
@@ -101,7 +99,7 @@ test('FAIL LOUD: an unreadable existing file is not silently overwritten', async
 
 test('a first save with no existing file still works', async () => {
   const root = await mkdtemp(join(tmpdir(), 'descix-ws-new-'));
-  const cfg = new WorkspaceConfig({ version: '2.1', type: 'workspace', env: {} }, root);
+  const cfg = new WorkspaceConfig({ version: '3.0', type: 'workspace', env: {} }, root);
   await cfg.save();
   const after = await readDoc(root);
   assert.equal(after.type, 'workspace');

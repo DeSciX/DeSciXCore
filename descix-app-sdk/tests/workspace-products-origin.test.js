@@ -25,7 +25,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -35,6 +34,7 @@ import {
   gatewayOrigin,
   gatewayProductUrl,
 } from '../src/dev/workspaceProducts.js';
+import { withV3Tree } from './support/v3Tree.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SDK_ROOT = path.resolve(__dirname, '..');
@@ -43,38 +43,34 @@ const SDK_ROOT = path.resolve(__dirname, '..');
 const stripComments = (src) =>
   src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 
-function withWorkspace(config, fn) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wp-origin-'));
-  try {
-    fs.mkdirSync(path.join(dir, '.descix'), { recursive: true });
-    fs.writeFileSync(path.join(dir, '.descix', 'workspace.json'), JSON.stringify(config, null, 2));
-    return fn(dir);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-}
-
-/** A workspace with one of every routable shape, on a non-default gateway port. */
-const CONFIG = {
-  env: {
-    gateway: { port: 5599 },
-    platform: { appId: 'daita', site: { port: 5174 } },
-    products: [
-      { appId: 'egpt-godsworld', localPath: 'godsworld/codesite', site: { static: '.' } },
-      { appId: 'egpt-frqtl', localPath: 'FRAQTL/site', site: { port: 5511 } },
-      { appId: 'powch', localPath: 'DeSciX/DeSciX_Powch', site: { port: 5175, protocol: 'https' } },
-      { appId: 'egpt-godsworld-dev', localPath: 'godsworld', site: { port: 5175, protocol: 'https' } },
-      { appId: 'unmapped', localPath: 'nowhere' },
-    ],
+/**
+ * A workspace with one of every routable shape, on a non-default gateway port. v3: the
+ * gateway workspace lists the shell and the app repos; each repo's OWN workspace.json
+ * carries its appId and site. Repo names equal the app ids.
+ */
+const TREE = {
+  gateway: {
+    port: 5599,
+    shell: 'daita',
+    appRepos: ['egpt-godsworld', 'egpt-frqtl', 'powch', 'egpt-godsworld-dev', 'unmapped'],
+  },
+  repos: {
+    daita: { appId: 'daita', site: { port: 5174 } },
+    'egpt-godsworld': { appId: 'egpt-godsworld', site: { static: '.' } },
+    'egpt-frqtl': { appId: 'egpt-frqtl', site: { port: 5511 } },
+    powch: { appId: 'powch', site: { port: 5175, protocol: 'https' } },
+    'egpt-godsworld-dev': { appId: 'egpt-godsworld-dev', site: { port: 5175, protocol: 'https' } },
+    unmapped: { appId: 'unmapped' },
   },
 };
+const withWorkspace = (fn) => withV3Tree(TREE, ({ dir }) => fn(dir));
 
 const GATEWAY = 'https://localhost:5599';
 
 // ------------------------------------------------- the fix, case by case (G-1)
 
 test('a dev-server product is served to the shell on the GATEWAY origin, not its own port', () => {
-  withWorkspace(CONFIG, (dir) => {
+  withWorkspace((dir) => {
     const map = buildWorkspaceProducts(dir);
     assert.equal(map['egpt-frqtl'], `${GATEWAY}/p/egpt-frqtl`);
     assert.equal(map['egpt-godsworld-dev'], `${GATEWAY}/p/egpt-godsworld-dev`);
@@ -86,25 +82,25 @@ test('POWCH IS THE EXCEPTION and is absent from this map', () => {
   // asserted the security regression. Powch is the ZK-SSO identity silo and is
   // cross-origin BY DESIGN; putting it in the shell-origin map hands the wallet
   // to every hosted app. Full invariant: tests/powch-origin-isolation.test.js.
-  withWorkspace(CONFIG, (dir) => {
+  withWorkspace((dir) => {
     assert.equal(buildWorkspaceProducts(dir)['powch'], undefined);
   });
 });
 
 test('a static product keeps its gateway URL (unchanged by the fix)', () => {
-  withWorkspace(CONFIG, (dir) => {
+  withWorkspace((dir) => {
     assert.equal(buildWorkspaceProducts(dir)['egpt-godsworld'], `${GATEWAY}/p/egpt-godsworld`);
   });
 });
 
 test('the platform (the shell itself) is the gateway ROOT', () => {
-  withWorkspace(CONFIG, (dir) => {
+  withWorkspace((dir) => {
     assert.equal(buildWorkspaceProducts(dir)['daita'], `${GATEWAY}/`);
   });
 });
 
 test('a product with no site config is not routable and stays out of the map', () => {
-  withWorkspace(CONFIG, (dir) => {
+  withWorkspace((dir) => {
     assert.equal(buildWorkspaceProducts(dir)['unmapped'], undefined);
   });
 });
@@ -112,7 +108,7 @@ test('a product with no site config is not routable and stays out of the map', (
 // ------------------------------------------------------- the invariant itself
 
 test('NO url in the map names a product dev-server port — every one is the gateway origin', () => {
-  withWorkspace(CONFIG, (dir) => {
+  withWorkspace((dir) => {
     const map = buildWorkspaceProducts(dir);
     const upstreamPorts = [5174, 5511, 5175];
     for (const [appId, url] of Object.entries(map)) {
@@ -128,13 +124,11 @@ test('NO url in the map names a product dev-server port — every one is the gat
 });
 
 test('site.protocol describes the UPSTREAM and never reaches the browser-facing map', () => {
-  const config = {
-    env: {
-      gateway: { port: 5599 },
-      products: [{ appId: 'httpapp', localPath: 'a', site: { port: 6001, protocol: 'http' } }],
-    },
+  const spec = {
+    gateway: { port: 5599, appRepos: ['httpapp'] },
+    repos: { httpapp: { appId: 'httpapp', site: { port: 6001, protocol: 'http' } } },
   };
-  withWorkspace(config, (dir) => {
+  withV3Tree(spec, ({ dir }) => {
     assert.equal(buildWorkspaceProducts(dir)['httpapp'], `${GATEWAY}/p/httpapp`);
   });
 });
@@ -142,7 +136,7 @@ test('site.protocol describes the UPSTREAM and never reaches the browser-facing 
 // ------------------------------------------------ ONE answer, driven off data
 
 test('the shell map and `descix app open` give the SAME answer for every app', () => {
-  withWorkspace(CONFIG, (dir) => {
+  withWorkspace((dir) => {
     const map = buildWorkspaceProducts(dir);
     for (const appId of Object.keys(map)) {
       const opened = resolveAppGatewayUrl(dir, appId);
@@ -164,7 +158,7 @@ test('both answers come from the SAME url builders — drift is structurally imp
     1,
     'exactly one place may spell out the localhost origin (gatewayOrigin); found ' + handBuilt.length,
   );
-  assert.match(src, /gatewayProductUrl\(gatewayPort, p\.appId\)/);
+  assert.match(src, /gatewayProductUrl\(gatewayPort, app\.appId\)/);
   assert.match(src, /const url = gatewayProductUrl\(gatewayPort, appId\)/);
 });
 

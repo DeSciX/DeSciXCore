@@ -163,10 +163,9 @@ export async function runInit(apiClient, options = {}) {
     }
 
     console.log(chalk.gray(`\n${existingConfig ? 'Updating' : 'Writing'} .descix/workspace.json...\n`));
-    const config = existingConfig || new WorkspaceConfig({ version: '2.1', type: 'workspace', env: {} }, projectPath);
+    const config = existingConfig || new WorkspaceConfig({ version: '3.0', type: 'workspace', env: {} }, projectPath);
     if (existingConfig && options.force && config.env) {
-      config.env.products = [];
-      delete config.env.platform;
+      delete config.env.app;
     }
     // NO APP IS REGISTERED HERE. The app id is the platform's: `app init` creates the app and
     // registers the id the server returns (with -c it is composed from the community and the

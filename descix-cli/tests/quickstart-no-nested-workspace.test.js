@@ -54,16 +54,16 @@ const HARNESS_TIMEOUT_MS = 90000;
 
 const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
 
-// A REGISTERED PRODUCT IS PART OF THE FIXTURE, not decoration: the later quickstart steps read
+// A REGISTERED APP IS PART OF THE FIXTURE, not decoration: the later quickstart steps read
 // the workspace to learn the app and community they must state, and refuse on a workspace that
-// names neither. A products:[] parent would make this suite fail for a reason unrelated to
+// names neither. An env.app-less parent would make this suite fail for a reason unrelated to
 // nesting — a fixture that cannot reach the behaviour under test does not measure it.
 const PARENT_WS = (root) => JSON.stringify({
-  version: '2.1', workspaceRoot: root, type: 'workspace',
+  version: '3.0', workspaceRoot: root, type: 'workspace',
   env: {
     environment: 'DEV',
     gateway: { port: 5173 },
-    products: [{ appId: 'parentapp', localPath: '.', kbId: 'General', communityId: 'testcomm' }]
+    app: { appId: 'parentapp', kbId: 'General', communityId: 'testcomm' }
   }
 }, null, 2);
 
@@ -101,9 +101,14 @@ async function runQuickstart({ withParentWorkspace }) {
   // Every answer as a FLAG: `descix init`/quickstart refuse a non-terminal stdin by design (they
   // cannot prompt), so the old piped answers could never reach the write and C2 went inert. The
   // flags are the supported non-interactive form — the same one an AI assistant uses.
+  // HERMETIC: the gates discriminate on FILE WRITES (runInit's workspace.json), which happen
+  // BEFORE quickstart's app-create leg. A dead loopback origin makes any network leg fail in
+  // milliseconds instead of walking into the device-login flow — which polls for 15 minutes
+  // and, before the CLI's non-interactive guard, seized the operator's live browser tab on
+  // every suite run (measured 2026-10-10). A test must never reach the real platform.
   const child = spawn(process.execPath, [BIN_JS, 'quickstart', '-c', 'testcomm', '-a', 'innerapp', '--yes'], {
     cwd: subdir,
-    env: { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0' },
+    env: { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0', DESCIX_API_URL: 'https://127.0.0.1:9' },
     stdio: ['pipe', 'pipe', 'pipe']
   });
 

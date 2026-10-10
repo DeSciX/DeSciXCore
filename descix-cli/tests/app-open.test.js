@@ -10,12 +10,13 @@
  * Coverage:
  *  - static site   → https://localhost:{gatewayPort}/p/{appId}
  *  - dev-server site → https://localhost:{gatewayPort}/p/{appId} (gateway proxies the port)
- *  - platform app  → https://localhost:{gatewayPort}/  (root)
+ *  - shell app     → https://localhost:{gatewayPort}/  (root)
  *  - custom gateway port (env.gateway.port) is honored
- *  - hard-fail: unmapped app → throws (not TypeError)
+ *  - hard-fail: an app the workspace does not serve → throws (not TypeError)
  *  - hard-fail: mapped app with NO site config → throws (not TypeError)
  *
- * Design: operates against a temp workspace; never touches the real workspace.json.
+ * Design: operates against a temp gateway tree (the gateway workspace lists sibling repos, each
+ * holding its own single-app workspace.json); never touches the real workspace.json.
  * Run: `node --test tests/app-open.test.js` from descix-cli/.
  */
 
@@ -25,33 +26,28 @@ import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { resolveAppGatewayUrl } from '@descix/app-sdk/dev';
+import { makeV3Tree } from './tools/v3-tree.mjs';
 
 /**
- * Build a temp workspace with: a platform app, a static-site product, a
- * dev-server product, and a no-site product.
+ * Build a temp gateway tree with: a shell app, a static-site app, a dev-server app, and a
+ * no-site app, each in its own sibling repo.
  */
 async function makeTestWorkspace(t, { gatewayPort } = {}) {
-  const wsRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'descix-test-appopen-'));
-  await fs.mkdir(path.join(wsRoot, '.descix'), { recursive: true });
-
-  const env = {
-    platform: { appId: 'daita', localPath: 'my-platform', kbId: 'General', site: { port: 5174 } },
-    products: [
-      { appId: 'descix-ssgpod', localPath: 'ssgpod', kbId: 'General', site: { static: 'site' } },
-      { appId: 'descix-devsrv', localPath: 'devsrv', kbId: 'General', site: { port: 6001 } },
-      { appId: 'descix-nosite', localPath: 'nosite', kbId: 'General' },
-    ],
-  };
-  if (gatewayPort) env.gateway = { port: gatewayPort };
-
-  const workspace = { version: '2.1', workspaceRoot: wsRoot, type: 'workspace', env };
-  await fs.writeFile(
-    path.join(wsRoot, '.descix', 'workspace.json'),
-    JSON.stringify(workspace, null, 2)
-  );
-
-  t.after(async () => { await fs.rm(wsRoot, { recursive: true, force: true }); });
-  return { wsRoot };
+  const { dir } = await makeV3Tree(t, {
+    env: { environment: 'DEV', apiUrl: 'https://dev.descix.net' },
+    gateway: {
+      ...(gatewayPort ? { port: gatewayPort } : {}),
+      shell: 'my-platform',
+      appRepos: ['ssgpod', 'devsrv', 'nosite'],
+    },
+    repos: {
+      'my-platform': { appId: 'daita', communityId: 'daita', kbId: 'General', site: { port: 5174 } },
+      ssgpod: { appId: 'descix-ssgpod', communityId: 'descix', kbId: 'General', site: { static: 'site' } },
+      devsrv: { appId: 'descix-devsrv', communityId: 'descix', kbId: 'General', site: { port: 6001 } },
+      nosite: { appId: 'descix-nosite', communityId: 'descix', kbId: 'General' },
+    },
+  });
+  return { wsRoot: dir };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -72,7 +68,7 @@ test('resolveAppGatewayUrl — dev-server site → /p/{appId} (gateway proxies t
   assert.match(r.via, /localhost:6001/, 'via must reference the proxied dev-server origin port');
 });
 
-test('resolveAppGatewayUrl — platform app → gateway root', async (t) => {
+test('resolveAppGatewayUrl — shell app → gateway root', async (t) => {
   const { wsRoot } = await makeTestWorkspace(t);
   const r = resolveAppGatewayUrl(wsRoot, 'daita');
   assert.equal(r.url, 'https://localhost:5173/');
@@ -86,19 +82,19 @@ test('resolveAppGatewayUrl — honors custom env.gateway.port', async (t) => {
   assert.equal(r.gatewayPort, 4999);
 });
 
-test('resolveAppGatewayUrl — hard-fail: unmapped app throws (not TypeError)', async (t) => {
+test('resolveAppGatewayUrl — hard-fail: an app the workspace does not serve throws (not TypeError)', async (t) => {
   const { wsRoot } = await makeTestWorkspace(t);
   assert.throws(
     () => resolveAppGatewayUrl(wsRoot, 'totally-unknown-app'),
     (err) => {
       assert.ok(!(err instanceof TypeError), 'must not be a TypeError');
-      assert.match(err.message, /not mapped in workspace\.json/);
+      assert.match(err.message, /is not served by this workspace \(not env\.app, not env\.gateway\.shell, not in env\.gateway\.appRepos\)/);
       return true;
     }
   );
 });
 
-test('resolveAppGatewayUrl — hard-fail: mapped app with no site config throws (not TypeError)', async (t) => {
+test('resolveAppGatewayUrl — hard-fail: an app with no site config throws (not TypeError)', async (t) => {
   const { wsRoot } = await makeTestWorkspace(t);
   assert.throws(
     () => resolveAppGatewayUrl(wsRoot, 'descix-nosite'),

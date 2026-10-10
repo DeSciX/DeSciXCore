@@ -107,7 +107,8 @@ test('every refusal that prescribes a `descix <verb>` prescribes a REGISTERED on
 
   // SELF-CHECK: the gate must be able to tell a real verb from a fabricated one. Without this
   // row, an empty or broken tree would make every assertion below pass vacuously.
-  assert.ok(tree.has('app set-localpath'), 'command tree must contain a known-good verb');
+  assert.ok(tree.has('app set-port'), 'command tree must contain a known-good verb');
+  assert.ok(!tree.has('app set-localpath'), 'a DELETED verb (workspace v3) must not be registered — the control that the tree is read live');
   assert.ok(!tree.has('totally-bogus-verb'), 'command tree must NOT contain a fabricated verb');
   assert.ok(tree.size > 20, `command tree looks empty (${tree.size}) — the gate would pass vacuously`);
 

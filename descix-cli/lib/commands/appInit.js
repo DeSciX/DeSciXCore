@@ -12,27 +12,24 @@
 import chalk from 'chalk';
 import fs from 'fs/promises';
 import path from 'path';
-import { WorkspaceConfig, resolveWorkspacePath } from '../workspace-config.js';
+import { WorkspaceConfig, assertNoParentWorkspace } from '../workspace-config.js';
 import { refreshCommunityIdentity, printIdentityReceipt } from './communityIdentity.js';
 import { generateAgentFiles } from '../agent-files.js';
 
 /**
  * @param {Object} apiClient an authenticated DeSciXApiClient
- * @param {{app: string, community?: string, short?: string, overwrite?: boolean, kb?: string, path?: string}} options
+ * @param {{app: string, community?: string, short?: string, overwrite?: boolean, kb?: string}} options
  * @returns {Promise<{appId: string, communityId: string, appPath: string, kbId: string}>}
  */
 export async function runAppInit(apiClient, options) {
   let appId = options.app;
   const kbId = options.kb || 'General';
 
-  // Refuse an unusable -p BEFORE anything is written — server-side included. The same resolver
-  // the workspace loader applies on every read decides it, so a value accepted here is one the
-  // next read accepts too. Refusing only at registration came AFTER a `-c` create, leaving a
-  // platform app with no local registration (measured 2026-09-18, daita-docs).
-  const workspaceConfig = await WorkspaceConfig.tryLoad();
-  if (options.path) {
-    resolveWorkspacePath(workspaceConfig?.workspaceRoot || process.cwd(), options.path, appId);
-  }
+  // v3 single-app: THIS directory becomes (or already is) the workspace root. A workspace at an
+  // ANCESTOR is a refusal, loud, BEFORE anything is written anywhere — the walk-up used to
+  // silently register a nested checkout into the parent workspace (the measured trap).
+  await assertNoParentWorkspace(process.cwd());
+  const workspaceConfig = await WorkspaceConfig.tryLoad(process.cwd());
 
   // Resolve community_id from the Products registry to learn whether the app exists yet.
   let communityId;
@@ -74,26 +71,15 @@ export async function runAppInit(apiClient, options) {
     );
   }
 
-  // 1. Workspace.json — register app if not already mapped
-  const alreadyMapped = workspaceConfig?.getAppByAppId(appId);
-  let appPath = alreadyMapped?.absolutePath;
-
-  if (alreadyMapped && options.path) {
-    throw new Error(
-      `App '${appId}' is already mapped to '${alreadyMapped.localPath}'. ` +
-      `Use 'descix app set-localpath -a ${appId} -p <new-path>' to update.`
-    );
-  }
-
+  // 1. Workspace.json — THIS repo root is the workspace root and holds exactly this app (v3).
+  // registerApp is idempotent for the same id and REFUSES a different one: a repo that already
+  // holds another app errors loudly instead of being silently re-pointed.
   const wsRoot = workspaceConfig?.workspaceRoot || process.cwd();
-  if (!alreadyMapped) {
-    const localPath = options.path || '.';
-    const cfg = workspaceConfig || new WorkspaceConfig({}, wsRoot);
-    cfg.registerApp(communityId, appId, { localPath, kbId });
-    await cfg.save(wsRoot);
-    appPath = path.resolve(wsRoot, localPath);
-    console.log(chalk.gray(`  workspace.json updated: ${appId} → ${localPath}`));
-  }
+  const cfg = workspaceConfig || new WorkspaceConfig({ version: '3.0' }, wsRoot);
+  cfg.registerApp(communityId, appId, { kbId });
+  await cfg.save(wsRoot);
+  const appPath = wsRoot;
+  console.log(chalk.gray(`  workspace.json: env.app = ${appId} (this repo root)`));
 
   // 2. Create app folder structure (site, microservice, assets)
   const assetsDir = path.join(appPath, 'assets');
