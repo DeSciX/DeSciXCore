@@ -49,6 +49,18 @@ describe('scaffold microservice — scripts/register.js consumes the registratio
         assert.equal(manifest.service.domain, undefined);
     });
 
+    it('passes meshSelfUrl derived from utils.PORT (the config owner), with no port literal', () => {
+        // register() self-tests the RUNNING service; the origin must come from the same config
+        // the listener binds (app.js uses utils.PORT), never a literal.
+        assert.match(registerSrc, /meshSelfUrl:\s*`http:\/\/127\.0\.0\.1:\$\{utils\.PORT\}`/);
+        assert.doesNotMatch(registerSrc, /127\.0\.0\.1:\d+/, 'no literal port');
+        assert.doesNotMatch(registerSrc, /localhost:\d+/, 'no literal port');
+    });
+
+    it('the failure path prints the remedy: start the service, then re-run register', () => {
+        assert.match(registerSrc, /start the service \(npm run dev\), then re-run npm run register/);
+    });
+
     it('NEGATIVE CONTROL: this suite detects a reintroduced direct write', () => {
         // The same assertions, run against the shape they are meant to catch. Without this, a
         // regex that silently stopped matching anything would still report green.

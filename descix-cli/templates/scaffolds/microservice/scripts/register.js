@@ -23,6 +23,11 @@
  * (audience = CORE_API_URL). On Cloud Run that works with no setup. Under local developer ADC,
  * ID-token minting is unsupported without impersonation and this reports a named failure — it
  * does not fall back to anything.
+ *
+ * REGISTRATION TARGETS A RUNNING SERVICE. Before it registers, the bootstrap calls this service's
+ * own /api UNSIGNED and registers only if the mesh guard answers 401 (the mesh startup self-test).
+ * The origin it calls is derived from utils.PORT — the same config value app.js binds — so start
+ * the service (npm run dev) first, in the same checkout, then run this script.
  */
 
 import fs from 'fs';
@@ -51,12 +56,17 @@ async function register() {
         // Used ONLY to name the derived domain in a message. The platform, not this script,
         // owns the derivation.
         siteDomain: utils.SITE_DOMAIN,
+        // The running service's own listener, from the config owner app.js binds (utils.PORT).
+        meshSelfUrl: `http://127.0.0.1:${utils.PORT}`,
     });
 
     const result = await bootstrap.register();
 
     if (result.status !== 'ok') {
         console.error(`[Register] ${manifest.service.name}: registration ${result.status} — ${result.error || result.reason}`);
+        if (String(result.error || result.reason).includes('mesh self-test FAILED')) {
+            console.error('[Register] REMEDY: start the service (npm run dev), then re-run npm run register');
+        }
         process.exit(1);
     }
     console.log(`[Register] SUCCESS: ${manifest.service.name} registered via register_service`);
