@@ -23,7 +23,8 @@ import { generateAgentFiles } from '../agent-files.js';
  */
 export async function runAppInit(apiClient, options) {
   let appId = options.app;
-  const kbId = options.kb || 'General';
+  let kbId = options.kb || 'General';
+  let createdHere = false;
 
   // v3 single-app: THIS directory becomes (or already is) the workspace root. A workspace at an
   // ANCESTOR is a refusal, loud, BEFORE anything is written anywhere — the walk-up used to
@@ -59,6 +60,7 @@ export async function runAppInit(apiClient, options) {
     const created = response.message || response;
     appId = created.app_id || appId;
     communityId = created.community_id || options.community;
+    createdHere = true;
     console.log(chalk.green(`\n✅ App created: ${appId}`));
     if (appId !== options.app) {
       console.log(chalk.gray(`  The platform composed the id from the community and the name you gave.`));
@@ -69,6 +71,35 @@ export async function runAppInit(apiClient, options) {
       `App '${appId}' already exists in community '${communityId}', not '${options.community}'. ` +
       `Omit -c to initialize the existing app.`
     );
+  }
+
+  // MAPPING AN EXISTING APP ADOPTS ITS KNOWLEDGE BASES AND NEVER CREATES ONE (measured
+  // 2026-10-10: mapping `egpt` without --kb created an empty `General` on PROD beside its
+  // real `Corpus`). One existing KB → adopted; several → --kb must name one of THEM; a named
+  // KB that does not exist is a refusal, never a create. Only the CREATE leg above may create,
+  // because only a brand-new app has nothing to adopt.
+  if (!createdHere) {
+    const kbResp = await apiClient.invoke('list_knowledge_bases', { community_id: communityId, app_id: appId });
+    const existingKbs = ((kbResp.message || kbResp).knowledge_bases || []).map((kb) => kb.name);
+    if (options.kb) {
+      if (!existingKbs.includes(options.kb)) {
+        throw new Error(
+          `App '${appId}' has no KB named '${options.kb}' — it has: ${existingKbs.join(', ') || '(none)'}.\n` +
+          `Mapping an existing app never creates a KB; name one that exists with --kb, or create ` +
+          `one deliberately with its own verb.`
+        );
+      }
+      kbId = options.kb;
+    } else if (existingKbs.length === 1) {
+      kbId = existingKbs[0];
+    } else if (existingKbs.length > 1) {
+      throw new Error(
+        `App '${appId}' has ${existingKbs.length} knowledge bases: ${existingKbs.join(', ')}.\n` +
+        `Name the one this repo syncs with --kb <name>.`
+      );
+    }
+    // zero KBs: every app is guaranteed a default KB at creation, so an empty list is a
+    // platform-side anomaly — keep the declared kbId and let the sync surface report it.
   }
 
   // 1. Workspace.json — THIS repo root is the workspace root and holds exactly this app (v3).
@@ -100,9 +131,12 @@ export async function runAppInit(apiClient, options) {
   }
   console.log(chalk.gray(`  Created: site/, microservice/, assets/`));
 
-  // 3. Create KnowledgeBase Firestore doc (Git Mode — no Drive required)
-  const kbResponse = await apiClient.invoke('init_git_mode_kb', { app_id: appId, kb_name: kbId });
-  const kbResult = kbResponse.message || kbResponse;
+  // 3. The default KB — CREATE leg only (see the adopt block above: map never creates).
+  let kbResult = null;
+  if (createdHere) {
+    const kbResponse = await apiClient.invoke('init_git_mode_kb', { app_id: appId, kb_name: kbId });
+    kbResult = kbResponse.message || kbResponse;
+  }
 
   console.log(chalk.green(`\n✓ ${appId} initialized`));
   console.log(chalk.gray(`  Community: ${communityId}`));
@@ -119,7 +153,7 @@ export async function runAppInit(apiClient, options) {
       console.log(chalk.gray(`    Retry with: descix community refresh-identity -c ${communityId}`));
     }
   }
-  console.log(chalk.gray(`  KB: ${kbId} — ${kbResult.created ? 'created' : 'already exists'}\n`));
+  console.log(chalk.gray(`  KB: ${kbId} — ${kbResult ? (kbResult.created ? 'created' : 'already exists') : 'adopted (existing app; map never creates)'}\n`));
   console.log(chalk.gray(`  (every app is guaranteed a default KB at creation; an empty one`));
   console.log(chalk.gray(`   says so rather than answering from general knowledge)\n`));
 
