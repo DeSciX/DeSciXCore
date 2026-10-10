@@ -24,10 +24,9 @@ import { resolveOrigin } from './origin.js';
 /**
  * Read the workspace's identity from a parsed `.descix/workspace.json`.
  *
- * The key order below mirrors `WorkspaceConfig.registerApp()` — `env.platform` for the
- * workspace's own platform app, then `env.products[]` for a registered product, then the
- * legacy `defaultContext`. If that order ever diverges from the writer's, the agent files go
- * wrong again, so the two are commented as a pair.
+ * v3 single-app: the one key the writer (`WorkspaceConfig.registerApp()`) writes is `env.app`,
+ * so that is the one key read here — writer and reader are a pair. The legacy `defaultContext`
+ * survives as the last resort for files written before the env block existed.
  *
  * @param {object} config - the PARSED workspace.json (not a WorkspaceConfig instance, so that
  *                          `agent-files.js` can stay usable from the VS Code extension where it
@@ -37,22 +36,16 @@ import { resolveOrigin } from './origin.js';
  */
 export function readIdentity(config = {}) {
     const env = config.env || {};
-    const platform = env.platform || {};
-    const products = Array.isArray(env.products) ? env.products : [];
-    // The first registered product is the workspace's app when there is no platform app. A
-    // workspace with several products has no single identity, and `init` only ever writes one.
-    const product = products[0] || {};
+    const app = env.app || {};
     const legacy = config.defaultContext || {};
 
     const appId =
-        platform.appId ||
-        product.appId ||
+        app.appId ||
         legacy.appId ||
         null;
 
     const communityId =
-        platform.communityId ||
-        product.communityId ||
+        app.communityId ||
         legacy.communityId ||
         config.primaryCommunity ||
         null;
