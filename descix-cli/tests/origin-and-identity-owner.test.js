@@ -359,6 +359,8 @@ test('GATE I2-writer-stores-community: app init records the community, and the i
 // returned — never a placeholder, and never an origin that contradicts the configuration. The
 // second fixture is what makes it discriminate: a generator that simply hardcoded the prod
 // origin would pass the first fixture and FAIL the second.
+const RUNBOOK_URL = 'https://descix.net/prod/daita-docs/site/app-sdk/app-developer-runbook.html';
+
 test('GATE I2-agent-files-name-the-developer: real ids, no my-app, and the RESOLVED origin', async () => {
     const generated = ['CLAUDE.md', '.cursorrules', '.clinerules', '.github/copilot-instructions.md'];
 
@@ -393,7 +395,9 @@ test('GATE I2-agent-files-name-the-developer: real ids, no my-app, and the RESOL
             const text = fs.readFileSync(path.join(dirB, f), 'utf8');
             assert.ok(text.includes('https://dev.descix.net'),
                 `${f} does not name the DEV origin this workspace was pointed at`);
-            assert.ok(!text.includes(PROD_ORIGIN),
+            // The CLAUDE.md handbook line carries the live runbook URL, which sits on the prod host
+            // by design; it is a doc address, not the workspace origin, so it is set aside here.
+            assert.ok(!text.replaceAll(RUNBOOK_URL, '').includes(PROD_ORIGIN),
                 `${f} names the PRODUCTION origin although this workspace was pointed at DEV — ` +
                 'the generator is not reading the resolved origin');
         }
