@@ -40,6 +40,79 @@ import {
     validateManifest,
 } from '../manifest/index.js';
 import { resolveServiceDomain } from '../naming/index.js';
+import { MESH_API_PATH } from '../meshApi.js';
+
+/**
+ * The reserved path segment the mesh self-test POSTs to. It is deliberately NOT a manifest
+ * command: if the guard were absent the probe would otherwise EXECUTE a real handler as an
+ * anonymous caller. Under the guard it never reaches the router at all.
+ */
+export const MESH_SELF_TEST_COMMAND = '__mesh_self_test__';
+
+/** Upper bound on the self-call. A listener that does not answer in time is a refusal, not a pass. */
+export const MESH_SELF_TEST_TIMEOUT_MS = 5000;
+
+/**
+ * THE MESH SELF-TEST. Call this service's own mesh endpoint UNSIGNED and require the mesh guard's
+ * refusal: HTTP 401 whose JSON body carries a `MESH_CTX_*` code (the code is what tells the
+ * guard's 401 from an application's own 401). Anything else means this process would serve its
+ * mesh-proxied /api surface to anyone, or cannot prove it does not.
+ *
+ * The self-call is a real HTTP request to `meshSelfUrl` (the service's own listener), never an
+ * in-process shortcut: it tests the stack that actually serves the mesh.
+ *
+ * @param {Object} o
+ * @param {string} o.meshSelfUrl  origin of this service's own listener, e.g. http://127.0.0.1:8080
+ * @param {string} o.name         service name, for messages
+ * @param {number} [o.timeoutMs]
+ * @returns {Promise<void>} resolves only on the guard's 401
+ * @throws {Error} on every other outcome, naming the outcome and the remedy
+ */
+export async function assertMeshGuardActive({ meshSelfUrl, name, timeoutMs = MESH_SELF_TEST_TIMEOUT_MS }) {
+    const url = `${meshSelfUrl.replace(/\/+$/, '')}${MESH_API_PATH}/${MESH_SELF_TEST_COMMAND}`;
+    const refusal = (what) => new Error(
+        `mesh self-test FAILED for '${name}': ${what} (POST ${url}, unsigned). Refusing to register: ` +
+        `a service registers only after proving its own ${MESH_API_PATH} refuses unsigned callers.`
+    );
+
+    let response;
+    try {
+        response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{}',
+            redirect: 'manual',
+            signal: AbortSignal.timeout(timeoutMs),
+        });
+    } catch (err) {
+        throw refusal(
+            `the service could not reach itself (${err.cause?.code || err.name}: ${err.message}) — ` +
+            'call register() only after the listener is up, and pass the origin of that listener as meshSelfUrl; ' +
+            'a self-test that cannot run does not pass'
+        );
+    }
+
+    let body = null;
+    try {
+        body = await response.json();
+    } catch (parseErr) {
+        body = null;
+    }
+
+    if (response.status === 401 && typeof body?.code === 'string' && body.code.startsWith('MESH_CTX_')) return;
+
+    if (response.status === 401) {
+        throw refusal(
+            `HTTP 401 without a MESH_CTX_* code — the 401 is not the mesh guard's (got ${JSON.stringify(body)}); ` +
+            `mount the guard with mountMeshApi(app, router) from @descix/cloud-core`
+        );
+    }
+    throw refusal(
+        `HTTP ${response.status} — the mesh guard is NOT mounted on ${MESH_API_PATH}; this service would ` +
+        `serve its mesh surface to unsigned callers. Mount it with mountMeshApi(app, router) from ` +
+        `@descix/cloud-core after initializeCloudConfig()`
+    );
+}
 
 /**
  * Mint an `Authorization: Bearer <id_token>` header for `audienceUrl` from Application Default
@@ -135,6 +208,12 @@ function describeRegisterReply(body) {
  *                                         and in refusals so an operator knows which key to set.
  * @param {string} [options.coreApiUrl]    The env-correct Cloud apifront URL. REQUIRED when
  *                                         `selfRegister` is true; no hardcoded default exists.
+ * @param {string} [options.meshSelfUrl]   REQUIRED when `selfRegister` is true. The origin of THIS
+ *                                         service's own listener (e.g. `http://127.0.0.1:${PORT}`).
+ *                                         `register()` POSTs it an unsigned request on the mesh
+ *                                         endpoint and registers only if the mesh guard answers 401
+ *                                         (assertMeshGuardActive). There is no flag to skip it.
+ * @param {number} [options.meshSelfTestTimeoutMs=MESH_SELF_TEST_TIMEOUT_MS] Bound on the self-call.
  * @param {string} [options.siteDomain]    The env-owned SITE_DOMAIN (e.g. 'dev.descix.net'). Used
  *                                         ONLY to NAME the derived domain — the authoritative
  *                                         derivation happens at registration, in the platform. When
@@ -156,6 +235,8 @@ export function createServiceBootstrap(options = {}) {
         selfRegisterConfigKey = 'SERVICE_SELF_REGISTER',
         coreApiUrl = null,
         siteDomain = null,
+        meshSelfUrl = null,
+        meshSelfTestTimeoutMs = MESH_SELF_TEST_TIMEOUT_MS,
         fetchImpl = fetch,
         identityHeaderProvider = mintServiceIdentityHeaders,
         logger = console,
@@ -201,6 +282,15 @@ export function createServiceBootstrap(options = {}) {
             `— it is the apifront endpoint this service registers against and the OIDC audience the ` +
             `identity token is minted for. Set it in defaults-config-{env}.json, or set ` +
             `\`${selfRegisterConfigKey}\` to false. Refusing to fall back to any hardcoded URL.`
+        );
+    }
+
+    if (selfRegister && !meshSelfUrl) {
+        throw new Error(
+            `[service-bootstrap] \`meshSelfUrl\` is required when \`${selfRegisterConfigKey}\` is true — ` +
+            `the origin of this service's own listener. Before registering, register() calls it unsigned on ` +
+            `${MESH_API_PATH}/ and refuses to register unless the mesh guard (mountMeshApi) answers 401. ` +
+            `No default exists and the check cannot be skipped.`
         );
     }
 
@@ -261,6 +351,10 @@ export function createServiceBootstrap(options = {}) {
         );
 
         try {
+            // Gate: prove the guard is live on THIS process before it enters the mesh. Inside the
+            // try, so a refusal is settled `failed` on /health and logged, never swallowed.
+            await assertMeshGuardActive({ meshSelfUrl, name, timeoutMs: meshSelfTestTimeoutMs });
+
             const headers = { 'Content-Type': 'application/json' };
             Object.assign(headers, await identityHeaderProvider(coreApiUrl));
 

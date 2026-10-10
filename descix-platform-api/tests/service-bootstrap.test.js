@@ -6,7 +6,7 @@
  * `skipped` is reachable only from an explicit named opt-out.
  */
 
-import { test, describe } from 'node:test';
+import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import {
     createServiceBootstrap,
@@ -15,6 +15,11 @@ import {
 // The hash is owned by the manifest module, beside computeManifestHash — one place to look for
 // "hash a manifest". service-bootstrap consumes it; it does not implement it.
 import { computeManifestObjectHash } from '../src/manifest/index.js';
+import { startGuardedListener } from './helpers/guarded-listener.js';
+
+let listener;
+before(async () => { listener = await startGuardedListener(); });
+after(() => listener.close());
 
 const MANIFEST = () => ({
     service: { name: 'testsvc', version: '3.11.0', domain: 'testsvc.dev.descix.net', debugPort: 3011 },
@@ -97,7 +102,7 @@ describe('createServiceBootstrap — one object, served and registered', () => {
     test('the registered payload is that same manifest', async () => {
         const fetchImpl = stubFetch(okResponse);
         const b = createServiceBootstrap({
-            manifest: MANIFEST(), selfRegister: true, coreApiUrl: 'https://stub/apifront',
+            manifest: MANIFEST(), selfRegister: true, coreApiUrl: 'https://stub/apifront', meshSelfUrl: listener.origin,
             fetchImpl, identityHeaderProvider: stubIdentity, logger: quietLogger,
         });
         await b.register();
@@ -127,7 +132,7 @@ describe('createServiceBootstrap — registration outcome is never swallowed', (
     test('success => ok, with the version and a timestamp, and it authorizes as the platform SA', async () => {
         const fetchImpl = stubFetch(okResponse);
         const b = createServiceBootstrap({
-            manifest: MANIFEST(), selfRegister: true, coreApiUrl: 'https://stub/apifront',
+            manifest: MANIFEST(), selfRegister: true, coreApiUrl: 'https://stub/apifront', meshSelfUrl: listener.origin,
             fetchImpl, identityHeaderProvider: stubIdentity, logger: quietLogger,
         });
         const reg = await b.register();
@@ -140,7 +145,7 @@ describe('createServiceBootstrap — registration outcome is never swallowed', (
 
     test('NEGATIVE CONTROL — a platform-side refusal => failed, carrying the error text', async () => {
         const b = createServiceBootstrap({
-            manifest: MANIFEST(), selfRegister: true, coreApiUrl: 'https://stub/apifront',
+            manifest: MANIFEST(), selfRegister: true, coreApiUrl: 'https://stub/apifront', meshSelfUrl: listener.origin,
             fetchImpl: stubFetch(() => ({
                 status: 200,
                 json: async () => ({ status: 'ERROR', message: 'Authentication required' }),
@@ -154,7 +159,7 @@ describe('createServiceBootstrap — registration outcome is never swallowed', (
 
     test('NEGATIVE CONTROL — a transport error => failed, not a throw', async () => {
         const b = createServiceBootstrap({
-            manifest: MANIFEST(), selfRegister: true, coreApiUrl: 'https://stub/apifront',
+            manifest: MANIFEST(), selfRegister: true, coreApiUrl: 'https://stub/apifront', meshSelfUrl: listener.origin,
             fetchImpl: async () => { throw new Error('ECONNREFUSED stub'); },
             identityHeaderProvider: stubIdentity, logger: quietLogger,
         });
@@ -165,7 +170,7 @@ describe('createServiceBootstrap — registration outcome is never swallowed', (
 
     test('NEGATIVE CONTROL — an unmintable identity => failed, naming the mint failure', async () => {
         const b = createServiceBootstrap({
-            manifest: MANIFEST(), selfRegister: true, coreApiUrl: 'https://stub/apifront',
+            manifest: MANIFEST(), selfRegister: true, coreApiUrl: 'https://stub/apifront', meshSelfUrl: listener.origin,
             fetchImpl: stubFetch(okResponse),
             identityHeaderProvider: async () => { throw new Error('local ADC cannot mint an ID token'); },
             logger: quietLogger,
@@ -178,7 +183,7 @@ describe('createServiceBootstrap — registration outcome is never swallowed', (
 
     test('NEGATIVE CONTROL — a non-JSON response => failed, naming the parse failure', async () => {
         const b = createServiceBootstrap({
-            manifest: MANIFEST(), selfRegister: true, coreApiUrl: 'https://stub/apifront',
+            manifest: MANIFEST(), selfRegister: true, coreApiUrl: 'https://stub/apifront', meshSelfUrl: listener.origin,
             fetchImpl: stubFetch(() => ({
                 status: 502,
                 json: async () => { throw new Error('Unexpected token < in JSON'); },
@@ -193,7 +198,7 @@ describe('createServiceBootstrap — registration outcome is never swallowed', (
     test('a failure LOGS loudly — it is not merely recorded', async () => {
         const errors = [];
         const b = createServiceBootstrap({
-            manifest: MANIFEST(), selfRegister: true, coreApiUrl: 'https://stub/apifront',
+            manifest: MANIFEST(), selfRegister: true, coreApiUrl: 'https://stub/apifront', meshSelfUrl: listener.origin,
             fetchImpl: async () => { throw new Error('boom'); },
             identityHeaderProvider: stubIdentity,
             logger: { log() {}, error: (m) => errors.push(m) },
