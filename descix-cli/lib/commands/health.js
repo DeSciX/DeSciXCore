@@ -36,7 +36,7 @@ import { promisify } from 'util';
 import { localUpstreamOrigin, resolveGatewayPort } from '@descix/app-sdk/dev';
 import https from 'https';
 import http from 'http';
-import { WorkspaceConfig } from '../workspace-config.js';
+import { WorkspaceConfig, resolveLocalApps } from '../workspace-config.js';
 
 const execAsync = promisify(exec);
 
@@ -109,47 +109,27 @@ function defaultHttpsProbe(url, timeoutMs = 8000, { insecure = false } = {}) {
  */
 function buildServiceRegistry(wsConfig) {
     const services = [];
-    const env = wsConfig.env || {};
 
-    if (env.platform) {
-        const name = env.platform.appId || 'platform';
-        if (env.platform.microservice?.port) {
+    // The local app set has ONE owner (workspaceApps, v3 fork (b)): this workspace's own
+    // env.app plus every repo env.gateway lists, each read from its OWN workspace.json.
+    const { apps } = resolveLocalApps(wsConfig);
+    for (const app of apps) {
+        if (app.microservice?.port) {
             services.push({
-                name,
-                appId: env.platform.appId,
-                port: env.platform.microservice.port,
+                name: app.appId,
+                appId: app.appId,
+                port: app.microservice.port,
                 type: 'microservice',
-                origin: localUpstreamOrigin(env.platform.microservice, 'env.platform.microservice'),
+                origin: localUpstreamOrigin(app.microservice, `env.app.microservice (${app.appId})`),
             });
         }
-        if (env.platform.site?.port) {
+        if (app.site?.port) {
             services.push({
-                name: `${name}-site`,
-                appId: env.platform.appId,
-                port: env.platform.site.port,
+                name: `${app.appId}-site`,
+                appId: app.appId,
+                port: app.site.port,
                 type: 'site',
-                origin: localUpstreamOrigin(env.platform.site, 'env.platform.site'),
-            });
-        }
-    }
-
-    for (const product of (env.products || [])) {
-        if (product.microservice?.port) {
-            services.push({
-                name: product.appId,
-                appId: product.appId,
-                port: product.microservice.port,
-                type: 'microservice',
-                origin: localUpstreamOrigin(product.microservice, `env.products[${product.appId}].microservice`),
-            });
-        }
-        if (product.site?.port) {
-            services.push({
-                name: `${product.appId}-site`,
-                appId: product.appId,
-                port: product.site.port,
-                type: 'site',
-                origin: localUpstreamOrigin(product.site, `env.products[${product.appId}].site`),
+                origin: localUpstreamOrigin(app.site, `env.app.site (${app.appId})`),
             });
         }
     }
@@ -279,15 +259,9 @@ async function probeGcloudAuth(execFn) {
  * - prod: only descix/egpt/powch (cutover #1 in-scope); raise on out-of-scope filter
  */
 function resolveAppsForCloudProbe(env, wsConfig, filterAppId) {
-    const allApps = [];
-    if (wsConfig.env?.platform?.appId) {
-        allApps.push(wsConfig.env.platform.appId);
-    }
-    for (const product of (wsConfig.env?.products || [])) {
-        if (product.appId) allApps.push(product.appId);
-    }
-    // Dedupe
-    const unique = [...new Set(allApps)];
+    // The app set has ONE owner (workspaceApps): env.app + every repo env.gateway lists.
+    const { apps } = resolveLocalApps(wsConfig);
+    const unique = [...new Set(apps.map(a => a.appId))];
 
     if (env === 'prod') {
         // PROD scope guard: only in-scope hosts allowed.

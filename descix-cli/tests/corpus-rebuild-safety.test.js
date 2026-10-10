@@ -100,7 +100,7 @@ class SpyApiClient {
 async function makeFixture(t, { branch = 'main', files = { 'docs/intro.md': '# Hello\n' } } = {}) {
   const wsRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'corpus-safety-'));
   const appId = 'testapp-corpus-safety';
-  const appRoot = path.join(wsRoot, 'apps', appId);
+  const appRoot = wsRoot; // v3: the app repo root IS the workspace root
 
   await fs.mkdir(path.join(wsRoot, '.descix'), { recursive: true });
   await fs.mkdir(path.join(appRoot, '.descix', 'manifests'), { recursive: true });
@@ -115,20 +115,20 @@ async function makeFixture(t, { branch = 'main', files = { 'docs/intro.md': '# H
   const manifest = {
     kb_name: 'Corpus',
     sync_mode: 'local',
-    sources: [{ path: `apps/${appId}/docs`, tier: 1, doc_type: 'documentation' }]
+    sources: [{ path: 'docs', tier: 1, doc_type: 'documentation' }]
   };
   await fs.writeFile(
     path.join(appRoot, '.descix', 'manifests', 'Corpus.json'),
     JSON.stringify(manifest, null, 2)
   );
 
-  // Workspace.json (v2.1)
+  // Workspace.json (v3)
   const workspace = {
-    version: '2.1',
+    version: '3.0',
     workspaceRoot: wsRoot,
     type: 'workspace',
     env: {
-      products: [{ appId, localPath: `apps/${appId}`, kbId: 'Corpus' }]
+      app: { appId, communityId: 'testcomm', kbId: 'Corpus' }
     }
   };
   await fs.writeFile(
@@ -204,7 +204,7 @@ test('A2 — dry-run with NO drift exits 0 (drift=false)', async (t) => {
   // To get drift=false we use --dry-run WITHOUT --rebuild and pre-seed local
   // sync state to match the walk.
   // Compute the blob SHAs the walker WOULD produce:
-  const blobShas = execSync('git rev-parse HEAD:apps/testapp-corpus-safety/docs/intro.md', {
+  const blobShas = execSync('git rev-parse HEAD:docs/intro.md', {
     cwd: process.cwd(), encoding: 'utf-8'
   }).trim();
   // Pre-seed sync state with matching blob SHA so the file is "unchanged".
@@ -214,7 +214,7 @@ test('A2 — dry-run with NO drift exits 0 (drift=false)', async (t) => {
   // correctly treated as belonging to no origin and forces a full walk — which would make this
   // no-drift fixture unable to produce no drift.
   const spy = new SpyApiClient({ registeredKbs: ['Corpus'], remoteFileIds: [] });
-  const seedPath = syncStatePath(path.join(process.cwd(), 'apps', appId), 'Corpus', await spy.ensureBaseUrl());
+  const seedPath = syncStatePath(process.cwd(), 'Corpus', await spy.ensureBaseUrl());
   await fs.mkdir(path.dirname(seedPath), { recursive: true });
   await fs.writeFile(
     seedPath,

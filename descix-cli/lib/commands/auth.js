@@ -22,9 +22,18 @@ const POLL_INTERVAL_MS = 3000; // 3 seconds
 const MAX_POLL_TIME_MS = 15 * 60 * 1000; // 15 minutes
 
 /**
- * Open browser to URL
+ * Open browser to URL — INTERACTIVE SESSIONS ONLY.
+ *
+ * A non-interactive invocation (a spawned test harness, CI, any piped run) must NEVER reach
+ * into the operator's live browser: measured 2026-10-10, the CLI test suite repeatedly seized
+ * the CEO's active tab because every spawned `quickstart`/`login` walked straight into the
+ * device flow's `open`. No TTY on stdout = print the URL, open nothing. DESCIX_NO_BROWSER=1
+ * forces the same for interactive runs that want it.
  */
 async function openBrowser(url) {
+  if (!process.stdout.isTTY || process.env.DESCIX_NO_BROWSER === '1') {
+    return false; // the caller already prints the URL on a false return
+  }
   const platform = process.platform;
   let command;
   

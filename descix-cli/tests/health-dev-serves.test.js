@@ -19,15 +19,20 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { runHealth } from '../lib/commands/health.js';
+import { WorkspaceConfig } from '../lib/workspace-config.js';
+import { makeV3Tree } from './tools/v3-tree.mjs';
 
-function ws({ gatewayPort = 5599, products = [] } = {}) {
-    return {
-        env: {
-            gateway: { port: gatewayPort },
-            platform: { appId: 'daita', microservice: { port: 4000 }, site: { port: 5174 } },
-            products,
-        },
-    };
+/**
+ * A real v3 tree on disk, loaded through WorkspaceConfig.load: the daita app (microservice
+ * 4000, site 5174) is the workspace's own env.app. The service set is whatever
+ * resolveWorkspaceApps makes of it — never hand-expanded here.
+ */
+async function ws(t, { gatewayPort = 5599 } = {}) {
+    const { dir } = await makeV3Tree(t, {
+        env: { app: { appId: 'daita', microservice: { port: 4000 }, site: { port: 5174 } } },
+        gateway: { port: gatewayPort },
+    });
+    return WorkspaceConfig.load(dir);
 }
 
 /** lsof mock: every port listed in `listening` reads as bound. */
@@ -75,14 +80,14 @@ const byName = (result, name) => result.services.find((s) => s.service === name)
 
 // ------------------------------------------------------------------ the defect, as a RED
 
-test('a BOUND port whose health route answers 500 is NOT healthy (the measured defect)', async () => {
+test('a BOUND port whose health route answers 500 is NOT healthy (the measured defect)', async (t) => {
     const probe = http({
         'https://localhost:4000/manifest': manifest('/api/health'),
         'https://localhost:4000/api/health': { status: 500, body: 'boom' },
         'https://localhost:5174/': html,
         'https://localhost:5599/__descix/app-binding.json': binding,
     });
-    const { result } = await run({ _wsConfig: ws(), _exec: lsof([4000, 5174, 5599]), _httpsProbe: probe });
+    const { result } = await run({ _wsConfig: await ws(t), _exec: lsof([4000, 5174, 5599]), _httpsProbe: probe });
     const daita = byName(result, 'daita');
     assert.equal(daita.bound, true, 'lsof says bound');
     assert.equal(daita.serves, false, 'a 500 on its declared health route is not serving');
@@ -90,48 +95,48 @@ test('a BOUND port whose health route answers 500 is NOT healthy (the measured d
     assert.equal(result.all_healthy, false);
 });
 
-test('positive control: the same service answering 200 on its declared route IS healthy', async () => {
+test('positive control: the same service answering 200 on its declared route IS healthy', async (t) => {
     const probe = http({
         'https://localhost:4000/manifest': manifest('/api/health'),
         'https://localhost:4000/api/health': { status: 200, body: 'OK' },
         'https://localhost:5174/': html,
         'https://localhost:5599/__descix/app-binding.json': binding,
     });
-    const { result } = await run({ _wsConfig: ws(), _exec: lsof([4000, 5174, 5599]), _httpsProbe: probe });
+    const { result } = await run({ _wsConfig: await ws(t), _exec: lsof([4000, 5174, 5599]), _httpsProbe: probe });
     assert.equal(byName(result, 'daita').healthy, true);
     assert.equal(result.all_healthy, true);
 });
 
 // ------------------------------------------------------------------ the owner is the manifest
 
-test('the health path comes from the served manifest, never from an assumed /health', async () => {
+test('the health path comes from the served manifest, never from an assumed /health', async (t) => {
     const probe = http({
         'https://localhost:4000/manifest': manifest('/api/health'),
         'https://localhost:4000/api/health': { status: 200, body: 'OK' },
         'https://localhost:5174/': html,
         'https://localhost:5599/__descix/app-binding.json': binding,
     });
-    await run({ _wsConfig: ws(), _exec: lsof([4000, 5174, 5599]), _httpsProbe: probe });
+    await run({ _wsConfig: await ws(t), _exec: lsof([4000, 5174, 5599]), _httpsProbe: probe });
     assert.ok(probe.calls.includes('https://localhost:4000/api/health'), 'probed the declared route');
     assert.ok(!probe.calls.includes('https://localhost:4000/health'), 'never guessed /health (404 on cloud)');
 });
 
-test('a bound service that serves no /manifest is NOT healthy and says why', async () => {
+test('a bound service that serves no /manifest is NOT healthy and says why', async (t) => {
     const probe = http({ 'https://localhost:5174/': html, 'https://localhost:5599/__descix/app-binding.json': binding });
-    const { result } = await run({ _wsConfig: ws(), _exec: lsof([4000, 5174, 5599]), _httpsProbe: probe });
+    const { result } = await run({ _wsConfig: await ws(t), _exec: lsof([4000, 5174, 5599]), _httpsProbe: probe });
     const daita = byName(result, 'daita');
     assert.equal(daita.bound, true);
     assert.equal(daita.serves, false);
     assert.match(daita.serves_probe, /\/manifest/);
 });
 
-test('a service whose manifest names no healthEndpoint is NOT healthy and names the field', async () => {
+test('a service whose manifest names no healthEndpoint is NOT healthy and names the field', async (t) => {
     const probe = http({
         'https://localhost:4000/manifest': { status: 200, body: JSON.stringify({ service: { name: 'cloud' } }) },
         'https://localhost:5174/': html,
         'https://localhost:5599/__descix/app-binding.json': binding,
     });
-    const { result } = await run({ _wsConfig: ws(), _exec: lsof([4000, 5174, 5599]), _httpsProbe: probe });
+    const { result } = await run({ _wsConfig: await ws(t), _exec: lsof([4000, 5174, 5599]), _httpsProbe: probe });
     const daita = byName(result, 'daita');
     assert.equal(daita.serves, false);
     assert.match(daita.serves_probe, /healthEndpoint/);
@@ -139,14 +144,14 @@ test('a service whose manifest names no healthEndpoint is NOT healthy and names 
 
 // ------------------------------------------------------------------ the gateway row
 
-test('the gateway has a row from env.gateway.port, probed on its own binding path', async () => {
+test('the gateway has a row from env.gateway.port, probed on its own binding path', async (t) => {
     const probe = http({
         'https://localhost:4000/manifest': manifest('/api/health'),
         'https://localhost:4000/api/health': { status: 200, body: 'OK' },
         'https://localhost:5174/': html,
         'https://localhost:5599/__descix/app-binding.json': binding,
     });
-    const { result } = await run({ _wsConfig: ws(), _exec: lsof([4000, 5174, 5599]), _httpsProbe: probe });
+    const { result } = await run({ _wsConfig: await ws(t), _exec: lsof([4000, 5174, 5599]), _httpsProbe: probe });
     const gw = byName(result, 'gateway');
     assert.ok(gw, 'gateway row exists');
     assert.equal(gw.port, 5599);
@@ -155,7 +160,7 @@ test('the gateway has a row from env.gateway.port, probed on its own binding pat
     assert.ok(probe.calls.includes('https://localhost:5599/__descix/app-binding.json'));
 });
 
-test('a vite dev server squatting on the gateway port is NOT a healthy gateway (HTML, not a binding)', async () => {
+test('a vite dev server squatting on the gateway port is NOT a healthy gateway (HTML, not a binding)', async (t) => {
     const probe = http({
         'https://localhost:4000/manifest': manifest('/api/health'),
         'https://localhost:4000/api/health': { status: 200, body: 'OK' },
@@ -163,19 +168,19 @@ test('a vite dev server squatting on the gateway port is NOT a healthy gateway (
         // vite answers 200 with index.html for ANY path — a status-only probe would call this healthy
         'https://localhost:5599/__descix/app-binding.json': html,
     });
-    const { result } = await run({ _wsConfig: ws(), _exec: lsof([4000, 5174, 5599]), _httpsProbe: probe });
+    const { result } = await run({ _wsConfig: await ws(t), _exec: lsof([4000, 5174, 5599]), _httpsProbe: probe });
     const gw = byName(result, 'gateway');
     assert.equal(gw.bound, true);
     assert.equal(gw.serves, false);
 });
 
-test('gateway down: bound=false, serves=false, and the run is not all_healthy', async () => {
+test('gateway down: bound=false, serves=false, and the run is not all_healthy', async (t) => {
     const probe = http({
         'https://localhost:4000/manifest': manifest('/api/health'),
         'https://localhost:4000/api/health': { status: 200, body: 'OK' },
         'https://localhost:5174/': html,
     });
-    const { result } = await run({ _wsConfig: ws(), _exec: lsof([4000, 5174]), _httpsProbe: probe });
+    const { result } = await run({ _wsConfig: await ws(t), _exec: lsof([4000, 5174]), _httpsProbe: probe });
     const gw = byName(result, 'gateway');
     assert.equal(gw.bound, false);
     assert.equal(gw.serves, false);
@@ -184,30 +189,30 @@ test('gateway down: bound=false, serves=false, and the run is not all_healthy', 
 
 // ------------------------------------------------------------------ boundary + format
 
-test('the command prints its coverage boundary on GREEN and on RED, and JSON carries it', async () => {
+test('the command prints its coverage boundary on GREEN and on RED, and JSON carries it', async (t) => {
     const green = http({
         'https://localhost:4000/manifest': manifest('/api/health'),
         'https://localhost:4000/api/health': { status: 200, body: 'OK' },
         'https://localhost:5174/': html,
         'https://localhost:5599/__descix/app-binding.json': binding,
     });
-    const g = await run({ _wsConfig: ws(), _exec: lsof([4000, 5174, 5599]), _httpsProbe: green });
+    const g = await run({ _wsConfig: await ws(t), _exec: lsof([4000, 5174, 5599]), _httpsProbe: green });
     assert.ok(g.lines.some((l) => /Not probed:/.test(l)), 'boundary printed on green');
     assert.match(g.result.probe_boundary, /Not probed:/);
 
     const red = http({ 'https://localhost:5174/': html });
-    const r = await run({ _wsConfig: ws(), _exec: lsof([5174]), _httpsProbe: red });
+    const r = await run({ _wsConfig: await ws(t), _exec: lsof([5174]), _httpsProbe: red });
     assert.ok(r.lines.some((l) => /Not probed:/.test(l)), 'boundary printed on red');
 });
 
-test('every probe line still matches `PASS|FAIL <name> [dev] (<probe>)` and names bound + serves', async () => {
+test('every probe line still matches `PASS|FAIL <name> [dev] (<probe>)` and names bound + serves', async (t) => {
     const probe = http({
         'https://localhost:4000/manifest': manifest('/api/health'),
         'https://localhost:4000/api/health': { status: 500, body: '' },
         'https://localhost:5174/': html,
         'https://localhost:5599/__descix/app-binding.json': binding,
     });
-    const { lines } = await run({ _wsConfig: ws(), _exec: lsof([4000, 5174, 5599]), _httpsProbe: probe });
+    const { lines } = await run({ _wsConfig: await ws(t), _exec: lsof([4000, 5174, 5599]), _httpsProbe: probe });
     const probeLines = lines.filter((l) => /\b(PASS|FAIL)\b/.test(l));
     assert.ok(probeLines.length >= 3);
     for (const l of probeLines) {
@@ -217,4 +222,15 @@ test('every probe line still matches `PASS|FAIL <name> [dev] (<probe>)` and name
         assert.match(plain, /bound:(yes|no)/, plain);
         assert.match(plain, /serves:(yes|no)/, plain);
     }
+});
+
+// ------------------------------------------------------------------ no silent workspace substitution
+
+test('a workspace config with no workspaceRoot FAILS LOUD, never enumerates the cwd instead', async () => {
+    const bare = new WorkspaceConfig({ version: '3.0', env: { app: { appId: 'daita', microservice: { port: 4000 } } } });
+    assert.equal(bare.workspaceRoot, null, 'fixture must be rootless');
+    await assert.rejects(
+        () => run({ _wsConfig: bare, _exec: lsof([4000]), _httpsProbe: http({}) }),
+        /carries no workspaceRoot/
+    );
 });

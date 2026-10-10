@@ -2,11 +2,11 @@
  * Microservice Restart Command (DEV only)
  *
  * Eliminates the "hand-kill + nohup-relaunch" tribal-knowledge workflow:
- *   1. Resolve the service from workspace.json `env.platform` / `env.products`
+ *   1. Resolve the service from the workspace's app set (env.app / env.gateway)
  *      (HARD-FAIL on unknown / ambiguous / missing devCommand).
  *   2. Find the running PID via `lsof -iTCP:<port> -sTCP:LISTEN` (or `ps`).
  *   3. SIGTERM → wait up to 5s → SIGKILL.
- *   4. Re-launch the canonical devCommand from `{workspaceRoot}/{localPath}/microservice/`
+ *   4. Re-launch the canonical devCommand from the app repo's own `microservice/` dir
  *      detached via `setsid + nohup`, redirecting stdout/stderr to a canonical log.
  *   5. Poll until the port is bound again; print new PID + log path.
  *   6. Run `descix health -m <name>` and print the result.
@@ -27,7 +27,7 @@ import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs/promises';
 import path from 'path';
-import { WorkspaceConfig } from '../workspace-config.js';
+import { WorkspaceConfig, resolveLocalApps } from '../workspace-config.js';
 
 const execAsync = promisify(exec);
 
@@ -44,28 +44,25 @@ const realSleep = (ms) => new Promise((r) => setTimeout(r, ms));
  * are restart-eligible (devCommand is the canonical launch signature).
  *
  * @param {WorkspaceConfig} wsConfig
- * @returns {Array<{name, localPath, port, devCommand, microserviceDir}>}
+ * @returns {Array<{name, dir, port, devCommand, microserviceDir}>}
  */
 export function buildRestartRegistry(wsConfig) {
-  const env = wsConfig.env || {};
-  const root = wsConfig.workspaceRoot;
   const out = [];
 
-  const collect = (entry) => {
-    if (!entry?.appId || !entry?.localPath) return;
-    const ms = entry.microservice;
-    if (!ms || !ms.port) return;
+  // The local app set has ONE owner (workspaceApps, v3 fork (b)): this workspace's own
+  // env.app plus every repo env.gateway lists, each read from its OWN workspace.json.
+  const { apps } = resolveLocalApps(wsConfig);
+  for (const app of apps) {
+    const ms = app.microservice;
+    if (!ms || !ms.port) continue;
     out.push({
-      name: entry.appId,
-      localPath: entry.localPath,
+      name: app.appId,
+      dir: app.dir,
       port: ms.port,
       devCommand: ms.devCommand || null,
-      microserviceDir: path.join(root, entry.localPath, 'microservice')
+      microserviceDir: path.join(app.dir, 'microservice')
     });
-  };
-
-  collect(env.platform);
-  for (const p of (env.products || [])) collect(p);
+  }
   return out;
 }
 
@@ -75,7 +72,7 @@ export function buildRestartRegistry(wsConfig) {
  *
  * @param {WorkspaceConfig} wsConfig
  * @param {string} name
- * @returns {{name, localPath, port, devCommand, microserviceDir}}
+ * @returns {{name, dir, port, devCommand, microserviceDir}}
  */
 export function resolveService(wsConfig, name) {
   const registry = buildRestartRegistry(wsConfig);
@@ -84,24 +81,19 @@ export function resolveService(wsConfig, name) {
   if (matches.length === 0) {
     const candidates = registry.map((s) => s.name).join(', ') || '(none)';
     throw new Error(
-      `Service '${name}' not found in workspace.json env.platform/env.products.\n` +
+      `Service '${name}' is not served by this workspace (env.app / env.gateway).\n` +
       `  Restart-eligible services (with microservice.port + microservice.devCommand): ${candidates}\n` +
       `  Add an entry to .descix/workspace.json or run 'descix microservice list'.`
     );
   }
-  if (matches.length > 1) {
-    throw new Error(
-      `Service name '${name}' is ambiguous — matches ${matches.length} entries: ` +
-      matches.map((m) => `${m.name}@${m.localPath}`).join(', ')
-    );
-  }
-
+  // No ambiguity branch: duplicate app ids are refused upstream by the app-set owner
+  // (resolveWorkspaceApps), so at most one entry can match here.
   const svc = matches[0];
   if (!svc.devCommand) {
     throw new Error(
       `Service '${name}' has no microservice.devCommand in workspace.json — ` +
       `cannot determine canonical launch signature. ` +
-      `Add 'devCommand' under env.products[].microservice to enable restart.`
+      `Add 'devCommand' under env.app.microservice in that app repo's workspace.json to enable restart.`
     );
   }
   return svc;
@@ -173,17 +165,20 @@ export async function killPid(pid, opts = {}) {
 
 /**
  * Resolve the canonical log path for a restart.
- *   apps/<community>/<app>/.descix/logs/<service>-<ts>.log
+ *   <app repo root>/.descix/logs/<service>-<ts>.log
+ * The app repo root is the entry's own `dir` (workspaceApps): under v3 each app lives in its
+ * own repo, so there is no workspace-wide apps/<community>/ tree to hang logs under.
  * Falls back to /tmp/<service>-restart-<ts>.log if the canonical dir
  * cannot be created.
+ *
+ * @param {{name: string, dir: string}} svc - a restart-registry entry
  */
-export async function resolveLogPath(wsConfig, serviceName, opts = {}) {
+export async function resolveLogPath(svc, opts = {}) {
   const deps = opts.deps || {};
   const fsImpl = deps.fs || fs;
   const ts = (opts.timestamp || new Date().toISOString()).replace(/[:.]/g, '-');
-  const root = wsConfig.workspaceRoot;
-  const community = wsConfig.env?.communityId || 'unkamon';
-  const canonicalDir = path.join(root, 'apps', community, serviceName, '.descix', 'logs');
+  const serviceName = svc.name;
+  const canonicalDir = path.join(svc.dir, '.descix', 'logs');
   try {
     await fsImpl.mkdir(canonicalDir, { recursive: true });
     return {
@@ -303,7 +298,7 @@ export async function restartMicroservice(args) {
   }
 
   // Step 2: resolve log path.
-  const logRes = await resolveLogPath(wsConfig, svc.name, { deps });
+  const logRes = await resolveLogPath(svc, { deps });
   if (logRes.fallback) {
     log(chalk.yellow(`  Canonical log dir unavailable (${logRes.fallbackReason}); using ${logRes.path}`));
   } else {

@@ -19,7 +19,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -32,69 +31,60 @@ import {
 } from '../src/dev/serveBinding.js';
 import { APP_BINDING_PATH as BROWSER_SIDE_PATH, fetchAppBinding } from '../src/util/appBinding.js';
 import { gatewayProductUrl } from '../src/dev/workspaceProducts.js';
+import { withV3Tree } from './support/v3Tree.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SDK_ROOT = path.resolve(__dirname, '..');
 const PORT = 5599;
 
-const CONFIG = {
-  env: {
-    gateway: { port: PORT },
-    platform: { appId: 'daita', localPath: 'DeSciX/DeSciX_Cloud/site', site: { port: 5174 } },
-    products: [
-      { appId: 'egpt-godsworld', localPath: 'godsworld', site: { static: 'codesite' } },
-      { appId: 'egpt-frqtl', localPath: 'FRAQTL', site: { port: 5511 } },
-      // deliberately nested inside FRAQTL to prove longest-match wins
-      { appId: 'frqtl-inner', localPath: 'FRAQTL/packages/inner', site: { port: 5512 } },
-    ],
+// v3: the gateway workspace lists the platform shell and each app repo; each repo's OWN
+// workspace.json carries its appId and site. "Standing in an app" means standing inside that
+// repo's directory, so the repos are sibling directories of the gateway workspace.
+const TREE = {
+  gateway: { port: PORT, shell: 'DeSciX/DeSciX_Cloud/site', appRepos: ['godsworld', 'FRAQTL', 'FRAQTL/packages/inner'] },
+  repos: {
+    'DeSciX/DeSciX_Cloud/site': { appId: 'daita', site: { port: 5174 } },
+    godsworld: { appId: 'egpt-godsworld', site: { static: 'codesite' } },
+    FRAQTL: { appId: 'egpt-frqtl', site: { port: 5511 } },
+    // deliberately nested inside FRAQTL to prove longest-match wins
+    'FRAQTL/packages/inner': { appId: 'frqtl-inner', site: { port: 5512 } },
   },
 };
 
-function withWorkspace(fn) {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'serve-bind-')));
-  try {
-    fs.mkdirSync(path.join(dir, '.descix'), { recursive: true });
-    fs.writeFileSync(path.join(dir, '.descix', 'workspace.json'), JSON.stringify(CONFIG, null, 2));
-    for (const p of ['godsworld', 'FRAQTL/packages/inner', 'DeSciX/DeSciX_Cloud/site']) {
-      fs.mkdirSync(path.join(dir, p), { recursive: true });
-    }
-    return fn(dir);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-}
+/** fn receives { dir (the gateway workspace root), repos (name -> abs dir), config }. */
+const withWorkspace = (fn) => withV3Tree(TREE, fn);
 
 // ------------------------------------------------------------------- AMB-2
 
 test('standing in an app directory binds THAT app — zero config', () => {
-  withWorkspace((dir) => {
-    const b = resolveServeBinding(dir, CONFIG, { cwd: path.join(dir, 'godsworld'), gatewayPort: PORT });
+  withWorkspace(({ dir, repos, config }) => {
+    const b = resolveServeBinding(dir, config, { cwd: repos.godsworld, gatewayPort: PORT });
     assert.equal(b.appId, 'egpt-godsworld');
     assert.equal(b.source, 'cwd');
   });
 });
 
 test('a subdirectory deep inside the app still binds the app', () => {
-  withWorkspace((dir) => {
-    const deep = path.join(dir, 'godsworld', 'a', 'b', 'c');
+  withWorkspace(({ dir, repos, config }) => {
+    const deep = path.join(repos.godsworld, 'a', 'b', 'c');
     fs.mkdirSync(deep, { recursive: true });
-    assert.equal(resolveServeBinding(dir, CONFIG, { cwd: deep, gatewayPort: PORT }).appId, 'egpt-godsworld');
+    assert.equal(resolveServeBinding(dir, config, { cwd: deep, gatewayPort: PORT }).appId, 'egpt-godsworld');
   });
 });
 
 test('a product nested inside another product resolves to the INNER one', () => {
-  withWorkspace((dir) => {
-    const inner = path.join(dir, 'FRAQTL/packages/inner');
-    assert.equal(detectAppFromCwd(dir, CONFIG, inner).appId, 'frqtl-inner');
+  withWorkspace(({ dir, repos, config }) => {
+    const inner = repos['FRAQTL/packages/inner'];
+    assert.equal(detectAppFromCwd(dir, inner).appId, 'frqtl-inner');
     // and the outer directory still resolves to the outer app
-    assert.equal(detectAppFromCwd(dir, CONFIG, path.join(dir, 'FRAQTL')).appId, 'egpt-frqtl');
+    assert.equal(detectAppFromCwd(dir, repos.FRAQTL).appId, 'egpt-frqtl');
   });
 });
 
 test('--app overrides cwd', () => {
-  withWorkspace((dir) => {
-    const b = resolveServeBinding(dir, CONFIG, {
-      cwd: path.join(dir, 'godsworld'), app: 'egpt-frqtl', gatewayPort: PORT,
+  withWorkspace(({ dir, repos, config }) => {
+    const b = resolveServeBinding(dir, config, {
+      cwd: repos.godsworld, app: 'egpt-frqtl', gatewayPort: PORT,
     });
     assert.equal(b.appId, 'egpt-frqtl');
     assert.equal(b.source, '--app');
@@ -102,11 +92,11 @@ test('--app overrides cwd', () => {
 });
 
 test('resolving the binding NEVER writes to workspace.json — no "current app" pointer', () => {
-  withWorkspace((dir) => {
+  withWorkspace(({ dir, repos, config }) => {
     const wsPath = path.join(dir, '.descix', 'workspace.json');
     const before = fs.readFileSync(wsPath, 'utf8');
-    resolveServeBinding(dir, CONFIG, { cwd: path.join(dir, 'godsworld'), gatewayPort: PORT });
-    resolveServeBinding(dir, CONFIG, { app: 'egpt-frqtl', cwd: dir, gatewayPort: PORT });
+    resolveServeBinding(dir, config, { cwd: repos.godsworld, gatewayPort: PORT });
+    resolveServeBinding(dir, config, { app: 'egpt-frqtl', cwd: dir, gatewayPort: PORT });
     assert.equal(fs.readFileSync(wsPath, 'utf8'), before);
   });
 });
@@ -114,9 +104,9 @@ test('resolving the binding NEVER writes to workspace.json — no "current app" 
 // ------------------------------------------------------------ AMB-5: fail loud
 
 test('from a directory that is no app, it FAILS LOUD naming BOTH fixes — never store chrome', () => {
-  withWorkspace((dir) => {
+  withWorkspace(({ dir, repos, config }) => {
     assert.throws(
-      () => resolveServeBinding(dir, CONFIG, { cwd: dir, gatewayPort: PORT }),
+      () => resolveServeBinding(dir, config, { cwd: dir, gatewayPort: PORT }),
       (e) => {
         assert.match(e.message, /cannot tell which app to serve/);
         assert.match(e.message, /cd into your app/);
@@ -130,49 +120,59 @@ test('from a directory that is no app, it FAILS LOUD naming BOTH fixes — never
 });
 
 test('--app with an unknown id fails loud and lists what exists', () => {
-  withWorkspace((dir) => {
+  withWorkspace(({ dir, repos, config }) => {
     assert.throws(
-      () => resolveServeBinding(dir, CONFIG, { app: 'nope', cwd: dir, gatewayPort: PORT }),
+      () => resolveServeBinding(dir, config, { app: 'nope', cwd: dir, gatewayPort: PORT }),
       /not in this workspace[\s\S]*egpt-godsworld[\s\S]*descix app init/,
     );
   });
 });
 
 test('the platform shell cannot be served as its own standalone app', () => {
-  withWorkspace((dir) => {
+  withWorkspace(({ dir, repos, config }) => {
     assert.throws(
-      () => resolveServeBinding(dir, CONFIG, { app: 'daita', cwd: dir, gatewayPort: PORT }),
+      () => resolveServeBinding(dir, config, { app: 'daita', cwd: dir, gatewayPort: PORT }),
       /PLATFORM shell itself/,
     );
     // and standing in the platform directory is the same refusal, not a silent store boot
     assert.throws(
-      () => resolveServeBinding(dir, CONFIG, { cwd: path.join(dir, 'DeSciX/DeSciX_Cloud/site'), gatewayPort: PORT }),
+      () => resolveServeBinding(dir, config, { cwd: repos['DeSciX/DeSciX_Cloud/site'], gatewayPort: PORT }),
       /cannot tell which app to serve/,
     );
   });
 });
 
 test('a missing gatewayPort is a programming error, not a guess', () => {
-  withWorkspace((dir) => {
-    assert.throws(() => resolveServeBinding(dir, CONFIG, { app: 'egpt-frqtl', cwd: dir }), /gatewayPort is required/);
+  withWorkspace(({ dir, repos, config }) => {
+    assert.throws(() => resolveServeBinding(dir, config, { app: 'egpt-frqtl', cwd: dir }), /gatewayPort is required/);
   });
 });
 
 // ------------------------------------------------------- the payload + AMB-1c
 
 test('the binding names the app and its GATEWAY url — same owner as the product map', () => {
-  withWorkspace((dir) => {
-    const b = resolveServeBinding(dir, CONFIG, { app: 'egpt-frqtl', cwd: dir, gatewayPort: PORT });
+  withWorkspace(({ dir, repos, config }) => {
+    const b = resolveServeBinding(dir, config, { app: 'egpt-frqtl', cwd: dir, gatewayPort: PORT });
     assert.equal(b.mode, 'standalone');
     assert.equal(b.appUrl, gatewayProductUrl(PORT, 'egpt-frqtl'));
     assert.equal(b.appUrl, `https://localhost:${PORT}/p/egpt-frqtl`);
   });
 });
 
-test('bindableApps sees the platform and every product', () => {
-  assert.deepEqual(bindableApps(CONFIG).map((a) => a.appId).sort(),
-    ['daita', 'egpt-frqtl', 'egpt-godsworld', 'frqtl-inner']);
-  assert.deepEqual(bindableApps({}), []);
+test('bindableApps sees the platform shell and every listed app repo', () => {
+  withWorkspace(({ dir, repos }) => {
+    const apps = bindableApps(dir);
+    assert.deepEqual(apps.map((a) => a.appId).sort(),
+      ['daita', 'egpt-frqtl', 'egpt-godsworld', 'frqtl-inner']);
+    assert.deepEqual(apps.filter((a) => a.isPlatform).map((a) => a.appId), ['daita'], 'only the shell is the platform');
+    assert.equal(apps.find((a) => a.appId === 'egpt-frqtl').dir, repos.FRAQTL);
+  });
+  // a workspace that holds no app and lists none binds nothing
+  withV3Tree({ env: { apiUrl: 'https://descix.net' } }, ({ dir }) => assert.deepEqual(bindableApps(dir), []));
+});
+
+test('bindableApps on a directory with no workspace fails loud — it never reports "no apps"', () => {
+  assert.throws(() => bindableApps(path.join(SDK_ROOT, 'no-such-workspace')), /No \.descix\/workspace\.json/);
 });
 
 test('gateway and browser agree on ONE spelling of the binding path', () => {

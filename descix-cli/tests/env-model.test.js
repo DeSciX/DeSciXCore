@@ -24,7 +24,7 @@ async function tempWorkspace(t, env = {}) {
   await fs.mkdir(path.join(wsRoot, '.descix'), { recursive: true });
   await fs.writeFile(
     path.join(wsRoot, '.descix', 'workspace.json'),
-    JSON.stringify({ version: '2.1', workspaceRoot: wsRoot, type: 'workspace', env }, null, 2)
+    JSON.stringify({ version: '3.0', workspaceRoot: wsRoot, type: 'workspace', env }, null, 2)
   );
   t.after(async () => { await fs.rm(wsRoot, { recursive: true, force: true }); });
   return wsRoot;
@@ -46,26 +46,25 @@ test('every named environment carries a URL — dev is no longer null', () => {
 });
 
 test('an unconfigured workspace resolves to the shipped PROD default', async (t) => {
-  const wsRoot = await tempWorkspace(t, { products: [] });
+  const wsRoot = await tempWorkspace(t);
   const ws = await WorkspaceConfig.load(wsRoot);
   assert.equal(ws.getApiUrl(), DEFAULT_API_URL);
   assert.equal(ws.getApiUrl(), 'https://descix.net');
 });
 
-test('an environment NAME never derives localhost from a platform port', async (t) => {
-  // The old behaviour: environment 'DEV' + platform.microservice.port 4000 silently
+test('an environment NAME never derives localhost from an app port', async (t) => {
+  // The old behaviour: environment 'DEV' + app.microservice.port 4000 silently
   // resolved to https://localhost:4000. That derivation is deleted.
   const wsRoot = await tempWorkspace(t, {
     environment: 'DEV',
-    platform: { appId: 'daita', localPath: 'p', microservice: { port: 4000 } },
-    products: [],
+    app: { appId: 'daita', microservice: { port: 4000 } },
   });
   const ws = await WorkspaceConfig.load(wsRoot);
   assert.equal(ws.getApiUrl(), DEFAULT_API_URL);
 });
 
 test('set-env dev WRITES the cloud dev URL (it used to delete the key)', async (t) => {
-  const wsRoot = await tempWorkspace(t, { products: [] });
+  const wsRoot = await tempWorkspace(t);
   const ws = await WorkspaceConfig.load(wsRoot);
   const res = await ws.setEnvironment('dev');
 
@@ -81,7 +80,7 @@ test('set-env dev WRITES the cloud dev URL (it used to delete the key)', async (
 });
 
 test('localhost is reached by naming a URL, not by naming an environment', async (t) => {
-  const wsRoot = await tempWorkspace(t, { products: [] });
+  const wsRoot = await tempWorkspace(t);
   const ws = await WorkspaceConfig.load(wsRoot);
   const res = await ws.setEnvironment('dev', 'https://localhost:4000');
 
@@ -94,7 +93,7 @@ test('localhost is reached by naming a URL, not by naming an environment', async
 
 test('set-env prod and demo persist their canonical origins', async (t) => {
   for (const name of ['prod', 'demo']) {
-    const wsRoot = await tempWorkspace(t, { products: [] });
+    const wsRoot = await tempWorkspace(t);
     const ws = await WorkspaceConfig.load(wsRoot);
     const res = await ws.setEnvironment(name);
     assert.equal(res.apiUrl, ENV_ORIGINS[name], name);

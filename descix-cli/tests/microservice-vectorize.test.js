@@ -5,7 +5,7 @@
  *  - primary path: manifest.json found at ./manifest.json (no workspace lookup needed)
  *  - fallback path: manifest.json not in cwd → resolved via getAppByAppId().absolutePath
  *  - no TypeError: getApp() removed; getAppByAppId() used — regression gate
- *  - fallback produces correct path: <workspaceRoot>/<localPath>/microservice/manifest.json
+ *  - fallback produces correct path: <app repo root>/microservice/manifest.json
  *
  * Design: tests WorkspaceConfig.getAppByAppId() path-resolution directly without
  * invoking the full vectorize pipeline (which requires a live backend).
@@ -21,13 +21,13 @@ import path from 'path';
 import { WorkspaceConfig } from '../lib/workspace-config.js';
 
 /**
- * Create a temp workspace with a mapped app that has a microservice/manifest.json.
+ * Create a temp v3 workspace with its app that has a microservice/manifest.json.
  * Returns { wsRoot, appId, manifestPath }.
  */
 async function makeVectorizeWorkspace(t) {
   const wsRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'descix-test-ms-vec-'));
   await fs.mkdir(path.join(wsRoot, '.descix'), { recursive: true });
-  const microserviceDir = path.join(wsRoot, 'smile-fms', 'microservice');
+  const microserviceDir = path.join(wsRoot, 'microservice');
   await fs.mkdir(microserviceDir, { recursive: true });
 
   const appId = 'smile-fms';
@@ -35,11 +35,11 @@ async function makeVectorizeWorkspace(t) {
   await fs.writeFile(manifestPath, JSON.stringify({ name: 'smile-fms', commands: [] }, null, 2));
 
   const workspace = {
-    version: '2.1',
+    version: '3.0',
     workspaceRoot: wsRoot,
     type: 'workspace',
     env: {
-      products: [{ appId, localPath: 'smile-fms', kbId: 'General' }]
+      app: { appId, communityId: 'smile', kbId: 'General' }
     }
   };
   await fs.writeFile(
@@ -117,7 +117,7 @@ test('microservice-vectorize — primary path: manifest.json in cwd used directl
   assert.equal(resolved, cwdManifest, 'primary path manifest must be returned directly');
 });
 
-test('microservice-vectorize — fallback: unmapped app throws clean Error', async (t) => {
+test('microservice-vectorize — fallback: an app that is not THE workspace app throws clean Error', async (t) => {
   const { wsRoot } = await makeVectorizeWorkspace(t);
   const cwdManifest = path.join(os.tmpdir(), 'no-such-manifest-' + Date.now() + '.json');
 

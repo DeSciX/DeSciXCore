@@ -3,7 +3,7 @@
  *
  * Coverage:
  *  - happy path: getAppByAppId returns config, appPath is resolved correctly
- *  - hard-fail: unmapped app → no TypeError, throws with meaningful message
+ *  - hard-fail: an app id that is not THE workspace app → no TypeError, throws with meaningful message
  *
  * Design: exercises WorkspaceConfig.getAppByAppId() directly (the post-migration
  * method) against a temp workspace to prove the TypeError regression is closed.
@@ -16,25 +16,24 @@ import assert from 'node:assert/strict';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { WorkspaceConfig } from '../lib/workspace-config.js';
+import { WorkspaceConfig, unmappedAppMessage } from '../lib/workspace-config.js';
 
 /**
- * Create an isolated temp workspace with one product mapped.
- * Returns { wsRoot, appId, appDir }.
+ * Create an isolated temp v3 workspace (the repo root IS the app root).
+ * Returns { wsRoot, appId, appDir } (appDir === wsRoot).
  */
 async function makeTestWorkspace(t) {
   const wsRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'descix-test-site-init-'));
-  const appDir = path.join(wsRoot, 'smile-fms');
-  await fs.mkdir(appDir, { recursive: true });
+  const appDir = wsRoot;
   await fs.mkdir(path.join(wsRoot, '.descix'), { recursive: true });
 
   const appId = 'smile-fms';
   const workspace = {
-    version: '2.1',
+    version: '3.0',
     workspaceRoot: wsRoot,
     type: 'workspace',
     env: {
-      products: [{ appId, localPath: 'smile-fms', kbId: 'General' }]
+      app: { appId, communityId: 'smile', kbId: 'General' }
     }
   };
   await fs.writeFile(
@@ -57,7 +56,7 @@ async function runSiteInitLookup(wsRoot, appId) {
   const workspaceConfig = await WorkspaceConfig.load(wsRoot);
   const appConfig = workspaceConfig.getAppByAppId(appId);
   if (!appConfig) {
-    throw new Error(`App not found in workspace.json.`);
+    throw new Error(unmappedAppMessage(appId));
   }
   return appConfig;
 }
@@ -70,7 +69,7 @@ test('site-init — happy path: getAppByAppId returns config with absolutePath a
   const appConfig = await runSiteInitLookup(wsRoot, appId);
 
   assert.ok(appConfig, 'appConfig must be returned for mapped app');
-  assert.ok(appConfig.localPath, 'localPath must be present');
+  assert.equal(appConfig.localPath, '.', 'v3 localPath is implicitly the workspace root');
   assert.ok(appConfig.absolutePath, 'absolutePath must be present');
   assert.equal(path.resolve(appConfig.absolutePath), path.resolve(appDir), 'absolutePath must point to app directory');
 });
@@ -97,7 +96,7 @@ test('site-init — hard-fail: unmapped app throws, not TypeError', async (t) =>
     () => runSiteInitLookup(wsRoot, 'totally-unknown-app'),
     (err) => {
       assert.ok(!(err instanceof TypeError), 'must not be a TypeError (removed-method regression)');
-      assert.match(err.message, /not found in workspace\.json/);
+      assert.match(err.message, /is not this workspace's app \(workspace\.json env\.app\)/);
       return true;
     }
   );

@@ -31,7 +31,7 @@ function withWorkspace(fn, extraTopLevel = {}) {
     fs.mkdirSync(path.join(dir, '.descix'), { recursive: true });
     fs.writeFileSync(
       path.join(dir, '.descix', 'workspace.json'),
-      JSON.stringify({ version: '2.1', type: 'workspace', env: { apiUrl: CONFIGURED, products: [] }, ...extraTopLevel }, null, 2),
+      JSON.stringify({ version: '3.0', type: 'workspace', env: { apiUrl: CONFIGURED }, ...extraTopLevel }, null, 2),
     );
     return fn(dir);
   } finally {
@@ -80,7 +80,7 @@ test('config --help no longer lists set-url (positive control: it still lists se
 
 // ------------------------------------------------------------------ the retired slot on disk
 
-test('load() refuses a v2.1 file carrying a top-level apiUrl, naming env.apiUrl and the remedy', () => {
+test('load() refuses a v3 file carrying a top-level apiUrl, naming env.apiUrl and the remedy', () => {
   withWorkspace((dir) => {
     const r = cli(dir, ['config', 'show']);
     assert.notEqual(r.code, 0, 'a retired key that nothing reads must not load silently');

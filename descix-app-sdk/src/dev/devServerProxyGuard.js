@@ -38,7 +38,7 @@ export function devServerUnreachableBody(appId, target, err) {
     `\n` +
     `The gateway could not get a response from this app's dev server.\n` +
     `  app:    ${appId}\n` +
-    `  target: ${target}   (workspace.json env.products[${appId}].site.port` +
+    `  target: ${target}   (the app repo's workspace.json env.app.site.port` +
     (scheme === 'https' ? ', default protocol https' : ` + site.protocol "${scheme}"`) + `)\n` +
     `  error:  ${reason}\n` +
     `\n` +

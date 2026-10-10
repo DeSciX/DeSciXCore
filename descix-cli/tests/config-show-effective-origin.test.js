@@ -24,7 +24,7 @@ function workspace(t) {
   const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cfg-show-home-')));
   fs.mkdirSync(path.join(dir, '.descix'), { recursive: true });
   fs.writeFileSync(path.join(dir, '.descix', 'workspace.json'),
-    JSON.stringify({ version: '2.1', type: 'workspace', env: { apiUrl: 'https://dev.descix.net', products: [] } }, null, 2));
+    JSON.stringify({ version: '3.0', type: 'workspace', env: { apiUrl: 'https://dev.descix.net' } }, null, 2));
   t.after(() => { fs.rmSync(dir, { recursive: true, force: true }); fs.rmSync(home, { recursive: true, force: true }); });
   return { dir, home };
 }

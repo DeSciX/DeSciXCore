@@ -41,29 +41,29 @@ test('init keeps the chosen environment, and registers NO app — the id is the 
     assert.equal(w.env.environment, 'DEV');
     // `app init` registers the id create_app_for_community returns (daita-myapp here). init used
     // to record `myapp`, an id the platform never had (devx review 2026-09-19, D2).
-    assert.deepEqual(w.env.products ?? [], []);
+    assert.equal(w.env.app, undefined, 'init registers no app');
 });
 
 test('--force restarts the APP registrations and still keeps the environment', (t) => {
     const dir = devWorkspace(t);
     const cfg = path.join(dir, '.descix', 'workspace.json');
     const seeded = ws(dir);
-    seeded.env.products = [{ appId: 'daita-firstapp', communityId: 'daita', localPath: '.', kbId: 'General' }];
+    seeded.env.app = { appId: 'daita-firstapp', communityId: 'daita', kbId: 'General' };
     fs.writeFileSync(cfg, JSON.stringify(seeded));
     run(dir, 'init', '-c', 'daita', '-a', 'myapp', '--yes', '--force');
     const w = ws(dir);
     assert.equal(w.env.apiUrl, 'https://dev.descix.net', 'THE REGRESSION: --force used to erase this');
-    assert.deepEqual(w.env.products ?? [], []);
+    assert.equal(w.env.app, undefined, 'init registers no app');
 });
 
 test('NEGATIVE CONTROL: without --force an existing registration is kept', (t) => {
     const dir = devWorkspace(t);
     const cfg = path.join(dir, '.descix', 'workspace.json');
     const seeded = ws(dir);
-    seeded.env.products = [{ appId: 'daita-firstapp', communityId: 'daita', localPath: '.', kbId: 'General' }];
+    seeded.env.app = { appId: 'daita-firstapp', communityId: 'daita', kbId: 'General' };
     fs.writeFileSync(cfg, JSON.stringify(seeded));
     run(dir, 'init', '-c', 'daita', '-a', 'myapp', '--yes');
-    assert.deepEqual(ws(dir).env.products.map((p) => p.appId), ['daita-firstapp']);
+    assert.equal(ws(dir).env.app.appId, 'daita-firstapp');
 });
 
 test('config show agrees: the environment is still DEV after init', (t) => {

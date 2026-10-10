@@ -32,7 +32,7 @@ function withWorkspace(fn) {
     fs.mkdirSync(path.join(dir, '.descix'), { recursive: true });
     fs.writeFileSync(
       path.join(dir, '.descix', 'workspace.json'),
-      JSON.stringify({ version: '2.1', type: 'workspace', env: { apiUrl: 'https://dev.descix.net', products: [] } }, null, 2),
+      JSON.stringify({ version: '3.0', type: 'workspace', env: { apiUrl: 'https://dev.descix.net' } }, null, 2),
     );
     return fn(dir);
   } finally {
@@ -135,7 +135,7 @@ test('"none" removes a key and empty parents do not linger in the file', () => {
 
 test('setEnvKey refuses per-app keys and names the verb that owns them', async () => {
   const { WorkspaceConfig } = await import('../lib/workspace-config.js');
-  const ws = new WorkspaceConfig({ version: '2.1', env: {} }, '/tmp/nowhere');
-  await assert.rejects(() => ws.setEnvKey('products.0.site.port', 5511), /not a workspace-level env key[\s\S]*descix app set-site/);
+  const ws = new WorkspaceConfig({ version: '3.0', env: {} }, '/tmp/nowhere');
+  await assert.rejects(() => ws.setEnvKey('app.site.port', 5511), /not a workspace-level env key[\s\S]*descix app set-site \/ set-port\./);
   await assert.rejects(() => ws.setEnvKey('apiUrl', 'https://x.example'), /not a workspace-level env key/);
 });

@@ -82,32 +82,32 @@ test('WorkspaceConfig.tryLoad() — v1 workspace returns null (soft-fail)', asyn
   assert.equal(result, null, 'tryLoad() must return null for v1 workspace (not throw)');
 });
 
-test('WorkspaceConfig.load() — v2.1 workspace loads cleanly (regression check)', async (t) => {
-  const v21Workspace = {
-    version: '2.1',
+test('WorkspaceConfig.load() — v3 workspace loads cleanly (regression check)', async (t) => {
+  const v3Workspace = {
+    version: '3.0',
     workspaceRoot: '/tmp/test',
     type: 'workspace',
     env: {
-      products: [{ appId: 'daita', localPath: 'DeSciX_Cloud', kbId: 'General' }]
+      app: { appId: 'daita', communityId: 'daita', kbId: 'General' }
     }
   };
-  const wsRoot = await writeWorkspace(t, v21Workspace);
+  const wsRoot = await writeWorkspace(t, v3Workspace);
 
   const config = await WorkspaceConfig.load(wsRoot);
-  assert.ok(config, 'v2.1 workspace must load without error');
+  assert.ok(config, 'v3 workspace must load without error');
   assert.ok(config.env, 'loaded config must have env block');
-  assert.ok(Array.isArray(config.env.products), 'env.products must be an array');
+  assert.equal(config.env.app.appId, 'daita', 'env.app must carry the single app');
 });
 
 test('WorkspaceConfig.load() — communities key WITH env key does NOT trigger v1 error', async (t) => {
   // Edge case: if a workspace somehow has both communities AND env, it is not v1.
   // Only "communities without env" triggers the hard error.
   const mixedWorkspace = {
-    version: '2.1',
+    version: '3.0',
     type: 'workspace',
     communities: { somekey: 'irrelevant' }, // extra key, not the v1 schema
     env: {
-      products: [{ appId: 'daita', localPath: 'DeSciX_Cloud', kbId: 'General' }]
+      app: { appId: 'daita', communityId: 'daita', kbId: 'General' }
     }
   };
   const wsRoot = await writeWorkspace(t, mixedWorkspace);
