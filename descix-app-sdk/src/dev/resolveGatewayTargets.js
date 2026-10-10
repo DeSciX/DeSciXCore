@@ -25,6 +25,7 @@ import { invokedBin } from './invokedBin.js';
 export { ENV_ORIGINS, DEFAULT_ENV, DEFAULT_API_URL, PROD_URL, CLOUD_DEV_URL } from './envOrigins.js';
 import { DEFAULT_API_URL, DEFAULT_ENV } from './envOrigins.js';
 import { localUpstreamOrigin } from './localOrigin.js';
+import { resolveWorkspaceApps } from './workspaceApps.js';
 
 const LOCAL_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]', '::1', '0.0.0.0']);
 
@@ -78,9 +79,23 @@ function assertSupportedKeys(config) {
   if (config.apiUrl) {
     throw new Error(
       '[Gateway] Top-level "apiUrl" in workspace.json is not a supported key. ' +
-      'Move it to env.apiUrl (v2.1 workspace format).'
+      'Move it to env.apiUrl (v3 workspace format).'
     );
   }
+}
+
+/**
+ * The SHELL app's entry, when this workspace is a gateway workspace and the caller
+ * named its root. The shell repo's own workspace is the authority on its site and
+ * microservice config (v3 fork (b)) — nothing here re-reads those keys from the
+ * gateway's file, where they no longer exist.
+ * @param {Object} config
+ * @param {Object} options
+ * @returns {Object|null}
+ */
+function shellEntry(config, options) {
+  if (!options.workspaceRoot || !config.env?.gateway?.shell) return null;
+  return resolveWorkspaceApps(options.workspaceRoot).shellApp;
 }
 
 /**
@@ -89,7 +104,8 @@ function assertSupportedKeys(config) {
  * Precedence:
  *   1. options.apiGatewayUrl        explicit caller override (app Vite configs)
  *   2. env.apiUrl                   explicit workspace setting (what `set-env` writes)
- *   3. env.platform.microservice    LOCAL platform checkout — the expert opt-in
+ *   3. the gateway SHELL repo's own microservice — LOCAL platform checkout, the
+ *      expert opt-in (env.gateway.shell; needs options.workspaceRoot)
  *   4. DEFAULT_API_URL              default: the published platform (PROD)
  *
  * @param {Object} config - parsed .descix/workspace.json
@@ -109,9 +125,10 @@ export function resolveApiTarget(config = {}, options = {}) {
   } else if (env.apiUrl) {
     apiUrl = env.apiUrl;
     apiSource = 'workspace env.apiUrl';
-  } else if (env.platform?.microservice?.port) {
-    apiUrl = localUpstreamOrigin(env.platform.microservice, 'env.platform.microservice');
-    apiSource = 'workspace env.platform.microservice (local platform)';
+  } else if (shellEntry(config, options)?.microservice?.port) {
+    const shell = shellEntry(config, options);
+    apiUrl = localUpstreamOrigin(shell.microservice, `env.gateway.shell (${shell.appId}) microservice`);
+    apiSource = 'gateway shell repo microservice (local platform)';
   } else {
     apiUrl = DEFAULT_API_URL;
     apiSource = `default (${DEFAULT_ENV.toUpperCase()})`;
@@ -133,8 +150,8 @@ export function resolveApiTarget(config = {}, options = {}) {
  *   1. options.siteUrl              explicit caller override (--site-url)
  *   2. env.siteUrl                  explicit workspace setting
  *   3. apiUrl, when it is REMOTE    the cloud shell shares the API origin
- *   4. env.platform.site.port       LOCAL shell — reachable only once the API is
- *                                   itself local (the all-local mode-1 stack)
+ *   4. the gateway SHELL repo's own site.port — LOCAL shell, reachable only once
+ *      the API is itself local (the all-local mode-1 stack)
  *   5. throw                        a local API with no local shell has no root
  *
  * @param {Object} config - parsed .descix/workspace.json
@@ -161,10 +178,11 @@ export function resolveSiteTarget(config = {}, options = {}) {
     return { siteUrl: apiUrl, siteSource: `same origin as API (${apiSource})` };
   }
 
-  if (env.platform?.site?.port) {
+  const shell = shellEntry(config, options);
+  if (shell?.site?.port) {
     return {
-      siteUrl: localUpstreamOrigin(env.platform.site, 'env.platform.site'),
-      siteSource: 'workspace env.platform.site (local shell, local API)',
+      siteUrl: localUpstreamOrigin(shell.site, `env.gateway.shell (${shell.appId}) site`),
+      siteSource: 'gateway shell repo site (local shell, local API)',
     };
   }
 
@@ -173,7 +191,7 @@ export function resolveSiteTarget(config = {}, options = {}) {
     `origin ${apiUrl} (${apiSource}) and there is no shell to serve at "/".\n` +
     `  Serve a PLATFORM shell: ${invokedBin()} serve --site-url ${DEFAULT_API_URL}\n` +
     '                          (or set env.siteUrl in .descix/workspace.json to make it permanent)\n' +
-    '  Serve a LOCAL shell:    set env.platform.site.port to your platform site dev-server port'
+    '  Serve a LOCAL shell:    point env.gateway.shell at your platform shell repo (its own workspace carries site.port)'
   );
 }
 

@@ -11,7 +11,7 @@
  * - compare: Show file-level deltas
  * 
  * Architecture:
- * - Uses WorkspaceConfig for all path resolution (supports v2.1 env.platform/products format)
+ * - Uses WorkspaceConfig for all path resolution (v3 single-app env.app format)
  * - All operations delegate to lib/core/ modules
  * - Supports interactive and unattended (agent) modes
  * - CLI handles UX (prompts, progress, errors)

@@ -1,6 +1,6 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { ENV_ORIGINS } from '@descix/app-sdk/dev';
+import { ENV_ORIGINS, resolveWorkspaceApps } from '@descix/app-sdk/dev';
 import { resolveOrigin } from './origin.js';
 // The one canonical KB-sync surface, from its owner. The example in requireContext() is a remedy
 // a stuck developer will copy verbatim, so it must resolve to the live verb rather than a literal
@@ -22,8 +22,9 @@ import { npxCommand } from './invocation.js';
  */
 export function unmappedAppMessage(appId) {
   return (
-    `App "${appId}" is not mapped in workspace.json. ` +
-    'Use `descix app init` to register, or `descix app set-localpath -a <id> -p <path>` to repoint.'
+    `App "${appId}" is not this workspace's app (workspace.json env.app). ` +
+    'A v3 workspace is single-app: run commands for another app from ITS repo root, ' +
+    'or run `descix app init -a <id>` in a fresh repo to create its workspace.'
   );
 }
 
@@ -53,6 +54,55 @@ export function resolveWorkspacePath(workspaceRoot, localPath, label = 'app') {
         );
     }
     return path.resolve(workspaceRoot, localPath);
+}
+
+/**
+ * The local app set of a loaded workspace — THE one CLI-side entry to resolveWorkspaceApps.
+ * Every command that enumerates local apps (health, microservice restart) goes through here, so
+ * a config that carries no workspaceRoot FAILS LOUD in one place instead of each caller quietly
+ * substituting the cwd and enumerating a different workspace than the one it was handed.
+ *
+ * @param {WorkspaceConfig} wsConfig
+ * @returns {{ shellApp: Object|null, apps: Object[] }} see resolveWorkspaceApps
+ */
+export function resolveLocalApps(wsConfig) {
+    if (!wsConfig?.workspaceRoot) {
+        throw new Error(
+            'Cannot enumerate the workspace apps: the workspace config carries no workspaceRoot. ' +
+            'Load it with WorkspaceConfig.load() (which sets it) rather than constructing it bare.'
+        );
+    }
+    return resolveWorkspaceApps(wsConfig.workspaceRoot);
+}
+
+/**
+ * `descix app init` runs where the APP REPO is — its root becomes the workspace root. A nested
+ * checkout used to WALK UP, find a parent workspace and silently register into it (the measured
+ * trap: an app repo cloned inside another workspace mapped itself into the parent's registry).
+ * Under v3 single-app there is nothing to register into: a workspace found at an ANCESTOR of the
+ * init directory is a refusal, loud, before anything is written anywhere.
+ *
+ * A workspace AT the directory itself is fine — that is the re-init case.
+ *
+ * @param {string} dir - the directory `app init` is about to make a workspace root
+ * @throws when a workspace.json exists at a strict ancestor of dir
+ */
+export async function assertNoParentWorkspace(dir = process.cwd()) {
+    const resolved = path.resolve(dir);
+    const found = await WorkspaceConfig.findWorkspaceRoot(resolved);
+    if (found && path.resolve(found) !== resolved) {
+        throw new Error(
+            `This directory is nested inside another DeSciX workspace.\n` +
+            `  Here:              ${resolved}\n` +
+            `  Parent workspace:  ${found} (.descix/workspace.json)\n` +
+            `\n` +
+            `A v3 workspace is single-app: the app repo's own root is its workspace root, and\n` +
+            `"descix app init" refuses to run inside someone else's workspace rather than\n` +
+            `silently registering this checkout into it.\n` +
+            `Move this checkout OUT of ${found} (sibling checkouts, one gateway config, is the\n` +
+            `supported local layout), then run "descix app init" again from the repo root.`
+        );
+    }
 }
 
 /**
@@ -166,7 +216,7 @@ export class WorkspaceConfig {
     this.environment = config.environment;
     this.directoryMappings = config.directoryMappings || {};
 
-    // app_id → localPath map from env.platform + env.products (Unified Registry)
+    // app_id → config map from env.app (v3 single-app)
     this._appIdToConfig = this._buildAppIdMap(config);
     
     // Environment URLs for descix-serve gateway routing
@@ -177,50 +227,39 @@ export class WorkspaceConfig {
   }
 
   /**
-   * Build app_id → config map from env.platform and env.products
-   * Unified Registry: app_id is globally unique; localPath maps to directory
+   * Build the app_id → config map from env.app (v3 single-app).
+   *
+   * v3 holds exactly ONE app and its localPath is implicitly '.': the app repo's root IS the
+   * workspace root. The map shape survives (one entry) so every reader keyed on appId keeps
+   * its contract; the retired v2.1 multi-app walk (env.platform + env.products) is refused by
+   * load() and has no reader here any more.
+   *
    * @param {Object} config - Parsed workspace.json
    * @returns {Object} Map of appId -> { localPath, communityId?, kbId }
    */
   _buildAppIdMap(config) {
     const map = {};
-    const env = config.env || {};
-    const wsRoot = config.workspaceRoot || this.workspaceRoot;
-
-    // env.platform (e.g. daita -> DeSciX_Cloud)
-    if (env.platform?.appId && env.platform?.localPath) {
-      map[env.platform.appId] = {
-        localPath: env.platform.localPath,
-        communityId: env.platform.communityId || null,
-        kbId: env.platform.kbId || 'General'
+    const app = config.env?.app;
+    if (app?.appId) {
+      map[app.appId] = {
+        localPath: '.',
+        communityId: app.communityId || null,
+        kbId: app.kbId || 'General'
       };
     }
-
-    // env.products array (e.g. powch -> DeSciX_Powch)
-    const products = Array.isArray(env.products) ? env.products : [];
-    for (const p of products) {
-      if (p?.appId && p?.localPath) {
-        map[p.appId] = {
-          localPath: p.localPath,
-          communityId: p.communityId || null,
-          kbId: p.kbId || 'General'
-        };
-      }
-    }
-
     return map;
   }
 
   /**
    * Get app config by app_id (Unified Registry - app_id is globally unique)
-   * Resolves from env.platform, env.products, communities, or products
+   * Resolves from env.app (v3 single-app)
    * @param {string} appId - App/product identifier
    * @returns {Object|null} { localPath, absolutePath?, communityId?, kbId } or null
    */
   getAppByAppId(appId) {
     if (!appId || !this.workspaceRoot) return null;
 
-    // env.platform + env.products (primary for manually crafted workspace)
+    // env.app (v3 single-app)
     const fromEnv = this._appIdToConfig[appId];
     if (fromEnv) {
       const absPath = resolveWorkspacePath(this.workspaceRoot, fromEnv.localPath, appId);
@@ -235,85 +274,27 @@ export class WorkspaceConfig {
     return null;
   }
 
-  /**
-   * The RAW registry entry for an app — `localPath` exactly as workspace.json carries it, with NO
-   * path resolution and therefore no possibility of throwing on a bad stored value.
-   *
-   * This exists for exactly one caller shape: a command that is about to REPLACE an app's
-   * localPath. Such a command must not resolve the OUTGOING value. getAppByAppId() resolves, and
-   * resolving the value you are on your way to overwrite is what made `descix app set-localpath`
-   * unusable precisely when it was needed — a workspace already carrying a rejected localPath
-   * could not be repaired by the one verb whose job is repairing it, while the rejection itself
-   * forbade hand-editing. The verb was the prescribed remedy and the verb refused.
-   *
-   * It reads the SAME map getAppByAppId reads (_buildAppIdMap is still the one owner of "what is
-   * mapped"); it simply stops short of resolution. Do NOT use it to obtain a usable path — take
-   * getAppByAppId().absolutePath for that, so the loader's rejection still runs.
-   *
-   * @param {string} appId - App/product identifier
-   * @returns {{ localPath: string, communityId: string|null, kbId: string }|null}
-   */
-  getAppEntry(appId) {
-    if (!appId) return null;
-    return this._appIdToConfig?.[appId] || null;
-  }
+
 
   /**
    * THE ONE OWNER of "find the LIVE env entry for this app, or hard-fail".
    *
    * Live means the actual object inside this.env — mutate it and save() persists the mutation.
-   * getAppByAppId() and getAppEntry() both return copies and are useless for writing.
+   * getAppByAppId() returns copies and is useless for writing.
    *
-   * The one lookup every entry setter (setMicroservicePort, setStaticSite, setLocalPath) uses. A
-   * private walk of env.products ONLY misses the platform app, finds nothing, writes nothing and
-   * still reports success.
+   * The one lookup every entry setter (setMicroservicePort, setStaticSite) uses. In v3 the only
+   * live entry is env.app; any other id hard-fails with the canonical unmapped message.
    *
    * @param {string} appId - App identifier
-   * @returns {Object} the live env.platform or env.products[] entry
-   * @throws if appId is not mapped
+   * @returns {Object} the live env.app entry
+   * @throws if appId is not THE app
    */
   _liveEnvEntry(appId) {
-    let entry = null;
-    if (this.env?.platform?.appId === appId) {
-      entry = this.env.platform;
-    } else if (Array.isArray(this.env?.products)) {
-      entry = this.env.products.find(p => p.appId === appId) || null;
-    }
+    const entry = this.env?.app?.appId === appId ? this.env.app : null;
     if (!entry) {
       throw new Error(unmappedAppMessage(appId));
     }
     return entry;
-  }
-
-  /**
-   * Update an app's localPath in env.platform or env.products[].
-   *
-   * The canonical write path for localPath. Backs `descix app set-localpath`.
-   *
-   * localPath MUST be workspace-root-relative. It is validated here through
-   * resolveWorkspacePath — the LOADER'S OWN resolver, not a second copy of its rules — so a
-   * value the loader will refuse on the next read is refused now, before anything is written.
-   * Writing a value the loader rejects is what bricked workspaces: every subsequent command
-   * threw, including the repair verbs, while the rejection forbade hand-editing.
-   *
-   * Persists via save() — same auto-save pattern as its siblings.
-   * Hard-fails if appId is not mapped in env.platform or env.products.
-   *
-   * @param {string} appId - App identifier (must exist in env.platform or env.products)
-   * @param {string} localPath - New path, relative to the workspace root
-   * @returns {Promise<string>} Path to saved config (from save())
-   */
-  async setLocalPath(appId, localPath) {
-    if (!appId) throw new Error('appId is required');
-    if (!localPath) throw new Error('localPath is required');
-
-    const entry = this._liveEnvEntry(appId);
-
-    // Validate through the loader's own resolver. Throws on an absolute path.
-    resolveWorkspacePath(this.workspaceRoot, localPath, appId);
-
-    entry.localPath = localPath;
-    return this.save();
   }
 
   /**
@@ -437,6 +418,28 @@ export class WorkspaceConfig {
       );
     }
 
+    // v2.1 MULTI-APP hard-error: env.platform / env.products are the retired mapping model —
+    // one workspace registering OTHER repos' apps by localPath. v3 is single-app (CEO
+    // 2026-10-09; fork (b) 2026-10-10): the app repo's root IS the workspace root, and local
+    // multi-app dev is sibling checkouts behind one gateway config. Same posture as the v1
+    // refusal above: loud, non-destructive, the remedy is one command per app repo.
+    if (parsed.env && (parsed.env.platform || parsed.env.products)) {
+      throw new Error(
+        'v2.1 multi-app workspace format is not supported. Migrate to v3 (single-app).\n' +
+        `  File:   ${configPath}\n` +
+        '\n' +
+        'This file is still on disk and has NOT been modified. v3 holds exactly ONE app\n' +
+        '(env.app) and the app repo\'s own root is the workspace root. To migrate:\n' +
+        '  • In EACH app repo this file mapped, run from that repo\'s root:\n' +
+        '      descix config init --env <dev|demo|prod>   # pins env.apiUrl\n' +
+        '      descix app init -a <app_id>                # writes the v3 env.app block\n' +
+        '  • A gateway hosting several local apps lists their repo roots in ITS OWN\n' +
+        '    workspace.json under env.gateway.appRepos (fork (b): sibling checkouts, one\n' +
+        '    gateway config).\n' +
+        moveAsideRemedy(configPath, 'descix app init')
+      );
+    }
+
     // A v2.1 file carrying a TOP-LEVEL `apiUrl` is refused by name. That key is retired: no
     // reader consumes it (the origin owner resolves `env.apiUrl` only) and save() never writes
     // it, so a developer who set it by hand would be silently ignored on every invocation —
@@ -480,8 +483,8 @@ export class WorkspaceConfig {
   }
   
   /**
-   * Save workspace configuration in v2.1 format.
-   * Always writes env.platform / env.products structure.
+   * Save workspace configuration in v3 (single-app) format: env.app, never
+   * env.platform / env.products.
    *
    * PRESERVES KEYS IT DOES NOT UNDERSTAND. This method used to serialize a fixed field list from
    * memory over the whole file, so ANY top-level key it did not itself enumerate was silently
@@ -508,7 +511,7 @@ export class WorkspaceConfig {
 
     this.workspaceRoot = root;
 
-    // Build env block for v2.1 output
+    // Build env block for v3 output
     const envBlock = (this.env && Object.keys(this.env).length > 0) ? this.env : null;
 
     // The keys this writer OWNS. Everything else on disk is carried through untouched.
@@ -537,7 +540,7 @@ export class WorkspaceConfig {
 
     const configData = {
       ...carried,
-      version: '2.1',
+      version: '3.0',
       workspaceRoot: path.resolve(root),
       type: this.type,
     };
@@ -552,54 +555,47 @@ export class WorkspaceConfig {
   // ============ App Registration Methods ============
 
   /**
-   * Register an app in the v2.1 workspace (env.platform or env.products).
-   * community_id is server-authoritative — not stored in workspace.json.
-   * @param {string} communityId - Accepted for call-site compatibility but not stored
+   * Register THE app of this v3 workspace (env.app).
+   *
+   * Single-app is the FORMAT, not a convention: a workspace that already holds a different app
+   * refuses loudly — there is no second slot to put one in, and silently replacing env.app
+   * would re-point every path-derived surface (site/, microservice/, manifests) at a different
+   * platform record. Re-registering the SAME app is idempotent (the `app init` re-run case) and
+   * may update kbId / communityId.
+   *
+   * localPath is GONE as an input: the app repo's root is the workspace root, always ('.').
+   *
+   * communityId is STORED, not just validated. It was previously accepted as a parameter and
+   * silently discarded, so `descix init -c egpt` wrote no trace of `egpt` anywhere — and
+   * `workspace-identity.js` (this entry's reader) then had no community to report, which is
+   * how the generated agent files named nobody's community. Writer and reader are a pair.
+   *
+   * @param {string} communityId - The app's community (server-authoritative value, mirrored here)
    * @param {string} appId - App identifier (globally unique)
-   * @param {Object} appConfig - App configuration
-   * @param {string} appConfig.localPath - Local folder path relative to workspaceRoot
-   * @param {string} [appConfig.kbId] - Default knowledge base ID
+   * @param {Object} [appConfig] - { kbId? }
    * @returns {boolean} Success status
    */
-  registerApp(communityId, appId, appConfig) {
-    if (!appId || !appConfig.localPath) {
-      throw new Error('appId and localPath are required');
+  registerApp(communityId, appId, appConfig = {}) {
+    if (!appId) {
+      throw new Error('appId is required');
     }
-
-    // Validate through THE LOADER'S OWN RESOLVER — the same owner setLocalPath consumes, never a
-    // second copy of its rules. Three writers persisted a localPath and only ONE validated it, so
-    // `descix app init -p /abs` wrote an absolute value, created directories at that arbitrary
-    // absolute location, printed success, and bricked the workspace on the NEXT read — the loader
-    // refused the value for every command including the repair verbs, while the refusal forbade
-    // hand-editing. A path this CLI accepts must be honoured, or refused before anything is written.
-    resolveWorkspacePath(this.workspaceRoot, appConfig.localPath, appId);
 
     if (!this.env) this.env = {};
-    if (!Array.isArray(this.env.products)) this.env.products = [];
-
-    // communityId is STORED, not just validated. It was previously accepted as a parameter and
-    // silently discarded, so `descix init -c egpt` wrote no trace of `egpt` anywhere — and
-    // `workspace-identity.js` (this entry's reader) then had no community to report, which is
-    // how the generated agent files named nobody's community. Writer and reader are a pair:
-    // the key order in `readIdentity()` mirrors the shape written here.
-    const entry = { appId, localPath: appConfig.localPath, kbId: appConfig.kbId || 'General' };
-    if (communityId) entry.communityId = communityId;
-
-    if (this.env.platform?.appId === appId) {
-      this.env.platform.localPath = appConfig.localPath;
-      if (appConfig.kbId) this.env.platform.kbId = appConfig.kbId;
-      if (communityId) this.env.platform.communityId = communityId;
-    } else {
-      const idx = this.env.products.findIndex(p => p.appId === appId);
-      if (idx >= 0) {
-        this.env.products[idx] = { ...this.env.products[idx], ...entry };
-      } else {
-        this.env.products.push(entry);
-      }
+    const existing = this.env.app;
+    if (existing?.appId && existing.appId !== appId) {
+      throw new Error(
+        `This workspace already holds app '${existing.appId}' — a v3 workspace is single-app.\n` +
+        `To work on '${appId}', clone or create its OWN repo and run "descix app init" from\n` +
+        `that repo's root (sibling checkouts, one gateway config, is the supported local layout).`
+      );
     }
 
+    const entry = { ...(existing || {}), appId, kbId: appConfig.kbId || existing?.kbId || 'General' };
+    if (communityId) entry.communityId = communityId;
+    this.env.app = entry;
+
     this._appIdToConfig = this._buildAppIdMap({ env: this.env, workspaceRoot: this.workspaceRoot });
-    this.version = '2.1';
+    this.version = '3.0';
     return true;
   }
   
@@ -648,7 +644,7 @@ export class WorkspaceConfig {
     const cwd = path.resolve(startDir);
     const wsRoot = this.workspaceRoot ? path.resolve(this.workspaceRoot) : null;
 
-    // env.platform + env.products (Unified Registry - primary)
+    // env.app (v3 single-app): at most one entry
     if (wsRoot) {
       for (const [appId, cfg] of Object.entries(this._appIdToConfig || {})) {
         const appPath = resolveWorkspacePath(wsRoot, cfg.localPath, appId);
@@ -776,7 +772,7 @@ export class WorkspaceConfig {
       throw new Error(
         `"${dottedKey}" is not a workspace-level env key.\n` +
         `  Settable here: ${ALLOWED.join(', ')}\n` +
-        '  Per-app keys have their own verbs: descix app set-site / set-port / set-localpath.'
+        '  Per-app keys have their own verbs: descix app set-site / set-port.'
       );
     }
 
@@ -806,7 +802,7 @@ export class WorkspaceConfig {
   }
 
   /**
-   * Update an app's microservice.port in env.products[] (or env.platform if it is the platform app).
+   * Update the app's microservice.port on env.app (v3 single-app).
    *
    * Operates on the entry's microservice.{} slot.
    * This is the canonical write path for the microservice port that `descix microservice init`
@@ -815,9 +811,9 @@ export class WorkspaceConfig {
    *
    * Pass `null` to remove microservice.port; if microservice.{} becomes empty, it is also deleted.
    * Persists via save() at the end — same auto-save pattern as setEnvironment().
-   * Hard-fails if appId is not mapped in env.platform or env.products.
+   * Hard-fails if appId is not THE app (env.app).
    *
-   * @param {string} appId - App identifier (must exist in env.platform or env.products)
+   * @param {string} appId - App identifier (must be env.app.appId)
    * @param {number|string|null} port - Port number to set, or null to remove microservice.port
    * @returns {Promise<string>} Path to saved config (from save())
    */
@@ -843,7 +839,7 @@ export class WorkspaceConfig {
   }
 
   /**
-   * Update an app's site config in env.products[] (or env.platform if it is the platform app).
+   * Update the app's site config on env.app (v3 single-app).
    *
    * Parallel to setMicroservicePort(), but operates on the entry's site.{} slot. This is the
    * canonical write path for site.static — the relative path the dev gateway's
@@ -867,9 +863,9 @@ export class WorkspaceConfig {
    * Pass null for a field to remove it (what `--unset` does for all three). Removals clear
    * only the named field. If site.{} becomes empty after removals it is deleted.
    * Persists via save() at the end — same auto-save pattern as setMicroservicePort().
-   * Hard-fails if appId is not mapped in env.platform or env.products.
+   * Hard-fails if appId is not THE app (env.app).
    *
-   * @param {string} appId - App identifier (must exist in env.platform or env.products)
+   * @param {string} appId - App identifier (must be env.app.appId)
    * @param {Object} fields - Fields to set on site.{}
    * @param {string|null} [fields.static] - Relative static-site path to set, or null to remove site.static
    * @param {number|string|null} [fields.port] - Site dev-server port to set, or null to remove site.port
@@ -1006,9 +1002,9 @@ export class WorkspaceConfig {
   validate() {
     const errors = [];
 
-    // v2.1 validation: must have env block
+    // v3 validation: must have env block
     if (!this.env || Object.keys(this.env).length === 0) {
-      errors.push('Missing env block — workspace.json must be v2.1 format with env.platform or env.products');
+      errors.push('Missing env block — workspace.json must be v3 format with env.app');
     }
 
     return {

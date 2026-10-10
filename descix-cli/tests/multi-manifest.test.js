@@ -25,13 +25,13 @@ import { WorkspaceConfig } from '../lib/workspace-config.js';
 import { loadManifests } from '../lib/core/ManifestLoader.js';
 
 /**
- * Create a temp workspace + app directory with two manifest files.
+ * Create a temp v3 workspace (repo root == app root) with two manifest files.
  * Returns: { wsRoot, appRoot, appId }
  */
 async function makeMultiManifestFixture(t) {
   const wsRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'descix-multimf-'));
   const appId = 'testapp-multimanifest';
-  const appRoot = path.join(wsRoot, 'apps', appId);
+  const appRoot = wsRoot; // v3: the app repo root IS the workspace root
 
   await fs.mkdir(path.join(wsRoot, '.descix'), { recursive: true });
   await fs.mkdir(path.join(appRoot, '.descix', 'manifests'), { recursive: true });
@@ -71,11 +71,11 @@ async function makeMultiManifestFixture(t) {
 
   // Workspace config
   const workspace = {
-    version: '2.1',
+    version: '3.0',
     workspaceRoot: wsRoot,
     type: 'workspace',
     env: {
-      products: [{ appId, localPath: path.join('apps', appId), kbId: 'Corpus' }]
+      app: { appId, communityId: 'testcomm', kbId: 'Corpus' }
     }
   };
   await fs.writeFile(

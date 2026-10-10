@@ -15,7 +15,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -27,6 +26,7 @@ import {
 } from '../src/dev/gatewayPort.js';
 import { listenOrFailLoud } from '../src/dev/gateway.js';
 import { buildWorkspaceProducts, resolveAppGatewayUrl } from '../src/dev/workspaceProducts.js';
+import { withV3Tree } from './support/v3Tree.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SDK_ROOT = path.resolve(__dirname, '..');
@@ -38,22 +38,11 @@ const GATEWAY_SRC = fs.readFileSync(path.join(SDK_ROOT, 'src', 'dev', 'gateway.j
 const stripComments = (src) =>
   src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 
-function withWorkspace(config, fn) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gw-port-'));
-  try {
-    fs.mkdirSync(path.join(dir, '.descix'), { recursive: true });
-    fs.writeFileSync(path.join(dir, '.descix', 'workspace.json'), JSON.stringify(config, null, 2));
-    return fn(dir);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-}
-
 // ------------------------------------------------------- the resolution chain
 
 test('the chain is: --port > env.gateway.port > built-in default', () => {
-  const configured = { env: { gateway: { port: 5599 }, products: [] } };
-  const bare = { env: { products: [] } };
+  const configured = { env: { gateway: { port: 5599 } } };
+  const bare = { env: {} };
 
   assert.deepEqual(resolveGatewayPort(bare), {
     port: DEFAULT_GATEWAY_PORT, portSource: `built-in default (${DEFAULT_GATEWAY_PORT})`,
@@ -89,14 +78,14 @@ test('a string port (what commander hands over) is accepted; junk fails loud', (
 // ------------------------------------------------- map and server agree (G-4.2)
 
 test('the product map the shell bakes reads the SAME owner as the server', () => {
-  const config = {
-    version: '2.1',
+  // v3: the workspace's own app is env.app, served from the workspace root.
+  const spec = {
     env: {
       gateway: { port: 5599 },
-      products: [{ appId: 'egpt-godsworld', localPath: 'godsworld/codesite', site: { static: '.' } }],
+      app: { appId: 'egpt-godsworld', communityId: 'egpt', site: { static: '.' } },
     },
   };
-  withWorkspace(config, (dir) => {
+  withV3Tree(spec, ({ dir, config }) => {
     const serverPort = resolveGatewayPort(config).port;
     assert.equal(serverPort, 5599);
 

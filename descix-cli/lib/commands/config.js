@@ -34,12 +34,10 @@ export async function show() {
       console.log(chalk.yellow(`   ⚠ This workspace pins ${normalizeOrigin(pinned)} (${environmentNameFor(pinned)}), but ${effective.source} overrides it for this shell.`));
     }
 
-    // Show mapped apps (v2.1 env.products)
-    const platform = workspaceConfig.env?.platform;
-    const products = workspaceConfig.env?.products || [];
-    const allApps = [platform?.appId, ...products.map(p => p.appId)].filter(Boolean);
-    if (allApps.length > 0) {
-      console.log(chalk.white(`   Apps:          ${allApps.join(', ')}`));
+    // v3 single-app: the one app this workspace holds
+    const appId = workspaceConfig.env?.app?.appId;
+    if (appId) {
+      console.log(chalk.white(`   App:           ${appId}`));
     }
 
     console.log('');

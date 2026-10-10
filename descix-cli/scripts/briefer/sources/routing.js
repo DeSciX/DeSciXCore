@@ -121,12 +121,13 @@ export async function extract({ env, cliPaths } = {}) {
     lines: smm.lines,
     regex: /export\s+async\s+function\s+proxyToExternalService\s*\(/,
     section: `§${SECTION.number} ${SECTION.heading}`,
-    source: `${SMM_FILE}:853-981 (proxyToExternalService)`,
+    source: `${SMM_FILE}:923-1051 (proxyToExternalService)`,
     expected: 'export async function proxyToExternalService(commandName, params, sessionToken = null, req = null)',
     recovery: `Re-locate proxyToExternalService in ${SMM_FILE}.`,
-    // Re-verified 2026-09-19: the signature is byte-identical; the function moved (650-800 ->
-    // 853) when routing-owner code landed above it (Cloud a06f908). The range re-arms the gate.
-    expectedRange: [820, 900]
+    // Re-verified 2026-10-10: the signature is byte-identical; the function moved (853 -> 923)
+    // when the prune/purge deploy hardening landed above it (Cloud main, ws-prune-504). The
+    // range re-arms the gate.
+    expectedRange: [890, 970]
   });
 
   // ── Source 3: apiFront.js — invoke() dispatch ──

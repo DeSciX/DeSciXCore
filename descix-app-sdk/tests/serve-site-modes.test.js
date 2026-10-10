@@ -18,51 +18,43 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { createViteProxyConfig } from '../src/dev/createViteProxyConfig.js';
 import { devServerProxyGuard, devServerUnreachableBody } from '../src/dev/devServerProxyGuard.js';
 import { resolveAppGatewayUrl } from '../src/dev/workspaceProducts.js';
+import { withV3Tree } from './support/v3Tree.js';
 
-function withWorkspace(config, fn) {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'serve-modes-')));
-  try {
-    fs.mkdirSync(path.join(dir, '.descix'), { recursive: true });
-    fs.writeFileSync(path.join(dir, '.descix', 'workspace.json'), JSON.stringify(config, null, 2));
-    return fn(dir);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-}
-
+// v3: each app's site block lives in ITS OWN repo's workspace.json; the gateway workspace
+// only lists the repos. The three apps cover the three site shapes the gateway must tell apart.
 const BOTH_SET = {
-  version: '2.1',
-  env: {
-    apiUrl: 'https://descix.net',
-    gateway: { port: 5599 },
-    products: [
-      { appId: 'egpt', localPath: 'apps/egpt', site: { port: 5612, static: 'site' } },
-      { appId: 'plain', localPath: 'apps/plain', site: { port: 6001, protocol: 'http' } },
-      { appId: 'built', localPath: 'apps/built', site: { static: 'dist' } },
-    ],
+  env: { apiUrl: 'https://descix.net' },
+  gateway: { port: 5599, appRepos: ['egpt', 'plain', 'built'] },
+  repos: {
+    egpt: { appId: 'egpt', site: { port: 5612, static: 'site' } },
+    plain: { appId: 'plain', site: { port: 6001, protocol: 'http' } },
+    built: { appId: 'built', site: { static: 'dist' } },
   },
 };
+
+/** fn receives the gateway workspace root and the repo dirs by name. */
+const withWorkspace = (fn) => withV3Tree(BOTH_SET, ({ dir, repos }) => fn(dir, repos));
 
 // ---------------------------------------------------------------- mode preference
 
 test('both-set product: the gateway serves the DEV SERVER (site.port wins), not the static dir', () => {
-  withWorkspace(BOTH_SET, (dir) => {
+  withWorkspace((dir, repos) => {
     const proxy = createViteProxyConfig(dir);
     assert.equal(proxy['/p/egpt']?.target, 'https://localhost:5612', 'dev-server route must exist for the both-set product');
     assert.equal(proxy._staticRoutes['egpt'], undefined, 'the both-set product must NOT also be a static route');
-    assert.ok(proxy._staticRoutes['built'], 'a static-only product still gets its static route');
+    // and its static dir resolves against the app's OWN repo root, not the gateway workspace
+    assert.equal(proxy._staticRoutes['built'], path.resolve(repos.built, 'dist'),
+      'a static-only product still gets its static route');
   });
 });
 
 test('both-set product is SAID OUT LOUD: _modeNotes names the winner, the loser, and the switch command', () => {
-  withWorkspace(BOTH_SET, (dir) => {
+  withWorkspace((dir, repos) => {
     const proxy = createViteProxyConfig(dir);
     const note = (proxy._modeNotes || []).find((n) => n.includes('/p/egpt'));
     assert.ok(note, 'a both-set product must produce a mode note');
@@ -74,14 +66,14 @@ test('both-set product is SAID OUT LOUD: _modeNotes names the winner, the loser,
 });
 
 test('single-mode products produce NO mode note', () => {
-  withWorkspace(BOTH_SET, (dir) => {
+  withWorkspace((dir, repos) => {
     const notes = createViteProxyConfig(dir)._modeNotes || [];
     assert.equal(notes.length, 1, 'only the both-set product may produce a note');
   });
 });
 
 test('resolveAppGatewayUrl reports the SAME mode the gateway serves for a both-set product', () => {
-  withWorkspace(BOTH_SET, (dir) => {
+  withWorkspace((dir, repos) => {
     const resolved = resolveAppGatewayUrl(dir, 'egpt');
     assert.equal(resolved.kind, 'dev-server', 'app open must report the mode the gateway actually routes');
     assert.match(resolved.via, /https:\/\/localhost:5612/);
@@ -91,21 +83,21 @@ test('resolveAppGatewayUrl reports the SAME mode the gateway serves for a both-s
 // ---------------------------------------------------------------- site.protocol
 
 test('site.protocol http composes an http:// upstream target for the /p route', () => {
-  withWorkspace(BOTH_SET, (dir) => {
+  withWorkspace((dir, repos) => {
     const proxy = createViteProxyConfig(dir);
     assert.equal(proxy['/p/plain']?.target, 'http://localhost:6001');
   });
 });
 
 test('default (no site.protocol) still targets https — behavior preserved exactly', () => {
-  withWorkspace(BOTH_SET, (dir) => {
+  withWorkspace((dir, repos) => {
     const proxy = createViteProxyConfig(dir);
     assert.equal(proxy['/p/egpt']?.target, 'https://localhost:5612');
   });
 });
 
 test('resolveAppGatewayUrl `via` carries the declared protocol (one origin owner)', () => {
-  withWorkspace(BOTH_SET, (dir) => {
+  withWorkspace((dir, repos) => {
     assert.match(resolveAppGatewayUrl(dir, 'plain').via, /http:\/\/localhost:6001/);
   });
 });
@@ -113,7 +105,7 @@ test('resolveAppGatewayUrl `via` carries the declared protocol (one origin owner
 // ---------------------------------------------------------------- loud 502 guard
 
 test('every /p dev-server route carries the loud-502 configure hook', () => {
-  withWorkspace(BOTH_SET, (dir) => {
+  withWorkspace((dir, repos) => {
     const proxy = createViteProxyConfig(dir);
     for (const appId of ['egpt', 'plain']) {
       assert.equal(typeof proxy[`/p/${appId}`].configure, 'function', `/p/${appId} must carry devServerProxyGuard`);

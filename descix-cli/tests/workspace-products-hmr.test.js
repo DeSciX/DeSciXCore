@@ -32,21 +32,24 @@ import {
   buildWorkspaceProducts,
   createViteProxyConfig,
 } from '@descix/app-sdk/dev';
+import { makeV3Tree } from './tools/v3-tree.mjs';
 
-async function makeTempWorkspace(t, env) {
-  const wsRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'descix-test-wshmr-'));
-  await fs.mkdir(path.join(wsRoot, '.descix'), { recursive: true });
-  await writeWorkspace(wsRoot, env);
-  t.after(async () => { await fs.rm(wsRoot, { recursive: true, force: true }); });
-  return wsRoot;
+/**
+ * A v3 gateway tree: the gateway workspace lists sibling app repos, each holding its OWN
+ * single-app workspace.json. `repos` are all WRITTEN; `gateway` decides which are LISTED — the
+ * plugin's product map is whatever resolveWorkspaceApps makes of the listing.
+ */
+async function makeTempWorkspace(t, { repos, gateway }) {
+  const tree = await makeV3Tree(t, { repos, gateway });
+  return tree;
 }
 
-async function writeWorkspace(wsRoot, env) {
-  const workspace = { version: '2.1', workspaceRoot: wsRoot, type: 'workspace', env };
-  await fs.writeFile(
-    path.join(wsRoot, '.descix', 'workspace.json'),
-    JSON.stringify(workspace, null, 2)
-  );
+/** Re-write ONLY the gateway workspace's env.gateway block (what editing the listing does). */
+async function writeGateway(dir, gateway) {
+  const file = path.join(dir, '.descix', 'workspace.json');
+  const doc = JSON.parse(await fs.readFile(file, 'utf8'));
+  doc.env.gateway = gateway;
+  await fs.writeFile(file, JSON.stringify(doc, null, 2));
 }
 
 /** Fake Vite server with a hot.send spy and an httpServer EventEmitter. */
@@ -71,13 +74,13 @@ async function waitFor(predicate, { timeoutMs = 4000, intervalMs = 25 } = {}) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('workspaceProductsPlugin — exposes the virtual module via resolveId/load', async (t) => {
-  const wsRoot = await makeTempWorkspace(t, {
-    platform: { appId: 'daita', localPath: 'p', site: { port: 5174 } },
-    products: [],
-  });
-  const plugin = workspaceProductsPlugin(wsRoot);
+const DAITA = { appId: 'daita', site: { port: 5174 } };
+const SYNTHPOD = { appId: 'descix-synthpod', site: { static: 'site' } };
+const DEVSRV = (port) => ({ appId: 'descix-devsrv', site: { port } });
 
+test('workspaceProductsPlugin — exposes the virtual module via resolveId/load', async (t) => {
+  const { dir } = await makeTempWorkspace(t, { repos: { daita: DAITA }, gateway: { shell: 'daita' } });
+  const plugin = workspaceProductsPlugin(dir);
   const resolved = plugin.resolveId(WORKSPACE_PRODUCTS_VIRTUAL_ID);
   assert.ok(resolved, 'resolveId must resolve the virtual id');
   const code = plugin.load(resolved);
@@ -89,23 +92,20 @@ test('workspaceProductsPlugin — exposes the virtual module via resolveId/load'
   assert.equal(plugin.apply, 'serve');
 });
 
-test('workspaceProductsPlugin — pushes a live HMR update when a product site is ADDED to workspace.json', async (t) => {
-  // Start with only the platform; no products yet.
-  const wsRoot = await makeTempWorkspace(t, {
-    platform: { appId: 'daita', localPath: 'platform', site: { port: 5174 } },
-    products: [],
+test('workspaceProductsPlugin — pushes a live HMR update when an app repo is ADDED to the gateway listing', async (t) => {
+  // Start with only the shell listed; the synthpod repo exists on disk but is not served yet.
+  const { dir } = await makeTempWorkspace(t, {
+    repos: { daita: DAITA, synthpod: SYNTHPOD },
+    gateway: { shell: 'daita' },
   });
 
-  const plugin = workspaceProductsPlugin(wsRoot, { debounceMs: 30 });
+  const plugin = workspaceProductsPlugin(dir, { debounceMs: 30 });
   const server = makeFakeServer();
   plugin.configureServer(server);
   t.after(() => server.httpServer.emit('close'));
 
-  // Now ADD a product with a static site (what `descix app set-site` would do).
-  await writeWorkspace(wsRoot, {
-    platform: { appId: 'daita', localPath: 'platform', site: { port: 5174 } },
-    products: [{ appId: 'descix-synthpod', localPath: 'synthpod', site: { static: 'site' } }],
-  });
+  // Now LIST the repo (what adding it to env.gateway.appRepos does).
+  await writeGateway(dir, { shell: '../daita', appRepos: ['../synthpod'] });
 
   const got = await waitFor(() => server.sent.length > 0);
   assert.ok(got, 'plugin must push an HMR message after workspace.json changes');
@@ -118,28 +118,23 @@ test('workspaceProductsPlugin — pushes a live HMR update when a product site i
   assert.equal(
     msg.data.products['descix-synthpod'],
     'https://localhost:5173/p/descix-synthpod',
-    'newly-added static product must appear in the pushed map at the gateway route'
+    'newly-listed static product must appear in the pushed map at the gateway route'
   );
-
 });
 
 test('workspaceProductsPlugin — does NOT push when the change does not alter the product map', async (t) => {
-  const wsRoot = await makeTempWorkspace(t, {
-    platform: { appId: 'daita', localPath: 'platform', site: { port: 5174 } },
-    products: [{ appId: 'descix-synthpod', localPath: 'synthpod', site: { static: 'site' } }],
+  const { dir } = await makeTempWorkspace(t, {
+    repos: { daita: DAITA, synthpod: SYNTHPOD },
+    gateway: { shell: 'daita', appRepos: ['synthpod'] },
   });
 
-  const plugin = workspaceProductsPlugin(wsRoot, { debounceMs: 30 });
+  const plugin = workspaceProductsPlugin(dir, { debounceMs: 30 });
   const server = makeFakeServer();
   plugin.configureServer(server);
   t.after(() => server.httpServer.emit('close'));
 
-  // Rewrite the SAME product map (add an unrelated, non-product field).
-  await writeWorkspace(wsRoot, {
-    gateway: { port: 5173 }, // does not change the product URLs (5173 is the default anyway)
-    platform: { appId: 'daita', localPath: 'platform', site: { port: 5174 } },
-    products: [{ appId: 'descix-synthpod', localPath: 'synthpod', site: { static: 'site' } }],
-  });
+  // Rewrite the SAME listing plus an unrelated field.
+  await writeGateway(dir, { port: 5173, shell: '../daita', appRepos: ['../synthpod'] }); // 5173 is the default anyway
 
   // Give the watcher a chance to (not) fire.
   await new Promise((r) => setTimeout(r, 300));
@@ -157,40 +152,107 @@ test('workspaceProductsPlugin — a dev-server PORT change does not churn the sh
   // the new port (gateway.js watchWorkspaceConfig -> buildGatewayProxy -> restart),
   // so the browser-facing URL never has to change. Not pushing is the CORRECT
   // behaviour here, and the shell is strictly quieter for it.
-  const wsRoot = await makeTempWorkspace(t, {
-    platform: { appId: 'daita', localPath: 'platform', site: { port: 5174 } },
-    products: [{ appId: 'descix-devsrv', localPath: 'devsrv', site: { port: 6001 } }],
+  const { dir, repos } = await makeTempWorkspace(t, {
+    repos: { daita: DAITA, devsrv: DEVSRV(6001), synthpod: SYNTHPOD },
+    gateway: { shell: 'daita', appRepos: ['devsrv'] },
   });
 
-  const plugin = workspaceProductsPlugin(wsRoot, { debounceMs: 30 });
+  const plugin = workspaceProductsPlugin(dir, { debounceMs: 30 });
   const server = makeFakeServer();
   plugin.configureServer(server);
   t.after(() => server.httpServer.emit('close'));
 
-  const before = buildWorkspaceProducts(wsRoot)['descix-devsrv'];
+  const before = buildWorkspaceProducts(dir)['descix-devsrv'];
   assert.equal(before, 'https://localhost:5173/p/descix-devsrv');
 
-  await writeWorkspace(wsRoot, {
-    platform: { appId: 'daita', localPath: 'platform', site: { port: 5174 } },
-    products: [{ appId: 'descix-devsrv', localPath: 'devsrv', site: { port: 6002 } }],
-  });
+  // Move the dev server's port in the APP REPO's own workspace.json, then touch the gateway
+  // workspace (same listing) so the watcher definitely runs against the moved port.
+  await fs.writeFile(
+    path.join(repos.devsrv, '.descix', 'workspace.json'),
+    JSON.stringify({ version: '3.0', env: { app: DEVSRV(6002) } }, null, 2)
+  );
+  await writeGateway(dir, { port: 5173, shell: '../daita', appRepos: ['../devsrv'] });
 
   await new Promise((r) => setTimeout(r, 300));
   const pushed = server.sent.filter((m) => m.event === WORKSPACE_PRODUCTS_HMR_EVENT);
   assert.equal(pushed.length, 0, 'the browser-facing URL is unchanged, so there is nothing to push');
-  assert.equal(buildWorkspaceProducts(wsRoot)['descix-devsrv'], before);
+  assert.equal(buildWorkspaceProducts(dir)['descix-devsrv'], before);
+
+  // POSITIVE CONTROL: the watcher is alive and the quiet above was a verdict, not deafness —
+  // listing one more repo DOES push.
+  await writeGateway(dir, { port: 5173, shell: '../daita', appRepos: ['../devsrv', '../synthpod'] });
+  assert.ok(await waitFor(() => server.sent.length > 0), 'control: a real map change must still push');
 });
 
 test('workspaceProductsPlugin — the port change is NOT lost: the gateway proxy follows it', async (t) => {
   // The other half of the contract above. If the map stops carrying the port, the
   // port must still reach the thing that actually needs it — the proxy target —
   // or the change is silently dropped and the app 502s behind a stable URL.
-  const wsRoot = await makeTempWorkspace(t, {
-    platform: { appId: 'daita', localPath: 'platform', site: { port: 5174 } },
-    products: [{ appId: 'descix-devsrv', localPath: 'devsrv', site: { port: 6002 } }],
+  const { dir } = await makeTempWorkspace(t, {
+    repos: { daita: DAITA, devsrv: DEVSRV(6002) },
+    gateway: { shell: 'daita', appRepos: ['devsrv'] },
   });
 
-  const config = JSON.parse(await fs.readFile(path.join(wsRoot, '.descix', 'workspace.json'), 'utf8'));
-  const proxy = createViteProxyConfig(wsRoot, config, { apiGatewayUrl: 'https://dev.descix.net' });
+  const proxy = createViteProxyConfig(dir, { apiGatewayUrl: 'https://dev.descix.net' });
   assert.equal(proxy['/p/descix-devsrv'].target, 'https://localhost:6002');
+});
+
+test('workspaceProductsPlugin — a LISTED repo changing its own site config pushes a live update (fork (b) gap)', async (t) => {
+  // v3 moved the site config into each app repo's OWN workspace.json (`descix app set-site`
+  // writes THERE), so a watcher that only sees the gateway's .descix directory goes deaf to
+  // exactly the write the plugin exists for. This gate holds the fix: the plugin watches every
+  // listed repo's workspace.json too.
+  const { dir, repos } = await makeTempWorkspace(t, {
+    repos: { daita: DAITA, devsrv: DEVSRV(6001) },
+    gateway: { shell: 'daita', appRepos: ['devsrv'] },
+  });
+
+  const plugin = workspaceProductsPlugin(dir, { debounceMs: 30 });
+  const server = makeFakeServer();
+  plugin.configureServer(server);
+  t.after(() => server.httpServer.emit('close'));
+
+  // The app FLIPS MODE in its own repo: dev server → static build. The gateway file is
+  // untouched; the browser-facing map changes (the /p route stays, but a NEW product appears
+  // if the app previously had no site — use that sharper shape: devsrv DROPS its site).
+  await fs.writeFile(
+    path.join(repos.devsrv, '.descix', 'workspace.json'),
+    JSON.stringify({ version: '3.0', env: { app: { appId: 'descix-devsrv' } } }, null, 2)
+  );
+
+  const got = await waitFor(() => server.sent.some((m) => m.event === WORKSPACE_PRODUCTS_HMR_EVENT));
+  assert.ok(got, 'a listed repo changing its own workspace.json must push — the gateway file never moved');
+  const msg = server.sent.find((m) => m.event === WORKSPACE_PRODUCTS_HMR_EVENT);
+  assert.ok(!(msg.data.products && msg.data.products['descix-devsrv']), 'the app that dropped its site must leave the map');
+});
+
+test('watchWorkspaceConfig — fires on a LISTED repo\'s own workspace.json change, and re-arms when the listing grows', async (t) => {
+  const { watchWorkspaceConfig } = await import('@descix/app-sdk/dev');
+  const { dir, repos } = await makeTempWorkspace(t, {
+    repos: { daita: DAITA, devsrv: DEVSRV(6001), synthpod: SYNTHPOD },
+    gateway: { shell: 'daita', appRepos: ['devsrv'] },
+  });
+
+  const calls = [];
+  const watcher = watchWorkspaceConfig(dir, (cfg) => calls.push(cfg), { debounceMs: 30 });
+  t.after(() => watcher.close());
+
+  // 1. A listed repo's own file changes → onChange fires (the gateway restarts its proxy).
+  await fs.writeFile(
+    path.join(repos.devsrv, '.descix', 'workspace.json'),
+    JSON.stringify({ version: '3.0', env: { app: DEVSRV(6002) } }, null, 2)
+  );
+  assert.ok(await waitFor(() => calls.length >= 1), 'listed-repo change must fire onChange');
+
+  // 2. The GATEWAY file lists one more repo → onChange fires AND the watcher re-arms so the
+  // newly listed repo is covered too.
+  await writeGateway(dir, { port: 5173, shell: '../daita', appRepos: ['../devsrv', '../synthpod'] });
+  assert.ok(await waitFor(() => calls.length >= 2), 'gateway-listing change must fire onChange');
+
+  const n = calls.length;
+  await fs.writeFile(
+    path.join(repos.synthpod, '.descix', 'workspace.json'),
+    JSON.stringify({ version: '3.0', env: { app: { appId: 'descix-synthpod', site: { static: 'dist' } } } }, null, 2)
+  );
+  assert.ok(await waitFor(() => calls.length > n), 'the NEWLY listed repo must be watched after the re-arm');
 });

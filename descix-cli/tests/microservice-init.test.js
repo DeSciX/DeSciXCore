@@ -6,8 +6,8 @@
  *
  * Coverage:
  *  - regression gate: getAppByAppId used (not removed getApp) — no TypeError
- *  - happy path: mapped app returns config with absolutePath and localPath
- *  - hard-fail: unmapped app throws a clean Error, not a TypeError
+ *  - happy path: the workspace's app resolves to the workspace root (v3: the repo root IS the app root)
+ *  - hard-fail: an app id that is not THE workspace app throws a clean Error, not a TypeError
  *
  * Design: exercises WorkspaceConfig.getAppByAppId() directly against a temp
  * workspace to validate the post-migration call site is correct.
@@ -20,7 +20,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { WorkspaceConfig } from '../lib/workspace-config.js';
+import { WorkspaceConfig, unmappedAppMessage } from '../lib/workspace-config.js';
 
 /**
  * Create an isolated temp workspace that mirrors a real smile-fms setup.
@@ -29,15 +29,14 @@ import { WorkspaceConfig } from '../lib/workspace-config.js';
 async function makeSmileWorkspace(t) {
   const wsRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'descix-test-ms-init-'));
   await fs.mkdir(path.join(wsRoot, '.descix'), { recursive: true });
-  await fs.mkdir(path.join(wsRoot, 'smile-fms'), { recursive: true });
 
   const appId = 'smile-fms';
   const workspace = {
-    version: '2.1',
+    version: '3.0',
     workspaceRoot: wsRoot,
     type: 'workspace',
     env: {
-      products: [{ appId, localPath: 'smile-fms', kbId: 'General' }]
+      app: { appId, communityId: 'smile', kbId: 'General' }
     }
   };
   await fs.writeFile(
@@ -54,13 +53,13 @@ async function makeSmileWorkspace(t) {
 
 /**
  * Simulate the post-migration microservice-init lookup
- * (mirrors the fixed bin/descix.js action).
+ * (mirrors the bin/descix.js action: getAppByAppId, else the canonical unmappedAppMessage).
  */
 async function runMicroserviceInitLookup(wsRoot, appId) {
   const workspaceConfig = await WorkspaceConfig.load(wsRoot);
   const appConfig = workspaceConfig.getAppByAppId(appId);
   if (!appConfig) {
-    throw new Error(`App not found in workspace.json.`);
+    throw new Error(unmappedAppMessage(appId));
   }
   return appConfig;
 }
@@ -89,23 +88,23 @@ test('microservice-init — happy path: appConfig has absolutePath and localPath
 
   const appConfig = await runMicroserviceInitLookup(wsRoot, appId);
 
-  assert.ok(appConfig.localPath, 'localPath must be present');
+  assert.equal(appConfig.localPath, '.', 'v3 localPath is implicitly the workspace root');
   assert.ok(appConfig.absolutePath, 'absolutePath must be present');
   assert.equal(
     path.resolve(appConfig.absolutePath),
-    path.resolve(path.join(wsRoot, 'smile-fms')),
-    'absolutePath must point to the app directory'
+    path.resolve(wsRoot),
+    'absolutePath must point to the app directory (the repo root)'
   );
 });
 
-test('microservice-init — hard-fail: unmapped app throws clean Error (not TypeError)', async (t) => {
+test('microservice-init — hard-fail: an app that is not THE workspace app throws clean Error (not TypeError)', async (t) => {
   const { wsRoot } = await makeSmileWorkspace(t);
 
   await assert.rejects(
     () => runMicroserviceInitLookup(wsRoot, 'totally-unknown-app'),
     (err) => {
       assert.ok(!(err instanceof TypeError), 'error must not be a TypeError (removed-method regression check)');
-      assert.match(err.message, /not found in workspace\.json/);
+      assert.match(err.message, /is not this workspace's app \(workspace\.json env\.app\)/);
       return true;
     }
   );

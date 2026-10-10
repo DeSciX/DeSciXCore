@@ -39,10 +39,10 @@ async function makeIsolatedWorkspace(t) {
   const wsRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'descix-model-cfg-test-'));
   await fs.mkdir(path.join(wsRoot, '.descix'), { recursive: true });
   const workspace = {
-    version: '2.1',
+    version: '3.0',
     workspaceRoot: wsRoot,
     type: 'workspace',
-    env: { products: [] }
+    env: {}
   };
   await fs.writeFile(
     path.join(wsRoot, '.descix', 'workspace.json'),

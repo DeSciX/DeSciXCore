@@ -7,9 +7,9 @@
  * what makes a shell sign-in visible to the app, and passkeys possible).
  *
  * Routing is data-driven via .descix/workspace.json:
- *   - root '/'       → the App Shell: env.siteUrl, or a local env.platform.site,
+ *   - root '/'       → the App Shell: env.siteUrl, or the gateway shell repo's local site,
  *                      or the API origin when that is remote (resolveGatewayTargets)
- *   - env.products[] → /p/{appId} per product (dev server or static dir)
+ *   - env.gateway.appRepos[] → /p/{appId} per app (dev server or static dir)
  *   - API, services, GCS → standard prefixes
  *
  * A workspace with no local platform checkout therefore serves the CLOUD shell
@@ -46,15 +46,15 @@ import { findWorkspaceRoot, readWorkspaceConfig, workspaceFilePath } from './wor
  */
 function buildDefines(config, workspaceRoot, targets) {
   // Powch URL — ONE owner, shared with the shell's own build (see powchUrl.js).
-  const powchAppUrl = resolvePowchUrl(config);
+  const powchAppUrl = resolvePowchUrl(config, { workspaceRoot });
   if (!powchAppUrl && isLocalOrigin(targets.siteUrl)) {
     // Only meaningful for a locally-built shell; a remote shell carries its own.
     // Said early because the shell now FAILS at boot rather than defaulting to a
     // production wallet — this warning is the hint that names the fix first.
     console.warn(
       '[Gateway] No Powch URL in workspace config — the shell will fail to boot.\n' +
-      '          Set env.powchUrl in .descix/workspace.json, or run Powch as a\n' +
-      '          product (env.products[] with appId "powch" and a site.port).'
+      '          Set env.powchUrl in .descix/workspace.json, or list the Powch repo in\n' +
+      '          env.gateway.appRepos (its own workspace carries appId "powch" and a site.port).'
     );
   }
 
@@ -124,7 +124,7 @@ export async function runGateway(options = {}) {
   }
 
   const config = readWorkspaceConfig(workspaceRoot);
-  const targets = resolveGatewayTargets(config, targetOverrides);
+  const targets = resolveGatewayTargets(config, { ...targetOverrides, workspaceRoot });
   // ONE owner of the port, so the server and the product map the shell bakes
   // (buildWorkspaceProducts) can never name different ports.
   const { port, portSource } = resolveGatewayPort(config, {

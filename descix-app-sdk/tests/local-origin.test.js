@@ -13,13 +13,11 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import { localUpstreamOrigin, LOCAL_DEFAULT_PROTOCOL } from '../src/dev/localOrigin.js';
 import { createViteProxyConfig } from '../src/dev/createViteProxyConfig.js';
 import { resolveApiTarget, resolveSiteTarget } from '../src/dev/resolveGatewayTargets.js';
 import { resolvePowchUrl } from '../src/dev/powchUrl.js';
+import { withV3Tree } from './support/v3Tree.js';
 
 // ------------------------------------------------------------------ the owner
 
@@ -36,43 +34,36 @@ test('a declared protocol is the only thing that changes the scheme', () => {
 test('a protocol that is not http/https fails loud naming the entry — no silent dead target', () => {
   for (const protocol of ['ftp', 'HTTPS', 'ws', ' ']) {
     assert.throws(
-      () => localUpstreamOrigin({ port: 5612, protocol }, 'env.products[egpt].site'),
-      /env\.products\[egpt\]\.site declares protocol .* only "http" or "https" are valid/s,
+      () => localUpstreamOrigin({ port: 5612, protocol }, 'env.app.site (egpt)'),
+      /env\.app\.site \(egpt\) declares protocol .* only "http" or "https" are valid/s,
     );
   }
 });
 
 test('a missing port fails loud, naming the entry — there is no port to default to', () => {
   for (const entry of [undefined, null, {}, { port: '' }, { protocol: 'http' }]) {
-    assert.throws(() => localUpstreamOrigin(entry, 'env.products[demo].microservice'),
-      /env\.products\[demo\]\.microservice names no port/);
+    assert.throws(() => localUpstreamOrigin(entry, 'env.app.microservice (demo)'),
+      /env\.app\.microservice \(demo\) names no port/);
   }
 });
 
 // ------------------------------------------------------------------ the consumers
 
+// v3: the gateway workspace lists the platform shell and each app repo; every repo's OWN
+// workspace.json carries its site/microservice. The same app roster the v2.1 inline
+// registry held, now as a directory tree.
 function withWorkspace(fn) {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'local-origin-')));
-  try {
-    fs.mkdirSync(path.join(dir, '.descix'), { recursive: true });
-    fs.writeFileSync(path.join(dir, '.descix', 'workspace.json'), JSON.stringify({
-      version: '2.1', type: 'workspace',
-      env: {
-        apiUrl: 'https://localhost:4000',
-        gateway: { port: 5601 },
-        platform: { appId: 'daita', site: { port: 5174 }, microservice: { port: 4000 } },
-        products: [
-          { appId: 'svc',   microservice: { port: 4000 } },
-          { appId: 'plain', microservice: { port: 8081, protocol: 'http' } },
-          { appId: 'site1', site: { port: 5180 } },
-          { appId: 'powch', site: { port: 5175 }, microservice: { port: 3003 } },
-        ],
-      },
-    }, null, 2));
-    return fn(dir);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  return withV3Tree({
+    env: { apiUrl: 'https://localhost:4000' },
+    gateway: { port: 5601, shell: 'cloud', appRepos: ['svc', 'plain', 'site1', 'powch'] },
+    repos: {
+      cloud: { appId: 'daita', site: { port: 5174 }, microservice: { port: 4000 } },
+      svc: { appId: 'svc', microservice: { port: 4000 } },
+      plain: { appId: 'plain', microservice: { port: 8081, protocol: 'http' } },
+      site1: { appId: 'site1', site: { port: 5180 } },
+      powch: { appId: 'powch', site: { port: 5175 }, microservice: { port: 3003 } },
+    },
+  }, ({ dir }) => fn(dir));
 }
 
 test('service routes /s/<appId> proxy to HTTPS unless the entry declares http (the measured defect)', () => {
@@ -100,15 +91,23 @@ test('negative control: an app that is not in the workspace has no /s/ route at 
 });
 
 test('resolveApiTarget and resolveSiteTarget build local platform origins through the owner', () => {
-  const config = { env: { platform: { site: { port: 5174 }, microservice: { port: 4000 } } } };
-  assert.equal(resolveApiTarget(config).apiUrl, 'https://localhost:4000');
-  assert.equal(resolveSiteTarget(config).siteUrl, 'https://localhost:5174');
-  const http = { env: { platform: { site: { port: 5174, protocol: 'http' }, microservice: { port: 4000, protocol: 'http' } } } };
-  assert.equal(resolveApiTarget(http).apiUrl, 'http://localhost:4000');
-  assert.equal(resolveSiteTarget(http).siteUrl, 'http://localhost:5174');
+  const shell = (site, microservice) => ({ gateway: { shell: 'cloud' }, repos: { cloud: { appId: 'daita', site, microservice } } });
+  withV3Tree(shell({ port: 5174 }, { port: 4000 }), ({ dir, config }) => {
+    assert.equal(resolveApiTarget(config, { workspaceRoot: dir }).apiUrl, 'https://localhost:4000');
+    assert.equal(resolveSiteTarget(config, { workspaceRoot: dir }).siteUrl, 'https://localhost:5174');
+  });
+  withV3Tree(shell({ port: 5174, protocol: 'http' }, { port: 4000, protocol: 'http' }), ({ dir, config }) => {
+    assert.equal(resolveApiTarget(config, { workspaceRoot: dir }).apiUrl, 'http://localhost:4000');
+    assert.equal(resolveSiteTarget(config, { workspaceRoot: dir }).siteUrl, 'http://localhost:5174');
+  });
 });
 
 test("resolvePowchUrl builds the product's own origin through the owner (trailing slash kept)", () => {
-  assert.equal(resolvePowchUrl({ env: { products: [{ appId: 'powch', site: { port: 5175 } }] } }), 'https://localhost:5175/');
-  assert.equal(resolvePowchUrl({ env: { products: [{ appId: 'powch', site: { port: 5175, protocol: 'http' } }] } }), 'http://localhost:5175/');
+  const powchRepo = (site) => ({ gateway: { appRepos: ['powch'] }, repos: { powch: { appId: 'powch', site } } });
+  withV3Tree(powchRepo({ port: 5175 }), ({ dir, config }) => {
+    assert.equal(resolvePowchUrl(config, { workspaceRoot: dir }), 'https://localhost:5175/');
+  });
+  withV3Tree(powchRepo({ port: 5175, protocol: 'http' }), ({ dir, config }) => {
+    assert.equal(resolvePowchUrl(config, { workspaceRoot: dir }), 'http://localhost:5175/');
+  });
 });

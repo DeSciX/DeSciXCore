@@ -12,6 +12,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 
+import { WorkspaceConfig } from '../lib/workspace-config.js';
+import { makeV3Tree } from './tools/v3-tree.mjs';
+
 import {
   buildRestartRegistry,
   resolveService,
@@ -24,43 +27,30 @@ import {
 /* Fixture helpers                                                     */
 /* ------------------------------------------------------------------ */
 
-function fakeWorkspaceConfig(overrides = {}) {
-  return {
-    workspaceRoot: '/fake/root',
-    env: {
-      environment: 'DEV',
-      communityId: 'unkamon',
-      platform: {
-        appId: 'daita',
-        localPath: 'DeSciX/DeSciX_Cloud',
-        microservice: { port: 4000, devCommand: 'nodemon app.js' }
-      },
-      products: [
-        {
-          appId: 'beast',
-          localPath: 'BEAST',
-          microservice: { port: 3011, devCommand: 'node app.js' }
-        },
-        {
-          appId: 'powch',
-          localPath: 'DeSciX/DeSciX_Powch',
-          microservice: { port: 3003, devCommand: 'npm run dev:service' }
-        },
-        // Entry with no devCommand — should NOT appear in restart registry.
-        {
-          appId: 'noop-service',
-          localPath: 'noop',
-          microservice: { port: 9999 }
-        },
-        // Entry with neither port nor microservice — should NOT appear.
-        {
-          appId: 'docs-only',
-          localPath: 'docs'
-        }
-      ],
-      ...overrides.env
-    }
+/**
+ * A real v3 gateway tree on disk, loaded through WorkspaceConfig.load: daita is the gateway
+ * SHELL repo and the other apps are sibling repos the gateway lists, each holding its own
+ * single-app workspace.json. The restart registry is whatever resolveWorkspaceApps makes of
+ * that tree — never hand-expanded here. Only the OS (lsof/kill/spawn/fs) is mocked.
+ *
+ * @returns {Promise<{ ws: WorkspaceConfig, repos: Object<string,string> }>} repos: name -> abs dir
+ */
+async function fakeWorkspaceConfig(t, extraRepos = {}) {
+  const repos = {
+    daita: { appId: 'daita', microservice: { port: 4000, devCommand: 'nodemon app.js' } },
+    beast: { appId: 'beast', microservice: { port: 3011, devCommand: 'node app.js' } },
+    powch: { appId: 'powch', microservice: { port: 3003, devCommand: 'npm run dev:service' } },
+    // Entry with no devCommand — kept in the registry so resolveService names the real gap.
+    'noop-service': { appId: 'noop-service', microservice: { port: 9999 } },
+    // Entry with neither port nor microservice — should NOT appear.
+    'docs-only': { appId: 'docs-only' },
+    ...extraRepos,
   };
+  const tree = await makeV3Tree(t, {
+    gateway: { shell: 'daita', appRepos: Object.keys(repos).filter((n) => n !== 'daita') },
+    repos,
+  });
+  return { ws: await WorkspaceConfig.load(tree.dir), repos: tree.repos };
 }
 
 /**
@@ -158,11 +148,11 @@ function makeDeps(scenario = {}) {
 /* Tests — registry / resolution                                       */
 /* ------------------------------------------------------------------ */
 
-test('buildRestartRegistry: includes every entry with a microservice.port', () => {
+test('buildRestartRegistry: includes every entry with a microservice.port', async (t) => {
   // Entries with port but missing devCommand are kept in the registry so
   // the user gets a specific 'add devCommand' error from resolveService —
   // not a generic 'not found' that would mask the real misconfiguration.
-  const ws = fakeWorkspaceConfig();
+  const { ws } = await fakeWorkspaceConfig(t);
   const reg = buildRestartRegistry(ws);
   const names = reg.map((s) => s.name).sort();
   assert.deepEqual(names, ['beast', 'daita', 'noop-service', 'powch']);
@@ -170,26 +160,27 @@ test('buildRestartRegistry: includes every entry with a microservice.port', () =
     assert.ok(svc.port, `${svc.name} must have a port`);
     assert.ok(svc.microserviceDir.endsWith('/microservice'),
       `${svc.name} cwd must end with /microservice`);
+    assert.equal(svc.microserviceDir, path.join(svc.dir, 'microservice'), `${svc.name} cwd is its own repo's microservice/`);
   }
   // docs-only has no microservice block at all — excluded.
   assert.equal(reg.find((s) => s.name === 'docs-only'), undefined);
 });
 
-test('resolveService: returns the beast entry from the unified registry', () => {
-  const ws = fakeWorkspaceConfig();
+test('resolveService: returns the beast entry from the unified registry', async (t) => {
+  const { ws, repos } = await fakeWorkspaceConfig(t);
   const svc = resolveService(ws, 'beast');
   assert.equal(svc.name, 'beast');
   assert.equal(svc.port, 3011);
   assert.equal(svc.devCommand, 'node app.js');
-  assert.equal(svc.microserviceDir, path.join('/fake/root', 'BEAST', 'microservice'));
+  assert.equal(svc.microserviceDir, path.join(repos.beast, 'microservice'));
 });
 
-test('resolveService: HARD-FAILS with candidate list on unknown name', () => {
-  const ws = fakeWorkspaceConfig();
+test('resolveService: HARD-FAILS with candidate list on unknown name', async (t) => {
+  const { ws } = await fakeWorkspaceConfig(t);
   assert.throws(
     () => resolveService(ws, 'unknown-service'),
     (err) => {
-      assert.match(err.message, /Service 'unknown-service' not found/);
+      assert.match(err.message, /Service 'unknown-service' is not served by this workspace \(env\.app \/ env\.gateway\)/);
       assert.match(err.message, /Restart-eligible services/);
       assert.match(err.message, /beast/);
       assert.match(err.message, /powch/);
@@ -199,36 +190,34 @@ test('resolveService: HARD-FAILS with candidate list on unknown name', () => {
   );
 });
 
-test('resolveService: HARD-FAILS when devCommand is missing (no silent fallback)', () => {
+test('resolveService: HARD-FAILS when devCommand is missing (no silent fallback)', async (t) => {
   // Per feedback_no-hardcoded-fallbacks: missing devCommand must surface a
   // specific 'add devCommand' error, never a guessed launch signature.
-  const ws = fakeWorkspaceConfig();
+  const { ws } = await fakeWorkspaceConfig(t);
   assert.throws(
     () => resolveService(ws, 'noop-service'),
     (err) => {
       assert.match(err.message, /no microservice\.devCommand/);
       assert.match(err.message, /cannot determine canonical launch signature/);
+      assert.match(err.message, /env\.app\.microservice/, 'remedy names the v3 location');
       return true;
     }
   );
 });
 
-test('resolveService: HARD-FAILS on ambiguous service name', () => {
-  // Two entries with the same appId — not legal in real workspace.json, but
-  // we want a defensive error rather than picking one silently.
-  const ws = {
-    workspaceRoot: '/fake/root',
-    env: {
-      products: [
-        { appId: 'duplicate', localPath: 'A', microservice: { port: 1, devCommand: 'a' } },
-        { appId: 'duplicate', localPath: 'B', microservice: { port: 2, devCommand: 'b' } }
-      ]
-    }
-  };
-  assert.throws(
-    () => resolveService(ws, 'duplicate'),
-    /ambiguous/
-  );
+test('buildRestartRegistry: two repos claiming ONE app id are refused by the app-set owner, not picked between', async (t) => {
+  // Not legal in a real gateway config. The duplicate is refused where the app set is built
+  // (resolveWorkspaceApps), so no restart-side "ambiguous" pick can ever be reached.
+  const { ws } = await fakeWorkspaceConfig(t, {
+    'duplicate-a': { appId: 'duplicate', microservice: { port: 1, devCommand: 'a' } },
+    'duplicate-b': { appId: 'duplicate', microservice: { port: 2, devCommand: 'b' } },
+  });
+  assert.throws(() => buildRestartRegistry(ws), /app id 'duplicate' appears twice/);
+});
+
+test('buildRestartRegistry: a config with no workspaceRoot FAILS LOUD, never reads the cwd instead', () => {
+  const bare = new WorkspaceConfig({ version: '3.0', env: { app: { appId: 'x', microservice: { port: 1, devCommand: 'a' } } } });
+  assert.throws(() => buildRestartRegistry(bare), /carries no workspaceRoot/);
 });
 
 /* ------------------------------------------------------------------ */
@@ -258,26 +247,27 @@ test('killPid: escalates to SIGKILL when SIGTERM is ignored', async () => {
 /* Tests — log path                                                    */
 /* ------------------------------------------------------------------ */
 
-test('resolveLogPath: canonical apps/<community>/<service>/.descix/logs/ path', async () => {
+test('resolveLogPath: canonical <app repo>/.descix/logs/ path', async (t) => {
   const { deps, calls } = makeDeps();
-  const ws = fakeWorkspaceConfig();
-  const res = await resolveLogPath(ws, 'beast', {
+  const { ws, repos } = await fakeWorkspaceConfig(t);
+  const svc = resolveService(ws, 'beast');
+  const res = await resolveLogPath(svc, {
     deps,
     timestamp: '2026-05-26T12-34-56Z'
   });
   assert.equal(res.fallback, false);
   assert.equal(
     res.path,
-    '/fake/root/apps/unkamon/beast/.descix/logs/beast-2026-05-26T12-34-56Z.log'
+    path.join(repos.beast, '.descix', 'logs', 'beast-2026-05-26T12-34-56Z.log')
   );
   assert.equal(calls.fsMkdir.length, 1);
 });
 
-test('resolveLogPath: falls back to /tmp when canonical dir is uncreatable', async () => {
+test('resolveLogPath: falls back to /tmp when canonical dir is uncreatable', async (t) => {
   const { deps } = makeDeps();
   deps.fs.mkdir = async () => { throw new Error('EROFS read-only'); };
-  const ws = fakeWorkspaceConfig();
-  const res = await resolveLogPath(ws, 'beast', {
+  const { ws } = await fakeWorkspaceConfig(t);
+  const res = await resolveLogPath(resolveService(ws, 'beast'), {
     deps,
     timestamp: '2026-05-26T12-34-56Z'
   });
@@ -308,21 +298,21 @@ test('restartMicroservice: env=prod HARD-FAILS with deploy-script pointer', asyn
   );
 });
 
-test('restartMicroservice: unknown service surfaces the candidate list', async () => {
-  const ws = fakeWorkspaceConfig();
+test('restartMicroservice: unknown service surfaces the candidate list', async (t) => {
+  const { ws, repos } = await fakeWorkspaceConfig(t);
   const { deps } = makeDeps();
   await assert.rejects(
     restartMicroservice({ name: 'unknown', env: 'dev', deps, workspaceConfig: ws }),
     (err) => {
-      assert.match(err.message, /Service 'unknown' not found/);
+      assert.match(err.message, /Service 'unknown' is not served by this workspace \(env\.app \/ env\.gateway\)/);
       assert.match(err.message, /Restart-eligible services.*beast.*powch/s);
       return true;
     }
   );
 });
 
-test('restartMicroservice: full happy path — finds PID, kills, relaunches, emits new PID', async () => {
-  const ws = fakeWorkspaceConfig();
+test('restartMicroservice: full happy path — finds PID, kills, relaunches, emits new PID', async (t) => {
+  const { ws, repos } = await fakeWorkspaceConfig(t);
   const { deps, calls } = makeDeps({
     listeningPid: 11111,    // pre-kill
     postLaunchPid: 22222,   // bound after relaunch
@@ -347,7 +337,7 @@ test('restartMicroservice: full happy path — finds PID, kills, relaunches, emi
   const spawnCall = calls.spawn[0];
   assert.equal(spawnCall.cmd, 'bash');
   assert.deepEqual(spawnCall.args, ['-lc', 'node app.js']);
-  assert.equal(spawnCall.opts.cwd, '/fake/root/BEAST/microservice');
+  assert.equal(spawnCall.opts.cwd, path.join(repos.beast, 'microservice'));
   assert.equal(spawnCall.opts.detached, true);
 
   // Port was confirmed bound; new PID surfaced.
@@ -361,8 +351,8 @@ test('restartMicroservice: full happy path — finds PID, kills, relaunches, emi
   assert.equal(calls.health[0].microservice, 'beast');
 });
 
-test('restartMicroservice: succeeds when no PID is listening initially (cold start)', async () => {
-  const ws = fakeWorkspaceConfig();
+test('restartMicroservice: succeeds when no PID is listening initially (cold start)', async (t) => {
+  const { ws, repos } = await fakeWorkspaceConfig(t);
   const { deps, calls } = makeDeps({
     listeningPid: null,      // nothing running
     postLaunchPid: 44444,
@@ -382,8 +372,8 @@ test('restartMicroservice: succeeds when no PID is listening initially (cold sta
   assert.equal(res.newPid, 44444);
 });
 
-test('restartMicroservice: FAILS when port does not bind after launch', async () => {
-  const ws = fakeWorkspaceConfig();
+test('restartMicroservice: FAILS when port does not bind after launch', async (t) => {
+  const { ws, repos } = await fakeWorkspaceConfig(t);
   const { deps } = makeDeps({
     listeningPid: 11111,
     postLaunchPid: null,    // never binds
@@ -403,8 +393,8 @@ test('restartMicroservice: FAILS when port does not bind after launch', async ()
   );
 });
 
-test('restartMicroservice: powch uses its `npm run dev:service` signature', async () => {
-  const ws = fakeWorkspaceConfig();
+test('restartMicroservice: powch uses its `npm run dev:service` signature', async (t) => {
+  const { ws, repos } = await fakeWorkspaceConfig(t);
   const { deps, calls } = makeDeps({
     listeningPid: 7777,
     postLaunchPid: 8888,
@@ -421,6 +411,6 @@ test('restartMicroservice: powch uses its `npm run dev:service` signature', asyn
 
   assert.equal(res.devCommand, 'npm run dev:service');
   assert.equal(calls.spawn[0].args[1], 'npm run dev:service');
-  assert.equal(calls.spawn[0].opts.cwd, '/fake/root/DeSciX/DeSciX_Powch/microservice');
+  assert.equal(calls.spawn[0].opts.cwd, path.join(repos.powch, 'microservice'));
   assert.equal(res.port, 3003);
 });

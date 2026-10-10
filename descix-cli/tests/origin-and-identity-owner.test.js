@@ -70,7 +70,7 @@ test('GATE I1-unconfigured-declares-prod: nothing configured resolves to PROD ca
     const { resolveOrigin, DEFAULT_ORIGIN_SOURCE } = await import('../lib/origin.js');
     const dir = tmpdir('i1');
     fs.mkdirSync(path.join(dir, '.descix'), { recursive: true });
-    const raw = { version: '2.1', type: 'workspace', env: { products: [] } };
+    const raw = { version: '3.0', type: 'workspace', env: {} };
     fs.writeFileSync(path.join(dir, '.descix/workspace.json'), JSON.stringify(raw));
 
     const cfg = new WorkspaceConfig(raw, dir);
@@ -151,15 +151,15 @@ test('GATE I1-invalid-config-fails-loud: an unusable configured origin throws an
     // ── THE HALF THAT ACTUALLY MEASURES THE ROW: the SHIPPED BINARY, on all three surfaces a
     // developer can misconfigure. A throw nobody prints is not a loud failure.
     const surfaces = [
-        ['DESCIX_API_URL', isolatedEnv({ DESCIX_API_URL: 'not-a-url' }), { env: { products: [] } }],
-        ['DESCIX_API_URL non-http', isolatedEnv({ DESCIX_API_URL: 'ftp://x.invalid' }), { env: { products: [] } }],
-        ['workspace env.apiUrl', isolatedEnv(), { env: { products: [], apiUrl: 'not-a-url' } }],
+        ['DESCIX_API_URL', isolatedEnv({ DESCIX_API_URL: 'not-a-url' }), { env: {} }],
+        ['DESCIX_API_URL non-http', isolatedEnv({ DESCIX_API_URL: 'ftp://x.invalid' }), { env: {} }],
+        ['workspace env.apiUrl', isolatedEnv(), { env: { apiUrl: 'not-a-url' } }],
     ];
     for (const [label, env, wsExtra] of surfaces) {
         const dir = tmpdir('i1inv');
         fs.mkdirSync(path.join(dir, '.descix'), { recursive: true });
         fs.writeFileSync(path.join(dir, '.descix/workspace.json'),
-            JSON.stringify({ version: '2.1', type: 'workspace', ...wsExtra }));
+            JSON.stringify({ version: '3.0', type: 'workspace', ...wsExtra }));
 
         let out = '', err = '', failed = false;
         try {
@@ -342,8 +342,8 @@ test('GATE I2-writer-stores-community: app init records the community, and the i
     await appInitInto(dir, { community: 'egpt', app: 'godsworld', serverId: 'egpt-godsworld' });
 
     const ws = JSON.parse(fs.readFileSync(path.join(dir, '.descix/workspace.json'), 'utf8'));
-    assert.equal(ws.env.products.length, 1, 'FIXTURE INVALID: app init registered nothing, so nothing below measures it');
-    const product = ws.env.products[0];
+    assert.ok(ws.env.app, 'FIXTURE INVALID: app init registered nothing, so nothing below measures it');
+    const product = ws.env.app;
     assert.equal(product.appId, 'egpt-godsworld',
         'the workspace names the NAME typed, not the id the platform issued (devx 2026-09-19, D2)');
     assert.equal(product.communityId, 'egpt',
@@ -410,7 +410,7 @@ test('GATE I2-identity-fails-loud: agent files are refused, not fabricated, when
     fs.mkdirSync(path.join(dir, '.descix'), { recursive: true });
     // A workspace that names NO app and NO community.
     fs.writeFileSync(path.join(dir, '.descix/workspace.json'),
-        JSON.stringify({ version: '2.1', type: 'workspace', env: { products: [] } }));
+        JSON.stringify({ version: '3.0', type: 'workspace', env: {} }));
 
     await assert.rejects(
         () => generateAgentFiles(dir),
@@ -430,7 +430,7 @@ test('GATE I1-executing-cli-refuses: a real invocation with nothing configured n
     const dir = tmpdir('i1x');
     fs.mkdirSync(path.join(dir, '.descix'), { recursive: true });
     fs.writeFileSync(path.join(dir, '.descix/workspace.json'),
-        JSON.stringify({ version: '2.1', type: 'workspace', env: { products: [] } }));
+        JSON.stringify({ version: '3.0', type: 'workspace', env: {} }));
     const env = isolatedEnv();
 
     assertFixtureRuns(dir, env);
@@ -523,7 +523,7 @@ test('GATE I1-prints-resolved-env: every network-bound invocation declares env +
     const dirA = tmpdir('i1p');
     fs.mkdirSync(path.join(dirA, '.descix'), { recursive: true });
     fs.writeFileSync(path.join(dirA, '.descix/workspace.json'),
-        JSON.stringify({ version: '2.1', type: 'workspace', env: { products: [] } }));
+        JSON.stringify({ version: '3.0', type: 'workspace', env: {} }));
     const envA = isolatedEnv();
     assertFixtureRuns(dirA, envA);
 
@@ -551,7 +551,7 @@ test('GATE I1-prints-resolved-env: every network-bound invocation declares env +
     const dirB = tmpdir('i1p2');
     fs.mkdirSync(path.join(dirB, '.descix'), { recursive: true });
     fs.writeFileSync(path.join(dirB, '.descix/workspace.json'), JSON.stringify({
-        version: '2.1', type: 'workspace', env: { products: [], apiUrl: 'https://dev.descix.net' },
+        version: '3.0', type: 'workspace', env: { apiUrl: 'https://dev.descix.net' },
     }));
     const envB = isolatedEnv();
     assertFixtureRuns(dirB, envB);

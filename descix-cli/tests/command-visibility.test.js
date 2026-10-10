@@ -41,9 +41,9 @@ test('shouldHideLeaf: mixed public+admin invoke set -> visible', () => {
 });
 
 test('shouldHideLeaf: no recorded invokes -> visible', () => {
-  assert.deepEqual(REAL_MAP['app set-localpath'], [], 'fixture assumption: app set-localpath has no invokes');
+  assert.deepEqual(REAL_MAP['app set-port'], [], 'fixture assumption: app set-port has no invokes');
   const surface = {}; // no data at all — must not matter
-  assert.equal(shouldHideLeaf('app set-localpath', surface), false);
+  assert.equal(shouldHideLeaf('app set-port', surface), false);
 });
 
 test('shouldHideLeaf: a command missing from the surface is never treated as admin (fails open toward visible)', () => {

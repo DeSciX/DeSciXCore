@@ -38,7 +38,7 @@
  *                                that property; it does not demonstrate this fix.
  *   PERMISSION-DENIED (below)  — DISCRIMINATOR, and it covers a state gate 1 cannot reach: a file
  *                                that EXISTS and PARSES FINE but cannot be OPENED. Measured on a
- *                                verified pre-fix tree (d73a48d), `app set-localpath` on an EACCES
+ *                                verified pre-fix tree (d73a48d), `app set-port` on an EACCES
  *                                workspace.json exits 1 printing "Workspace not configured." —
  *                                the wrong diagnosis and the destructive advice; post-fix it exits
  *                                1 naming the file and the EACCES. Note the pre-fix symptom is
@@ -74,7 +74,9 @@ function runCli(args, cwd) {
     const child = spawn(process.execPath, [CLI, ...args], {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0' },
+      // HERMETIC: a dead loopback origin — a spawned CLI must never reach the real platform
+      // or the device-login flow (which seizes the operator's browser; measured 2026-10-10).
+      env: { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0', DESCIX_API_URL: 'https://127.0.0.1:9' },
     });
     let stdout = '';
     let stderr = '';
@@ -100,7 +102,7 @@ async function makeWorkspace(contents) {
 
 /** Truncated mid-array — a realistic partial write, not a synthetic blob of garbage. */
 const CORRUPT_JSON =
-  '{"version":"2.1","env":{"platform":{"appId":"unk-beast","localPath":"apps/unk-beast"},"products":[';
+  '{"version":"3.0","env":{"app":{"appId":"unk-beast","communityId":"unk"},"site":{"static":';
 
 // ---------------------------------------------------------------------------
 // GATE 1 — DISCRIMINATOR: a corrupt-but-present workspace is UNREADABLE, not ABSENT.
@@ -116,7 +118,7 @@ test('GATE 1: corrupt workspace.json → UNREADABLE, names path + parse error, n
   assert.ok(size > 0, 'fixture must be non-empty or it cannot exhibit a parse failure');
   assert.throws(() => JSON.parse(CORRUPT_JSON), 'fixture must be genuinely unparseable');
 
-  const { code, stderr } = await runCli(['app', 'set-localpath', '-a', 'unk-beast', '-p', 'apps/x'], root);
+  const { code, stderr } = await runCli(['app', 'set-port', '-a', 'unk-beast', '-p', '4100'], root);
 
   assert.equal(code, 1, 'must fail loud');
   assert.doesNotMatch(stderr, NOT_CONFIGURED_RE,
@@ -142,7 +144,7 @@ test('GATE 2 (regression guard): absent workspace still gets today\'s message an
   // Fixture check: there must genuinely be no workspace.json anywhere at or under root.
   await assert.rejects(() => fs.stat(path.join(root, '.descix', 'workspace.json')));
 
-  const { code, stderr } = await runCli(['app', 'set-localpath', '-a', 'unk-beast', '-p', 'apps/x'], sub);
+  const { code, stderr } = await runCli(['app', 'set-port', '-a', 'unk-beast', '-p', '4100'], sub);
 
   assert.equal(code, 1);
   assert.match(stderr, NOT_CONFIGURED_RE, 'absent keeps the init advice — it is correct here');
@@ -161,7 +163,7 @@ test('GATE 3: after the UNREADABLE failure the corrupt workspace.json is byte-id
   const sizeBefore = (await fs.stat(configPath)).size;
   assert.ok(sizeBefore > 0, 'fixture must be non-empty');
 
-  const { code } = await runCli(['app', 'set-localpath', '-a', 'unk-beast', '-p', 'apps/x'], root);
+  const { code } = await runCli(['app', 'set-port', '-a', 'unk-beast', '-p', '4100'], root);
   assert.equal(code, 1);
 
   const after = await sha256(configPath);
@@ -178,7 +180,7 @@ test('permission-denied workspace.json is UNREADABLE, not "not configured"', asy
     t.skip('running as root: chmod 000 would not deny this process');
     return;
   }
-  const root = await makeWorkspace('{"version":"2.1","env":{"platform":{"appId":"x"}}}');
+  const root = await makeWorkspace('{"version":"3.0","env":{"app":{"appId":"x"}}}');
   const configPath = path.join(root, '.descix', 'workspace.json');
   await fs.chmod(configPath, 0o000);
   t.after(async () => {
@@ -186,7 +188,7 @@ test('permission-denied workspace.json is UNREADABLE, not "not configured"', asy
     await fs.rm(root, { recursive: true, force: true });
   });
 
-  const { code, stderr } = await runCli(['app', 'set-localpath', '-a', 'x', '-p', 'y'], root);
+  const { code, stderr } = await runCli(['app', 'set-port', '-a', 'x', '-p', '4100'], root);
 
   assert.equal(code, 1);
   assert.doesNotMatch(stderr, NOT_CONFIGURED_RE);

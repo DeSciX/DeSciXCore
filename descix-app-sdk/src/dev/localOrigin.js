@@ -24,8 +24,8 @@ export const LOCAL_DEFAULT_PROTOCOL = 'https';
 
 /**
  * @param {{ port: number|string, protocol?: string }|null|undefined} entry - a workspace
- *        `site` or `microservice` block (`env.platform.*` or `env.products[].*`)
- * @param {string} what - the entry's name for the error, e.g. `env.products[powch].site`
+ *        `site` or `microservice` block (`env.app.*`, from any app's own workspace)
+ * @param {string} what - the entry's name for the error, e.g. `env.app.site (powch)`
  * @returns {string} an origin with no trailing slash, e.g. `https://localhost:5175`
  * @throws {Error} when the entry names no port
  */
