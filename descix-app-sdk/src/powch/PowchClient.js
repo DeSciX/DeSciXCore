@@ -9,6 +9,11 @@
 import { requirePowchUrl } from './powchOrigin.js';
 import { resolveBridge } from '../util/bridgeResolver.js';
 
+// Bound on how long a request may wait for the iframe's POWCH_READY. Independent of the
+// per-request timeout, which only starts once the request is actually posted.
+const DEFAULT_READY_TIMEOUT_MS = 30000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 120000;
+
 export class PowchClient {
   constructor(config = {}) {
     this.handlers = {};
@@ -37,6 +42,11 @@ export class PowchClient {
       this.container = config.container || document.body;
       this.origin = new URL(this.bridgeUrl).origin;
       this.iframe = null;
+      this.readyTimeoutMs = config.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS;
+      this.requestTimeoutMs = config.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+      // Requests made before POWCH_READY. Posting earlier is lost: the iframe has not
+      // armed its message listener yet.
+      this._readyQueue = [];
 
       this._initIframe();
       this._setupListeners();
@@ -109,6 +119,7 @@ export class PowchClient {
       // Handle internal protocol events
       if (type === 'POWCH_READY') {
         this.isReady = true;
+        this._flushReadyQueue();
         this.emit('ready');
         return;
       }
@@ -200,29 +211,62 @@ export class PowchClient {
   }
 
   /**
-   * Send a request to the Powch iframe.
+   * Send a request to the Powch iframe. Standalone mode only (embedded mode delegates
+   * to the shell bridge and never reaches here).
+   *
+   * Before POWCH_READY the request is queued, not posted: a post to an iframe that has
+   * not armed its listener is lost and would only surface as the request timeout.
+   * `timeout` runs from the actual post; `readyTimeoutMs` bounds the wait for READY and
+   * rejects the queued request naming the missing READY.
    */
-  _sendRequest(type, payload = {}, timeout = 120000) {
+  _sendRequest(type, payload = {}, timeout = this.requestTimeoutMs) {
     const requestId = `req_${++this.requestIdCounter}_${Date.now()}`;
 
     return new Promise((resolve, reject) => {
-      this.pendingRequests.set(requestId, { resolve, reject });
+      const entry = { type, payload, timeout, requestId, resolve, reject, timer: null };
 
-      this.iframe.contentWindow.postMessage({
-        type,
-        requestId,
-        payload
-      }, this.origin);
+      if (this.isReady) {
+        this._post(entry);
+        return;
+      }
 
-      if (timeout) {
-        setTimeout(() => {
+      entry.timer = setTimeout(() => {
+        const i = this._readyQueue.indexOf(entry);
+        if (i === -1) return;
+        this._readyQueue.splice(i, 1);
+        reject(new Error(
+          `Powch iframe (${this.bridgeUrl}) did not send POWCH_READY within ${this.readyTimeoutMs}ms; ` +
+          `${type} was never posted`
+        ));
+      }, this.readyTimeoutMs);
+      this._readyQueue.push(entry);
+    });
+  }
+
+  _flushReadyQueue() {
+    const queued = this._readyQueue.splice(0);
+    for (const entry of queued) {
+      clearTimeout(entry.timer);
+      this._post(entry);
+    }
+  }
+
+  _post({ type, payload, timeout, requestId, resolve, reject }) {
+    const timer = timeout
+      ? setTimeout(() => {
           if (this.pendingRequests.has(requestId)) {
             this.pendingRequests.delete(requestId);
             reject(new Error(`Timeout waiting for ${type} response`));
           }
-        }, timeout);
-      }
+        }, timeout)
+      : null;
+    // The timer is cleared on settle so a resolved request does not hold the event loop.
+    this.pendingRequests.set(requestId, {
+      resolve: (v) => { clearTimeout(timer); resolve(v); },
+      reject: (e) => { clearTimeout(timer); reject(e); },
     });
+
+    this.iframe.contentWindow.postMessage({ type, requestId, payload }, this.origin);
   }
 
   /**
