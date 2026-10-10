@@ -22,7 +22,8 @@
  * Run: node --test tests/service-domain-derivation.test.js
  */
 
-import { describe, it } from 'node:test';
+import { describe, it, before, after } from 'node:test';
+import { startGuardedListener } from './helpers/guarded-listener.js';
 import assert from 'node:assert/strict';
 
 import {
@@ -244,6 +245,10 @@ describe('requireServiceOrigin — the ONE owner of "is this stored manifest rou
 });
 
 describe('P1-R (3) what a NEWLY SCAFFOLDED service now generates at `npm run register`', () => {
+    let listener;
+    before(async () => { listener = await startGuardedListener(); });
+    after(() => listener.close());
+
     /** The manifest `descix app scaffold` writes: context injected, NO domain. */
     function scaffoldedManifest() {
         return {
@@ -265,6 +270,7 @@ describe('P1-R (3) what a NEWLY SCAFFOLDED service now generates at `npm run reg
         const bootstrap = createServiceBootstrap({
             manifest: scaffoldedManifest(),
             selfRegister: true,
+            meshSelfUrl: listener.origin,
             selfRegisterConfigKey: 'npm run register',
             coreApiUrl: 'https://dev.descix.net/apifront',
             siteDomain: 'dev.descix.net',
