@@ -116,7 +116,9 @@ descix kb corpus sync -c <community> -a <app>
 
 **What registration is, and is not.** It publishes your `manifest.json` — the command list —
 and vectorizes the README you pass with `-r`, so `tell_me_how` can discover your tools.
-`scripts/register.js` writes that manifest and logs the commands it published. There is no
+`scripts/register.js` writes that manifest and logs the commands it published. It targets a RUNNING
+service: it first calls the service's own `/api` unsigned and registers only if the mesh guard
+answers 401, so start the service (`npm run dev`), then run `npm run register`. There is no
 separate developer-facing vectorize step — `descix microservice vectorize` exists but is an
 admin-only utility (for re-vectorizing without re-registering), not part of the normal flow.
 It is a DISCOVERY step.
