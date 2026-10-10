@@ -169,3 +169,25 @@ test('assertNoParentWorkspace: a workspace at an ANCESTOR refuses app init in a 
   const clean = await tmpdir(t, 'descix-v3-clean-');
   await assertNoParentWorkspace(clean);
 });
+
+test('tryLoad THROWS on a RETIRED format (v1, v2.1-multi) — retired is not ABSENT', async (t) => {
+  // Measured 2026-10-10 (CEO-COMMS, five app repos): a v2.1 file under cli 2.0.0 printed
+  // "env: prod (default — no workspace config)" — the refusal threw a PLAIN Error, tryLoad
+  // swallowed it to null, and a stale-but-present workspace silently resolved to the DEFAULT
+  // origin. "There is no workspace here" and "the workspace here is in a retired format" are
+  // different answers, and only the first is a soft no — same doctrine as UNREADABLE.
+  const wsRoot = await tmpdir(t, 'descix-v3-tryload21-');
+  await writeWorkspace(wsRoot, {
+    version: '2.1',
+    env: { environment: 'PROD', apiUrl: 'https://descix.net', products: [{ appId: 'egpt-frqtl', localPath: '.' }] },
+  });
+  await assert.rejects(() => WorkspaceConfig.tryLoad(wsRoot), /v2\.1 multi-app workspace format is not supported/i);
+
+  const v1Root = await tmpdir(t, 'descix-v3-tryload1-');
+  await writeWorkspace(v1Root, { communities: { egpt: {} } });
+  await assert.rejects(() => WorkspaceConfig.tryLoad(v1Root), /v1 workspace format is not supported/i);
+
+  // Genuinely ABSENT stays a soft null.
+  const empty = await tmpdir(t, 'descix-v3-tryloadnone-');
+  assert.equal(await WorkspaceConfig.tryLoad(empty), null);
+});

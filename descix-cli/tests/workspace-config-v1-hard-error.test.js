@@ -65,21 +65,12 @@ test('WorkspaceConfig.load() — v1 workspace (communities + no env) → throws 
   );
 });
 
-test('WorkspaceConfig.tryLoad() — v1 workspace returns null (soft-fail)', async (t) => {
-  const v1Workspace = {
-    version: '1.0',
-    communities: {
-      descix: {
-        apps: {
-          daita: { localPath: 'DeSciX_Cloud', kbId: 'General' }
-        }
-      }
-    }
-  };
-  const wsRoot = await writeWorkspace(t, v1Workspace);
-
-  const result = await WorkspaceConfig.tryLoad(wsRoot);
-  assert.equal(result, null, 'tryLoad() must return null for v1 workspace (not throw)');
+test('WorkspaceConfig.tryLoad() — a v1 workspace THROWS the typed retired-format error', async (t) => {
+  // SUPERSEDED CONTRACT (2026-10-10): tryLoad used to soft-null a v1 file, and that same
+  // swallow made five stale v2.1 app repos silently resolve to the DEFAULT origin under cli
+  // 2.0.0. Retired is not absent: tryLoad now rethrows WorkspaceRetiredFormatError.
+  const root = await writeWorkspace(t, { version: '1.0', communities: { descix: {} } });
+  await assert.rejects(() => WorkspaceConfig.tryLoad(root), /v1 workspace format is not supported/);
 });
 
 test('WorkspaceConfig.load() — v3 workspace loads cleanly (regression check)', async (t) => {
@@ -139,7 +130,7 @@ test('WorkspaceConfig.load() — error message includes migration instructions',
   // Migration instructions must guide the user
   assert.match(
     caughtMessage,
-    /Migrate to v2\.1/,
-    'error must include "Migrate to v2.1" guidance'
+    /Migrate to v3/,
+    'error must include "Migrate to v3" guidance'
   );
 });

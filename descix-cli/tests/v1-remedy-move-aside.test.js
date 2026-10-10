@@ -109,7 +109,7 @@ describe('v1 refusal must not prescribe destroying the file it is diagnosing', (
         'v1 refusal PRESCRIBES DESTRUCTION of the file it is diagnosing. Got:\n' + msg);
       assert.match(msg, /move it aside/i, 'refusal must name the MOVE-ASIDE route. Got:\n' + msg);
       assert.match(msg, /\.broken/, 'refusal must show the concrete move-aside target. Got:\n' + msg);
-      assert.match(msg, /Migrate to v2\.1/, 'refusal must still identify the v1 condition. Got:\n' + msg);
+      assert.match(msg, /Migrate to v3/, 'refusal must still identify the v1 condition. Got:\n' + msg);
       assert.ok(msg.includes(f.wsPath), 'refusal must NAME THE PATH. Got:\n' + msg);
     });
   }
