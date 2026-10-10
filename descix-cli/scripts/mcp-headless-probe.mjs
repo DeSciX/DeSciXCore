@@ -18,8 +18,8 @@ export async function runProbe(CLI, serviceMode) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'reach-'));
     fs.mkdirSync(path.join(dir, '.descix'), { recursive: true });
     fs.writeFileSync(path.join(dir, '.descix/workspace.json'), JSON.stringify({
-        version: '2.1', type: 'workspace',
-        env: { products: [], apiUrl: `http://127.0.0.1:${srv.address().port}` },
+        version: '3.0', type: 'workspace',
+        env: { apiUrl: `http://127.0.0.1:${srv.address().port}` },
     }));
     process.chdir(dir);
     const { DeSciXApiClient } = await import(path.join(CLI, 'lib/api-client.js'));
