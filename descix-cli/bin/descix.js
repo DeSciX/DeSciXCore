@@ -2411,11 +2411,20 @@ siteCommand
         filesToUpload.forEach(f => console.log(chalk.gray(`  + ${f.path} (${(f.size / 1024).toFixed(1)}KB)`)));
         // The server's last deploy manifest names what it holds; the confirm step lists the
         // storage prefix itself, so this preview is the manifest's view of what would go.
-        const lastDeployed = Object.keys(existing_manifest?.files || {});
-        const wouldRemove = lastDeployed.filter(p => !(p in localFiles)).sort();
-        if (wouldRemove.length > 0) {
-          console.log(chalk.yellow('\n  Would remove from the server (in the last deploy, not in this build):'));
-          wouldRemove.forEach(f => console.log(chalk.gray(`  - ${f}`)));
+        // THE REMOVE SET IS ALWAYS STATED, including empty (regression from 1.0.20 measured
+        // 2026-10-10: the silent branch read as "didn't check", and an absence claim the
+        // instrument cannot make — no server manifest — must say THAT, not imply none).
+        if (existing_manifest?.files) {
+          const lastDeployed = Object.keys(existing_manifest.files);
+          const wouldRemove = lastDeployed.filter(p => !(p in localFiles)).sort();
+          if (wouldRemove.length > 0) {
+            console.log(chalk.yellow('\n  Would remove from the server (in the last deploy, not in this build):'));
+            wouldRemove.forEach(f => console.log(chalk.gray(`  - ${f}`)));
+          } else {
+            console.log(chalk.gray('\n  Would remove: none (every file of the last deploy is in this build)'));
+          }
+        } else {
+          console.log(chalk.gray('\n  Would remove: unknown — the server returned no previous deploy manifest (first deploy, or manifest unreadable)'));
         }
         console.log(chalk.gray(`\n  Site URL: ${site_url}\n`));
         return;

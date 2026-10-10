@@ -12,6 +12,7 @@
     "create_app_for_community",
     "get_product_context",
     "init_git_mode_kb",
+    "list_knowledge_bases",
     "update_community_metadata"
   ],
   "app invite": [
@@ -189,6 +190,7 @@
     "find_communities",
     "get_product_context",
     "init_git_mode_kb",
+    "list_knowledge_bases",
     "resolve_invite",
     "sync_auto_purchases",
     "update_community_metadata"

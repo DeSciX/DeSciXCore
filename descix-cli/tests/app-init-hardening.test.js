@@ -32,6 +32,7 @@ const apiClient = {
   async invoke(command) {
     platformCalls.push(command);
     if (command === 'get_product_context') return { community_id: 'testcomm' };
+    if (command === 'list_knowledge_bases') return { knowledge_bases: [{ name: 'General' }] };
     if (command === 'init_git_mode_kb') return { created: true };
     throw new Error(`unexpected platform call in app-init-hardening: ${command}`);
   },
@@ -119,4 +120,86 @@ test('app init — happy path: re-running for the app the repo already holds is 
 
   const reloaded = await WorkspaceConfig.load(dir);
   assert.equal(reloaded.env.app.appId, 'egpt');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MAP-NEVER-CREATES (measured 2026-10-10, EGPT-Evidence migration): mapping the EXISTING
+// `egpt` app without --kb CREATED an empty `General` KB on PROD beside its real `Corpus`.
+// The existing-app leg ADOPTS what exists and never creates; only the -c CREATE leg may.
+
+function stubWithKbs(kbNames, { community = 'testcomm' } = {}) {
+  const calls = [];
+  return {
+    calls,
+    async invoke(command, params) {
+      calls.push({ command, params });
+      if (command === 'get_product_context') return { community_id: community };
+      if (command === 'list_knowledge_bases') {
+        return { knowledge_bases: kbNames.map((name) => ({ name })) };
+      }
+      if (command === 'init_git_mode_kb') return { created: true };
+      if (command === 'create_app_for_community') {
+        return { app_id: `${community}-${params.app_name}`, community_id: community };
+      }
+      throw new Error(`unexpected platform call: ${command}`);
+    },
+  };
+}
+
+test('app init (existing app, one KB) ADOPTS it — no --kb needed, NO create call', async (t) => {
+  quiet(t);
+  const { dir } = await repoAt(t);
+  const stub = stubWithKbs(['Corpus']);
+  await runAppInit(stub, { app: 'egpt' });
+  const ws = await WorkspaceConfig.load(dir);
+  assert.equal(ws.env.app.kbId, 'Corpus', 'the single existing KB is adopted');
+  assert.ok(!stub.calls.some((c) => c.command === 'init_git_mode_kb'),
+    'mapping an existing app must NEVER create a KB');
+});
+
+test('app init (existing app, several KBs, no --kb) REFUSES naming them', async (t) => {
+  quiet(t);
+  await repoAt(t);
+  const stub = stubWithKbs(['Corpus', 'Sources']);
+  await assert.rejects(
+    () => runAppInit(stub, { app: 'egpt' }),
+    (err) => {
+      assert.match(err.message, /Corpus/); assert.match(err.message, /Sources/);
+      assert.match(err.message, /--kb/);
+      return true;
+    }
+  );
+  assert.ok(!stub.calls.some((c) => c.command === 'init_git_mode_kb'), 'and creates nothing');
+});
+
+test('app init (existing app) --kb must name a KB that EXISTS', async (t) => {
+  quiet(t);
+  const { dir } = await repoAt(t);
+  const stub = stubWithKbs(['Corpus', 'Sources']);
+  await assert.rejects(
+    () => runAppInit(stub, { app: 'egpt', kb: 'General' }),
+    /General.*does not exist|no KB named/i
+  );
+  await runAppInit(stub, { app: 'egpt', kb: 'Sources' });
+  const ws = await WorkspaceConfig.load(dir);
+  assert.equal(ws.env.app.kbId, 'Sources');
+  assert.ok(!stub.calls.some((c) => c.command === 'init_git_mode_kb'));
+});
+
+test('app init CREATE leg (-c) still creates the default KB', async (t) => {
+  quiet(t);
+  const { dir } = await repoAt(t);
+  const stub = stubWithKbs([]); // a just-created app has no KB yet
+  // the create leg: get_product_context must MISS first
+  stub.invoke = (function (orig) {
+    return async function (command, params) {
+      if (command === 'get_product_context') { stub.calls.push({ command, params }); throw new Error('not found'); }
+      return orig.call(this, command, params);
+    };
+  })(stub.invoke);
+  await runAppInit(stub, { app: 'myapp', community: 'testcomm' });
+  assert.ok(stub.calls.some((c) => c.command === 'init_git_mode_kb'),
+    'the CREATE leg guarantees the default KB');
+  const ws = await WorkspaceConfig.load(dir);
+  assert.equal(ws.env.app.appId, 'testcomm-myapp');
 });
