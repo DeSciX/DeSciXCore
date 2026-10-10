@@ -14,6 +14,7 @@ import { requireAuth } from '../lib/auth-guard.js';
 import { WorkspaceConfig, unmappedAppMessage, resolveWorkspacePath } from '../lib/workspace-config.js';
 import { CLI_VERSION } from '../lib/cli-version.js';
 import { recordInvocationOrigin } from '../lib/origin.js';
+import { verifyDeployOutcome } from '../lib/deploy-outcome.js';
 // Chat session pointer + the ONE rule for when a dead pointer may be self-healed.
 import {
   getSessionInteractionId,
@@ -2589,6 +2590,28 @@ siteCommand
           branch: gitStatus.branch
         } : null,
         preview: options.preview || false
+      }).catch(async (confirmErr) => {
+        // ws-prune-504: a lost confirm RESPONSE is not a failed DEPLOY. Re-read the served
+        // manifest keyed on THIS upload's token and say which it actually is — never "failed"
+        // when the truth is knowable.
+        console.log(chalk.yellow(`\n  Confirm response lost (${confirmErr.message}) — reading the deploy record back...`));
+        const verdict = await verifyDeployOutcome(apiClient, {
+          communityId, appId, tokenId: token_id, preview: options.preview || false
+        });
+        if (verdict.outcome === 'confirmed') {
+          console.log(chalk.green(`\n  Deploy CONFIRMED — ${verdict.detail}.`));
+          console.log(chalk.gray(`  The server may still be finishing the stale-file prune; ` +
+            `'descix site status -c ${communityId} -a ${appId}' shows the deploy, 'descix site list' what is served.`));
+          process.exit(0);
+        }
+        if (verdict.outcome === 'unconfirmed') {
+          console.error(chalk.red(`\n  Deploy UNCONFIRMED — ${verdict.detail}.`));
+          console.error(chalk.red(`  Nothing was removed from the server. Re-run the upload.`));
+          process.exit(1);
+        }
+        console.error(chalk.red(`\n  Deploy outcome UNKNOWN — ${verdict.detail}.`));
+        console.error(chalk.red(`  Check 'descix site status -c ${communityId} -a ${appId}' before re-running.`));
+        process.exit(1);
       });
 
       const result = confirmResponse.message;
@@ -2602,6 +2625,10 @@ siteCommand
       }
       console.log(chalk.gray(`  Removed from the server: ${pruned.length}`));
       pruned.forEach(f => console.log(chalk.gray(`    - ${f}`)));
+      if (result.prune_status === 'partial') {
+        console.log(chalk.yellow(`  Prune PARTIAL: ${result.prune_remaining_count} stale file(s) not yet removed (soft budget).`));
+        console.log(chalk.yellow(`  ${result.prune_remedy}`));
+      }
       console.log(chalk.gray(`  Deployed: ${result.deployed_at}`));
       if (result.preview) {
         console.log(chalk.yellow(`  Mode: PREVIEW`));
