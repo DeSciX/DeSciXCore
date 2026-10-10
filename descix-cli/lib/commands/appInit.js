@@ -15,6 +15,7 @@ import path from 'path';
 import { WorkspaceConfig, assertNoParentWorkspace } from '../workspace-config.js';
 import { refreshCommunityIdentity, printIdentityReceipt } from './communityIdentity.js';
 import { generateAgentFiles } from '../agent-files.js';
+import { scaffoldAppRepo } from '../app-scaffold.js';
 
 /**
  * @param {Object} apiClient an authenticated DeSciXApiClient
@@ -130,6 +131,7 @@ export async function runAppInit(apiClient, options) {
     await fs.writeFile(descPath, `# ${appId}\n\nApplication description goes here.\n`);
   }
   console.log(chalk.gray(`  Created: site/, microservice/, assets/`));
+  for (const f of await scaffoldAppRepo(appPath, { appId, communityId })) console.log(chalk.green(`  ✓ ${f}`));
 
   // 3. The default KB — CREATE leg only (see the adopt block above: map never creates).
   let kbResult = null;

@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{{APP_ID}} — a {{COMMUNITY_ID}} app on DeSciX</title>
+<meta name="description" content="{{APP_ID}}, an app of the {{COMMUNITY_ID}} community on DeSciX. Replace this description with what the app is for.">
+<style>
+:root{
+  --bg:#0b0f14; --bg2:#10161e; --panel:#151d27; --line:#233040; --line2:#2f3f52;
+  --ink:#e9eef3; --ink2:#b3bfcc; --mute:#7f8ea0;
+  --cyan:#5fcbe6; --cyan2:#3aa9c6; --cyan-ink:#06202a;
+  --serif:Georgia,"Times New Roman",serif;
+  --sans:"Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:17px;line-height:1.55;-webkit-font-smoothing:antialiased}
+a{color:var(--cyan);text-decoration:none}
+a:hover{text-decoration:underline}
+a:focus-visible,button:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+img{max-width:100%;display:block}
+h1,h2,h3{font-family:var(--serif);font-weight:500;line-height:1.08;margin:0;text-wrap:balance;letter-spacing:-.01em}
+h2{font-size:clamp(30px,4.2vw,46px)}
+h3{font-size:22px}
+p{margin:0}
+.wrap{max-width:1120px;margin:0 auto;padding-inline:20px}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--cyan)}
+.sec{padding-block:88px;border-top:1px solid var(--line)}
+.sec-head{display:grid;gap:14px;max-width:760px;margin-bottom:44px}
+.lede{font-size:19px;color:var(--ink2);max-width:62ch}
+.btn{display:inline-flex;align-items:center;gap:10px;padding:14px 22px;border-radius:4px;font-family:var(--sans);font-weight:600;font-size:16px;border:1px solid transparent;cursor:pointer;text-decoration:none!important}
+.btn-primary{background:var(--cyan);color:var(--cyan-ink)}
+.btn-primary:hover{background:#7ad6ec}
+.btn-ghost{background:transparent;color:var(--ink);border-color:var(--line2)}
+.btn-ghost:hover{border-color:var(--cyan);color:var(--cyan)}
+code{font-family:var(--mono);font-size:.92em;color:var(--cyan);background:rgba(95,203,230,.08);padding:2px 6px;border-radius:3px}
+
+/* nav */
+.nav{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:rgba(11,15,20,.86);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.nav .wrap{display:flex;align-items:center;justify-content:space-between;gap:20px;height:64px}
+.brand{display:flex;align-items:baseline;gap:10px;color:var(--ink);text-decoration:none!important}
+.brand b{font-family:var(--serif);font-weight:600;font-size:20px;letter-spacing:.01em}
+.brand span{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--mute)}
+.navlinks{display:flex;gap:26px;font-size:15px}
+.navlinks a{color:var(--ink2)}
+.navlinks a:hover{color:var(--cyan);text-decoration:none}
+@media (max-width:820px){.navlinks{display:none}}
+
+/* hero */
+.hero{position:relative;overflow:hidden;border-bottom:1px solid var(--line)}
+.hero .wrap{position:relative;padding-block:96px 84px;display:grid;gap:26px}
+.hero h1{font-size:clamp(40px,6.4vw,78px);font-weight:300;max-width:12ch}
+.hero h1 em{font-style:italic;font-weight:500;color:var(--cyan)}
+.hero .lede{font-size:20px;max-width:56ch}
+.cta-row{display:flex;flex-wrap:wrap;gap:12px;margin-top:6px}
+
+/* skeleton cards */
+.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+.card{border:1px solid var(--line);border-radius:6px;background:var(--bg2);padding:24px 22px;display:grid;gap:10px;align-content:start}
+.card p{font-size:15px;color:var(--ink2)}
+@media (max-width:820px){.cards{grid-template-columns:1fr}}
+
+/* footer */
+footer{border-top:1px solid var(--line);padding-block:44px 60px;color:var(--mute);font-size:14px}
+footer .wrap{display:grid;gap:22px}
+footer .row{display:flex;flex-wrap:wrap;gap:8px 24px}
+footer .row a{color:var(--ink2)}
+footer .legal{max-width:80ch;font-size:13px}
+</style>
+</head>
+<body>
+
+<nav class="nav"><div class="wrap">
+  <a class="brand" href="#top"><b>{{APP_ID}}</b><span>{{COMMUNITY_ID}}</span></a>
+  <div class="navlinks">
+    <a href="#about">About</a><a href="#next">Next steps</a>
+  </div>
+</div></nav>
+
+<header class="hero" id="top">
+  <div class="wrap">
+    <p class="eyebrow">A {{COMMUNITY_ID}} app on DeSciX</p>
+    <h1>{{APP_ID}}, <em>in one sentence.</em></h1>
+    <p class="lede">This is the scaffold front page <code>descix app init</code> stamped for {{APP_ID}}. It is yours: replace this paragraph with what the app does and who it is for.</p>
+    <div class="cta-row">
+      <a class="btn btn-primary" href="#about">Learn more</a>
+      <a class="btn btn-ghost" href="#next">Make this page yours</a>
+    </div>
+  </div>
+</header>
+
+<section class="sec" id="about"><div class="wrap">
+  <div class="sec-head">
+    <p class="eyebrow">About</p>
+    <h2>What {{APP_ID}} is for.</h2>
+  </div>
+  <p class="lede">Placeholder copy from the scaffold. Say what {{APP_ID}} offers to the {{COMMUNITY_ID}} community, in the app's own words.</p>
+</div></section>
+
+<section class="sec" id="next"><div class="wrap">
+  <div class="sec-head">
+    <p class="eyebrow">Next steps</p>
+    <h2>Make this page yours.</h2>
+  </div>
+  <div class="cards">
+    <div class="card"><h3>Edit it</h3><p>This file is <code>site/index.html</code> in your repository. Nothing regenerates it; your edits are kept.</p></div>
+    <div class="card"><h3>Upload it</h3><p>Deploy the site set with <code>descix site upload</code>.</p></div>
+    <div class="card"><h3>Ask the handbook</h3><p>Run <code>descix tell-me-how</code> for every capability the CLI offers.</p></div>
+  </div>
+</div></section>
+
+<footer><div class="wrap">
+  <div class="brand"><b>{{APP_ID}}</b><span>{{COMMUNITY_ID}}</span></div>
+  <div class="row">
+    <a href="#about">About</a><a href="#next">Next steps</a>
+  </div>
+  <p class="legal">{{APP_ID}} is an app of the {{COMMUNITY_ID}} community on DeSciX. Replace this line with your own legal text.</p>
+</div></footer>
+
+</body>
+</html>

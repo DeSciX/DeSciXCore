@@ -39,6 +39,10 @@ A complete Express microservice with:
 descix microservice init
 ```
 
+### Front page (`frontpage/`)
+
+The shared front-page template (`index.html`: head styles, `<nav class="nav">`, `<header class="hero" id="top">`, `<section class="sec" id="…">` blocks, `<footer>`). It is stamped by `descix app init` as `site/index.html`, ONLY if that file is absent, with `{{APP_ID}}` / `{{COMMUNITY_ID}}` filled by `lib/app-scaffold.js`. It is not a `site init` scaffold type. Each repo owns its own divergence after the stamp; no repo reads this template across repositories.
+
 ## Usage
 
 Run scaffold commands from your app directory (auto-detects context):
