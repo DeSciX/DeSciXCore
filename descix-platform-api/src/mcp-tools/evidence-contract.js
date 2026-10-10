@@ -144,11 +144,12 @@ export const SETTLEMENT_PROFILES = Object.freeze({
                 expected_when_green: 'The Lean 4 proof chain typechecks sorry-free (~2 min).',
             }),
             Object.freeze({
+                // EGPTMath ships as the published Rust->WASM SDK (no JS math-core source is
+                // public); the command is self-contained and runs from any directory, so it
+                // carries no repo/cwd root.
                 id: 'egpt_tests',
-                repo: EGPT_SEED_REPO,
-                cwd: 'EGPTMath',
-                cmd: 'node test/EGPTTestSuite.js',
-                expected_when_green: 'The integer-only (IOP, not FLOP) JS math library passes its main suite (157 tests).',
+                cmd: 'npx -y -p @descix/egpt-math-sdk@0.2.0 egpt-math-bench --quiet',
+                expected_when_green: 'Exit 0, ending "EGPT-MATH BENCH: 157 canonical assertions | 157 runnable | 157/157 pass | 0 structurally-gapped (pinned) → RESULT: PASS" — the integer-only (IOP, not FLOP) EGPT math, compiled Rust→WASM; a corrupted WASM exits 1 (no JS fallback ships).',
             }),
             Object.freeze({
                 id: 'axiom_audit',

@@ -94,8 +94,15 @@ test('EGPT settlement profile: capstones enumerated inline + axiom closure + rep
     // repo is the PUBLIC contributable seed, never the private research remote.
     assert.equal(p.repo, 'https://github.com/DeSciX/egpt-lean');
     assert.ok(!JSON.stringify(p).includes('egpt_research'), 'private remote must not be surfaced');
-    // Every verification command has a stated root (repo+cwd) and the renamed field.
-    for (const cmd of p.verification_commands) {
+    // Every verification command states where it runs: a repo+cwd root, or a self-contained
+    // published command (egpt_tests: the Rust->WASM SDK bench, runnable from any directory).
+    const egptTests = p.verification_commands.find(v => v.id === 'egpt_tests');
+    assert.ok(egptTests && !egptTests.repo && !egptTests.cwd,
+        'egpt_tests is self-contained — a repo/cwd root would point at a tree that does not ship it');
+    assert.match(egptTests.cmd, /^npx -y -p @descix\/egpt-math-sdk@\d+\.\d+\.\d+ egpt-math-bench/,
+        'egpt_tests must run the PUBLISHED pinned SDK bench');
+    assert.match(egptTests.expected_when_green, /157\/157 pass/);
+    for (const cmd of p.verification_commands.filter(v => v.id !== 'egpt_tests')) {
         assert.ok(cmd.repo && cmd.cwd, `command ${cmd.id} missing repo/cwd root`);
         assert.ok(typeof cmd.expected_when_green === 'string', `command ${cmd.id} missing expected_when_green`);
         assert.ok(!('proves' in cmd), `command ${cmd.id} still has legacy 'proves' field`);
