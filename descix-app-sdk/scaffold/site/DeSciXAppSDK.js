@@ -167,14 +167,16 @@ window.DeSciX = (() => {
     const ready = () => new Promise((resolve) => {
         const found = resolveBridge();
 
-        if (found.mode === 'standalone') {
-            resolve({ mode: 'standalone', members: [], version: null });
+        // The bus is the fact; the mode string is a second derivation of it. 'standalone' and
+        // 'embedded-no-bridge' both carry bus: null — there is no readable window to wait on.
+        if (!found.bus) {
+            resolve({ mode: found.mode, members: [], version: null });
             return;
         }
 
         const snapshot = () => {
             const now = resolveBridge();
-            if (now.mode === 'standalone') return { mode: 'standalone', members: [], version: null };
+            if (!now.bus) return { mode: now.mode, members: [], version: null };
             return {
                 mode: 'shell',
                 version: now.bus.bridge ? now.bus.bridge.version : null,
@@ -207,9 +209,9 @@ window.DeSciX = (() => {
     const member = (name, why) => {
         const found = resolveBridge();
 
-        if (found.mode === 'standalone') {
+        if (!found.bus) {
             console.error(
-                `[DeSciX SDK] DeSciX.${name} is unavailable: no DeSciX App Shell was found ` +
+                `[DeSciX SDK] DeSciX.${name} is unavailable: no readable DeSciX App Shell bus was found ` +
                 `above this page (running standalone, or the shell is cross-origin). ${why}`
             );
             return null;
@@ -226,10 +228,14 @@ window.DeSciX = (() => {
         return api;
     };
 
-    /** Read a plain (non-member) property off the bus, or null when there is no shell. */
+    /**
+     * Read a plain (non-member) property off the bus, or null when there is no readable bus.
+     * Keyed on the bus itself, never on the mode: 'embedded-no-bridge' is framed yet carries
+     * bus: null, and a getter that throws poisons every `{...window.DeSciX}` spread.
+     */
     const busProp = (name) => {
         const found = resolveBridge();
-        return found.mode === 'standalone' ? null : found.bus[name];
+        return found.bus ? found.bus[name] : null;
     };
 
     return {
@@ -311,10 +317,10 @@ window.DeSciX = (() => {
          */
         call: (command, params) => {
             const found = resolveBridge();
-            if (found.mode === 'standalone') {
+            if (!found.bus) {
                 throw new Error(
                     `[DeSciX SDK] DeSciX.call('${command}') requires the DeSciX App Shell: ` +
-                    'no shell was found above this page (running standalone, or cross-origin).'
+                    'no readable shell bus was found above this page (running standalone, or cross-origin).'
                 );
             }
             return found.bus.call(command, params);
