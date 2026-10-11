@@ -28,7 +28,6 @@ import * as authCommands from '../lib/commands/auth.js';
 import * as configCommands from '../lib/commands/config.js';
 import * as buyCommands from '../lib/commands/buy.js';
 import * as creditsCommands from '../lib/commands/credits.js';
-import * as airdropCommands from '../lib/commands/airdrop.js';
 import { MICROSERVICE_AUTH_MODEL } from '../lib/commands/microservice-auth-model.js';
 import { runInit } from '../lib/commands/init.js';
 // "May I prompt?" has ONE OWNER. No command in this file derives it.
@@ -425,30 +424,6 @@ creditsCommand
   .action(async (options) => {
     try {
       await creditsCommands.refundCredits(options);
-    } catch (error) {
-      fail(error);
-    }
-  });
-
-// ============ Airdrop Commands (WS-ADMIN-B1 manual-trigger) ============
-// Per CEO-D-MANUAL-TRIGGER-NO-CRON (2026-04-20), airdrop batch execution is operator-triggered
-// via this CLI command group rather than Cloud Scheduler cron. Server-side access is gated on
-// platform-admin membership (`isPlatformAdmin(user)`); the server emits an on_chain_log row
-// with `caller.operator_email` for audit.
-
-const airdropCommand = program
-  .command('airdrop')
-  .description('Admin airdrop migration operations (WS-ADMIN-B1)');
-
-airdropCommand
-  .command('execute-queue')
-  .description('DRY-RUN ONLY preview of the airdrop migration queue (admin-only). Execution lives in daita-sam (act plan + the role holder\'s own wallet) — the apply leg is removed.')
-  .option('--community <slug>', 'Community slug for per-community batch scoping')
-  .option('--dry-run', 'Read-only preview: encode calldata, estimate gas, validate net-zero invariant. No PK, no tx, no state mutation. (The default; the flag is accepted for scripts.)')
-  .option('--batch-size <n>', 'Cap on users processed this run (server caps at AIRDROP_MAX_RUN_USERS)')
-  .action(async (options) => {
-    try {
-      await airdropCommands.executeQueue(options);
     } catch (error) {
       fail(error);
     }

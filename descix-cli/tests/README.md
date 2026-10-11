@@ -18,7 +18,7 @@ Node.js `node:test` (built-in, no external framework). Assertions use `node:asse
 
 | File | What it covers |
 |------|---------------|
-| `airdrop.test.js` | `descix airdrop execute-queue` — dry-run, apply, PK file, mutual-exclusion guards |
+| `airdrop-execute-queue-removed.test.js` | `descix airdrop execute-queue` is refused by name, non-zero, naming the offers rail on daita-sam |
 | `app-set-localpath.test.js` | `descix app set-localpath` — path validation, workspace.json update, hard-fail paths |
 | `app-unmap.test.js` | `descix app unmap` — workspace removal, "not mapped" guard, zero Pinecone calls |
 | `app-init-hardening.test.js` | `descix app init` — already-mapped guard, no-silent-mkdir-p, new-app happy path |

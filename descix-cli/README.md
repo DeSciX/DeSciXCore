@@ -183,48 +183,6 @@ build variables the server returns injected into its environment:
 }
 ```
 
-## Airdrop Admin Operations (WS-ADMIN-B1)
-
-Admin-only commands for triggering airdrop migration batch runs. Per CEO-D-MANUAL-TRIGGER-NO-CRON (2026-04-20), Cloud Scheduler cron was dropped from Round B in favor of operator-invoked manual triggers via this CLI.
-
-**Access:** requires platform-admin membership (enforced server-side via `isPlatformAdmin(user)`).
-
-### `descix airdrop execute-queue`
-
-Manually trigger the server-side `airdrop_execute_queue` command on the target environment. Assembles `pending_migrations` rows into per-community batches and (when `BATCH_UPDATE_BALANCES_BROADCAST_ENABLED=true`) broadcasts to the Powch HD wallet. When the broadcast flag is off (default for DEV), batches are assembled but the downstream Powch handler returns `stopped_at_broadcast_boundary` — useful for verifying queue shape without spending MATIC.
-
-**Read-only is the default.** Without `--apply`, the command runs as a dry run.
-
-**Options:**
-
-- `--dry-run`: Read-only preview — encode calldata, estimate gas, validate the net-zero invariant. No PK, no transaction, no state mutation. Mutually exclusive with `--apply`.
-- `--apply`: Live execution. Requires `--signer-pk-file` or the interactive prompt, and requires `--community`.
-- `--community <slug>`: Community slug for per-community batch scoping. **Required for `--apply`**; optional in dry-run mode, where omitting it returns an aggregate preview across communities.
-- `--signer-pk-file <path>`: Path to a file containing the admin signer PK (`0x` + 64 hex). Used for `--apply`; when omitted, the PK is requested at an interactive no-echo prompt. Inline PK flags and environment variables are rejected on security grounds (process-listing leak).
-- `--batch-size <n>`: Cap on users processed this run (server caps at `AIRDROP_MAX_RUN_USERS`; a larger `--batch-size` is clamped).
-
-**Examples:**
-
-```bash
-# Dry run against DEV — safe to run repeatedly; no PK, no tx, no state mutation
-descix airdrop execute-queue --env dev --dry-run
-
-# Dry run scoped to one community
-descix airdrop execute-queue --env dev --dry-run --community smile
-
-# Live execution, capped at 10 users this invocation (prompts for the signer PK)
-descix airdrop execute-queue --env dev --apply --community smile --batch-size 10
-
-# Live execution reading the signer PK from a file
-descix airdrop execute-queue --env dev --apply --community smile --signer-pk-file ./signer.key
-```
-
-**Testing:**
-
-```bash
-cd DeSciX_Core/descix-cli && npm test
-```
-
 ## Documentation
 
 For full documentation, please refer to the [DeSciX SDK Documentation](./SERVICE_README_sdk.md).
