@@ -166,7 +166,10 @@ const GUEST_ALLOWED_COMMANDS = [
     'register_native_user', 'reconnect_by_wallet', 'login_wallet_session', 'device_request_login',
     'device_check_status', 'device_validate', 'device_complete', 'get_platform_holdings',
     'get_market_overview', 'get_user_nfts', 'get_pool_state', 'get_pool_liquidity',
-    'submit_transaction', 'submit_meta_transaction',
+    // submit_transaction is NOT here: Powch 2.2.0 requires an authenticated caller (both measured
+    // callers are signed-in flows), and the platform broadcast endpoint must refuse guests at
+    // EVERY gate. submit_meta_transaction stays pending its own caller measurement.
+    'submit_meta_transaction',
     'get_pool_market_overview', 'get_price_history', 'get_pool_token_info', 'get_migration_status',
     'list_services', 'get_service', 'service_health_check', 'platform_health',
     'admin_bootstrap_login',
