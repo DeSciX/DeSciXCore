@@ -441,7 +441,6 @@ export const AppContextView = {
   LOADING: 'LOADING',
   WELCOME: 'WELCOME',
   HOME: 'HOME', // The platform shell's front page: a designated app's site (the shell's own config names it)
-  TRADING_DASHBOARD: 'TRADING_DASHBOARD', // Crypto exchange-style trading dashboard
   COMMUNITY_LOBBY: 'COMMUNITY_LOBBY',
   COMMUNITY_STORE: 'COMMUNITY_STORE',
   MY_APPS: 'MY_APPS',
