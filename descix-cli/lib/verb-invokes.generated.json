@@ -2,9 +2,6 @@
   "admin-login": [
     "admin_bootstrap_login"
   ],
-  "airdrop execute-queue": [
-    "airdrop_execute_queue"
-  ],
   "app delete": [
     "delete_app"
   ],
