@@ -205,17 +205,6 @@ export const airdropLoadSheet = async (sheetUrl) => {
   }
 };
 
-export const airdropStage = async (sheetUrl, tokenSymbol) => {
-  try {
-    const data = await makeCommandRequestJSON('airdrop_stage', { sheet_url: sheetUrl, token_symbol: tokenSymbol });
-    if (data.status !== ResponseStatus.OK) throw new Error(data.message || 'Failed to stage airdrop');
-    return data.message;
-  } catch (error) {
-    console.error('Error staging airdrop:', error);
-    throw error;
-  }
-};
-
 export const airdropConfirm = async (sheetUrl, tokenSymbol) => {
   try {
     const data = await makeCommandRequestJSON('airdrop_confirm', { sheet_url: sheetUrl, token_symbol: tokenSymbol });

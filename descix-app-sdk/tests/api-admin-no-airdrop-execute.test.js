@@ -17,3 +17,11 @@ test('ApiAdmin source exports no airdropExecute and names no airdrop_execute com
     assert.doesNotMatch(SRC, /airdropExecute/);
     assert.doesNotMatch(SRC, /airdrop_execute/);
 });
+
+// airdrop_stage was struck from Cloud 2026-10-11 (410, superseded by offerService.importOffers —
+// the offers rail, CEO word 1530eb6). The wrapper `airdropStage` is dead surface the same way;
+// airdropLoadSheet STAYS (the sheet reader feeding importOffers).
+test('ApiAdmin source exports no airdropStage and names no airdrop_stage command', () => {
+    assert.doesNotMatch(SRC, /airdropStage/);
+    assert.doesNotMatch(SRC, /airdrop_stage/);
+});
