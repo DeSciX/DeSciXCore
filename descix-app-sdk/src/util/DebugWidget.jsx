@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useContext } from 'react';
-import { AppData, AppContextEvent, AppContextView } from './AppData';
+import { AppData, AppContextEvent } from './AppData';
 import { AppContext } from '../AppContext';
 
 const DebugWidget = () => {
@@ -90,11 +90,8 @@ const DebugWidget = () => {
     if (appContext) {
       // Dispatch refresh event to trigger backend re-fetch
       appContext.setAppEvent({ type: AppContextEvent.PURCHASES_REFRESH_REQUESTED });
-      
-      // Navigate to Trading Dashboard
-      appContext.setCurrentView(AppContextView.TRADING_DASHBOARD);
-      
-      console.log('[DebugWidget] Refresh complete - navigating to Trading Dashboard');
+
+      console.log('[DebugWidget] Refresh requested');
     } else {
       console.warn('[DebugWidget] AppContext not available - reload page to apply changes');
       window.location.reload();
