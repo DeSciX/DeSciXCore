@@ -281,6 +281,8 @@ test('the placebo suggestPrompt stub is DELETED, not left beside the real handle
 
 test('the standalone path RESOLVES readiness instead of hanging forever', () => {
   const src = fs.readFileSync(SCAFFOLD_SDK, 'utf8');
-  assert.match(src, /mode: 'standalone', members: \[\]/,
+  // Keyed on the bus (found.bus), reporting the resolver's own mode: standalone resolves
+  // immediately as 'standalone' (behaviour asserted in app-sdk-embedded-no-bridge.test.js).
+  assert.match(src, /if \(!found\.bus\) \{\s*resolve\(\{ mode: found\.mode, members: \[\]/,
     'an app awaiting a bridge that is never coming is indistinguishable from a broken app');
 });
