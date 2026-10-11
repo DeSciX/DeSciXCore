@@ -697,8 +697,8 @@ export const AppProvider = ({ children }) => {
       const response = await Api.handlePurchase(app, ProductTypes.APP);
       
       if (response.needsOnboarding) {
-        // User needs to complete onboarding - go to Dashboard
-        setAppEvent({ type: AppContextEvent.CHANGE_VIEW, payload: { view: AppContextView.TRADING_DASHBOARD } });
+        // User needs to complete onboarding - the Powch portfolio tab is the replacement surface
+        window.DeSciX?.powch?.open?.({ tab: 'portfolio' });
         return false;
       }
 
@@ -738,8 +738,8 @@ export const AppProvider = ({ children }) => {
       const response = await Api.handlePurchase(community, ProductTypes.COMMUNITY);
 
       if (response.needsOnboarding) {
-        // User needs to complete onboarding - go to Dashboard
-        setAppEvent({ type: AppContextEvent.CHANGE_VIEW, payload: { view: AppContextView.TRADING_DASHBOARD } });
+        // User needs to complete onboarding - the Powch portfolio tab is the replacement surface
+        window.DeSciX?.powch?.open?.({ tab: 'portfolio' });
         return false;
       }
 
