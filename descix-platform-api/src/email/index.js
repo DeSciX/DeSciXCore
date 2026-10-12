@@ -68,9 +68,14 @@ export function isValidEmail(email) {
  * @param {string} subject - Email subject
  * @param {string} body - Email body (plain text)
  * @param {string} [fromEmail] - Optional sender email (defaults to DESCIX_ROUTER_COMMUNITY_MANAGER)
+ * @param {Object} [options]
+ * @param {string} [options.html] - Optional HTML body (Q15, CEO word Unkamon c7bbc15). When
+ *   present the message is multipart/alternative: the plain `body` is the text part, `html`
+ *   the html part (last = preferred). Absent, the message is the same single-part text/plain
+ *   it has always been — no existing caller changes.
  * @returns {Promise<void>}
  */
-export async function sendEmail(toEmail, subject, body, fromEmail = null) {
+export async function sendEmail(toEmail, subject, body, fromEmail = null, { html = null } = {}) {
     const utils = getCloudConfig();
 
     // The sender/impersonated user - must be a real user in the domain with Gmail access
@@ -98,16 +103,41 @@ export async function sendEmail(toEmail, subject, body, fromEmail = null) {
 
     const gmail = google.gmail({ version: 'v1', auth });
 
-    // Build the email message with Reply-To header
-    const message = [
+    // Build the email message with Reply-To header. With `html`, multipart/alternative
+    // (text part first, html part last — the alternative order of preference); without it,
+    // the single-part text/plain message unchanged.
+    const headers = [
         `From: DeSciX <${impersonatedUser}>`,
         `To: ${toEmail}`,
         `Reply-To: ${replyToEmail}`,
         `Subject: ${subject}`,
-        'Content-Type: text/plain; charset="UTF-8"',
-        '',
-        body
-    ].join('\n');
+    ];
+    let message;
+    if (html) {
+        const boundary = `descix-alt-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+        message = [
+            ...headers,
+            'MIME-Version: 1.0',
+            `Content-Type: multipart/alternative; boundary="${boundary}"`,
+            '',
+            `--${boundary}`,
+            'Content-Type: text/plain; charset="UTF-8"',
+            '',
+            body,
+            `--${boundary}`,
+            'Content-Type: text/html; charset="UTF-8"',
+            '',
+            html,
+            `--${boundary}--`
+        ].join('\n');
+    } else {
+        message = [
+            ...headers,
+            'Content-Type: text/plain; charset="UTF-8"',
+            '',
+            body
+        ].join('\n');
+    }
 
     const raw = base64UrlEncode(message);
 
