@@ -148,7 +148,7 @@ export const SETTLEMENT_PROFILES = Object.freeze({
                 // public); the command is self-contained and runs from any directory, so it
                 // carries no repo/cwd root.
                 id: 'egpt_tests',
-                cmd: 'npx -y -p @descix/egpt-math-sdk@0.3.1 egpt-math-bench --quiet',
+                cmd: 'npx -y -p @descix/egpt-math-sdk@0.3.2 egpt-math-bench --quiet',
                 expected_when_green: 'Exit 0, ending "EGPT-MATH BENCH: 157 canonical assertions | 157 runnable | 157/157 pass | 0 structurally-gapped (pinned) → RESULT: PASS", preceded by the "wasm sha256 …" provenance line and the "… WASM calls …" counter line — the integer-only (IOP, not FLOP) EGPT math, compiled Rust→WASM; a corrupted WASM exits 1 (no JS fallback ships).',
             }),
             Object.freeze({
