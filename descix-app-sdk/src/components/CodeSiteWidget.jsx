@@ -321,6 +321,11 @@ const CodeSiteWidget = ({
             title={title}
             style={{ width: '100%', height: '100%', border: 'none' }}
             sandbox={sandboxPermissions}
+            // Fullscreen is a PERMISSIONS-POLICY delegation, separate from sandbox tokens:
+            // without it a framed app's requestFullscreen records DENIED (FRAQTL GYM,
+            // measured 2026-10-11). allowFullScreen is the legacy-engine twin.
+            allow="fullscreen"
+            allowFullScreen
           />
         )}
         
