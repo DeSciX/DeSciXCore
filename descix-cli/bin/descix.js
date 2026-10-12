@@ -2347,7 +2347,11 @@ siteCommand
 
       console.log(chalk.cyan(`\n  Site Upload: ${appId} → GCS\n`));
       console.log(chalk.gray(`  Source: ${sourceLabel}`));
-      console.log(chalk.gray(`  Target: ${communityId}/${appId}`));
+      // The write prefix is server-owned and FLAT ({env}/{appId}/site/ — community_id is
+      // derived server-side from Products/{app_id} and a caller-supplied one is ignored).
+      // Printing a locally-guessed community here once read as a changed write target and
+      // held up a prod upload (FRAQTL wall, 2026-10-12) — say only what this client knows.
+      console.log(chalk.gray(`  Target: {env}/${appId}/site/ (flat; community resolved server-side)`));
       if (options.preview) console.log(chalk.yellow(`  Mode: PREVIEW`));
       if (gitStatus.isGitRepo) {
         console.log(chalk.gray(`  Git: ${gitStatus.branch} @ ${gitStatus.shortHash}`));
