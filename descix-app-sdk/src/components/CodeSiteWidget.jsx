@@ -290,8 +290,12 @@ const CodeSiteWidget = ({
     );
   }
 
-  // Sandbox permissions: allow-same-origin is CRITICAL for direct interframe scripting
-  const sandboxPermissions = 'allow-scripts allow-forms allow-popups allow-same-origin';
+  // Sandbox permissions: allow-same-origin is CRITICAL for direct interframe scripting.
+  // allow-popups-to-escape-sandbox: an outbound link from a framed app opens UNSANDBOXED —
+  // without it the popup inherits the sandbox and a COOP origin (YouTube) lands on a
+  // chrome-error page (FRAQTL, CEO report 2026-10-13). The scripts+same-origin pair already
+  // lets the frame escape its own sandbox, so this token removes no barrier.
+  const sandboxPermissions = 'allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-same-origin';
 
   // Layout: chatWidth is ALWAYS the chat pane's fraction; chatPosition picks the side
   // (row-reverse puts the chat pane first visually for 'left' — WS-HEADLESS-MVP-A4 fix:
