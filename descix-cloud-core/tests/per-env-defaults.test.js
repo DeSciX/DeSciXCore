@@ -119,7 +119,6 @@ test('(b2) additionalRequiredKeys does NOT throw when the value IS provided by t
     // under test is the per-service CORE_API_URL (supplied by the prod env layer).
     const base = {
         INTELLIGENCE_LEVELS: { "2": { label: "Standard", model: "gemini-3.1-flash-lite" } },
-        DEFAULT_AI_MODEL: "gemini-3.1-flash-lite",
         DEFAULT_INTELLIGENCE_LEVEL: "2",
         PINECONE_INDEX_NAME: "descix-prod",
         PINECONE_API_KEY: "test-pc-key",

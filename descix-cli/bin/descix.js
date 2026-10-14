@@ -7,7 +7,7 @@
  * Combines CLI and MCP functionality with unified authentication.
  */
 
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import chalk from 'chalk';
 import { DeSciXApiClient } from '../lib/api-client.js';
 import { requireAuth } from '../lib/auth-guard.js';
@@ -1663,7 +1663,8 @@ appCommand
 // ============ App: set-default-model (WS-CONFIG-BOOTSTRAP-FIX item #10) ============
 //
 // Updates Community/{c}/Apps/{a}.default_app_model. Per CEO inheritance chain:
-//   options.model > kb.kb_model_override > app.default_app_model > levelConfig.model > DEFAULT_AI_MODEL
+//   request intelligence_level > kb.kb_model_override > app.default_app_model > the level's model
+// (there is no separate default model: the default is the model of DEFAULT_INTELLIGENCE_LEVEL)
 //
 // --clear deletes the field via FieldValue.delete() (NOT null) so the resolver falls through
 // cleanly to per-level platform defaults.
@@ -1672,13 +1673,13 @@ appCommand
   .command('set-default-model')
   .description('Set or clear App.default_app_model (model used when no KB override is set)')
   .requiredOption('-a, --app <app_id>', 'App ID (e.g. unk-cos)')
-  .option('-m, --model <model_name>', 'Gemini model name (e.g. gemini-3.1-flash-lite). Mutually exclusive with --clear.')
+  .option('-m, --model <model_name>', 'Model name (e.g. gemini-3.8-flash). Mutually exclusive with --clear.')
   .option('--clear', 'Delete App.default_app_model via FieldValue.delete() (resets to platform-default inheritance)')
   .addHelpText('after', `
-NOTE: Pinning a "Pro" model (e.g., gemini-2.5-pro, gemini-3.1-pro-preview) as
-an app or KB override will fail at L1 — these models require thinking mode and
-reject L1's thinkingBudget=0. If you intend an L1-compatible override, use a
-"Flash" model (gemini-2.5-flash, gemini-3.1-flash-lite, gemini-3-flash-preview).
+NOTE: A pinned model is paired with a thinking_level, and which levels exist is a
+property of the MODEL. The server refuses, by name, a (model, thinking_level) pair
+it does not support. The current intelligence levels (each names its own model and
+thinking_level) are printed under "Per-level" after this command runs.
 `)
   .action(async (options) => {
     try {
@@ -1820,12 +1821,12 @@ kbCommand
   .description('Set KB.kb_model_override (per-KB model selection)')
   .requiredOption('-a, --app <app_id>', 'App ID')
   .requiredOption('-k, --kb <kb_name>', 'KB name')
-  .requiredOption('-m, --model <model_name>', 'Gemini model name (e.g. gemini-2.5-pro)')
+  .requiredOption('-m, --model <model_name>', 'Model name (e.g. gemini-3.8-flash)')
   .addHelpText('after', `
-NOTE: Pinning a "Pro" model (e.g., gemini-2.5-pro, gemini-3.1-pro-preview) as
-an app or KB override will fail at L1 — these models require thinking mode and
-reject L1's thinkingBudget=0. If you intend an L1-compatible override, use a
-"Flash" model (gemini-2.5-flash, gemini-3.1-flash-lite, gemini-3-flash-preview).
+NOTE: A pinned model is paired with a thinking_level, and which levels exist is a
+property of the MODEL. The server refuses, by name, a (model, thinking_level) pair
+it does not support. The current intelligence levels (each names its own model and
+thinking_level) are printed under "Per-level" after this command runs.
 `)
   .action(async (options) => {
     try {
@@ -3360,11 +3361,15 @@ program
   .option('--apps <ids>', 'Comma-separated app IDs for cross-app query')
   .option('--level <n>', 'Intelligence level (1-5)', parseInt)
   .option('--model <name>', 'Explicit model override')
-  .option('--thinking <budget>', 'Thinking token budget (-1=dynamic, 0=off, N=fixed)', parseInt)
+  .option('--thinking-level <level>', 'Thinking level for this call: minimal, low, medium or high. The server refuses a level the resolved model does not support.')
+  .addOption(new Option('--thinking <budget>').hideHelp())
   .option('--tokens', 'Show token usage in response footer')
   .option('--new', 'Start a new conversation (clear session)')
   .action(async (questionArgs, options) => {
     try {
+      if (options.thinking !== undefined) {
+        throw new Error('--thinking (a token budget) was removed. Use --thinking-level <level>, one of minimal, low, medium, high.');
+      }
       const apiClient = new DeSciXApiClient();
       await requireAuth(apiClient);
 
@@ -3390,7 +3395,7 @@ program
           user_input: question,
           intelligence_level: options.level,
           model: options.model,
-          thinking_budget: options.thinking,
+          thinking_level: options.thinkingLevel,
           streaming: false
         });
         const result = response.message || response;
@@ -3497,7 +3502,7 @@ program
         streaming: false,
         intelligence_level: options.level,
         model: options.model,
-        thinking_budget: options.thinking,
+        thinking_level: options.thinkingLevel,
       };
 
       if (useMultiKb) {

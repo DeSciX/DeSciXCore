@@ -70,7 +70,6 @@ const MOVED_PLATFORM_NODE_KEYS = [
     'PINECONE_API_KEY',
     'GEMINI_API_KEY',
     'INTELLIGENCE_LEVELS',
-    'DEFAULT_AI_MODEL',
     'DEFAULT_INTELLIGENCE_LEVEL',
     'PLATFORM_DEFAULT_CHAIN',
     'STORAGE_BUCKET',
@@ -159,7 +158,6 @@ test('DeSciX_Cloud per-service keys pass when present alongside base keys', asyn
         PINECONE_API_KEY: 'k',
         GEMINI_API_KEY: 'g',
         INTELLIGENCE_LEVELS: { '2': { model: 'gemini-3.1-flash-lite' } },
-        DEFAULT_AI_MODEL: 'gemini-3.1-flash-lite',
         DEFAULT_INTELLIGENCE_LEVEL: '2',
         PLATFORM_DEFAULT_CHAIN: 'polygon',
         STORAGE_BUCKET: 'descix-assets',
@@ -170,7 +168,7 @@ test('DeSciX_Cloud per-service keys pass when present alongside base keys', asyn
         rootPath: dir,
         additionalRequiredKeys: [
             'PINECONE_INDEX_NAME', 'PINECONE_API_KEY',
-            'GEMINI_API_KEY', 'INTELLIGENCE_LEVELS', 'DEFAULT_AI_MODEL',
+            'GEMINI_API_KEY', 'INTELLIGENCE_LEVELS',
             'DEFAULT_INTELLIGENCE_LEVEL', 'PLATFORM_DEFAULT_CHAIN', 'STORAGE_BUCKET',
         ],
     });
@@ -228,4 +226,10 @@ test('CloudConfigFatalError is exported and instanceof checks work', () => {
     assert.equal(err.name, 'CloudConfigFatalError');
     assert.ok(err instanceof CloudConfigFatalError);
     assert.ok(err instanceof Error);
+});
+
+test('config-schema.json carries no DEFAULT_AI_MODEL (the default model is the model of DEFAULT_INTELLIGENCE_LEVEL) and no retired gemini id', async () => {
+    const raw = await fsp.readFile(new URL('../config-schema.json', import.meta.url), 'utf8');
+    assert.doesNotMatch(raw, /DEFAULT_AI_MODEL/);
+    assert.doesNotMatch(raw, /gemini-2\./);
 });

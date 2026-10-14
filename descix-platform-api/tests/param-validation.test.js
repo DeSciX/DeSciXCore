@@ -144,7 +144,7 @@ test('ask_question_to_app declares every param its handler honors', () => {
     const props = Object.keys(askSchema.properties);
     for (const p of [
         // generation knobs (ragCommands.js:394)
-        'intelligence_level', 'model', 'thinking_budget', 'temperature', 'max_output_tokens', 'streaming',
+        'intelligence_level', 'model', 'thinking_level', 'temperature', 'max_output_tokens', 'streaming',
         // document scoping (communityManagement.js prepare_chat_context:1493)
         'file_id', 'ipdoc_file_id', 'doc_ids',
         // multimodal attachments (ws-chat-multimodal-image-attach): prepare_chat_context
@@ -171,8 +171,45 @@ test('every declared param carries a description (the schema IS the MCP-facing d
 test('the CLI tuning knobs that used to be silently dropped now validate', () => {
     assert.doesNotThrow(() => validateParamsAgainstSchema(askSchema, {
         app_id: 'unk-beast', user_input: 'q',
-        intelligence_level: 3, model: 'gemini-3.1-flash-lite', thinking_budget: -1, streaming: false,
+        intelligence_level: 3, model: 'gemini-3.1-flash-lite', thinking_level: 'low', streaming: false,
     }, { commandName: 'ask_question_to_app' }));
+});
+
+test('thinking_level: every allowed level is accepted', () => {
+    for (const level of ['minimal', 'low', 'medium', 'high']) {
+        assert.doesNotThrow(() => validateParamsAgainstSchema(askSchema,
+            { app_id: 'unk-beast', user_input: 'q', thinking_level: level },
+            { commandName: 'ask_question_to_app' }), level);
+    }
+});
+
+test('thinking_level: a value outside the enum is REFUSED naming the param and the allowed values', () => {
+    assert.throws(
+        () => validateParamsAgainstSchema(askSchema,
+            { app_id: 'unk-beast', user_input: 'q', thinking_level: 'turbo' },
+            { commandName: 'ask_question_to_app' }),
+        (e) => e.code === 'INVALID_PARAMS'
+            && /thinking_level/.test(e.message) && /minimal, low, medium, high/.test(e.message),
+    );
+});
+
+test('thinking_budget is REMOVED: refused with THINKING_BUDGET_REMOVED naming thinking_level and its values', () => {
+    for (const v of [-1, 0, 2048]) {
+        assert.throws(
+            () => validateParamsAgainstSchema(askSchema,
+                { app_id: 'unk-beast', user_input: 'q', thinking_budget: v },
+                { commandName: 'ask_question_to_app' }),
+            (e) => e.code === 'THINKING_BUDGET_REMOVED'
+                && /thinking_level/.test(e.message) && /minimal, low, medium, high/.test(e.message),
+            `thinking_budget=${v}`);
+    }
+});
+
+test('thinking_budget is no longer a declared property of ask_question_to_app', () => {
+    assert.ok(!('thinking_budget' in askSchema.properties));
+    assert.deepEqual(askSchema.properties.thinking_level.enum, ['minimal', 'low', 'medium', 'high']);
+    assert.ok(!/gemini-/.test(askSchema.properties.thinking_level.description),
+        'the thinking_level description names no model id');
 });
 
 /**

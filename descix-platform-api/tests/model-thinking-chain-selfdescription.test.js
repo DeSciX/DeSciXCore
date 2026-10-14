@@ -25,7 +25,7 @@ const SRC = fs.readFileSync(
 const ask = NATIVE_MCP_TOOLS.find((t) => t.name === 'ask_question_to_app');
 const PROPS = ask?.inputSchema?.properties ?? {};
 /** Every param that participates in the pair chain. */
-const CHAIN_PARAMS = ['intelligence_level', 'model', 'thinking_budget'];
+const CHAIN_PARAMS = ['intelligence_level', 'model', 'thinking_level'];
 
 test('P4 fixture check: the tool and all three knobs are actually served', () => {
     assert.ok(ask, 'ask_question_to_app is in NATIVE_MCP_TOOLS');

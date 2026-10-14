@@ -7,8 +7,9 @@
  *   - descix kb set-override-model -a <app_id> -k <kb_name> -m <model_name> [--env=dev|demo|prod]
  *   - descix kb clear-override-model -a <app_id> -k <kb_name> [--env=dev|demo|prod]
  *
- * Per CEO 2026-05-26 inheritance chain:
- *   options.model || kb.kb_model_override || app.default_app_model || levelConfig.model || utils.DEFAULT_AI_MODEL
+ * Resolver order (the server owns it; this CLI prints the chain the server reports):
+ *   request intelligence_level > kb.kb_model_override (+ its thinking_level) > app.default_app_model > the level's model
+ * There is no separate default model: the default is the model of the platform's default intelligence level.
  *
  * --clear flows use FieldValue.delete() server-side (NOT null) per tripwire #2.
  *
@@ -110,12 +111,10 @@ function identityFromApiClient(apiClient) {
 function printResolution({ app_id, resolution }) {
     if (!resolution) return;
     const dam = resolution.default_app_model === null ? 'null' : `"${resolution.default_app_model}"`;
-    const dai = resolution.default_ai_model ? `"${resolution.default_ai_model}"` : 'null';
 
     console.log(chalk.cyan('\nResolution chain that will apply going forward:'));
     console.log(chalk.gray(`  ${resolution.chain}`));
     console.log(chalk.gray(`  app.default_app_model = ${dam}`));
-    console.log(chalk.gray(`  utils.DEFAULT_AI_MODEL = ${dai}`));
 
     const levels = resolution.intelligence_levels || {};
     const levelKeys = Object.keys(levels).sort();

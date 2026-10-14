@@ -126,7 +126,6 @@
       "VECTORIZE_MODE": "sync",
       "PINECONE_INTEGRATED_EMBED_MODEL": "llama-text-embed-v2",
       "PLATFORM_DEFAULT_CHAIN": "polygon",
-      "DEFAULT_AI_MODEL": "gemini-2.0-flash",
       "CHAIN_DB_ID": "descix-chain",
       "DESCIX_ROUTER_PREFIX": "reply+",
       "AIRDROP_BATCH_LIMIT": 100,

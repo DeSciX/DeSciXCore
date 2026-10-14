@@ -35,7 +35,6 @@ This document audits all keys in [docs/secret.example.json](../secret.example.js
 | **FIRESTORE_DATABASE_ID** | Firestore database (e.g. descix-dev) | firestore.js, cloudflaredService, clearUsersAndPurchases, Powch storage | Active |
 | **SITE_DOMAIN** | Domain for groups/email (e.g. descix.net) | communityManagement.js, googleGroupsService.js | Active |
 | **APP_URL** | Public PWA URL (canonical; includes https://) | cryptoApisService, pwaHandoff, tokenClaimService, powchService, many others | Active |
-| **DEFAULT_AI_MODEL** | Default Gemini model name | geminiInteractions, geminiAPI, appCommands, communityManagement, ipStorageUtils | Active |
 | **STORAGE_BUCKET** | GCS bucket (private) | googleStorageService, communityManagement, ipStorageUtils, descixTest | Active |
 | **STORAGE_BUCKET_PUBLIC** | GCS bucket (public) | googleStorageService, appCommands, communityManagement | Active |
 | **STORAGE_ROOT_FOLDER** | GCS root path | defaults only | Deprecated (no service usage) |

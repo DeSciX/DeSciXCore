@@ -100,9 +100,13 @@ export const MODEL_THINKING_CHAIN =
     'PRECEDENCE — the model and the thinking setting are ONE pair and always come from the SAME '
     + 'tier; the first tier that states a model supplies both: (1) intelligence_level named on THIS '
     + 'request, (2) the KB model override, (3) the app default model, (4) the platform default — the '
-    + "KB's own intelligence_level, else the platform default level, else the platform default model. "
-    + 'A tier that states a model but no thinking setting sends NO thinking directive and the '
-    + 'provider decides; a thinking setting is never inherited onto a model it was not declared with.';
+    + "KB's own intelligence_level, else the platform default level (there is no separate default model: "
+    + 'every level names its model). '
+    + 'A tier that states a model but no thinking_level sends NO thinking directive and the '
+    + 'provider decides; a thinking_level is never inherited onto a model it was not declared with.';
+
+/** The ONE owner of the thinking_level vocabulary on the request surface (per-model support is the server's). */
+export const THINKING_LEVELS = Object.freeze(['minimal', 'low', 'medium', 'high']);
 
 export const NATIVE_MCP_TOOLS = Object.freeze([
     {
@@ -160,8 +164,8 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
                 // the generation knobs; communityManagement.js prepare_chat_context reads the
                 // document-scoping ones). Declared so strict validation admits them.
                 intelligence_level: { type: 'number', description: 'Intelligence level 1-5. A level selects a (model, thinking) PAIR, not just a model tier — higher levels cost more AI credits. ' + MODEL_THINKING_CHAIN },
-                model: { type: 'string', description: 'Explicit model name. It overrides the whole chain below, and because you changed the model it carries NO inherited thinking setting — pass thinking_budget too if this model needs one. Prefer intelligence_level unless you need one specific model. ' + MODEL_THINKING_CHAIN },
-                thinking_budget: { type: 'number', description: 'Thinking-token budget for THIS call: -1 dynamic, 0 off, N a fixed cap. The number is mapped onto the provider\'s thinking LEVEL, and which levels exist is a property of the MODEL: on a model whose vocabulary is {high, low} (measured: gemini-2.5-flash, gemini-2.5-pro) there is no "off", so 0 is REFUSED naming the model and its allowed values rather than sent onward. Thinking is also spent from max_output_tokens, so a cap too small to fit it is refused too. It is the request tier\'s thinking statement and wins over whatever the chain resolved. Omit to take the thinking setting from the same tier that supplied the model. ' + MODEL_THINKING_CHAIN },
+                model: { type: 'string', description: 'Explicit model name. It overrides the whole chain below, and because you changed the model it carries NO inherited thinking setting — pass thinking_level too if you want one. Prefer intelligence_level unless you need one specific model. ' + MODEL_THINKING_CHAIN },
+                thinking_level: { type: 'string', enum: [...THINKING_LEVELS], 'x-enforceEnum': true, description: 'How much the model thinks before answering, for THIS call: minimal, low, medium or high. This is the only thinking control. Which levels exist is a property of the resolved MODEL, and the server REFUSES, by name, a level the resolved model does not support rather than sending it onward. Thinking is also spent from max_output_tokens, so a cap too small to fit it is refused too. It is the request tier\'s thinking statement and wins over whatever the chain resolved. Omit to take the thinking level from the same tier that supplied the model. ' + MODEL_THINKING_CHAIN },
                 temperature: { type: 'number', description: 'Generation temperature override. Omit to inherit the KB/platform default.' },
                 max_output_tokens: { type: 'number', description: 'Cap on generated tokens for this call. Omit to inherit the KB/platform default.' },
                 streaming: { type: 'boolean', description: 'Stream the reply instead of returning it whole. Leave unset/false over MCP tools/call, which returns a single result — this exists for the streaming transports (PWA/Discord).' },
@@ -179,6 +183,13 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
                 workstream_id: { type: 'string', description: "The workstream this question belongs to. When present, the answer runs on a thread OWNED BY THAT WORKSTREAM rather than by the calling user: the server derives the thread owner as roomThreadKey({surface:'workstream', room_id:workstream_id, app_id}) - e.g. 'unk-beast:workstream-ws-c3-librarian' - and stores continuity server-side in the InteractionRooms collection. Send the SAME workstream_id every turn and omit previous_interaction_id; the response's interaction_id is an ECHO for observability, not a handle to resend. A workstream thread is SHARED BY DESIGN: every caller naming the same workstream on the same app continues the same conversation. It is NOT a private per-user conversation and carries no per-user privacy property. A client-supplied interaction_owner_id remains stripped at the door and is not a substitute for this param." },
             },
             required: ['app_id', 'user_input'],
+            'x-removedParams': {
+                thinking_budget: {
+                    code: 'THINKING_BUDGET_REMOVED',
+                    replacement: 'thinking_level',
+                    message: `thinking_budget no longer exists; use thinking_level, one of ${THINKING_LEVELS.join(', ')}.`,
+                },
+            },
         },
     },
     {

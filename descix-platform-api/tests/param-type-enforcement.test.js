@@ -41,7 +41,9 @@ const SPECIMEN = {
 };
 
 /** A value that conforms to `types`, or undefined when we cannot build one. */
-function conformingValue(types) {
+function conformingValue(types, def) {
+    // A property that enforces its enum is only satisfied by a member of it.
+    if (def && def['x-enforceEnum'] === true && Array.isArray(def.enum) && def.enum.length) return def.enum[0];
     for (const t of types) if (t in SPECIMEN && t !== 'null') return SPECIMEN[t];
     return undefined;
 }
@@ -75,7 +77,7 @@ function baseBag(tool) {
     const props = tool.inputSchema?.properties || {};
     const bag = {};
     for (const r of tool.inputSchema?.required || []) {
-        const v = conformingValue(declaredTypesOf(props[r]));
+        const v = conformingValue(declaredTypesOf(props[r]), props[r]);
         if (v !== undefined) bag[r] = v;
     }
     return bag;
@@ -146,7 +148,7 @@ test('FIXTURE CHECK (negative control): the SAME parameters are ACCEPTED when se
     let cases = 0;
     for (const { tool, name, def } of declaredParams()) {
         const types = declaredTypesOf(def);
-        const good = conformingValue(types);
+        const good = conformingValue(types, def);
         if (good === undefined) continue;
         const bag = { ...baseBag(tool), [name]: good };
         cases++;

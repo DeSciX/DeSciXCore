@@ -9,7 +9,7 @@
  *     patterns (bootstrap.js hydrate-env + confirm_site_deploy).
  *   - App-level config layer (§6.7 extension) — cite the resolver chain
  *     in geminiInteractions.js::resolveModelThinkingPair: request level → kb_model_override
- *     → default_app_model → levelConfig → DEFAULT_AI_MODEL.
+ *     → default_app_model → the level's model (no separate default model).
  *
  * NO direct @google-cloud/firestore or @pinecone-database/pinecone imports
  * (AC-7 anti-regression). All Firestore touches in the briefer code go

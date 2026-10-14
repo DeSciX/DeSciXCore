@@ -335,7 +335,7 @@ export class App {
         this.create_date = create_date instanceof Date ? create_date : new Date(create_date);
         this.owner_id = String(owner_id);
         // default_app_model: keep as null/absent unless the caller passed an explicit value.
-        // This avoids re-populating the doc with utils.DEFAULT_AI_MODEL on every hydration,
+        // This avoids re-populating the doc with a model on every hydration,
         // which would shadow the per-level platform default at request time.
         this.default_app_model = default_app_model || null;
         this.default_prompt = utils.DEFAULT_COMMUNITY_PROMPT;

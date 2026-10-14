@@ -165,7 +165,7 @@ test('app set-default-model — HARD-FAIL when both -m and --clear are given', a
   t.after(cleanup);
 
   await assert.rejects(
-    () => mod.runAppSetDefaultModel({ app: 'unk-cos', model: 'gemini-2.5-pro', clear: true }),
+    () => mod.runAppSetDefaultModel({ app: 'unk-cos', model: 'gemini-3.8-flash', clear: true }),
     /-m and --clear are mutually exclusive/,
     'must hard-fail on mutual exclusion'
   );
@@ -176,7 +176,7 @@ test('kb set-override-model — HARD-FAIL when -a is missing', async (t) => {
   const { mod, cleanup } = await loadModelConfigWithFakeApi({});
   t.after(cleanup);
   await assert.rejects(
-    () => mod.runKbSetOverrideModel({ kb: 'Corpus', model: 'gemini-2.5-pro' }),
+    () => mod.runKbSetOverrideModel({ kb: 'Corpus', model: 'gemini-3.8-flash' }),
     /Missing required option: -a/
   );
 });
@@ -186,7 +186,7 @@ test('kb set-override-model — HARD-FAIL when -k is missing', async (t) => {
   const { mod, cleanup } = await loadModelConfigWithFakeApi({});
   t.after(cleanup);
   await assert.rejects(
-    () => mod.runKbSetOverrideModel({ app: 'unk-cos', model: 'gemini-2.5-pro' }),
+    () => mod.runKbSetOverrideModel({ app: 'unk-cos', model: 'gemini-3.8-flash' }),
     /Missing required option: -k/
   );
 });
@@ -249,7 +249,7 @@ test('kb set-override-model — HARD-FAIL when backend returns KB-not-found', as
   t.after(cleanup);
 
   await assert.rejects(
-    () => mod.runKbSetOverrideModel({ app: 'unk-cos', kb: 'no-such-kb', model: 'gemini-2.5-pro' }),
+    () => mod.runKbSetOverrideModel({ app: 'unk-cos', kb: 'no-such-kb', model: 'gemini-3.8-flash' }),
     /Unexpected backend command/  // because the plan is empty — equivalent to backend rejecting
   );
 });
@@ -268,15 +268,14 @@ test('app set-default-model --clear → routes to clear_app_default_model (Field
       app_id: 'unk-cos',
       field_was_present: true,
       field_present_after: false,
-      before: { default_app_model: 'gemini-2.5-pro' },
+      before: { default_app_model: 'gemini-3.8-flash' },
       after: { default_app_model: null },
       resolution: {
-        chain: 'options.model > kb.kb_model_override > app.default_app_model > levelConfig.model > DEFAULT_AI_MODEL',
+        chain: 'request intelligence_level > kb.kb_model_override > app.default_app_model > the level\'s model',
         default_app_model: null,
-        default_ai_model: 'gemini-3.1-flash-lite',
         intelligence_levels: {
-          '1': { label: 'Efficient', model: 'gemini-2.5-flash' },
-          '2': { label: 'Standard', model: 'gemini-3.1-flash-lite' }
+          '1': { label: 'Efficient', model: 'gemini-3.1-flash-lite' },
+          '2': { label: 'Standard', model: 'gemini-3.8-flash' }
         },
         kb_overrides: { Corpus: null, Role: null }
       }
@@ -305,12 +304,11 @@ test('kb clear-override-model → routes to clear_kb_model_override', async (t) 
       kb_name: 'Corpus',
       field_was_present: true,
       field_present_after: false,
-      before: { kb_model_override: 'gemini-2.5-pro' },
+      before: { kb_model_override: 'gemini-3.8-flash' },
       after: { kb_model_override: null },
       resolution: {
-        chain: 'options.model > kb.kb_model_override > app.default_app_model > levelConfig.model > DEFAULT_AI_MODEL',
+        chain: 'request intelligence_level > kb.kb_model_override > app.default_app_model > the level\'s model',
         default_app_model: null,
-        default_ai_model: 'gemini-3.1-flash-lite',
         intelligence_levels: {},
         kb_overrides: { Corpus: null }
       }
@@ -337,23 +335,22 @@ test('kb set-override-model → routes to set_kb_model_override with model_name'
       app_id: 'unk-cos',
       kb_name: 'Corpus',
       before: { kb_model_override: null },
-      after: { kb_model_override: 'gemini-2.5-pro' },
+      after: { kb_model_override: 'gemini-3.8-flash' },
       resolution: {
-        chain: 'options.model > kb.kb_model_override > app.default_app_model > levelConfig.model > DEFAULT_AI_MODEL',
+        chain: 'request intelligence_level > kb.kb_model_override > app.default_app_model > the level\'s model',
         default_app_model: null,
-        default_ai_model: 'gemini-3.1-flash-lite',
         intelligence_levels: {},
-        kb_overrides: { Corpus: 'gemini-2.5-pro' }
+        kb_overrides: { Corpus: 'gemini-3.8-flash' }
       }
     }
   };
   const { mod, calls, cleanup } = await loadModelConfigWithFakeApi(plan);
   t.after(cleanup);
 
-  await mod.runKbSetOverrideModel({ app: 'unk-cos', kb: 'Corpus', model: 'gemini-2.5-pro', env: 'dev' });
+  await mod.runKbSetOverrideModel({ app: 'unk-cos', kb: 'Corpus', model: 'gemini-3.8-flash', env: 'dev' });
 
   assert.equal(calls[0].cmd, 'set_kb_model_override');
-  assert.equal(calls[0].params.model_name, 'gemini-2.5-pro', 'model name must be forwarded');
+  assert.equal(calls[0].params.model_name, 'gemini-3.8-flash', 'model name must be forwarded');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -371,9 +368,8 @@ test('audit log — JSONL line written with correct schema after app set-default
       before: { default_app_model: null },
       after: { default_app_model: 'gemini-3.1-flash-lite' },
       resolution: {
-        chain: 'options.model > kb.kb_model_override > app.default_app_model > levelConfig.model > DEFAULT_AI_MODEL',
+        chain: 'request intelligence_level > kb.kb_model_override > app.default_app_model > the level\'s model',
         default_app_model: 'gemini-3.1-flash-lite',
-        default_ai_model: 'gemini-3.1-flash-lite',
         intelligence_levels: {},
         kb_overrides: {}
       }
@@ -410,20 +406,19 @@ test('audit log — kb action includes kb field in schema', async (t) => {
       app_id: 'unk-cos',
       kb_name: 'Corpus',
       before: { kb_model_override: null },
-      after: { kb_model_override: 'gemini-2.5-pro' },
+      after: { kb_model_override: 'gemini-3.8-flash' },
       resolution: {
-        chain: 'options.model > kb.kb_model_override > app.default_app_model > levelConfig.model > DEFAULT_AI_MODEL',
+        chain: 'request intelligence_level > kb.kb_model_override > app.default_app_model > the level\'s model',
         default_app_model: null,
-        default_ai_model: 'gemini-3.1-flash-lite',
         intelligence_levels: {},
-        kb_overrides: { Corpus: 'gemini-2.5-pro' }
+        kb_overrides: { Corpus: 'gemini-3.8-flash' }
       }
     }
   };
   const { mod, cleanup } = await loadModelConfigWithFakeApi(plan);
   t.after(cleanup);
 
-  await mod.runKbSetOverrideModel({ app: 'unk-cos', kb: 'Corpus', model: 'gemini-2.5-pro', env: 'dev' });
+  await mod.runKbSetOverrideModel({ app: 'unk-cos', kb: 'Corpus', model: 'gemini-3.8-flash', env: 'dev' });
 
   const auditPath = path.join(wsRoot, 'docs', 'audit', 'model-config-changes.jsonl');
   const txt = await fs.readFile(auditPath, 'utf8');
@@ -484,15 +479,14 @@ test('resolution chain — printResolution emits chain + per-level + KB override
     mod._internal.printResolution({
       app_id: 'unk-cos',
       resolution: {
-        chain: 'options.model > kb.kb_model_override > app.default_app_model > levelConfig.model > DEFAULT_AI_MODEL',
+        chain: 'request intelligence_level > kb.kb_model_override > app.default_app_model > the level\'s model',
         default_app_model: null,
-        default_ai_model: 'gemini-3.1-flash-lite',
         intelligence_levels: {
-          '1': { label: 'Efficient', model: 'gemini-2.5-flash' },
-          '2': { label: 'Standard', model: 'gemini-3.1-flash-lite' },
-          '3': { label: 'Enhanced', model: 'gemini-3-flash-preview' }
+          '1': { label: 'Efficient', model: 'gemini-3.1-flash-lite' },
+          '2': { label: 'Standard', model: 'gemini-3.8-flash' },
+          '3': { label: 'Enhanced', model: 'gemini-3.8-flash' }
         },
-        kb_overrides: { Corpus: null, Role: 'gemini-2.5-pro' }
+        kb_overrides: { Corpus: null, Role: 'gemini-3.8-flash' }
       }
     });
   } finally {
@@ -501,13 +495,14 @@ test('resolution chain — printResolution emits chain + per-level + KB override
 
   const joined = captured.join('\n');
   assert.match(joined, /Resolution chain that will apply going forward/);
-  assert.match(joined, /options\.model > kb\.kb_model_override > app\.default_app_model > levelConfig\.model > DEFAULT_AI_MODEL/);
+  assert.match(joined, /request intelligence_level > kb\.kb_model_override > app\.default_app_model > the level's model/);
   assert.match(joined, /app\.default_app_model = null/);
-  assert.match(joined, /L1: gemini-2\.5-flash/);
-  assert.match(joined, /L2: gemini-3\.1-flash-lite/);
-  assert.match(joined, /L3: gemini-3-flash-preview/);
+  assert.doesNotMatch(joined, /DEFAULT_AI_MODEL/, 'there is no separate default model: the default is the model of the default level');
+  assert.match(joined, /L1: gemini-3\.1-flash-lite/);
+  assert.match(joined, /L2: gemini-3\.8-flash/);
+  assert.match(joined, /L3: gemini-3\.8-flash/);
   assert.match(joined, /Corpus=cleared/, 'null override must print as "cleared"');
-  assert.match(joined, /Role="gemini-2\.5-pro"/, 'non-null override must print with value');
+  assert.match(joined, /Role="gemini-3\.8-flash"/, 'non-null override must print with value');
 });
 
 test('audit-log path — anchored at workspace root, not cwd-relative', async (t) => {
@@ -529,4 +524,13 @@ test('audit-log path — anchored at workspace root, not cwd-relative', async (t
     'audit-log dir must be anchored at the workspace root, not cwd'
   );
   assert.equal(path.basename(auditPath), 'model-config-changes.jsonl');
+});
+
+test('the CLI source states the resolver\'s real order and carries no DEFAULT_AI_MODEL / thinking_budget', async () => {
+  const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+  for (const rel of ['lib/commands/model-config.js', 'bin/descix.js', 'SERVICE_README_sdk.md', 'templates/agent-claude.md', 'scripts/briefer/sources/entitlements.js']) {
+    const src = await fs.readFile(path.join(root, rel), 'utf8');
+    assert.doesNotMatch(src, /DEFAULT_AI_MODEL/, `${rel} still names DEFAULT_AI_MODEL`);
+    assert.doesNotMatch(src, /thinking_budget|thinkingBudget|gemini-2\.|gemini-3-flash-preview|gemini-3\.1-pro-preview/, `${rel} carries a removed thinking/model name`);
+  }
 });
