@@ -288,7 +288,7 @@ You are bonded to cloud knowledge bases. **BEFORE starting any task**, query the
 
 **Multi-app query (preferred — richer context):**
 ```bash
-descix chat --apps APP1,APP2 -q "YOUR SPECIFIC QUESTION" --level 3 --thinking -1 --tokens
+descix chat --apps APP1,APP2 -q "YOUR SPECIFIC QUESTION" --level 3 --thinking-level low --tokens
 ```
 
 **Single-app query:**
@@ -303,7 +303,7 @@ ask_question_to_app({ app_id: "APP_ID", user_input: "YOUR SPECIFIC QUESTION" })
 
 **Query parameters:**
 - `--level 1-5` — intelligence (1=fast lookup, 3=balanced, 5=deep reasoning)
-- `--thinking -1` — dynamic thinking budget; `0`=off, `N`=fixed tokens
+- `--thinking-level minimal|low|medium|high` — how much the model thinks; the server refuses a level the resolved model does not support
 - `--tokens` — show token usage in response
 - Omit `--new` to continue the session thread (Gemini remembers context)
 

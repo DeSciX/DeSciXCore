@@ -155,18 +155,18 @@ descix kb corpus sync -a myapp -k General
 **Description:** Set or clear the App-level default Gemini model (`App.default_app_model`) used when no KB-level override is present.
 **Use when:** Promoting a new platform default model to a specific app, or resetting an app to inherit per-intelligence-level platform defaults.
 **Inheritance chain (CEO 2026-05-26):**
-`options.model > kb.kb_model_override > app.default_app_model > levelConfig.model > DEFAULT_AI_MODEL`
+`request intelligence_level > kb.kb_model_override (+ its thinking_level) > app.default_app_model > the level's model`. There is no separate default model: the default is the model of the platform's default intelligence level. A model is always paired with a `thinking_level` (minimal, low, medium, high); the server refuses, by name, a pair the model does not support. The current levels are printed under "Per-level" after this command runs.
 
 **Options:**
 - `-a, --app <app_id>` (required): App ID (e.g. `unk-cos`)
-- `-m, --model <model_name>`: Gemini model name (e.g. `gemini-3.1-flash-lite`). Mutually exclusive with `--clear`.
+- `-m, --model <model_name>`: Model name (e.g. `gemini-3.8-flash`). Mutually exclusive with `--clear`.
 - `--clear`: Delete `App.default_app_model` via `FieldValue.delete()` (not null) so the resolver falls through to platform per-level defaults.
 - `--env <name>`: Target environment (dev, demo, prod). Inherited from the top-level CLI flag.
 
 **Examples:**
 ```bash
 # Promote a new platform default model to one app
-descix app set-default-model -a unk-cos -m gemini-3.1-flash-lite --env=dev
+descix app set-default-model -a unk-cos -m gemini-3.8-flash --env=dev
 
 # Reset an app so platform per-level defaults apply
 descix app set-default-model -a unk-cos --clear --env=dev
@@ -186,13 +186,13 @@ Requires platform-admin permission.
 **Options:**
 - `-a, --app <app_id>` (required): App ID
 - `-k, --kb <kb_name>` (required): KB name (e.g. `Corpus`, `Role`, `Training`)
-- `-m, --model <model_name>` (required): Gemini model name (e.g. `gemini-2.5-pro`)
+- `-m, --model <model_name>` (required): Model name (e.g. `gemini-3.8-flash`)
 - `--env <name>`: Target environment
 
 **Example:**
 ```bash
 # Pin a tuned model on a single KB
-descix kb set-override-model -a unk-cos -k Corpus -m gemini-2.5-pro --env=dev
+descix kb set-override-model -a unk-cos -k Corpus -m gemini-3.8-flash --env=dev
 ```
 
 Emits a JSONL audit entry to `docs/audit/model-config-changes.jsonl`.

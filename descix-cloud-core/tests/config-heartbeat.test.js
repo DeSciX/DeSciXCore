@@ -32,7 +32,6 @@ import {
 function fullDefaults(overrides = {}) {
     return {
         INTELLIGENCE_LEVELS: { "2": { label: "Standard", model: "gemini-3.1-flash-lite" } },
-        DEFAULT_AI_MODEL: "gemini-3.1-flash-lite",
         DEFAULT_INTELLIGENCE_LEVEL: "2",
         PINECONE_INDEX_NAME: "descix-dev",
         PINECONE_API_KEY: "test-pc-key",
@@ -86,7 +85,7 @@ test('2.B.3: checkDefaultsDrift logs canonical WARN when on-disk SHA changes aft
     assert.ok(bootSha, 'boot SHA must be captured by _loadDefaults');
 
     // Mutate the file on disk (simulate operator editing defaults-config.json mid-flight)
-    const updated = fullDefaults({ DEFAULT_AI_MODEL: 'gemini-fake-mutation' });
+    const updated = fullDefaults({ DEFAULT_INTELLIGENCE_LEVEL: 'gemini-fake-mutation' });
     await fsp.writeFile(path.join(dir, 'defaults-config.json'), JSON.stringify(updated, null, 2));
 
     const out = captureConsole(t);
@@ -116,7 +115,7 @@ test('2.B.3: sampleDriftCheck triggers checkDefaultsDrift every Nth call', async
     // Mutate file so any checkDefaultsDrift will trigger a warn.
     await fsp.writeFile(
         path.join(dir, 'defaults-config.json'),
-        JSON.stringify(fullDefaults({ DEFAULT_AI_MODEL: 'gemini-fake' }), null, 2),
+        JSON.stringify(fullDefaults({ DEFAULT_INTELLIGENCE_LEVEL: 'gemini-fake' }), null, 2),
     );
 
     // Force the sampling N to a small value so the test runs fast.
@@ -153,8 +152,8 @@ test('2.B.1: dev file-watcher hot-reloads changed keys + emits config:reloaded',
         }
     });
 
-    const originalModel = cfg.DEFAULT_AI_MODEL;
-    assert.equal(originalModel, 'gemini-3.1-flash-lite');
+    const originalLevel = cfg.DEFAULT_INTELLIGENCE_LEVEL;
+    assert.equal(originalLevel, '2');
 
     // Subscribe to event
     let eventPayload = null;
@@ -163,20 +162,20 @@ test('2.B.1: dev file-watcher hot-reloads changed keys + emits config:reloaded',
     // Mutate file on disk
     await fsp.writeFile(
         path.join(dir, 'defaults-config.json'),
-        JSON.stringify(fullDefaults({ DEFAULT_AI_MODEL: 'gemini-hot-reload-target' }), null, 2),
+        JSON.stringify(fullDefaults({ DEFAULT_INTELLIGENCE_LEVEL: 'gemini-hot-reload-target' }), null, 2),
     );
 
     // Wait for debounce + read (debounce=50ms set above, so 500ms is plenty).
     const deadline = Date.now() + 1500;
     while (Date.now() < deadline) {
-        if (cfg.DEFAULT_AI_MODEL === 'gemini-hot-reload-target') break;
+        if (cfg.DEFAULT_INTELLIGENCE_LEVEL === 'gemini-hot-reload-target') break;
         await sleep(25);
     }
 
-    assert.equal(cfg.DEFAULT_AI_MODEL, 'gemini-hot-reload-target', 'singleton must reflect on-disk change after watcher fires');
+    assert.equal(cfg.DEFAULT_INTELLIGENCE_LEVEL, 'gemini-hot-reload-target', 'singleton must reflect on-disk change after watcher fires');
     assert.ok(eventPayload, 'config:reloaded event must fire');
     assert.ok(Array.isArray(eventPayload.changedKeys), 'event payload must include changedKeys array');
-    assert.ok(eventPayload.changedKeys.includes('DEFAULT_AI_MODEL'), `changedKeys must include DEFAULT_AI_MODEL, got: ${JSON.stringify(eventPayload.changedKeys)}`);
+    assert.ok(eventPayload.changedKeys.includes('DEFAULT_INTELLIGENCE_LEVEL'), `changedKeys must include DEFAULT_INTELLIGENCE_LEVEL, got: ${JSON.stringify(eventPayload.changedKeys)}`);
 });
 
 test('2.B.1: watcher is NOT armed when DEPLOY_ENV !== dev', async (t) => {
@@ -225,23 +224,23 @@ test('2.B.1: file-watcher survives atomic-rename save (vim/VS Code default patte
     };
 
     // --- Edit 1: in-place write (baseline; this also worked under fs.watch) ---
-    await fsp.writeFile(target, JSON.stringify(fullDefaults({ DEFAULT_AI_MODEL: 'edit-1-inplace' }), null, 2));
-    const got1 = await waitFor(() => cfg.DEFAULT_AI_MODEL === 'edit-1-inplace');
-    assert.ok(got1, `edit-1 (in-place) did not hot-reload; current=${cfg.DEFAULT_AI_MODEL}`);
+    await fsp.writeFile(target, JSON.stringify(fullDefaults({ DEFAULT_INTELLIGENCE_LEVEL: 'edit-1-inplace' }), null, 2));
+    const got1 = await waitFor(() => cfg.DEFAULT_INTELLIGENCE_LEVEL === 'edit-1-inplace');
+    assert.ok(got1, `edit-1 (in-place) did not hot-reload; current=${cfg.DEFAULT_INTELLIGENCE_LEVEL}`);
 
     // --- Edit 2: atomic-rename (write to tmp, then rename over original) ---
     // This is the macOS regression case fs.watch could not survive.
     const tmp = path.join(dir, 'defaults-config.json.tmp');
-    await fsp.writeFile(tmp, JSON.stringify(fullDefaults({ DEFAULT_AI_MODEL: 'edit-2-atomic-rename' }), null, 2));
+    await fsp.writeFile(tmp, JSON.stringify(fullDefaults({ DEFAULT_INTELLIGENCE_LEVEL: 'edit-2-atomic-rename' }), null, 2));
     await fsp.rename(tmp, target);
-    const got2 = await waitFor(() => cfg.DEFAULT_AI_MODEL === 'edit-2-atomic-rename');
-    assert.ok(got2, `edit-2 (atomic-rename) did not hot-reload; current=${cfg.DEFAULT_AI_MODEL}`);
+    const got2 = await waitFor(() => cfg.DEFAULT_INTELLIGENCE_LEVEL === 'edit-2-atomic-rename');
+    assert.ok(got2, `edit-2 (atomic-rename) did not hot-reload; current=${cfg.DEFAULT_INTELLIGENCE_LEVEL}`);
 
     // --- Edit 3: in-place write AFTER atomic-rename ---
     // Critical: this is the exact subsequent-edit that fs.watch could not detect
     // because its inode binding had been severed by edit 2. chokidar's
     // re-attachment must keep the watch live across the rename.
-    await fsp.writeFile(target, JSON.stringify(fullDefaults({ DEFAULT_AI_MODEL: 'edit-3-after-rename' }), null, 2));
-    const got3 = await waitFor(() => cfg.DEFAULT_AI_MODEL === 'edit-3-after-rename');
-    assert.ok(got3, `edit-3 (in-place after rename) did not hot-reload; current=${cfg.DEFAULT_AI_MODEL}`);
+    await fsp.writeFile(target, JSON.stringify(fullDefaults({ DEFAULT_INTELLIGENCE_LEVEL: 'edit-3-after-rename' }), null, 2));
+    const got3 = await waitFor(() => cfg.DEFAULT_INTELLIGENCE_LEVEL === 'edit-3-after-rename');
+    assert.ok(got3, `edit-3 (in-place after rename) did not hot-reload; current=${cfg.DEFAULT_INTELLIGENCE_LEVEL}`);
 });

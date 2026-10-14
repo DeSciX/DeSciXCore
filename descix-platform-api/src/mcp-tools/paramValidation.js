@@ -459,6 +459,25 @@ export function validateParamsAgainstSchema(schema, params, opts = {}) {
 
     const validNames = Object.keys(properties);
     const supplied = params && typeof params === 'object' ? params : {};
+
+    // REMOVED PARAMETERS. A schema retires a parameter by listing it under `x-removedParams`
+    // ({ name: { code, replacement, message } }). A caller still sending it gets that code and a
+    // message naming the replacement, instead of the generic unknown-parameter refusal (which
+    // would only guess a spelling). Declared properties win: a name cannot be both.
+    const removed = schema['x-removedParams'] && typeof schema['x-removedParams'] === 'object'
+        ? schema['x-removedParams'] : {};
+    const suppliedKeys = Object.keys(params && typeof params === 'object' ? params : {});
+    const removedHit = suppliedKeys.find(k => !(k in properties) && Object.prototype.hasOwnProperty.call(removed, k));
+    if (removedHit) {
+        const r = removed[removedHit];
+        const err = new Error(
+            `${commandName}: parameter '${removedHit}' was REMOVED. ${r.message} ` +
+            `Rejected at the ${surface} boundary — the parameter was NOT applied, and no default was substituted.`
+        );
+        err.code = r.code;
+        err.data = { command: commandName, removed_parameter: removedHit, replacement: r.replacement, accepted_parameters: validNames };
+        throw err;
+    }
     const unknown = Object.keys(supplied).filter(k => !(k in properties) && !isWaived(k));
     if (unknown.length > 0) {
         // A refused key that the PLATFORM injects is a different mistake from a typo, and saying so
@@ -532,6 +551,32 @@ export function validateParamsAgainstSchema(schema, params, opts = {}) {
         );
         err.code = 'INVALID_PARAMS';
         err.data = { command: commandName, mistyped_parameters: mistyped, accepted_parameters: validNames };
+        throw err;
+    }
+
+    // FOURTH GATE: a property that opts in with `x-enforceEnum: true` has its declared `enum`
+    // enforced as part of the published contract: a scalar outside it is refused naming the allowed
+    // values. Opt-in because most existing enums were advertising-only and their handlers tolerate
+    // other values; widening this to every enum is a separate, deliberate decision.
+    // Top-level scalars only, like the type gate.
+    const outOfEnum = [];
+    for (const name of validNames) {
+        const value = supplied[name];
+        const allowed = properties[name] && properties[name].enum;
+        if (isAbsent(value) || !Array.isArray(allowed) || Array.isArray(value)) continue;
+        if (properties[name]['x-enforceEnum'] !== true) continue;
+        if (!allowed.includes(value)) outOfEnum.push({ parameter: name, allowed, received_shape: describeShape(value) });
+    }
+    if (outOfEnum.length > 0) {
+        const details = outOfEnum.map(m =>
+            `'${m.parameter}' must be one of ${m.allowed.join(', ')} but received a value outside that set (${m.received_shape})`
+        );
+        const err = new Error(
+            `${commandName}: invalid parameter value${outOfEnum.length > 1 ? 's' : ''} — ${details.join('; ')}. ` +
+            `Rejected at the ${surface} boundary — the value was NOT coerced and the command did NOT run.`
+        );
+        err.code = 'INVALID_PARAMS';
+        err.data = { command: commandName, out_of_enum_parameters: outOfEnum, accepted_parameters: validNames };
         throw err;
     }
 }
