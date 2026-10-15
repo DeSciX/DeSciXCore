@@ -8,6 +8,7 @@
 
 import { requirePowchUrl } from './powchOrigin.js';
 import { resolveBridge } from '../util/bridgeResolver.js';
+import { toSignableTypedData } from './typedData.js';
 
 // Bound on how long a request may wait for the iframe's POWCH_READY. Independent of the
 // per-request timeout, which only starts once the request is actually posted.
@@ -360,6 +361,24 @@ export class PowchClient {
 
     this.open();
     return this._sendRequest('POWCH_SIGN_MESSAGE', params);
+  }
+
+  /**
+   * Sign EIP-712 typed data using Powch. PII-implying: ensures sidebar is shown (idempotent).
+   * `typedData` is the full EIP-712 object (e.g. Coinbase CDP permit2.eip712); it is converted by
+   * toSignableTypedData (EIP712Domain dropped, message -> value) and a malformed object throws
+   * TypedDataError before anything is opened or sent.
+   * @param {object} params - { typedData: { domain, types, primaryType, message }, address? }
+   * @returns {Promise<{signature: string}>}
+   */
+  async signTypedData(params) {
+    const { domain, types, value } = toSignableTypedData(params?.typedData);
+    if (this.shellBridge) {
+      return this.shellBridge.signTypedData(domain, types, value, params.address);
+    }
+
+    this.open();
+    return this._sendRequest('POWCH_SIGN_TYPED_DATA', { domain, types, value, address: params.address });
   }
 
   /**
