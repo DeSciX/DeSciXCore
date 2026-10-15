@@ -23,6 +23,7 @@ export {
 export { default as PowchSideBarWidget } from './components/PowchSideBarWidget.jsx';
 export { PowchBridgeProvider, usePowchBridge } from './providers/PowchBridgeProvider.jsx';
 export { PowchClient } from './powch/PowchClient.js';
+export { toSignableTypedData, TypedDataError } from './powch/typedData.js';
 export { NetworkLoadingProvider, useNetworkLoading } from './util/NetworkAPI.jsx';
 export { useDeSciXView } from './hooks/useDeSciXView.js';
 export { VIEW_MODES, DEFAULT_VIEW, getView, setView, subscribeView, resetView, publishViewApi, viewAvailable } from './util/appView.js';

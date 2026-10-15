@@ -26,7 +26,7 @@ npm install @descix/app-sdk
 
 | Export | Description |
 |--------|-------------|
-| `.` | AppShell, AppContext, AppProvider, useAppContext, Api, ErrorBoundary, LoadingWidget, DebugWidget, CodeSiteWidget, ChatWidget, PowchSideBarWidget, PowchBridgeProvider, usePowchBridge, PowchClient, useDeSciXView, VIEW_MODES, viewAvailable, publishChatApi, retractChatApi, publishBridgeMember, retractBridgeMember, getBridge, BRIDGE_READY_EVENT |
+| `.` | AppShell, AppContext, AppProvider, useAppContext, Api, ErrorBoundary, LoadingWidget, DebugWidget, CodeSiteWidget, ChatWidget, PowchSideBarWidget, PowchBridgeProvider, usePowchBridge, PowchClient, toSignableTypedData, TypedDataError, useDeSciXView, VIEW_MODES, viewAvailable, publishChatApi, retractChatApi, publishBridgeMember, retractBridgeMember, getBridge, BRIDGE_READY_EVENT |
 | `./dev` | createViteProxyConfig, createViteServerConfig, getViteHttpsConfig, resolveGatewayPort, resolveServeBinding, resolvePowchUrl, resolveDevCertOptions, buildWorkspaceProducts |
 | `./powch-client` | PowchClient (for third-party sites) |
 
@@ -62,6 +62,12 @@ import { PowchClient } from '@descix/app-sdk/powch-client';
 const powch = new PowchClient({ bridgeUrl: import.meta.env.VITE_POWCH_APP_URL });
 powch.createButton(document.getElementById('powch-button'), { toggle: true });
 ```
+
+Signing methods: `signTransaction({ tx, address? })`, `signMessage({ message, address? })`, and
+`signTypedData({ typedData, address? })` -> `{ signature }`. `typedData` is the full EIP-712 object
+`{ domain, types, primaryType, message }` (e.g. Coinbase CDP's `permit2.eip712`); the client drops
+`types.EIP712Domain` (ethers v6 rejects it) and sends `{ domain, types, value }`. A missing field or a
+`primaryType` that is not a key of `types` throws `TypedDataError` before anything is sent.
 
 ## Dependencies
 
