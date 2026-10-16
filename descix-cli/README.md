@@ -165,10 +165,14 @@ metadata. Files are uploaded straight to GCS with short-lived **signed URLs** is
 - `-p, --path <localPath>`: directory to deploy (default `./site`). **Ignored when a site manifest
   exists.**
 - `--preview`: deploy to the preview path.
-- `--full`: force a full upload, ignoring the unchanged-file delta.
 - `--dry-run`: show what would be deployed.
 - `--no-cache`: set `Cache-Control: no-cache`.
 - `-c, --community <id>` / `-a, --app <id>`: auto-detected from context when omitted.
+
+**From a gateway workspace**, `-a <appId>` names the listed repo (`env.gateway.shell` or
+`env.gateway.appRepos[]`) whose own workspace holds that app; its manifest, build and sources are
+read there, while the env, origin and sign-in stay the gateway's. An appId no listed repo holds is
+refused, naming the repos searched. Every run prints `App repo:` and `Site manifest:` first.
 
 **Site deploys target a cloud environment.** An upload that resolves to a local backend without
 this invocation naming its target is refused — pass `--env <dev|demo|prod>`.

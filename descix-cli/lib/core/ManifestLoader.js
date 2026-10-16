@@ -559,6 +559,11 @@ function validateSiteManifest(manifest, filePath) {
   }
 }
 
+/** Where an app's site manifest lives: {appRoot}/.descix/manifests/site.json (the one spelling). */
+export function siteManifestPath(appRoot) {
+  return path.join(appRoot, '.descix', 'manifests', 'site.json');
+}
+
 /**
  * Load a site manifest from {appRoot}/.descix/manifests/site.json.
  *
@@ -569,7 +574,7 @@ function validateSiteManifest(manifest, filePath) {
  * @returns {Promise<Object|null>} Validated site manifest with _resolvedSources, or null if not found
  */
 export async function loadSiteManifest(appRoot) {
-  const manifestPath = path.join(appRoot, '.descix', 'manifests', 'site.json');
+  const manifestPath = siteManifestPath(appRoot);
 
   let raw;
   try {
@@ -598,4 +603,4 @@ export async function loadSiteManifest(appRoot) {
   return manifest;
 }
 
-export default { loadManifest, loadManifests, loadSiteManifest };
+export default { loadManifest, loadManifests, loadSiteManifest, siteManifestPath };
