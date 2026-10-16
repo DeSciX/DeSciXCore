@@ -2253,9 +2253,9 @@ siteCommand
       const appRoot = appRepo?.dir || path.resolve('.');
 
       // Check for site manifest (.descix/manifests/site.json)
-      const { loadSiteManifest } = await import('../lib/core/ManifestLoader.js');
+      const { loadSiteManifest, siteManifestPath: siteManifestPathOf } = await import('../lib/core/ManifestLoader.js');
       const siteManifest = await loadSiteManifest(appRoot);
-      const siteManifestPath = path.join(appRoot, '.descix', 'manifests', 'site.json');
+      const siteManifestPath = siteManifestPathOf(appRoot);
 
       // A gateway app whose repo carries no site manifest has no deployable set of its own; the
       // -p default ('./site', relative to the cwd) would read the GATEWAY's tree. Only an explicit
