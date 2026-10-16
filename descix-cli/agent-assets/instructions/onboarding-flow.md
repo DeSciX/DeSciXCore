@@ -12,22 +12,21 @@ DeSciX uses **workspace.json** as the sole configuration file.
 
 Location: `{workspace_root}/.descix/workspace.json`
 
-Purpose: Maps local folders to DeSciX apps and stores all configuration.
+Purpose: names THE app this repository holds (v3 single-app: one repo, one app, and the repo root
+is the workspace root) and stores its configuration.
 
 ```json
 {
-  "version": "2.1",
+  "version": "3.0",
+  "type": "workspace",
   "env": {
-    "environment": "DEV",
-    "apiUrl": "https://dev.descix.net",
-    "products": [
-      {
-        "appId": "daita-appsdk",
-        "communityId": "daita",
-        "localPath": "daita/appsdk",
-        "kbId": "General"
-      }
-    ]
+    "environment": "PROD",
+    "apiUrl": "https://descix.net",
+    "app": {
+      "appId": "daita-appsdk",
+      "communityId": "daita",
+      "kbId": "General"
+    }
   },
   "driveConfig": {
     "base_folder_id": "..."
@@ -35,18 +34,19 @@ Purpose: Maps local folders to DeSciX apps and stores all configuration.
 }
 ```
 
-A `communities`-keyed block with no `env` block is the removed v1 shape — the loader refuses it:
-`v1 workspace format is not supported. Migrate to v2.1.`
+The loader refuses the retired shapes by name: a `communities`-keyed block with no `env` block
+(`v1 workspace format is not supported. Migrate to v3.`) and an `env.platform` / `env.products`
+block (`v2.1 multi-app workspace format is not supported. Migrate to v3 (single-app).`).
 
 **Used for:**
-- CLI auto-detection of community/app from current directory
+- CLI auto-detection of the app from the current directory (anywhere under the repo root)
 - `tell_me_how --scope project` to discover project-specific tools
-- MCP server to know which apps are in scope
+- MCP server to know which app is in scope
 - CLI to find the workspace root
 
 ### Key Principle
 
-**workspace.json** is the single configuration file that maps local folders to DeSciX apps and contains all sync configuration. It is created once at the workspace root during onboarding.
+**workspace.json** is the single configuration file for the app this repo holds. `descix app init` creates it at the repo root during onboarding; inside another DeSciX workspace it refuses — app repos are sibling checkouts, never nested.
 
 ---
 
@@ -66,8 +66,8 @@ START
 ├── Is this a fresh workspace (no .descix/workspace.json)?
 │   └── YES → Run Full Setup Flow
 │
-├── Does workspace.json exist but has unconfigured apps?
-│   └── YES → Run App Configuration Flow
+├── Does the user want to work on an app this repo does not hold?
+│   └── YES → Run App Configuration Flow (that app gets its own repo)
 │
 └── Is everything configured?
     └── YES → Ready for development
@@ -109,69 +109,51 @@ Service Slots:
 - {slot_count} available for microservice deployment
 ```
 
-### Step 3: Scan Workspace Folders
+### Step 3: Choose the App This Repo Holds
 
-Identify potential project folders:
-- Look for directories with `package.json`, `Cargo.toml`, `requirements.txt`
-- Ignore: `node_modules`, `.git`, `dist`, `build`, `.descix`
-- Note folders that are already registered in `workspace.json`
-
-### Step 4: Ask User About Folder Mappings
-
-Present options:
+One repo holds one app. Ask which of the user's apps this repository is for — or whether it is a
+new app.
 
 ```
-I see these folders in your workspace:
-- frontend/ (React app with build system)
-- backend/ (Node.js with Express)
-- docs/ (Markdown documentation)
-
-Would you like to map any to your apps?
-
-Suggested mappings based on folder contents:
-- frontend/ → {community}/pwa (Static Site)
-- backend/ → {community}/api (Microservice)
-- docs/ → {community}/docs (Knowledge Only)
-
-Which mappings should I create?
+This repository will hold ONE DeSciX app. Which one?
+- {community_id}/{app_id} ({app_name})
+- ...
+- a new app in {community_id}
 ```
 
-### Step 5: Create Configuration Files
+### Step 4: Create the Configuration
 
-For each mapping, create appropriate config:
+`workspace.json` is written by CLI verbs, never by hand. From the **repo root**:
 
-1. **workspace.json** (root level) — written by CLI verbs, never by hand:
-   ```bash
-   descix config init --env dev                          # creates workspace.json, pins env.apiUrl
-   descix app init -a {app_id} -c {community_id} -p {folder}   # adds env.products[] entry
-   ```
-   Each mapping becomes one `env.products[]` entry (`appId`, `communityId`, `localPath`, `kbId`).
+```bash
+descix config init --env prod                     # creates workspace.json, pins env.apiUrl
+descix app init -a {app_id}                       # an existing app: writes env.app
+descix app init -a {name} -c {community_id}       # a new app: creates it, then writes env.app
+```
 
 ## App Configuration Flow
 
 For apps that exist in entitlements but aren't configured locally:
 
-### Step 1: Identify Unconfigured Apps
+### Step 1: Identify the Other Apps
 
-Compare:
-- Apps from `fetch_my_purchases`
-- Mappings in `workspace.json`
+Compare the apps from `fetch_my_purchases` with `env.app` in this repo's `workspace.json`. Every
+other app lives in its own repository.
 
-### Step 2: Ask About Each Unconfigured App
+### Step 2: Ask About Each One
 
 ```
-You have these apps that aren't linked to local folders:
+You have these apps that this repository does not hold:
 - {community}/{app} - {description}
 
-Would you like to:
-1. Link to an existing folder
-2. Create a new folder for this app
-3. Skip for now
+Each app is its own repository. Would you like to:
+1. Clone or create that app's repo as a sibling of this one, then run `descix app init` from its root
+2. Skip for now
 ```
 
 ### Step 3: Determine Packaging Type
 
-For each folder being configured:
+For the app this repo holds:
 
 1. Read [guides/README.md](../guides/README.md) for the decision tree (Knowledge-Only / Static
    Site / Microservice / Dynamic Site)
@@ -186,7 +168,7 @@ For each folder being configured:
 After determining packaging type, ensure the folder follows the [Standard Folder Structure](./standard-folder-structure.md):
 
 ```
-{app_folder}/
+{repo_root}/
 ├── assets/                          # App identity (required)
 ├── .descix/manifests/<KB>.json      # Corpus manifest — required for RAG, see below
 ├── site/                            # Static site (required)
@@ -252,7 +234,7 @@ Your app structure is now ready. Run `descix app sync-assets` to sync.
 ## Key Principles
 
 ### Never Assume
-- Always ask before creating mappings
+- Always ask which app a repo holds before running `descix app init`
 - Present options, let user choose
 - Explain trade-offs of each packaging type
 
@@ -273,8 +255,8 @@ User hasn't purchased anything yet. Direct them to the PWA store.
 ### "App not in entitlements"
 User is trying to configure an app they don't own. Suggest purchase.
 
-### "Folder already configured"
-Check if configuration matches intended app. Offer to update or skip.
+### "This workspace already holds app '<id>'"
+A repo holds one app. Work on the other app in its own repo (a sibling checkout).
 
 ### Powch sign-in under `descix serve` fails ("User cancelled", or "WebAuthn is not supported on sites with TLS certificate errors")
 The gateway's dev certificate is not trusted. Run `descix dev-certs check`. If it is not trusted,
@@ -327,7 +309,7 @@ You have access to:
   - {app_2} - {app_2_status}
 
 Would you like me to help you:
-1. Link a folder to one of your apps
+1. Connect this repository to one of your apps
 2. Explore what you can do with a specific app
 3. Something else
 ```
@@ -343,9 +325,9 @@ Based on your purchases, here's what you can work with:
 | {name} | {role} | {count} |
 
 **Your Apps:**
-| App | Status | Local Folder |
-|-----|--------|--------------|
-| {app_id} | Configured / Not linked | {folder or "—"} |
+| App | Status | Local Repo |
+|-----|--------|------------|
+| {app_id} | Held by this repo / Not here | {repo or "—"} |
 
 Which app would you like to work on?
 ```
@@ -358,7 +340,7 @@ All done! Your app is configured.
 **Summary:**
 - App: {community}/{app}
 - Type: {packaging_type}
-- Folder: {folder_path}
+- Repo: {repo_root}
 
 **What you can do now:**
 - Use `tell_me_how` to discover tools

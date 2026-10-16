@@ -44,20 +44,19 @@ my-site/
 
 ## Configuration (`workspace.json`)
 
-One `env.products[]` entry, written by `descix app init` and `descix app set-site` (never by hand):
+The repo's `env.app`, written by `descix app init` (run from the repo root) and `descix app set-site` (never by hand):
 
 ```json
 {
   "appId": "my-community-my-site",
   "communityId": "my-community",
-  "localPath": "my-site",
   "kbId": "General",
   "site": { "static": "site" }
 }
 ```
 
 For a framework dev server instead of files on disk, `descix app set-site -a <app_id> --port 3000`
-writes `"site": { "port": 3000 }`; the gateway proxies `/p/<app_id>` to it without rewriting paths,
+writes `"site": { "port": 3000 }`; `--static` takes a directory relative to the repo root (`site`, `site/dist`, `.`, `../scratch`) and refuses an absolute path; the gateway proxies `/p/<app_id>` to it without rewriting paths,
 so the framework's base path must be `/p/<app_id>/`.
 
 ## CLI Workflow
