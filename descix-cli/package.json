@@ -1,6 +1,6 @@
 {
   "name": "@descix/cli",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "DeSciX CLI and MCP Server - Unified command-line interface for DeSciX platform",
   "repository": {
     "type": "git",
@@ -30,7 +30,7 @@
   "author": "DeSciX",
   "license": "SEE LICENSE IN LICENSE.md",
   "dependencies": {
-    "@descix/app-sdk": "^0.3.0",
+    "@descix/app-sdk": "^0.3.3",
     "@descix/sdk": "^3.0.0",
     "@modelcontextprotocol/sdk": "^1.25.1",
     "axios": "^1.7.9",
