@@ -334,7 +334,90 @@ export class WorkspaceConfig {
     if (!appConfig?.absolutePath) return null;
     return path.join(appConfig.absolutePath, 'microservice');
   }
-  
+
+  /**
+   * Is this a GATEWAY workspace — one that lists sibling app repos (env.gateway.shell or
+   * env.gateway.appRepos[]) rather than holding only its own env.app?
+   * @returns {boolean}
+   */
+  isGateway() {
+    const gw = this.env?.gateway;
+    return Boolean(gw?.shell || (Array.isArray(gw?.appRepos) && gw.appRepos.length));
+  }
+
+  /**
+   * THE ONE OWNER of "which repo root does a command given `-a <appId>` operate on".
+   *
+   * Single-app workspace: its own env.app is its root (getAppByAppId); any other id is null.
+   *
+   * Gateway workspace: the entry (env.app if any, env.gateway.shell, env.gateway.appRepos[], paths
+   * relative to the gateway root) whose OWN .descix/workspace.json names env.app.appId === appId.
+   * Each entry is read by @descix/app-sdk/dev resolveWorkspaceAppsFrom — the rule the gateway
+   * serves it by — one entry at a time, so an unreadable entry (no workspace.json, no env.app, a
+   * bad site.static) is SKIPPED rather than blocking an app that is listed; every skipped entry is
+   * named, with its reason, in the refusal. No match → throw naming the appId and every entry
+   * searched; never a fallback to the cwd. Env, apiUrl and credential stay with the gateway
+   * workspace (lib/origin.js) — this resolves only WHERE the app's files live.
+   *
+   * @param {string} appId
+   * @returns {{ appId: string, communityId: string|null, dir: string, role: 'self'|'shell'|'repo', entry: string }|null}
+   *   null only for a single-app workspace asked about another app
+   * @throws in a gateway workspace when no entry, or more than one, holds appId
+   */
+  resolveAppRepo(appId) {
+    if (!this.isGateway()) {
+      const app = this.getAppByAppId(appId);
+      return app ? { appId, communityId: app.communityId, dir: app.absolutePath, role: 'self', entry: '.' } : null;
+    }
+    if (!this.workspaceRoot) {
+      throw new Error(
+        'Cannot resolve a gateway app: the workspace config carries no workspaceRoot. ' +
+        'Load it with WorkspaceConfig.load() (which sets it) rather than constructing it bare.'
+      );
+    }
+    const root = path.resolve(this.workspaceRoot);
+    const gw = this.env.gateway;
+    const candidates = [];
+    if (this.env.app?.appId) candidates.push({ entry: '.', role: 'self', env: { app: this.env.app } });
+    if (gw.shell) candidates.push({ entry: gw.shell, role: 'shell', env: { gateway: { shell: gw.shell } } });
+    for (const rel of gw.appRepos || []) candidates.push({ entry: rel, role: 'repo', env: { gateway: { appRepos: [rel] } } });
+
+    const searched = [];
+    const matches = [];
+    for (const c of candidates) {
+      let found;
+      try {
+        found = resolveWorkspaceAppsFrom(root, { env: c.env }).apps[0];
+      } catch (err) {
+        const reason = err.message.replace(/^\[workspaceApps\]\s*/, '').split('\n')[0];
+        searched.push(`  ${c.entry} (${c.role}): skipped — ${reason}`);
+        continue;
+      }
+      searched.push(`  ${c.entry} (${c.role}): app "${found.appId}"`);
+      if (found.appId === appId) {
+        matches.push({ appId, communityId: found.communityId, dir: found.dir, role: c.role, entry: c.entry });
+      }
+    }
+
+    const gatewayFile = path.join(root, '.descix', 'workspace.json');
+    if (matches.length > 1) {
+      throw new Error(
+        `App "${appId}" is held by more than one entry of the gateway workspace ${gatewayFile}: ` +
+        `${matches.map((m) => m.entry).join(', ')}. One app, one repo — remove the duplicate with ` +
+        '`descix config gateway remove-repo <repo>`.'
+      );
+    }
+    if (matches.length === 0) {
+      throw new Error(
+        `App "${appId}" is not held by any entry of the gateway workspace ${gatewayFile}.\n` +
+        `Searched (env.gateway.shell / env.gateway.appRepos, relative to ${root}):\n` +
+        `${searched.join('\n')}\n` +
+        `List the app's repo with \`descix config gateway add-repo <repo>\`, or run the command from that repo's root.`
+      );
+    }
+    return matches[0];
+  }
+
   /**
    * Find the workspace root by searching up from startDir
    * 

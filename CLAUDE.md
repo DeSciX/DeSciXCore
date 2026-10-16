@@ -69,6 +69,7 @@ After `descix login` / bootstrap, all testing must use `node DeSciX_Core/descix-
 
 ### WorkspaceConfig — canonical methods (v3)
 - **`getAppByAppId(appId)`** — primary app lookup, resolved from `env.app`. Returns a COPY `{ localPath, absolutePath, communityId, kbId }` or `null`.
+- **`isGateway()`** / **`resolveAppRepo(appId)`** — in the GATEWAY workspace form, the one resolver of which repo root (shell or an `appRepos` entry, by that repo's own `env.app.appId`) a `-a <appId>` names; throws naming the appId and every entry searched when none holds it (never falls back to the cwd). `site upload` consumes it; a single-app workspace returns its own app or `null`.
 - **`_liveEnvEntry(appId)`** — the one owner of "find the LIVE env.app entry or hard-fail"; every entry setter (`setStaticSite`, `setMicroservicePort`) goes through it.
 - **`setStaticSite(appId, { static, port, protocol })`** — mutates the live `env.app` entry's `site.{}` and calls `save()`. ONE ACTIVE MODE PER WRITE: `static` alone clears `port`+`protocol`, `port` alone clears `static`, both in one call keeps both (the gateway serves the dev server — site.port wins). `protocol` is "http"|"https" (default https when absent), dev-server mode only. Pass `null` for a field to remove it; empty `site.{}` is cleaned up. Hard-fails if `appId` is not THE app.
 - **`getSitePath(appId)`** / **`getMicroservicePath(appId)`** — convenience wrappers returning `absolutePath/site` and `absolutePath/microservice` respectively.
