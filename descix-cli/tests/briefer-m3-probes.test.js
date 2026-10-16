@@ -3,17 +3,19 @@
  *
  * AC coverage:
  *   M3-AC-1: gcloud probe SUCCESS path → citation has source=gcloud and a SHA.
- *   M3-AC-2: gcloud probe FAILURE with --env=demo → HARD-FAIL with code BRIEFER-GCLOUD-FAIL.
- *   M3-AC-3: --env=dev → probe is SKIPPED and a "DEV: ... skipped" stanza is emitted.
- *   M3-AC-4: Citation SHA changes when probe output changes (two different mocked
- *            responses → two different SHAs).
+ *   M3-AC-2: gcloud probe FAILURE → HARD-FAIL with code BRIEFER-GCLOUD-FAIL.
+ *   M3-AC-3: --env=dev probes exactly like prod — DEV is a deployed environment; no
+ *            env skips a probe, so a failing gcloud fails every live section on dev.
+ *   M3-AC-4: Citation SHA is over the PROJECTED facts the briefer renders: it changes
+ *            when a rendered fact changes and is stable when only volatile response
+ *            fields (etag, earliestVersionTime) change.
  *
  * Strategy:
  *   - For (1) we exercise the real probe against a live gcloud (requires CI/auth)
  *     OR we patch a PATH that points at a tiny stub `gcloud` shell script.
  *     We choose the latter so the test is deterministic and offline.
  *   - For (2) we use a stub that returns non-zero / empty.
- *   - For (3) we just call extract({ env: 'dev' }) and verify the stanza.
+ *   - For (3) we call extract({ env: 'dev' }) with a failing stub and expect the hard-fail.
  *   - For (4) we run extract twice with two different stub outputs.
  *
  * Stub: a tiny shell script at $TMP/stub-bin/gcloud that emits either a fixed
@@ -58,6 +60,9 @@ function withPath(stubDir, fn) {
   return Promise.resolve(fn()).finally(() => { process.env.PATH = orig; });
 }
 
+/** The projection the routing extractor renders from the URL map. */
+const URL_MAP_FACTS = (json) => ({ fingerprint: json.fingerprint });
+
 // ─────────────────────────────────────────────────────────────────────────────
 // M3-AC-1: gcloud probe SUCCESS → citation has source=gcloud + non-null SHA.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -65,8 +70,8 @@ test('M3-AC-1: probeGcloudJson SUCCESS yields citation with source=gcloud and 12
   const stubJson = JSON.stringify({
     name: 'projects/descix/global/urlMaps/descix-discord-app-lb',
     fingerprint: 'StubFingerprintAAA=',
-    hostRules: [{ hosts: ['daita.demo.descix.net'], pathMatcher: 'matcher-daita-demo' }],
-    pathMatchers: [{ name: 'matcher-daita-demo', defaultService: 'foo' }]
+    hostRules: [{ hosts: ['daita.dev.descix.net'], pathMatcher: 'matcher-daita-dev' }],
+    pathMatchers: [{ name: 'matcher-daita-dev', defaultService: 'foo' }]
   });
   const { dir } = await makeGcloudStub({ stdout: stubJson });
 
@@ -74,13 +79,15 @@ test('M3-AC-1: probeGcloudJson SUCCESS yields citation with source=gcloud and 12
     const mod = await import('../scripts/briefer/util/source-reader.js?ac1=1');
     const res = await mod.probeGcloudJson({
       command: ['compute', 'url-maps', 'describe', 'descix-discord-app-lb', '--format=json'],
-      env: 'demo',
+      env: 'dev',
       section: '§3 routing',
-      anchor: 'lb-url-map'
+      anchor: 'lb-url-map',
+      project: URL_MAP_FACTS
     });
-    assert.ok(res, 'probe must return non-null on demo');
+    assert.ok(res, 'probe must return non-null on dev');
     assert.equal(res.citation.source, 'gcloud');
-    assert.equal(res.citation.env, 'demo');
+    assert.equal(res.citation.env, 'dev');
+    assert.deepEqual(res.facts, { fingerprint: 'StubFingerprintAAA=' });
     assert.match(res.citation.sha, /^[a-f0-9]{12}$/);
     assert.equal(res.citation.anchor, 'lb-url-map');
     assert.match(res.citation.probe, /^gcloud compute url-maps describe/);
@@ -89,9 +96,9 @@ test('M3-AC-1: probeGcloudJson SUCCESS yields citation with source=gcloud and 12
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// M3-AC-2: gcloud FAILURE with --env=demo → HARD-FAIL BRIEFER-GCLOUD-FAIL.
+// M3-AC-2: gcloud FAILURE → HARD-FAIL BRIEFER-GCLOUD-FAIL.
 // ─────────────────────────────────────────────────────────────────────────────
-test('M3-AC-2: probeGcloudJson FAILURE on env=demo HARD-FAILS with BRIEFER-GCLOUD-FAIL', async () => {
+test('M3-AC-2: probeGcloudJson FAILURE on env=prod HARD-FAILS with BRIEFER-GCLOUD-FAIL', async () => {
   const { dir } = await makeGcloudStub({ stdout: '', exitCode: 1, stderr: 'ERROR: not authenticated' });
 
   await withPath(dir, async () => {
@@ -99,21 +106,23 @@ test('M3-AC-2: probeGcloudJson FAILURE on env=demo HARD-FAILS with BRIEFER-GCLOU
     await assert.rejects(
       () => mod.probeGcloudJson({
         command: ['compute', 'url-maps', 'describe', 'descix-discord-app-lb', '--format=json'],
-        env: 'demo',
+        env: 'prod',
         section: '§3 routing',
-        anchor: 'lb-url-map'
+        anchor: 'lb-url-map',
+        project: URL_MAP_FACTS
       }),
       (err) => err.code === 'BRIEFER-GCLOUD-FAIL' &&
-               /env: demo/.test(err.detail || err.message) &&
-               /gcloud auth login/.test(err.recovery || err.message)
+               /env: prod/.test(err.detail || err.message) &&
+               /dev-deploy-runbook\.md §1/.test(err.recovery || err.message) &&
+               !/gcloud auth login/.test(err.recovery || err.message)
     );
   });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// M3-AC-2b: gcloud SUCCESS-BUT-EMPTY-STDOUT on env=demo → HARD-FAIL.
+// M3-AC-2b: gcloud SUCCESS-BUT-EMPTY-STDOUT → HARD-FAIL.
 // ─────────────────────────────────────────────────────────────────────────────
-test('M3-AC-2b: probeGcloudJson empty stdout on env=demo HARD-FAILS with BRIEFER-GCLOUD-FAIL', async () => {
+test('M3-AC-2b: probeGcloudJson empty stdout on env=prod HARD-FAILS with BRIEFER-GCLOUD-FAIL', async () => {
   const { dir } = await makeGcloudStub({ stdout: '', exitCode: 0 });
 
   await withPath(dir, async () => {
@@ -121,9 +130,10 @@ test('M3-AC-2b: probeGcloudJson empty stdout on env=demo HARD-FAILS with BRIEFER
     await assert.rejects(
       () => mod.probeGcloudJson({
         command: ['functions', 'list', '--gen2', '--format=json'],
-        env: 'demo',
+        env: 'prod',
         section: '§2 environments',
-        anchor: 'cloud-functions-list'
+        anchor: 'cloud-functions-list',
+        project: URL_MAP_FACTS
       }),
       (err) => err.code === 'BRIEFER-GCLOUD-FAIL' &&
                /empty stdout/.test(err.detail || err.message)
@@ -132,44 +142,44 @@ test('M3-AC-2b: probeGcloudJson empty stdout on env=demo HARD-FAILS with BRIEFER
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// M3-AC-3: --env=dev → probe SKIPPED (returns null), no HARD-FAIL.
+// M3-AC-3: DEV is a deployed environment — no env skips a probe. A failing gcloud
+// fails the probe and every live section on dev exactly as it does on prod.
 // ─────────────────────────────────────────────────────────────────────────────
-test('M3-AC-3: probeGcloudJson on env=dev returns null (skipped)', async () => {
-  // Even without a stub, env=dev short-circuits BEFORE invoking gcloud.
-  const mod = await import('../scripts/briefer/util/source-reader.js?ac3=1');
-  const res = await mod.probeGcloudJson({
-    command: ['compute', 'url-maps', 'describe', 'descix-discord-app-lb', '--format=json'],
-    env: 'dev',
-    section: '§3 routing',
-    anchor: 'lb-url-map'
+test('M3-AC-3: probeGcloudJson on env=dev invokes gcloud (no dev skip)', async () => {
+  const { dir } = await makeGcloudStub({ stdout: '', exitCode: 1, stderr: 'ERROR: stub refuses' });
+  await withPath(dir, async () => {
+    const mod = await import('../scripts/briefer/util/source-reader.js?ac3=1');
+    await assert.rejects(
+      () => mod.probeGcloudJson({
+        command: ['compute', 'url-maps', 'describe', 'descix-discord-app-lb', '--format=json'],
+        env: 'dev',
+        section: '§3 routing',
+        anchor: 'lb-url-map',
+        project: URL_MAP_FACTS
+      }),
+      (err) => err.code === 'BRIEFER-GCLOUD-FAIL' && /env: dev/.test(err.detail || err.message)
+    );
   });
-  assert.equal(res, null);
 });
 
-test('M3-AC-3b: §2 environments.extract(env=dev) emits "DEV: gcloud probes skipped" stanza', async () => {
-  const mod = await import('../scripts/briefer/sources/environments.js?ac3b=1');
-  const r = await mod.extract({ env: 'dev', cliPaths });
-  assert.match(r.markdown, /DEV: gcloud probes skipped/);
-  // No probe citations should be present for dev.
-  const probeC = r.citations.filter(c => c.source === 'gcloud' || c.source === 'firestore-rest');
-  assert.equal(probeC.length, 0, 'no probe citations on dev');
-});
-
-test('M3-AC-3c: §4 microservice-deploy.extract(env=dev) emits skipped stanza', async () => {
-  const mod = await import('../scripts/briefer/sources/microservice-deploy.js?ac3c=1');
-  const r = await mod.extract({ env: 'dev', cliPaths });
-  assert.match(r.markdown, /DEV: gcloud probes skipped/);
-  const probeC = r.citations.filter(c => c.source === 'gcloud' || c.source === 'firestore-rest');
-  assert.equal(probeC.length, 0);
-});
-
-test('M3-AC-3d: §5 entitlements.extract(env=dev) emits skipped stanza', async () => {
-  const mod = await import('../scripts/briefer/sources/entitlements.js?ac3d=1');
-  const r = await mod.extract({ env: 'dev', cliPaths });
-  assert.match(r.markdown, /DEV: Firestore probe skipped/);
-  const probeC = r.citations.filter(c => c.source === 'gcloud' || c.source === 'firestore-rest');
-  assert.equal(probeC.length, 0);
-});
+for (const [label, file] of [
+  ['§2 environments', 'environments.js'],
+  ['§3 routing', 'routing.js'],
+  ['§4 microservice-deploy', 'microservice-deploy.js'],
+  ['§5 entitlements', 'entitlements.js']
+]) {
+  test(`M3-AC-3: ${label}.extract(env=dev) probes live state and HARD-FAILS when gcloud fails`, async () => {
+    const { dir } = await makeGcloudStub({ stdout: '', exitCode: 1, stderr: 'ERROR: stub refuses' });
+    await withPath(dir, async () => {
+      const mod = await import(`../scripts/briefer/sources/${file}?ac3dev=1`);
+      await assert.rejects(
+        () => mod.extract({ env: 'dev', cliPaths }),
+        (err) => err.code === 'BRIEFER-GCLOUD-FAIL' && /env: dev/.test(err.detail || err.message),
+        `${file}: env=dev must run the live probe, not skip it`
+      );
+    });
+  });
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // M3-AC-4: Citation SHA changes when probe output changes.
@@ -183,9 +193,10 @@ test('M3-AC-4: citation SHA changes when gcloud output changes', async () => {
     const mod = await import('../scripts/briefer/util/source-reader.js?ac4a=1');
     const r = await mod.probeGcloudJson({
       command: ['compute', 'url-maps', 'describe', 'descix-discord-app-lb', '--format=json'],
-      env: 'demo',
+      env: 'dev',
       section: '§3 routing',
-      anchor: 'lb-url-map'
+      anchor: 'lb-url-map',
+      project: URL_MAP_FACTS
     });
     shaA = r.citation.sha;
   });
@@ -193,9 +204,10 @@ test('M3-AC-4: citation SHA changes when gcloud output changes', async () => {
     const mod = await import('../scripts/briefer/util/source-reader.js?ac4b=1');
     const r = await mod.probeGcloudJson({
       command: ['compute', 'url-maps', 'describe', 'descix-discord-app-lb', '--format=json'],
-      env: 'demo',
+      env: 'dev',
       section: '§3 routing',
-      anchor: 'lb-url-map'
+      anchor: 'lb-url-map',
+      project: URL_MAP_FACTS
     });
     shaB = r.citation.sha;
   });
@@ -212,20 +224,52 @@ test('M3-AC-4b: citation SHA stable when gcloud output unchanged (determinism)',
     const mod = await import('../scripts/briefer/util/source-reader.js?ac4b1=1');
     const r1 = await mod.probeGcloudJson({
       command: ['compute', 'url-maps', 'describe', 'descix-discord-app-lb', '--format=json'],
-      env: 'demo',
+      env: 'dev',
       section: '§3 routing',
-      anchor: 'lb-url-map'
+      anchor: 'lb-url-map',
+      project: URL_MAP_FACTS
     });
     const r2 = await mod.probeGcloudJson({
       command: ['compute', 'url-maps', 'describe', 'descix-discord-app-lb', '--format=json'],
-      env: 'demo',
+      env: 'dev',
       section: '§3 routing',
-      anchor: 'lb-url-map'
+      anchor: 'lb-url-map',
+      project: URL_MAP_FACTS
     });
     s1 = r1.citation.sha;
     s2 = r2.citation.sha;
   });
   assert.equal(s1, s2);
+});
+
+test('M3-AC-4c: citation SHA ignores volatile response fields the briefer does not render', async () => {
+  const a = [{ name: 'projects/descix/databases/descix-dev', etag: 'IPP1', earliestVersionTime: '2026-10-16T18:53:39.711689Z' }];
+  const b = [{ name: 'projects/descix/databases/descix-dev', etag: 'INb+', earliestVersionTime: '2026-10-16T18:53:42.426449Z' }];
+  const project = (json) => json.map(d => d.name.split('/').pop());
+  const shas = [];
+  for (const payload of [a, b]) {
+    const { dir } = await makeGcloudStub({ stdout: JSON.stringify(payload) });
+    await withPath(dir, async () => {
+      const mod = await import('../scripts/briefer/util/source-reader.js?ac4c=1');
+      const r = await mod.probeGcloudJson({
+        command: ['firestore', 'databases', 'list', '--format=json'],
+        env: 'dev',
+        section: '§2 environments',
+        anchor: 'firestore-databases-list',
+        project
+      });
+      shas.push(`${r.citation.sha}|${r.citation.lines}`);
+    });
+  }
+  assert.equal(shas[0], shas[1], 'etag / earliestVersionTime churn must not move the citation');
+});
+
+test('M3-AC-4d: probeGcloudJson requires a projection (no raw-output SHA)', async () => {
+  const mod = await import('../scripts/briefer/util/source-reader.js?ac4d=1');
+  await assert.rejects(
+    () => mod.probeGcloudJson({ command: ['projects', 'list', '--format=json'], env: 'dev', section: '§x', anchor: 'a' }),
+    /project/
+  );
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

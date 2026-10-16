@@ -12,7 +12,7 @@
  * Stable error codes (per scope doc §2.3) — grep-friendly for diagnostics:
  *   BRIEFER-SRC-NOT-FOUND   Source file missing / line range no longer matches
  *   BRIEFER-GCLOUD-AUTH     gcloud auth missing or insufficient scope
- *   BRIEFER-GCLOUD-FAIL     gcloud probe failed (auth/empty/timeout) when --env=demo|prod required it
+ *   BRIEFER-GCLOUD-FAIL     a live gcloud / Firestore probe failed (auth/empty/timeout)
  *   BRIEFER-PARSE-FAIL      Source file present but construct unparseable
  *   BRIEFER-DRIFT-DETECTED  --check diff against canonical briefer non-empty
  *   BRIEFER-NEGATIVE-CLAIM  Briefer claims X does not exist, but found at Y:Z

@@ -2,7 +2,7 @@
  * WS-DESCIX-BRIEFER-CLI M5 — CI `--check` gate semantics.
  *
  * The M5 deliverable adds `.github/workflows/briefer-check.yml` as a path-filtered
- * PR gate. The workflow runs `node scripts/briefer/run.mjs --check --env demo` and fails the
+ * PR gate. The workflow runs `node DeSciX/DeSciX_Core/descix-cli/scripts/briefer/run.mjs --check --env=dev` and fails the
  * PR if the canonical briefer is out of sync with the 6 watched source files:
  *
  *   1. DeSciX/DeSciX_Cloud/microservice/admin/scripts/deploy/provision-platform-lb.js
@@ -23,7 +23,10 @@
  *       contains "canonical briefer not found".
  *   (4) Workflow YAML structural integrity — the workflow exists, the paths
  *       filter covers all 6 watched files, and the run step invokes
- *       `briefer --check --env=demo` referencing the SA secret.
+ *       `scripts/briefer/run.mjs --check --env=dev` referencing the SA secret.
+ *   (6) The regen stamp (Last regenerated + the provenance row's date and By) is
+ *       not drift: two regens of unchanged sources at different times, by
+ *       different operators, are in sync.
  *
  * Tests (1)-(3) use a synthetic BrieferDoc fixture so they're fully hermetic —
  * no gcloud auth, no DeSciX_Cloud tree, no live extractors. The fixture
@@ -91,7 +94,7 @@ async function withConsoleStubs(fn) {
  * depends on. Citations are embedded as HTML comments matching the regex in
  * extractCitationTrail().
  */
-function makeFixtureDoc({ env = 'demo', extraLine = '' } = {}) {
+function makeFixtureDoc({ env = 'dev', extraLine = '' } = {}) {
   const markdown = [
     '# Fixture Briefer',
     `**Env:** ${env}`,
@@ -127,7 +130,7 @@ test('(1) runCheckMode SYNC: canonical matches regen → drift:false, no process
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'briefer-ci-check-sync-'));
   const outPath = path.join(tmpDir, 'platform-must-know-briefer.md');
 
-  const doc = makeFixtureDoc({ env: 'demo' });
+  const doc = makeFixtureDoc({ env: 'dev' });
   await fs.writeFile(outPath, doc.markdown, 'utf-8');
 
   const { exitCode, stdout, stubExitError } = await withConsoleStubs(async () => {
@@ -150,8 +153,8 @@ test('(2) runCheckMode DRIFT: canonical differs → process.exit(1) + BRIEFER-DR
   const outPath = path.join(tmpDir, 'platform-must-know-briefer.md');
 
   // Write a canonical that's slightly different from the regen.
-  const canonicalDoc = makeFixtureDoc({ env: 'demo', extraLine: '<!-- I am the canonical -->' });
-  const regenDoc = makeFixtureDoc({ env: 'demo' });  // no extra line — different from canonical
+  const canonicalDoc = makeFixtureDoc({ env: 'dev', extraLine: '<!-- I am the canonical -->' });
+  const regenDoc = makeFixtureDoc({ env: 'dev' });  // no extra line — different from canonical
   await fs.writeFile(outPath, canonicalDoc.markdown, 'utf-8');
 
   const { exitCode, stderr } = await withConsoleStubs(async () => {
@@ -173,7 +176,7 @@ test('(3) runCheckMode MISSING-CANONICAL: file absent → process.exit(2) + clea
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'briefer-ci-check-missing-'));
   const missingPath = path.join(tmpDir, 'nonexistent.md');
 
-  const doc = makeFixtureDoc({ env: 'demo' });
+  const doc = makeFixtureDoc({ env: 'dev' });
   const { exitCode, stderr } = await withConsoleStubs(async () => {
     await runCheckMode({ doc, outPath: missingPath, verbose: false });
   });
@@ -195,7 +198,7 @@ test('(4) runCheckMode DETECTS citation-SHA drift even when prose is unchanged',
   const outPath = path.join(tmpDir, 'platform-must-know-briefer.md');
 
   // Two docs identical in prose but with one different citation SHA.
-  const canon = makeFixtureDoc({ env: 'demo' });
+  const canon = makeFixtureDoc({ env: 'dev' });
   const regen = {
     ...canon,
     markdown: canon.markdown.replace('sha=abc123def456', 'sha=fff000eee999'),
@@ -221,10 +224,10 @@ test('(4) runCheckMode DETECTS citation-SHA drift even when prose is unchanged',
 // being meaningful. This test pins:
 //   - workflow exists at .github/workflows/briefer-check.yml
 //   - all 6 watched files are in the `paths:` filter
-//   - workflow runs `briefer --check --env=demo`
+//   - workflow runs `scripts/briefer/run.mjs --check --env=dev`
 //   - workflow references the BRIEFER_CHECK_GCP_SA_KEY secret
 // ─────────────────────────────────────────────────────────────────────────────
-test('(5) .github/workflows/briefer-check.yml has the canonical paths filter + invokes briefer --check --env=demo', async () => {
+test('(5) .github/workflows/briefer-check.yml has the canonical paths filter + invokes run.mjs --check --env=dev', async () => {
   // The workflow file lives in the parent Unkamon repo at .github/workflows/.
   // In CI (where the PR branch is checked out at REPO_ROOT) the file is on disk.
   // In local dev with worktrees, the file may live on a worktree branch and not
@@ -276,7 +279,43 @@ test('(5) .github/workflows/briefer-check.yml has the canonical paths filter + i
   for (const w of watched) {
     assert.ok(raw.includes(w), `paths filter missing watched file: ${w}`);
   }
-  assert.match(raw, /briefer --check --env=demo/, 'workflow must invoke `briefer --check --env=demo`');
+  assert.match(raw, /node DeSciX\/DeSciX_Core\/descix-cli\/scripts\/briefer\/run\.mjs --check --env=dev/,
+    'workflow must invoke `node DeSciX/DeSciX_Core/descix-cli/scripts/briefer/run.mjs --check --env=dev`');
+  assert.doesNotMatch(raw, /descix\.js briefer/, 'the removed `descix.js briefer` verb must not be called');
+  assert.doesNotMatch(raw, /--env[= ]demo/, 'the DEMO environment no longer exists');
   assert.match(raw, /BRIEFER_CHECK_GCP_SA_KEY/, 'workflow must reference BRIEFER_CHECK_GCP_SA_KEY secret');
   assert.match(raw, /google-github-actions\/auth/, 'workflow must use google-github-actions/auth for SA auth');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Test (6): the regen stamp is not drift.
+// ─────────────────────────────────────────────────────────────────────────────
+test('(6) runCheckMode: docs differing ONLY in the regen stamp are in sync; a content change still drifts', async () => {
+  const { runCheckMode } = await import('../scripts/briefer/index.js');
+  const { stitchBriefer, extractCitationTrail } = await import('../scripts/briefer/stitcher.js');
+  const sections = [{
+    section: { number: 1, heading: '1. Fixture', sourceFiles: [] },
+    extract: { markdown: 'fact', citations: [{ file: 'a.js', lines: '1', sha: 'abcabcabcabc', anchor: 'x' }] }
+  }];
+  const canonical = stitchBriefer({ env: 'dev', mechanism: 'm', regenBy: 'alice', sections })
+    .replace(/\d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC/g, '2026-01-01 00:00:00 UTC');
+  const regenMd = stitchBriefer({ env: 'dev', mechanism: 'm', regenBy: 'runner', sections });
+  assert.notEqual(canonical, regenMd, 'fixture must actually differ in the stamp');
+  const doc = { markdown: regenMd, citationTrail: extractCitationTrail(regenMd) };
+
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'briefer-ci-check-stamp-'));
+  const outPath = path.join(tmpDir, 'platform-must-know-briefer.md');
+  await fs.writeFile(outPath, canonical, 'utf-8');
+  const sync = await withConsoleStubs(async () => {
+    const r = await runCheckMode({ doc, outPath, verbose: false });
+    assert.equal(r.drift, false);
+  });
+  assert.equal(sync.exitCode, null, 'a stamp-only difference must not exit');
+
+  await fs.writeFile(outPath, canonical.replace('fact', 'fact!'), 'utf-8');
+  const drift = await withConsoleStubs(async () => {
+    await runCheckMode({ doc, outPath, verbose: false });
+  });
+  assert.equal(drift.exitCode, 1, 'a one-character content change must still drift');
+  await fs.rm(tmpDir, { recursive: true, force: true });
 });
