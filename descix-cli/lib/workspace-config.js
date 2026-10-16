@@ -1,6 +1,6 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { ENV_ORIGINS, resolveWorkspaceApps, assertSiteStatic } from '@descix/app-sdk/dev';
+import { ENV_ORIGINS, resolveWorkspaceApps, resolveWorkspaceAppsFrom, assertSiteStatic } from '@descix/app-sdk/dev';
 import { resolveOrigin } from './origin.js';
 // The one canonical KB-sync surface, from its owner. The example in requireContext() is a remedy
 // a stuck developer will copy verbatim, so it must resolve to the live verb rather than a literal
@@ -953,6 +953,97 @@ export class WorkspaceConfig {
       entry.site = site;
     }
 
+    return this.save();
+  }
+
+  /**
+   * THE ONE WRITER of a gateway workspace's repo list: env.gateway.shell and env.gateway.appRepos[]
+   * (DeSciXCore#9). Backs `descix config gateway set-shell | add-repo | remove-repo`, so a gateway
+   * workspace.json is never hand-edited.
+   *
+   * Paths are relative to THIS workspace's root (sibling checkouts: "../<repo>") and are stored in
+   * normalized form; two spellings of one directory are one repo.
+   *
+   * Refused loud, and a refusal writes NOTHING:
+   *  - this workspace holds env.app — a single-app workspace is not a gateway;
+   *  - add-repo of a repo already listed (or already the shell);
+   *  - remove-repo of a repo that is not listed;
+   *  - any resulting listed repo that the gateway could not read: the candidate config is resolved
+   *    by @descix/app-sdk/dev resolveWorkspaceAppsFrom — the SAME function the gateway reads it with
+   *    — so an absolute path, a repo without its own .descix/workspace.json, one with no env.app, a
+   *    bad site.static, or one appId listed twice is refused by the reader's own rule.
+   *
+   * @param {'set-shell'|'add-repo'|'remove-repo'} op
+   * @param {string|null} repo - repo root relative to the workspace root; null with set-shell removes the shell
+   * @returns {Promise<string>} Path to saved config (from save())
+   */
+  async setGatewayRepo(op, repo) {
+    const OPS = ['set-shell', 'add-repo', 'remove-repo'];
+    if (!OPS.includes(op)) throw new Error(`Unknown gateway op "${op}" (expected one of: ${OPS.join(', ')}).`);
+    const root = this.workspaceRoot;
+    if (!root) throw new Error('Workspace root not set. Load the config with WorkspaceConfig.load() first.');
+    const configPath = path.join(root, '.descix', 'workspace.json');
+
+    if (this.env?.app?.appId) {
+      throw new Error(
+        `${configPath} is a single-app workspace (env.app "${this.env.app.appId}"), not a gateway workspace.\n` +
+        'env.gateway.shell and env.gateway.appRepos belong to a gateway workspace, which holds no env.app of\n' +
+        'its own and lists sibling app repos. Run this verb from the gateway workspace\'s root. Nothing was written.'
+      );
+    }
+
+    const removingShell = op === 'set-shell' && (repo === null || repo === undefined);
+    if (!removingShell && (typeof repo !== 'string' || repo.trim() === '')) {
+      throw new Error(`descix config gateway ${op} needs a repo path (relative to ${root}). Nothing was written.`);
+    }
+    // Normalized relative form: "../repo-a/", "./../repo-a" and "../repo-a" are one repo. An absolute
+    // path is passed through untouched so the reader's own rule refuses it below.
+    const normalize = (rel) => (path.isAbsolute(rel) ? rel : (path.normalize(rel).replace(/[\\/]+$/, '') || '.'));
+    const dirOf = (rel) => path.resolve(root, rel);
+    const rel = removingShell ? null : normalize(repo.trim());
+
+    const gateway = { ...(this.env?.gateway || {}) };
+    const appRepos = [...(gateway.appRepos || [])];
+
+    if (op === 'set-shell') {
+      if (rel === null) delete gateway.shell;
+      else gateway.shell = rel;
+    } else if (op === 'add-repo') {
+      if (!path.isAbsolute(rel)) {
+        const listed = appRepos.find((r) => dirOf(r) === dirOf(rel));
+        if (listed) {
+          throw new Error(`"${repo}" is already listed in env.gateway.appRepos (as "${listed}") in ${configPath}. Nothing was written.`);
+        }
+        if (gateway.shell && dirOf(gateway.shell) === dirOf(rel)) {
+          throw new Error(
+            `"${repo}" is this workspace's env.gateway.shell in ${configPath}; the shell is served at / and is not ` +
+            'also listed in appRepos. Nothing was written.'
+          );
+        }
+      }
+      appRepos.push(rel);
+    } else {
+      const at = path.isAbsolute(rel) ? -1 : appRepos.findIndex((r) => dirOf(r) === dirOf(rel));
+      if (at < 0) {
+        throw new Error(
+          `"${repo}" is not listed in env.gateway.appRepos in ${configPath}.\n` +
+          `  Listed: ${appRepos.length ? appRepos.join(', ') : '(none)'}\nNothing was written.`
+        );
+      }
+      appRepos.splice(at, 1);
+    }
+
+    if (appRepos.length) gateway.appRepos = appRepos;
+    else delete gateway.appRepos;
+
+    const candidateEnv = { ...(this.env || {}) };
+    if (Object.keys(gateway).length) candidateEnv.gateway = gateway;
+    else delete candidateEnv.gateway;
+
+    // Validate the WHOLE resulting repo set with the reader's own function before anything is saved.
+    resolveWorkspaceAppsFrom(root, { env: candidateEnv });
+
+    this.env = candidateEnv;
     return this.save();
   }
 
