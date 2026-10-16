@@ -86,6 +86,13 @@ repo with no `.descix/workspace.json` or no `env.app`, a repo already listed (or
 shell), one appId listed twice, and `remove-repo` of a repo that is not listed. `descix serve`
 applies the same checks when it reads the file.
 
+`descix site upload -a <appId>` run from a gateway workspace's root operates on the listed repo
+whose own workspace names that appId: its `.descix/manifests/site.json`, its `buildCommand` (run
+in that repo's root) and its sources. The env, API origin and sign-in are the gateway workspace's.
+A listed repo with no workspace or no `env.app` is skipped; an appId no listed repo holds is
+refused, naming every repo searched. A matched repo with no site manifest is refused unless `-p
+<dir>` names the directory to upload. Every run prints `App repo:` and `Site manifest:` first.
+
 ### Refused shapes
 
 - A `communities` block with no `env` block — the v1 format — fails on load: `v1 workspace format is

@@ -2197,12 +2197,12 @@ siteCommand
   .runbookAnchor('#_8-deploy-the-site')
   .description('Upload site to GCS and update app metadata (uses .descix/manifests/site.json when present)')
   .option('-c, --community <id>', 'Community ID (auto-detects from context)')
-  .option('-a, --app <id>', 'App ID (auto-detects from context)')
+  .option('-a, --app <id>', 'App ID (auto-detects from context; in a gateway workspace, the listed repo holding this app supplies the manifest and files)')
   .option('-p, --path <localPath>', 'Local directory to deploy (ignored when site manifest exists)', './site')
   .option('--preview', 'Deploy to preview path')
   .option('--dry-run', 'Show what would be uploaded and which server files would be removed')
   .option('--no-cache', 'Set Cache-Control: no-cache')
-  .action(async (options) => {
+  .action(async (options, command) => {
     try {
       const apiClient = new DeSciXApiClient();
 
@@ -2226,9 +2226,8 @@ siteCommand
         process.exit(1);
       }
 
-      await requireAuth(apiClient);
-
-      // Load workspace context
+      // Load workspace context. The app's repo is resolved BEFORE the credential check: which tree
+      // would be uploaded is a local fact, and a refusal about it needs no sign-in.
       const workspaceConfig = await WorkspaceConfig.load();
       const ctx = workspaceConfig.resolveContextWithOptions(options);
 
@@ -2241,20 +2240,39 @@ siteCommand
         process.exit(1);
       }
 
-      // Resolve app root from workspace config
-      const appConfig = workspaceConfig.getAppByAppId(appId);
+      // The app's repo root (WorkspaceConfig.resolveAppRepo — gateway entries resolve to their own
+      // repo; a gateway miss throws by name). Env, apiUrl and credential stay with THIS workspace.
+      const appRepo = workspaceConfig.resolveAppRepo(appId);
 
       // Derive communityId from workspace config if not provided.
       // Fallback: for NFT apps, community_id === app_id (convention).
       // The backend will validate this via hydrateCommunityIdFromProducts.
       if (!communityId) {
-        communityId = appConfig?.communityId || appId;
+        communityId = appRepo?.communityId || appId;
       }
-      const appRoot = appConfig?.absolutePath || path.resolve('.');
+      const appRoot = appRepo?.dir || path.resolve('.');
 
       // Check for site manifest (.descix/manifests/site.json)
       const { loadSiteManifest } = await import('../lib/core/ManifestLoader.js');
       const siteManifest = await loadSiteManifest(appRoot);
+      const siteManifestPath = path.join(appRoot, '.descix', 'manifests', 'site.json');
+
+      // A gateway app whose repo carries no site manifest has no deployable set of its own; the
+      // -p default ('./site', relative to the cwd) would read the GATEWAY's tree. Only an explicit
+      // -p names a directory to upload.
+      if (workspaceConfig.isGateway() && !siteManifest && command.getOptionValueSource('path') !== 'cli') {
+        throw new Error(
+          `App "${appId}" resolves to ${appRoot} (gateway ${appRepo.role} entry '${appRepo.entry}'), ` +
+          `which has no site manifest at ${siteManifestPath}. Add one there, or name the directory to upload with -p <dir>.`
+        );
+      }
+
+      console.log(chalk.gray(`\n  App repo: ${appRoot} (${appRepo
+        ? (appRepo.role === 'self' ? 'this workspace\'s app' : `gateway ${appRepo.role} entry '${appRepo.entry}'`)
+        : 'not this workspace\'s app — current directory'})`));
+      console.log(chalk.gray(`  Site manifest: ${siteManifest ? siteManifestPath : `none at ${siteManifestPath} — uploading -p ${path.resolve(options.path)}`}`));
+
+      await requireAuth(apiClient);
 
       // Import mime for content types
       const mime = (await import('mime-types')).default;
@@ -2294,11 +2312,11 @@ siteCommand
         // Run buildCommand if specified
         if (siteManifest.buildCommand) {
           if (options.dryRun) {
-            console.log(chalk.yellow(`\n  Dry run - skipping build (${siteManifest.buildCommand})`));
+            console.log(chalk.yellow(`\n  Dry run - skipping build (${siteManifest.buildCommand}, cwd ${appRoot}); files are listed from what is on disk now`));
             console.log(chalk.gray('  Build env vars that would be injected:'));
             Object.entries(buildEnvVars).forEach(([k, v]) => console.log(chalk.gray(`    ${k}=${v}`)));
           } else {
-            console.log(chalk.cyan(`\n  Running build: ${siteManifest.buildCommand}\n`));
+            console.log(chalk.cyan(`\n  Running build: ${siteManifest.buildCommand} (cwd ${appRoot})\n`));
             const { exec } = await import('child_process');
             const { promisify } = await import('util');
             const execAsync = promisify(exec);

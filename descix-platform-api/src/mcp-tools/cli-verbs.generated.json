@@ -1951,7 +1951,7 @@
       },
       {
         "flags": "-a, --app <id>",
-        "description": "App ID (auto-detects from context)",
+        "description": "App ID (auto-detects from context; in a gateway workspace, the listed repo holding this app supplies the manifest and files)",
         "required": false
       },
       {
