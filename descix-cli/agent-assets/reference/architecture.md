@@ -111,31 +111,28 @@ folder of JSON chunk files to manage.
 
 ```json
 {
-  "version": "2.1",
+  "version": "3.0",
   "type": "workspace",
-  "workspaceRoot": "/path/to/workspace",
+  "workspaceRoot": "/path/to/daita-agent-repo",
   "env": {
-    "environment": "DEV",
-    "apiUrl": "https://dev.descix.net",
+    "environment": "PROD",
+    "apiUrl": "https://descix.net",
     "gateway": { "port": 5599 },
-    "products": [
-      {
-        "appId": "daita-agent",
-        "communityId": "daita",
-        "localPath": "daita/agent",
-        "kbId": "General",
-        "site": { "port": 3000 },
-        "microservice": { "port": 4001 }
-      }
-    ]
+    "app": {
+      "appId": "daita-agent",
+      "communityId": "daita",
+      "kbId": "General",
+      "site": { "port": 3000 },
+      "microservice": { "port": 4001 }
+    }
   },
   "driveConfig": { "base_folder_id": "1ABC..." }
 }
 ```
 
-Every key is written by a CLI verb (`descix config init --env …`, `descix app init`, `descix app set-site`, `descix app set-port`, …) — see `workspace-config.md` for the key → verb table. A `communities` block without `env` (the v1 shape) is refused on load.
+Every key is written by a CLI verb (`descix config init --env …`, `descix app init`, `descix app set-site`, `descix app set-port`, …) — see `workspace-config.md` for the key → verb table. One repo holds one app (`env.app`), and the repo root is the workspace root. A `communities` block without `env` (the v1 shape) and an `env.platform` / `env.products` block (the v2.1 multi-app shape) are refused on load.
 
-**Note:** `.descix.app/context.json` files are no longer used. All app configuration is stored in `workspace.json`. The CLI auto-detects app context from the current working directory by matching against registered app paths.
+**Note:** `.descix.app/context.json` files are no longer used. All app configuration is stored in `workspace.json`. The CLI auto-detects the app (`env.app`) when the current working directory is the repo root or below it.
 
 ---
 
@@ -169,7 +166,7 @@ The DeSciX CLI publishes content with one verb per plane. Each command resolves 
 |---------|-------------|
 | `descix site init` | Copy site template to current app's `site/` folder |
 | `descix site upload` | Deploy site to GCS |
-| `descix app set-site -a <app_id> --port <port>` | Register the local dev-server port for the app's site (`env.products[].site.port`) |
+| `descix app set-site -a <app_id> --port <port>` | Register the local dev-server port for the app's site (`env.app.site.port`) |
 | `descix microservice init` | Copy microservice template to current app's `microservice/` folder |
 | `descix microservice register -r SERVICE_README.md` | Register microservice AND vectorize the README for `tell_me_how` discovery, in one step |
 

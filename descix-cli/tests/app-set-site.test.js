@@ -271,3 +271,41 @@ test('anti-regression: WorkspaceConfig exposes setStaticSite as a function', asy
     'WorkspaceConfig.setStaticSite must exist (backs `descix app set-site` / WS-SSGPOD site.static gap)'
   );
 });
+
+// ── site.static PATH RULE (measured 2026-10-16: an absolute --static was stored verbatim and the
+// gateway re-rooted it under the workspace with path.join, failing only at request time with
+// "Not found: <url>"). The write refuses anything that is not a plain relative path, and the
+// refusal writes NOTHING. Negative control first; the positive controls prove the rule is not
+// a refuse-everything gate.
+
+const NOT_RELATIVE = ['/abs/site', '/', 'C:\\site', '\\\\host\\share\\site', '~/site', 'file:///abs/site', '', '   '];
+
+for (const bad of NOT_RELATIVE) {
+  test(`site.static rule — refuses ${JSON.stringify(bad)} at the write, naming the rule; nothing written`, async (t) => {
+    const { wsRoot, productAppId } = await makeTestWorkspace(t);
+    const before = await fs.readFile(path.join(wsRoot, '.descix', 'workspace.json'), 'utf-8');
+
+    const wc = await WorkspaceConfig.load(wsRoot);
+    await assert.rejects(
+      () => wc.setStaticSite(productAppId, { static: bad }),
+      (err) => {
+        assert.match(err.message, /--static takes a path relative to the workspace root/);
+        assert.match(err.message, /e\.g\. site or \.\.\/scratch/);
+        assert.ok(err.message.includes(`got ${JSON.stringify(bad)}`), `message must name the refused value: ${err.message}`);
+        return true;
+      }
+    );
+    const after = await fs.readFile(path.join(wsRoot, '.descix', 'workspace.json'), 'utf-8');
+    assert.equal(after, before, 'a refused --static must write nothing');
+  });
+}
+
+for (const good of ['site', '.', '../scratch', 'site/dist']) {
+  test(`site.static rule — accepts the relative path ${JSON.stringify(good)}`, async (t) => {
+    const { wsRoot, productAppId } = await makeTestWorkspace(t);
+    const wc = await WorkspaceConfig.load(wsRoot);
+    await wc.setStaticSite(productAppId, { static: good });
+    const reloaded = await WorkspaceConfig.load(wsRoot);
+    assert.equal(reloaded.env.app.site?.static, good);
+  });
+}

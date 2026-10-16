@@ -84,27 +84,29 @@ The app-sdk is **self-contained**. It bundles:
 
 `descix serve` puts the App Shell, your app and the API on **one HTTPS origin**, which is
 what makes a shell sign-in visible to your app and what makes passkeys work at all. No
-platform checkout is required: with nothing configured, the shell and `/apifront` both
-resolve to cloud DEV. What you see is **your app, standalone — no store chrome**.
+platform checkout is required: the shell and `/apifront` both resolve to the environment your
+workspace pins (`env.apiUrl`), PROD when nothing is pinned. What you see is **your app,
+standalone — no store chrome**.
 
 ```bash
-descix config set-env dev                   # ← today: the platform runs on dev.descix.net
-descix app init -a <app-id> -p ./my-app     # register the app in .descix/workspace.json
-descix app set-site -a <app-id> --static .  # serve ./my-app at /p/<app-id>/
-cd my-app && descix serve                   # the app is detected from the directory
+cd my-app                                     # the repo root is the workspace root
+descix config init --env prod                 # pins env.apiUrl
+descix app init -a <app-id>                   # writes env.app in .descix/workspace.json
+descix app set-site -a <app-id> --static site # serve ./site at /p/<app-id>/ (relative to the repo root)
+descix serve                                  # the app is detected from the directory
 ```
 
 ```
-  API:       https://dev.descix.net   [workspace env.apiUrl]
-  Shell:     https://dev.descix.net   [same origin as API (workspace env.apiUrl)]
+  API:       https://descix.net       [workspace env.apiUrl]
+  Shell:     https://descix.net       [same origin as API (workspace env.apiUrl)]
   Port:      5173                     [built-in default (5173)]
   App:       <app-id>                 [cwd]   mode: standalone
   Open:      https://localhost:5173/   → App Shell; reads /__descix/app-binding.json and boots <app-id> standalone
   App route: https://localhost:5173/p/<app-id>   → this app's route on the gateway (the URL the shell loads it from)
 
-    /                                  → https://dev.descix.net   (App Shell — sign in here)
-    /apifront                          → https://dev.descix.net
-    /p/<app-id>                        → ./my-app
+    /                                  → https://descix.net   (App Shell — sign in here)
+    /apifront                          → https://descix.net
+    /p/<app-id>                        → ./site
 ```
 
 `descix serve` starts **nothing else** — no backend, no app dev server. If your app has its
@@ -114,8 +116,9 @@ nothing running.
 #### Which app, and which port
 
 One serve session serves **one app, standalone**. It is detected from the directory you are
-standing in (the product whose `localPath` contains your cwd; longest match wins), or named
-with `--app <id>` from anywhere else. Nothing is written to `workspace.json` — a persistent
+standing in (the app whose repo root contains your cwd — your repo's `env.app`, or on a gateway
+workspace the `env.gateway` repo you are inside; longest match wins), or named with `--app <id>`
+from anywhere else. Nothing is written to `workspace.json` — a persistent
 "current app" pointer goes stale and lies. When it cannot name an app it says so and lists
 the workspace's apps rather than quietly showing you the store.
 
@@ -137,18 +140,18 @@ store — the safe degradation.
 There is no `__STANDALONE_APP_ID__` define; it is deleted. An app that builds *itself*
 standalone declares it at its own mount: `<AppShell appId="my-app" standalone>`.
 
-> **Which environment?** The SDK ships pointing at **PROD** (`https://descix.net`). While the
-> platform is still coming up on prod, run `descix config set-env dev` once per workspace —
-> that writes `env.apiUrl` and both the API and the shell follow it. `demo` and `prod` work the
-> same way. There is no "local" environment: a local backend is a URL you name, e.g.
-> `descix config set-env dev --url https://localhost:4000`.
+> **Which environment?** The SDK ships pointing at **PROD** (`https://descix.net`).
+> `descix config init --env dev|demo|prod` pins a workspace — it writes `env.apiUrl` and both
+> the API and the shell follow it. There is no "local" environment: a local backend is a URL you
+> name — per run with `descix --api-url https://localhost:4000 <command>`, or persistently under a
+> custom name with `descix config set-env local --url https://localhost:4000`.
 
 Targets, in precedence order:
 
 | Target | `1.` flag | `2.` workspace.json | `3.` derived | `4.` default |
 |---|---|---|---|---|
-| **API** (`/apifront`, `/api`, `/mcp`, `/oauth`) | `descix --api-url <url> serve`, `--env dev` | `env.apiUrl` (what `set-env` writes) | `env.platform.microservice.port` (local platform checkout) | **PROD** |
-| **Shell** (`/`) | `descix serve --site-url <url>` | `env.siteUrl` | the API origin when remote, else `env.platform.site.port` | — fails loud |
+| **API** (`/apifront`, `/api`, `/mcp`, `/oauth`) | `descix --api-url <url> serve`, `--env dev` | `env.apiUrl` (what `config init --env` writes) | the `env.gateway.shell` repo's own `microservice.port` (local platform checkout) | **PROD** |
+| **Shell** (`/`) | `descix serve --site-url <url>` | `env.siteUrl` | the API origin when remote, else the `env.gateway.shell` repo's own `site.port` | — fails loud |
 
 The default SDK user wins the defaults: whenever the API is a real platform origin, the shell
 comes from that same origin, so one origin carries shell + app + `/apifront` with nothing
@@ -242,12 +245,12 @@ exact `openssl` command that mints a correct one.
 
 | Key | Verb |
 |---|---|
-| `env.apiUrl` | `descix config set-env <dev\|demo\|prod> [--url <url>]` (env is positional) |
+| `env.apiUrl` | `descix config init --env dev\|demo\|prod`, or `descix config set-env <custom-name> --url <url>` (`--url` is refused on a known name) |
 | `env.gateway.port` | `descix config set-gateway-port <n\|none>` |
 | `env.devCerts` | `descix config set-dev-certs --dir\|--cert\|--key\|--clear` |
 | `env.powchUrl` | `descix config set-powch-url <url\|none>` |
 | `env.siteUrl` | `descix config set-site-url <url\|none>` |
-| product entries | `descix app init` / `app set-site` / `app set-port` / `app set-localpath` / `app unmap` |
+| `env.app` (THE app this repo holds) | `descix app init` (from the repo root) / `app set-site` / `app set-port` |
 
 Ports are explicit-only — there is no auto-allocation.
 

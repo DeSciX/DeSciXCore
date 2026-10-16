@@ -82,14 +82,13 @@ out until something depends on the difference.
 
 ## Configuration (`workspace.json`)
 
-One `env.products[]` entry, written by `descix app init`, `descix app set-port` and (for the optional
-frontend) `descix app set-site` — never by hand:
+The repo's `env.app`, written by `descix app init` (run from the repo root), `descix app set-port` and
+(for the optional frontend) `descix app set-site` — never by hand:
 
 ```json
 {
   "appId": "my-community-my-service",
   "communityId": "my-community",
-  "localPath": "my-service",
   "kbId": "General",
   "site": { "static": "site" },
   "microservice": { "port": 4001 }

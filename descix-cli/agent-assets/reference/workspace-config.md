@@ -1,32 +1,43 @@
 # Workspace Configuration Guide
 
-`.descix/workspace.json` is the CLI's only local configuration file. It is **version 2.1**, it is
-written **only by CLI verbs**, and the loader refuses the shapes that hand edits produce. This page
-is the schema and the verb that owns each key.
+`.descix/workspace.json` is the CLI's only local configuration file. It is **version 3.0
+(single-app)**: one repo, one app, and the repo root IS the workspace root. It is written **only by
+CLI verbs**, and the loader refuses the shapes that hand edits produce. This page is the schema and
+the verb that owns each key.
 
 ---
 
-## 1. Format (v2.1 — the only format)
+## 1. Format (v3 — the only format)
+
+An app repo's workspace holds exactly one app, `env.app`:
 
 ```json
 {
-  "version": "2.1",
+  "version": "3.0",
   "type": "workspace",
-  "workspaceRoot": "/path/to/workspace",
+  "workspaceRoot": "/path/to/my-app-repo",
   "env": {
-    "environment": "DEV",
-    "apiUrl": "https://dev.descix.net",
+    "environment": "PROD",
+    "apiUrl": "https://descix.net",
     "gateway": { "port": 5599 },
     "devCerts": { "dir": "/Users/you/.descix/dev-certs-san" },
-    "powchUrl": "https://powch.dev.descix.net",
-    "products": [
-      { "appId": "egpt-mydocs", "communityId": "egpt", "localPath": ".", "kbId": "General", "site": { "static": "site" } },
-      { "appId": "egpt-tool", "communityId": "egpt", "localPath": "tool", "kbId": "General", "site": { "port": 5174 }, "microservice": { "port": 4001 } }
-    ]
+    "powchUrl": "https://powch.descix.net",
+    "app": {
+      "appId": "egpt-mydocs",
+      "communityId": "egpt",
+      "kbId": "General",
+      "site": { "static": "site" },
+      "microservice": { "port": 4001 }
+    }
   },
   "driveConfig": { "base_folder_id": "1ABC..." }
 }
 ```
+
+Run `descix app init` **from the repo root** — it writes `env.app` and makes that directory the
+workspace root. Inside another DeSciX workspace it refuses (`This directory is nested inside another
+DeSciX workspace`) rather than registering into the parent: keep app repos as sibling checkouts. A
+workspace that already holds a different app refuses a second one — that app gets its own repo.
 
 | Key | Meaning | Owned by |
 |---|---|---|
@@ -36,29 +47,50 @@ is the schema and the verb that owns each key.
 | `env.devCerts` | `dir`, or `cert` + `key` — the TLS pair for the gateway and every app behind it; unset means the SDK's shipped pair. Passkey sign-in needs it trusted: `descix dev-certs check`, then the human runs `descix dev-certs trust` (see `reference/local-dev.md` §3.3) | `descix config set-dev-certs --dir\|--cert\|--key\|--clear` |
 | `env.powchUrl` | Powch's own origin (optional; Powch is cross-origin from the shell by design) | `descix config set-powch-url <url>` |
 | `env.siteUrl` | the App Shell origin the gateway proxies `/` to (optional; default is the API origin) | `descix config set-site-url <url>` |
-| `env.products[]` | one entry per app in this workspace, see below | `descix app init`, `app set-site`, `app set-port`, `app set-localpath`, `app unmap` |
-| `env.platform` | the platform shell's own entry — platform contributors only; an app developer has none | platform runbook |
+| `env.app` | THE app this repo holds, see below | `descix app init`, `app set-site`, `app set-port` |
 | `driveConfig.base_folder_id` | the Drive base folder for `descix drive pull/push` | no verb; set it in `.descix/workspace.json` |
 
-A product entry:
+`env.app`:
 
 | Field | Meaning | Written by |
 |---|---|---|
 | `appId` | the platform app id (`<community>-<short>`) | `descix app init` |
 | `communityId` | the app's community; stored so context detection can name it | `descix app init` |
-| `localPath` | the app directory, relative to `workspaceRoot` (`.` when the workspace root is the app) | `descix app init -p`, `descix app set-localpath` |
 | `kbId` | the default knowledge base (default `General`) | `descix app init --kb` |
-| `site.static` | a directory under `localPath` served from disk at `/p/<appId>/` | `descix app set-site --static <dir>` |
+| `site.static` | a directory relative to the workspace root (the repo root) served from disk at `/p/<appId>/` — `site`, `site/dist`, `.` (the root itself) or `../scratch`; an absolute path is refused at the write and on read | `descix app set-site --static <dir>` |
 | `site.port` | a framework dev server the gateway proxies `/p/<appId>` to (no path rewrite) | `descix app set-site --port <n>` |
+| `site.protocol` | `http` or `https` — the dev server's scheme (dev-server mode only; default `https`) | `descix app set-site --port <n> --protocol <scheme>` |
 | `microservice.port` | the local port the gateway proxies `/s/<appId>` to; `descix microservice init` requires it | `descix app set-port -p <n>` |
 
 Sites and services are started by you (or your framework); the CLI does not store or run a dev command.
 
+### Gateway workspaces
+
+A workspace that serves several local app repos behind one `descix serve` (platform contributors)
+lists them under `env.gateway`, with paths relative to its own root:
+
+```json
+"gateway": { "port": 5599, "shell": "../platform-shell", "appRepos": ["../my-app", "../other-app"] }
+```
+
+| Key | Meaning |
+|---|---|
+| `env.gateway.shell` | the repo whose app the gateway serves at `/` |
+| `env.gateway.appRepos[]` | repos whose apps the gateway serves at `/p/<appId>` |
+
+Each listed repo holds its OWN v3 workspace (`descix app init` in that repo), and that file is the
+sole authority on its app's id, site and microservice — the gateway workspace never restates them.
+An absolute path, a listed repo with no workspace, or one appId listed twice fails loud. No verb
+writes `env.gateway.shell` or `env.gateway.appRepos`.
+
 ### Refused shapes
 
 - A `communities` block with no `env` block — the v1 format — fails on load: `v1 workspace format is
-  not supported. Migrate to v2.1.` The file is left untouched; re-create it with `descix config init
+  not supported. Migrate to v3.` The file is left untouched; re-create it with `descix config init
   --env …` and `descix app init`.
+- An `env.platform` or `env.products` block — the multi-app format — fails on load: `v2.1 multi-app
+  workspace format is not supported. Migrate to v3 (single-app).` The file is left untouched; run
+  `descix config init --env …` and `descix app init -a <app_id>` from each app repo's own root.
 - A top-level `apiUrl` key is refused by name; the origin lives at `env.apiUrl` and nowhere else.
 
 ---
@@ -143,14 +175,13 @@ The git path (`descix kb corpus sync`) needs none of this.
 
 ## 6. CLI Context Resolution
 
-`WorkspaceConfig.detectContext()` matches your current directory against every product's resolved
-`localPath` (longest match wins) and returns `{ communityId, appId, kbId }` from that entry —
-`communityId` is `null` for an entry registered by a CLI that did not yet store it.
+`WorkspaceConfig.detectContext()` returns `{ communityId, appId, kbId }` from `env.app` when your
+current directory is the workspace root or anywhere below it.
 `resolveContextWithOptions()` lets explicit `-c` / `-a` / `-k` flags win over detection.
 
 ```bash
-# From inside an app directory — detected
-cd my-app
+# From inside the app repo — detected
+cd my-app-repo
 descix kb corpus sync
 
 # From anywhere — flags
@@ -164,7 +195,7 @@ descix site status -c egpt -a egpt-mydocs      # site status/list need both when
 
 | Concept | Owner |
 |---|---|
-| Workspace loading, the v2.1 writer, app registration, context detection | `WorkspaceConfig`, internal to `@descix/cli` |
+| Workspace loading, the v3 writer, app registration, context detection | `WorkspaceConfig`, internal to `@descix/cli` |
 | Origin resolution precedence | flag → `DESCIX_API_URL` → `env.apiUrl` → default (`descix config` commands) |
 | User-level settings (`~/.descixrc`) | `GlobalConfig`, internal to `@descix/cli` |
 | `.descix/wallet.json` | written by `descix login` |

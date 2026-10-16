@@ -39,14 +39,13 @@ example; `kb/General/` also works if that's where content ends up, e.g. from `de
 
 ## Configuration (`workspace.json`)
 
-One `env.products[]` entry, written by `descix app init` (never by hand); no `site` and no
-`microservice` slot:
+The repo's `env.app`, written by `descix app init` (run from the repo root; never by hand); no `site`
+and no `microservice` slot:
 
 ```json
 {
   "appId": "my-community-my-docs",
   "communityId": "my-community",
-  "localPath": "my-docs",
   "kbId": "General"
 }
 ```
