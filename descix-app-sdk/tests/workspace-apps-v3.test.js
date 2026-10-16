@@ -25,7 +25,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { resolveWorkspaceApps } from '../src/dev/workspaceApps.js';
+import { resolveWorkspaceApps, resolveWorkspaceAppsFrom } from '../src/dev/workspaceApps.js';
 
 async function writeWs(dir, env) {
   await fs.mkdir(path.join(dir, '.descix'), { recursive: true });
@@ -173,4 +173,28 @@ test('relative site.static values ("site", ".", "../scratch") are read unchanged
     await writeWs(root, { app: { appId: 'rel-app', site: { static: rel } } });
     assert.equal(resolveWorkspaceApps(root).apps[0].site.static, rel);
   }
+});
+
+test('resolveWorkspaceAppsFrom applies the same rules to an IN-MEMORY candidate (the gateway writer\'s check)', async (t) => {
+  const parent = await tmp(t, 'wsapps-from-');
+  await writeWs(path.join(parent, 'a'), { app: { appId: 'app-a' } });
+  await fs.mkdir(path.join(parent, 'gw'), { recursive: true });
+  // nothing on disk at gw/ — the candidate is resolved from memory
+  const ok = resolveWorkspaceAppsFrom(path.join(parent, 'gw'), { env: { gateway: { appRepos: ['../a'] } } });
+  assert.deepEqual(ok.apps.map((a) => a.appId), ['app-a']);
+  assert.throws(
+    () => resolveWorkspaceAppsFrom(path.join(parent, 'gw'), { env: { gateway: { appRepos: ['../missing'] } } }),
+    /has no \.descix\/workspace\.json/
+  );
+});
+
+test('a listed repo whose workspace.json is not JSON fails loud NAMING the file', async (t) => {
+  const parent = await tmp(t, 'wsapps-badjson-');
+  const bad = path.join(parent, 'bad');
+  await fs.mkdir(path.join(bad, '.descix'), { recursive: true });
+  await fs.writeFile(path.join(bad, '.descix', 'workspace.json'), '{ not json');
+  assert.throws(
+    () => resolveWorkspaceAppsFrom(parent, { env: { gateway: { appRepos: ['bad'] } } }),
+    (err) => err.message.includes(path.join(bad, '.descix', 'workspace.json')) && /could not be read as JSON/.test(err.message)
+  );
 });

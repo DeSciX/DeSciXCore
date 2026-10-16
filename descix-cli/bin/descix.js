@@ -3724,6 +3724,51 @@ configCommand
     }
   });
 
+// The gateway workspace's repo list (env.gateway.shell, env.gateway.appRepos[]). One writer:
+// WorkspaceConfig.setGatewayRepo(), which validates with the gateway's own reader.
+const configGatewayCommand = configCommand
+  .command('gateway')
+  .description('Write a gateway workspace\'s repo list (env.gateway.shell, env.gateway.appRepos[]) — never hand-edit it')
+  .addHelpText('after', '\nRepo paths are relative to the gateway workspace root (sibling checkouts: ../<repo>).\n' +
+    'Each listed repo must carry its own v3 .descix/workspace.json with env.app (descix app init there).\n' +
+    'Refused in a single-app workspace (one that holds env.app).\n');
+
+configGatewayCommand
+  .command('set-shell')
+  .description('Set the repo whose app the gateway serves at / (env.gateway.shell)')
+  .argument('<repo>', 'Repo root relative to the workspace root, or "none" to remove')
+  .action(async (repo) => {
+    try {
+      await configCommands.setGatewayRepo('set-shell', repo === 'none' ? null : repo);
+    } catch (error) {
+      fail(error);
+    }
+  });
+
+configGatewayCommand
+  .command('add-repo')
+  .description('List a repo whose app the gateway serves at /p/<appId> (env.gateway.appRepos[])')
+  .argument('<repo>', 'Repo root relative to the workspace root')
+  .action(async (repo) => {
+    try {
+      await configCommands.setGatewayRepo('add-repo', repo);
+    } catch (error) {
+      fail(error);
+    }
+  });
+
+configGatewayCommand
+  .command('remove-repo')
+  .description('Remove a listed repo from env.gateway.appRepos[]')
+  .argument('<repo>', 'Repo root relative to the workspace root, as listed')
+  .action(async (repo) => {
+    try {
+      await configCommands.setGatewayRepo('remove-repo', repo);
+    } catch (error) {
+      fail(error);
+    }
+  });
+
 configCommand
   .command('set-dev-certs')
   .description('Point local dev servers at your own TLS cert pair (env.devCerts) — the gateway AND every app behind it')
