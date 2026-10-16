@@ -73,15 +73,18 @@ lists them under `env.gateway`, with paths relative to its own root:
 "gateway": { "port": 5599, "shell": "../platform-shell", "appRepos": ["../my-app", "../other-app"] }
 ```
 
-| Key | Meaning |
-|---|---|
-| `env.gateway.shell` | the repo whose app the gateway serves at `/` |
-| `env.gateway.appRepos[]` | repos whose apps the gateway serves at `/p/<appId>` |
+| Key | Meaning | Verb |
+|---|---|---|
+| `env.gateway.shell` | the repo whose app the gateway serves at `/` | `descix config gateway set-shell <repo\|none>` |
+| `env.gateway.appRepos[]` | repos whose apps the gateway serves at `/p/<appId>` | `descix config gateway add-repo <repo>`, `descix config gateway remove-repo <repo>` |
 
-Each listed repo holds its OWN v3 workspace (`descix app init` in that repo), and that file is the
-sole authority on its app's id, site and microservice — the gateway workspace never restates them.
-An absolute path, a listed repo with no workspace, or one appId listed twice fails loud. No verb
-writes `env.gateway.shell` or `env.gateway.appRepos`.
+Run the verbs from the gateway workspace's root; `<repo>` is relative to that root. Each listed repo
+holds its OWN v3 workspace (`descix app init` in that repo), and that file is the sole authority on
+its app's id, site and microservice — the gateway workspace never restates them. The verbs refuse,
+writing nothing: a run in a single-app workspace (one that holds `env.app`), an absolute path, a
+repo with no `.descix/workspace.json` or no `env.app`, a repo already listed (or already the
+shell), one appId listed twice, and `remove-repo` of a repo that is not listed. `descix serve`
+applies the same checks when it reads the file.
 
 ### Refused shapes
 

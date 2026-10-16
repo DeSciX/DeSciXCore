@@ -308,3 +308,21 @@ export async function setSiteUrl(url) {
     'App Shell URL set — `descix serve` will proxy / here.',
   );
 }
+
+/**
+ * `descix config gateway set-shell | add-repo | remove-repo` — the CLI face of the one writer,
+ * WorkspaceConfig.setGatewayRepo(). A refusal propagates to the bin's fail(), which prints it once.
+ *
+ * @param {'set-shell'|'add-repo'|'remove-repo'} op
+ * @param {string|null} repo
+ */
+export async function setGatewayRepo(op, repo) {
+  const workspaceConfig = await WorkspaceConfig.load();
+  const configPath = await workspaceConfig.setGatewayRepo(op, repo);
+  const gateway = workspaceConfig.env?.gateway || {};
+  console.log(chalk.green(`\n✅ Gateway ${op}: ${repo === null ? '(shell removed)' : repo}\n`));
+  console.log(chalk.white(`   env.gateway.shell:    ${gateway.shell ?? '(none)'}`));
+  console.log(chalk.white(`   env.gateway.appRepos: ${gateway.appRepos?.length ? gateway.appRepos.join(', ') : '(none)'}`));
+  console.log(chalk.gray(`   Saved to: ${configPath}\n`));
+  return configPath;
+}
