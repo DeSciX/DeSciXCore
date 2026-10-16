@@ -247,6 +247,7 @@ exact `openssl` command that mints a correct one.
 |---|---|
 | `env.apiUrl` | `descix config init --env dev\|demo\|prod`, or `descix config set-env <custom-name> --url <url>` (`--url` is refused on a known name) |
 | `env.gateway.port` | `descix config set-gateway-port <n\|none>` |
+| `env.gateway.shell` / `env.gateway.appRepos[]` (gateway workspaces only) | `descix config gateway set-shell <repo\|none>` / `add-repo <repo>` / `remove-repo <repo>` |
 | `env.devCerts` | `descix config set-dev-certs --dir\|--cert\|--key\|--clear` |
 | `env.powchUrl` | `descix config set-powch-url <url\|none>` |
 | `env.siteUrl` | `descix config set-site-url <url\|none>` |

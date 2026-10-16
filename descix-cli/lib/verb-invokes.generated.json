@@ -93,6 +93,9 @@
   "community rename": [
     "rename_community"
   ],
+  "config gateway add-repo": [],
+  "config gateway remove-repo": [],
+  "config gateway set-shell": [],
   "config init": [],
   "config set-dev-certs": [],
   "config set-env": [],

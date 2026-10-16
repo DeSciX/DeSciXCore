@@ -93,6 +93,8 @@ The `workspace.json` file is the **single source of truth** for local routing an
 |---|---|
 | `env.apiUrl` | `descix config init --env dev\|demo\|prod`, or `descix config set-env <custom-name> --url <url>` (`--url` is refused on a known name) |
 | `env.gateway.port` | `descix config set-gateway-port <n\|none>` |
+| `env.gateway.shell` | `descix config gateway set-shell <repo\|none>` (gateway workspaces only) |
+| `env.gateway.appRepos[]` | `descix config gateway add-repo <repo>` / `remove-repo <repo>` (gateway workspaces only) |
 | `env.devCerts` | `descix config set-dev-certs --dir\|--cert\|--key\|--clear` |
 | `env.powchUrl` | `descix config set-powch-url <url\|none>` |
 | `env.siteUrl` | `descix config set-site-url <url\|none>` |

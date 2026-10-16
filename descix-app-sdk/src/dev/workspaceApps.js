@@ -35,7 +35,11 @@ import { invokedBin } from './invokedBin.js';
 function readWorkspaceFile(dir) {
   const wsPath = workspaceFilePath(dir);
   if (!fs.existsSync(wsPath)) return null;
-  return JSON.parse(fs.readFileSync(wsPath, 'utf8'));
+  try {
+    return JSON.parse(fs.readFileSync(wsPath, 'utf8'));
+  } catch (err) {
+    throw new Error(`[workspaceApps] ${wsPath} could not be read as JSON: ${err.message}`);
+  }
 }
 
 /**
@@ -99,7 +103,23 @@ export function resolveWorkspaceApps(workspaceRoot) {
   if (!ws) {
     throw new Error(`[workspaceApps] No .descix/workspace.json found at ${root}`);
   }
-  const env = ws.env || {};
+  return resolveWorkspaceAppsFrom(root, ws);
+}
+
+/**
+ * The same resolution over a workspace config held IN MEMORY rather than read from disk. This is
+ * what a WRITER of env.gateway validates its candidate with (the CLI's `descix config gateway`
+ * verbs): every rule a listed repo must satisfy — relative path, its own workspace.json, an
+ * env.app, a valid site.static, no appId listed twice — is applied by this one function, so the
+ * write is refused by exactly the rules the gateway will later read it with.
+ *
+ * @param {string} workspaceRoot - the root the config's relative paths resolve against
+ * @param {Object} ws - the parsed (or candidate) workspace config
+ * @returns {{ shellApp: WorkspaceAppEntry|null, apps: WorkspaceAppEntry[] }}
+ */
+export function resolveWorkspaceAppsFrom(workspaceRoot, ws) {
+  const root = path.resolve(workspaceRoot);
+  const env = ws?.env || {};
   const apps = [];
 
   if (env.app?.appId) {

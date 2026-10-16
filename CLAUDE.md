@@ -74,8 +74,9 @@ After `descix login` / bootstrap, all testing must use `node DeSciX_Core/descix-
 - **`getSitePath(appId)`** / **`getMicroservicePath(appId)`** — convenience wrappers returning `absolutePath/site` and `absolutePath/microservice` respectively.
 - **`setEnvironment(envName)`** — canonical way to persist environment to workspace.json.
 - **`setEnvKey(dottedKey, value)`** — workspace-level env keys (`gateway.port`, `devCerts.*`, `powchUrl`, `siteUrl`); each has a `descix config set-*` verb.
+- **`setGatewayRepo(op, repo)`** — the one writer of `env.gateway.shell` / `env.gateway.appRepos[]` (`descix config gateway set-shell|add-repo|remove-repo`). Refused in a workspace that holds `env.app`; validates the candidate repo set with app-sdk's `resolveWorkspaceAppsFrom` (the gateway's own reader) before saving.
 - **`workspaceConfig.env`** is read-only — mutate through the setters (`descix app set-site` / `set-port`, explicit only, no auto-allocation); never hand-edit workspace.json.
-- The app-set owner for multi-repo dev is `@descix/app-sdk`'s `resolveWorkspaceApps(workspaceRoot)` (`src/dev/workspaceApps.js`) — gateway and watchers consume it, never a second derivation.
+- The app-set owner for multi-repo dev is `@descix/app-sdk`'s `resolveWorkspaceApps(workspaceRoot)` / `resolveWorkspaceAppsFrom(workspaceRoot, config)` (`src/dev/workspaceApps.js`) — gateway, watchers and the gateway writer consume it, never a second derivation.
 
 ### KB Mode — ONE sync surface
 - `descix kb corpus sync` is the ONLY KB sync surface: corpus manifest → chunks → Pinecone.
