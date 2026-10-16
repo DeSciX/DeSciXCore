@@ -50,7 +50,7 @@ export async function extract({ env, cliPaths } = {}) {
       code: BRIEFER_ERROR_CODES.NOT_IMPLEMENTED,
       section: `§${SECTION.number} ${SECTION.heading}`,
       source: 'extractor argument',
-      expected: 'env (dev|demo|prod) provided by caller',
+      expected: 'env (dev|prod) provided by caller',
       recovery: 'Pass {env} from the briefer entry point.'
     });
   }

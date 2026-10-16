@@ -10,7 +10,8 @@
  *         provision-platform-lb.js:120 makes routing.js HARD-FAIL with a clear
  *         error.
  *   AC-5: Tests cover at least the routing and identifiers extractors.
- *   AC-3 partial: routing.js --env=dev is rejected with a clear message.
+ *   AC-3: routing.js runs on --env=dev (a deployed env) and names the dev apex from the
+ *         envOrigins owner; the briefer rejects --env=demo by name.
  *
  * Run: `node --test tests/briefer-extractors.test.js` from descix-cli/.
  */
@@ -38,7 +39,7 @@ const cliPaths = {
 
 test('identifiers.extract({env, cliPaths}) returns code-grounded markdown + non-null SHAs', async () => {
   const mod = await import('../scripts/briefer/sources/identifiers.js');
-  const result = await mod.extract({ env: 'demo', cliPaths });
+  const result = await mod.extract({ env: 'dev', cliPaths });
   assert.ok(result.markdown.length > 500, 'markdown should be substantial');
   // The host pattern from provision-platform-lb.js:120 must appear verbatim
   // (or close to it) in the rendered markdown.
@@ -62,7 +63,7 @@ test('identifiers.extract HARD-FAILS with BRIEFER-SRC-NOT-FOUND if the source mo
   // Point cliPaths at a non-existent root.
   const badPaths = { ...cliPaths, repoRoot: '/nonexistent-briefer-test-root' };
   await assert.rejects(
-    () => mod.extract({ env: 'demo', cliPaths: badPaths }),
+    () => mod.extract({ env: 'dev', cliPaths: badPaths }),
     (err) => err.code === 'BRIEFER-SRC-NOT-FOUND' && /provision-platform-lb\.js/.test(err.source || err.message)
   );
 });
@@ -95,7 +96,7 @@ test('identifiers.extract HARD-FAILS with PARSE_FAIL if the host construct moves
 
   const mod = await import('../scripts/briefer/sources/identifiers.js');
   await assert.rejects(
-    () => mod.extract({ env: 'demo', cliPaths: { ...cliPaths, repoRoot: tmp } }),
+    () => mod.extract({ env: 'dev', cliPaths: { ...cliPaths, repoRoot: tmp } }),
     (err) => err.code === 'BRIEFER-PARSE-FAIL' &&
              /host pattern/.test(err.source || err.message)
   );
@@ -105,9 +106,9 @@ test('identifiers.extract HARD-FAILS with PARSE_FAIL if the host construct moves
 // §3 routing.js
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('routing.extract({env=demo}) returns code-grounded markdown with verbatim pathRules', async () => {
+test('routing.extract({env=dev}) returns code-grounded markdown with verbatim pathRules', async () => {
   const mod = await import('../scripts/briefer/sources/routing.js');
-  const result = await mod.extract({ env: 'demo', cliPaths });
+  const result = await mod.extract({ env: 'dev', cliPaths });
   assert.ok(result.markdown.length > 500);
   // The verbatim pathRules block must appear.
   assert.match(result.markdown, /Broker-first mesh/);
@@ -120,13 +121,36 @@ test('routing.extract({env=demo}) returns code-grounded markdown with verbatim p
   }
 });
 
-test('routing.extract HARD-REJECTS --env=dev (per scope §2.1 — DEV has no LB URL map)', async () => {
-  const mod = await import('../scripts/briefer/sources/routing.js');
-  await assert.rejects(
-    () => mod.extract({ env: 'dev', cliPaths }),
-    (err) => err.code === 'BRIEFER-PARSE-FAIL' &&
-             /DEV has no LB URL map/.test(err.recovery || err.message)
-  );
+test('routing.extract({env=dev}) probes the live URL map and names the dev apex (no dev refusal)', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'briefer-routing-dev-stub-'));
+  const payload = JSON.stringify({ fingerprint: 'DevFp=', hostRules: [{}, {}], pathMatchers: [{}] }).replace(/'/g, "'\\''");
+  await fs.writeFile(path.join(dir, 'gcloud'), `#!/bin/sh\nprintf '%s' '${payload}'\n`, { mode: 0o755 });
+  const orig = process.env.PATH;
+  process.env.PATH = `${dir}:${orig}`;
+  try {
+    const mod = await import('../scripts/briefer/sources/routing.js?devlive=1');
+    const result = await mod.extract({ env: 'dev', cliPaths });
+    assert.match(result.markdown, /Live LB state/);
+    assert.match(result.markdown, /`DevFp=`/);
+    assert.match(result.markdown, /env=`dev`/);
+    assert.match(result.markdown, /`dev\.descix\.net`/, 'dev apex host from envOrigins');
+    assert.doesNotMatch(result.markdown, /demo/i, 'no DEMO text survives in §3');
+    assert.ok(result.citations.some(c => c.source === 'gcloud' && c.env === 'dev'));
+  } finally {
+    process.env.PATH = orig;
+  }
+});
+
+test('the briefer rejects --env=demo by name (the DEMO environment no longer exists)', async () => {
+  const { execFile } = await import('child_process');
+  const { promisify } = await import('util');
+  const run = path.resolve(__dirname, '..', 'scripts', 'briefer', 'run.mjs');
+  const err = await promisify(execFile)('node', [run, '--check', '--env=demo'], { cwd: os.tmpdir() })
+    .then(() => null, e => e);
+  assert.ok(err, '--env=demo must exit non-zero');
+  assert.equal(err.code, 1);
+  assert.match(err.stderr, /--env=demo/);
+  assert.match(err.stderr, /dev, prod/);
 });
 
 test('routing.extract HARD-FAILS if ensureCoreNeg is missing from provision-platform-lb.js (AC-4)', async () => {
@@ -143,7 +167,7 @@ test('routing.extract HARD-FAILS if ensureCoreNeg is missing from provision-plat
 
   const mod = await import('../scripts/briefer/sources/routing.js');
   await assert.rejects(
-    () => mod.extract({ env: 'demo', cliPaths: { ...cliPaths, repoRoot: tmp } }),
+    () => mod.extract({ env: 'dev', cliPaths: { ...cliPaths, repoRoot: tmp } }),
     (err) => err.code === 'BRIEFER-SRC-NOT-FOUND' &&
              /ensureCoreNeg/.test(err.source || err.expected || err.message)
   );
@@ -155,8 +179,8 @@ test('routing.extract HARD-FAILS if ensureCoreNeg is missing from provision-plat
 
 test('citation SHAs are deterministic for unchanged source', async () => {
   const mod = await import('../scripts/briefer/sources/identifiers.js');
-  const r1 = await mod.extract({ env: 'demo', cliPaths });
-  const r2 = await mod.extract({ env: 'demo', cliPaths });
+  const r1 = await mod.extract({ env: 'dev', cliPaths });
+  const r2 = await mod.extract({ env: 'dev', cliPaths });
   const shas1 = r1.citations.map(c => `${c.file}@${c.lines}@${c.sha}`).sort();
   const shas2 = r2.citations.map(c => `${c.file}@${c.lines}@${c.sha}`).sort();
   assert.deepEqual(shas1, shas2, 'two regens against unchanged source must produce identical SHAs');
