@@ -132,3 +132,45 @@ test('an absolute appRepos path refuses loudly (portability)', async (t) => {
   await writeWs(gw, { environment: 'DEV', apiUrl: 'https://dev.descix.net', gateway: { port: 5173, appRepos: ['/abs/path'] } });
   assert.throws(() => resolveWorkspaceApps(gw), /absolute/i);
 });
+
+// ── site.static read-side guard: a stored absolute value (an old file, a hand edit) was silently
+// re-rooted under the app dir by the gateway's path.join and failed only at request time with
+// "Not found: <url>". The one reader refuses it, naming the file, the key and the fix verb.
+
+test('a stored absolute site.static (own app) refuses loudly, naming the file, key and fix', async (t) => {
+  const root = await tmp(t, 'wsapps-abs-static-');
+  await writeWs(root, { app: { appId: 'abs-app', site: { static: '/abs/site' } } });
+  assert.throws(
+    () => resolveWorkspaceApps(root),
+    (err) => {
+      assert.ok(err.message.includes(path.join(root, '.descix', 'workspace.json')), err.message);
+      assert.match(err.message, /env\.app\.site\.static takes a path relative to the workspace root/);
+      assert.match(err.message, /got "\/abs\/site"/);
+      assert.match(err.message, /app set-site -a abs-app --static <relative path>/);
+      return true;
+    }
+  );
+});
+
+test('a stored absolute site.static in a gateway-listed repo refuses loudly, naming THAT repo\'s file', async (t) => {
+  const gw = await tmp(t, 'wsapps-gw-abs-');
+  const repo = path.join(gw, 'apprepo');
+  await writeWs(repo, { app: { appId: 'repo-app', site: { static: '/abs/site' } } });
+  await writeWs(gw, { gateway: { appRepos: ['apprepo'] } });
+  assert.throws(
+    () => resolveWorkspaceApps(gw),
+    (err) => {
+      assert.ok(err.message.includes(path.join(repo, '.descix', 'workspace.json')), err.message);
+      assert.match(err.message, /env\.app\.site\.static/);
+      return true;
+    }
+  );
+});
+
+test('relative site.static values ("site", ".", "../scratch") are read unchanged (positive control)', async (t) => {
+  for (const rel of ['site', '.', '../scratch']) {
+    const root = await tmp(t, 'wsapps-rel-static-');
+    await writeWs(root, { app: { appId: 'rel-app', site: { static: rel } } });
+    assert.equal(resolveWorkspaceApps(root).apps[0].site.static, rel);
+  }
+});

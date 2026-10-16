@@ -1482,7 +1482,7 @@ appCommand
 appCommand
   .command('set-port')
   .description('Set the microservice port for this workspace\'s app (writes env.app.microservice.port). Pass "n" to remove.')
-  .requiredOption('-a, --app <app_id>', 'App ID (must be mapped in workspace.json)')
+  .requiredOption('-a, --app <app_id>', 'App ID (must be this workspace\'s app, env.app)')
   .requiredOption('-p, --port <port>', 'Microservice port number (1-65535), or "n" to remove')
   .action(async (options) => {
     try {
@@ -1503,7 +1503,7 @@ appCommand
       }
 
       // setMicroservicePort mutates the live env entry and saves — and hard-fails (canonical
-      // "not mapped in workspace.json" error) for an unmapped app, surfaced in the catch below.
+      // "is not this workspace's app" error) for any other app id, surfaced in the catch below.
       await workspaceConfig.setMicroservicePort(appId, portNum);
 
       console.log(chalk.green(`\n✓ Microservice port set for ${appId}`));
@@ -1520,9 +1520,9 @@ appCommand
 //
 // Canonical write path for an app's site.{} slot in workspace.json. TWO MODES, one active
 // per write:
-//   static mode (--static):      site.static — the relative dir (under the app's localPath;
-//                                "." = the localPath itself) the gateway's staticSitePlugin
-//                                serves at /p/{appId}/.
+//   static mode (--static):      site.static — the dir relative to the workspace root (the
+//                                repo root; "." = the root itself) the gateway's
+//                                staticSitePlugin serves at /p/{appId}/.
 //   dev-server mode (--port):    site.port [+ site.protocol] — the local dev server the
 //                                gateway proxies /p/{appId} to (vite-style hotserving).
 // Setting one mode CLEARS the other's fields; passing BOTH flags in one invocation is the
@@ -1533,8 +1533,8 @@ appCommand
 appCommand
   .command('set-site')
   .description("Set this workspace app's site config (env.app.site). One active mode per write: --static <dir> (built site served at /p/<app>/) or --port <n> [--protocol http|https] (dev server proxied at /p/<app>); setting one clears the other. Pass both flags together to keep both — the gateway then serves the dev server (site.port wins). --unset clears site.{} entirely.")
-  .requiredOption('-a, --app <app_id>', 'App ID (must be mapped in workspace.json)')
-  .option('--static <path>', 'Static mode: relative dir under the app localPath (e.g. "site"; "." = the localPath itself). Alone, it clears site.port and site.protocol (one active mode per write).')
+  .requiredOption('-a, --app <app_id>', 'App ID (must be this workspace\'s app, env.app)')
+  .option('--static <path>', 'Static mode: a dir relative to the workspace root (the repo root), e.g. "site" or "../scratch"; "." = the root itself. An absolute path is refused. Alone, it clears site.port and site.protocol (one active mode per write).')
   .option('--port <port>', 'Dev-server mode: proxy /p/<app> to your local dev server on this port (1-65535). Alone, it clears site.static. With --static in the same call, both are kept and the gateway serves the dev server.')
   .option('--protocol <scheme>', 'Dev-server upstream scheme: "http" or "https" (default https when unset). Dev-server mode only — requires site.port. A wrong scheme fails loud at the gateway (502); there is no auto-detection.')
   .option('--unset', 'Remove site.static, site.port and site.protocol for the app, clearing the site.{} slot')
@@ -1558,13 +1558,9 @@ appCommand
 
       const fields = {};
 
-      if (options.static !== undefined) {
-        if (typeof options.static !== 'string' || options.static.trim() === '') {
-          console.error(chalk.red('\n❌ --static requires a non-empty relative path (e.g. "site" or ".").\n'));
-          process.exit(1);
-        }
-        fields.static = options.static;
-      }
+      // The --static path rule has ONE owner (assertSiteStatic, applied in setStaticSite);
+      // a refusal surfaces through the catch below.
+      if (options.static !== undefined) fields.static = options.static;
 
       if (options.port !== undefined) {
         const portNum = parseInt(options.port, 10);
@@ -1584,7 +1580,7 @@ appCommand
       }
 
       // setStaticSite applies ONE-ACTIVE-MODE-PER-WRITE and saves — it hard-fails (canonical
-      // "not mapped in workspace.json" error, or protocol-without-port) in the catch below.
+      // "is not this workspace's app" error, or protocol-without-port) in the catch below.
       await workspaceConfig.setStaticSite(appId, fields);
 
       console.log(chalk.green(`\n✓ site config set for ${appId}`));
@@ -1622,7 +1618,7 @@ appCommand
 appCommand
   .command('open')
   .description('Resolve (and optionally open) an app\'s local gateway dev URL. Hard-fails if the app has no site config.')
-  .requiredOption('-a, --app <app_id>', 'App ID (must be mapped in workspace.json with a site)')
+  .requiredOption('-a, --app <app_id>', 'App ID (an app this workspace serves, with a site)')
   .option('--open', 'Open the resolved URL in the default browser')
   .action(async (options) => {
     try {

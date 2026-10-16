@@ -28,11 +28,30 @@
 
 import fs from 'fs';
 import path from 'path';
+import { workspaceFilePath } from './workspaceFile.js';
+import { assertSiteStatic } from './siteStatic.js';
+import { invokedBin } from './invokedBin.js';
 
 function readWorkspaceFile(dir) {
-  const wsPath = path.join(dir, '.descix', 'workspace.json');
+  const wsPath = workspaceFilePath(dir);
   if (!fs.existsSync(wsPath)) return null;
   return JSON.parse(fs.readFileSync(wsPath, 'utf8'));
+}
+
+/**
+ * The app's site config as read from `dir`'s workspace.json, with site.static held to the one
+ * rule (siteStatic.js): a stored value that is not a plain relative path fails loud here,
+ * naming the file and key, instead of being re-rooted by the gateway's path.join.
+ */
+function readSite(dir, app) {
+  const site = app.site || {};
+  if (site.static !== undefined && site.static !== null) {
+    assertSiteStatic(site.static, {
+      subject: `${workspaceFilePath(dir)}: env.app.site.static`,
+      remedy: `Fix it with: ${invokedBin()} app set-site -a ${app.appId} --static <relative path>`,
+    });
+  }
+  return site;
 }
 
 function entryFromRepo(gatewayRoot, rel, role) {
@@ -64,7 +83,7 @@ function entryFromRepo(gatewayRoot, rel, role) {
     appId: app.appId,
     communityId: app.communityId || null,
     dir,
-    site: app.site || {},
+    site: readSite(dir, app),
     microservice: app.microservice || {},
     role,
   };
@@ -88,7 +107,7 @@ export function resolveWorkspaceApps(workspaceRoot) {
       appId: env.app.appId,
       communityId: env.app.communityId || null,
       dir: root,
-      site: env.app.site || {},
+      site: readSite(root, env.app),
       microservice: env.app.microservice || {},
       role: 'self',
     });
