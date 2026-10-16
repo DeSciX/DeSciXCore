@@ -1,5 +1,6 @@
 {
   "name": "descix-core",
+  "license": "SEE LICENSE IN LICENSE.md",
   "version": "1.0.0",
   "private": true,
   "description": "DeSciX Core packages - SDK, CLI, cloud utilities",

@@ -1,11 +1,4 @@
-<!-- GENERATED — DO NOT EDIT BY HAND.
-     Upstream source of truth: Unkamon repo DeSciX/DSCL/DeSciX_Community_License_v1.tex
-     Regenerate with:
-       pandoc -f latex -t markdown_strict --wrap=none <that .tex> -o LICENSE.md
-     (markdown_strict, not markdown: it emits no backslash-escaped quotes and no
-      {#anchor} attributes, while keeping the section headings the clause
-      cross-references rely on. Verified 0/0/0 at render time.)
-     Per-package copies are produced by scripts/sync-licenses.mjs (run --check in CI). -->
+<!-- DeSciX Community License and Membership Agreement (DCMA), version 1. Rendered from its canonical source; do not edit by hand. -->
 
 # Preamble – The DeSciX Virtual University & App Store: Internal Collaboration, External Value Return
 
