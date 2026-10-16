@@ -8,11 +8,8 @@
  *   - serviceManifestManager.js — proxyToExternalService dispatch
  *   - apiFront.js — invoke() dispatch (internal + external command split)
  *   - app-sdk dev/gateway.js + createViteProxyConfig.js — local dev mirror
- *   - Live `gcloud compute url-maps describe descix-discord-app-lb`
- *     when gcloud is available and --env=demo|prod
- *
- * --env=dev is HARD-REJECTED in this extractor (per scope §2.1) — DEV has no
- * LB URL map, so routing facts from gcloud cannot be verified.
+ *   - Live `gcloud compute url-maps describe descix-discord-app-lb` (one URL map
+ *     serves every env; required on every regen)
  */
 import {
   readSourceFile,
@@ -22,6 +19,7 @@ import {
   probeGcloudJson
 } from '../util/source-reader.js';
 import { BrieferExtractorError, BRIEFER_ERROR_CODES } from '../errors.js';
+import { apexHost } from '../envs.js';
 
 export const SECTION = {
   number: 3,
@@ -47,22 +45,8 @@ export async function extract({ env, cliPaths } = {}) {
       code: BRIEFER_ERROR_CODES.NOT_IMPLEMENTED,
       section: `§${SECTION.number} ${SECTION.heading}`,
       source: 'extractor argument',
-      expected: 'env (demo|prod) provided by caller',
+      expected: 'env (dev|prod) provided by caller',
       recovery: 'Pass {env} from the briefer entry point.'
-    });
-  }
-  // M2 hard-reject --env=dev for the routing extractor specifically.
-  // Per scope §2.1: DEV does not have an LB URL map, querying it would
-  // produce a malformed briefer. Other extractors that don't need gcloud
-  // may still accept dev; this rejection lives in routing.js.
-  if (env === 'dev') {
-    throw new BrieferExtractorError({
-      code: BRIEFER_ERROR_CODES.PARSE_FAIL,
-      section: `§${SECTION.number} ${SECTION.heading}`,
-      source: 'env argument',
-      expected: 'demo or prod (the envs with a live LB URL map)',
-      recovery: 'DEV has no LB URL map; use --env=demo or --env=prod for routing extraction. Other sections may run with --env=dev independently.',
-      detail: `Got --env=dev. DEV has no descix-discord-app-lb URL map to verify routing against.`
     });
   }
   if (!cliPaths) {
@@ -167,25 +151,31 @@ export async function extract({ env, cliPaths } = {}) {
     section: `§${SECTION.number} ${SECTION.heading}`
   });
 
-  // ── M3: live gcloud probe (HARD-FAIL on demo/prod, skipped on dev) ──
-  // routing.js already hard-rejects --env=dev above (no LB URL map in DEV),
-  // so this probe ALWAYS runs for demo/prod and MUST succeed. probeGcloudJson
-  // throws BRIEFER-GCLOUD-FAIL with an actionable recovery message otherwise.
-  let gcloudBlock = '';
-  let gcloudCitation = null;
+  // ── M3: live gcloud probe — required on every env; probeGcloudJson HARD-FAILS otherwise ──
   const lbProbe = await probeGcloudJson({
     command: ['compute', 'url-maps', 'describe', 'descix-discord-app-lb', '--format=json'],
     env,
     section: `§${SECTION.number} ${SECTION.heading}`,
     anchor: 'lb-url-map',
     expected: 'JSON describing the descix-discord-app-lb URL map',
-    recovery: `Run 'gcloud auth login' and 'gcloud config set project descix'. If the URL map does not exist for env=${env}, that is a real platform-state issue — investigate before regenerating the briefer.`
+    project: (json) => ({
+      hostRuleCount: (json.hostRules || []).length,
+      pathMatcherCount: (json.pathMatchers || []).length,
+      fingerprint: json.fingerprint
+    })
   });
-  // lbProbe is non-null for demo/prod (dev is rejected upstream).
-  const hostRuleCount = (lbProbe.json.hostRules || []).length;
-  const pathMatcherCount = (lbProbe.json.pathMatchers || []).length;
-  const fingerprint = lbProbe.json.fingerprint || 'unknown';
-  gcloudBlock = [
+  const { hostRuleCount, pathMatcherCount, fingerprint } = lbProbe.facts;
+  if (!fingerprint) {
+    throw new BrieferExtractorError({
+      code: BRIEFER_ERROR_CODES.GCLOUD_FAIL,
+      section: `§${SECTION.number} ${SECTION.heading}`,
+      source: 'gcloud',
+      expected: 'a fingerprint on the descix-discord-app-lb URL map',
+      recovery: 'Inspect `gcloud compute url-maps describe descix-discord-app-lb --format=json`; every URL map carries a fingerprint.',
+      detail: `env: ${env}`
+    });
+  }
+  const gcloudBlock = [
     '',
     '**Live LB state** (live `gcloud compute url-maps describe descix-discord-app-lb` at regen time):',
     `- Host rules: \`${hostRuleCount}\``,
@@ -194,7 +184,7 @@ export async function extract({ env, cliPaths } = {}) {
     `- Probed: \`${lbProbe.citation.probe}\` (env=\`${env}\`)`,
     ''
   ].join('\n');
-  gcloudCitation = lbProbe.citation;
+  const gcloudCitation = lbProbe.citation;
 
   const singletonBlockEnd = findFunctionEnd(lb.lines, singletonMatcherMatch.lineNumber);
   const singletonBlock = sliceRange(lb.lines, singletonMatcherMatch.lineNumber, singletonBlockEnd);
@@ -206,7 +196,7 @@ export async function extract({ env, cliPaths } = {}) {
     `Platform LB (\`descix-discord-app-lb\`) is provisioned at platform standup by \`deploy-backend-env.sh\` → \`provision-platform-lb.js\`; the per-app lane \`deploy-service-env.sh\` provisions no LB state (hosted apps are routed by the Cloudflare edge Worker by app id):`,
     ``,
     `- **daita** broker NEG: \`apifront-http-{env}-neg\` → \`{env}-api-backend\` → Cloud Function \`apiFront-http-{env}\` — \`${LB_FILE}:${ensureCoreNegMatch.lineNumber}\``,
-    `- Apex singleton (\`daita\`): \`demo.descix.net\` / \`descix.net\` → GCS \`/{env}/daita/site/\` + \`/apifront\`, \`/mcp\`, \`/api\` → daita broker — \`${LB_FILE}:${singletonMatcherMatch.lineNumber}\``,
+    `- Apex singleton (\`daita\`): \`${apexHost(env)}\` → GCS \`/{env}/daita/site/\` + \`/apifront\`, \`/mcp\`, \`/api\` → daita broker — \`${LB_FILE}:${singletonMatcherMatch.lineNumber}\``,
     `- **powch** core platform NEG: \`powch-{env}-neg\` → \`powch-{env}-backend\` → Cloud Run \`powch-{env}\` — \`${LB_FILE} (ensureCloudRunAppNeg)\``,
     `- Platform peer host (\`powch.{env}.descix.net\`): GCS site + \`/apifront\`, \`/mcp\` → daita broker; \`/api/*\` → powch NEG`,
     ``,
@@ -254,25 +244,4 @@ function findFunctionEnd(lines, startLine) {
     }
   }
   return Math.min(lines.length, startLine + 40);
-}
-
-function findArrayEnd(lines, startLine) {
-  const MAX = Math.min(lines.length, startLine + 100);
-  let depth = 0;
-  for (let i = startLine - 1; i < MAX; i++) {
-    const line = lines[i];
-    for (const ch of line) {
-      if (ch === '[') depth++;
-      else if (ch === ']') {
-        depth--;
-        if (depth === 0) return i + 1;
-      }
-    }
-  }
-  return Math.min(lines.length, startLine + 50);
-}
-
-function shortenGcloudErr(msg) {
-  if (!msg) return 'unknown error';
-  return msg.split('\n')[0].slice(0, 120);
 }

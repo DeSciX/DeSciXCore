@@ -54,7 +54,7 @@ export async function extract({ env, cliPaths } = {}) {
       code: BRIEFER_ERROR_CODES.NOT_IMPLEMENTED,
       section: `§${SECTION.number} ${SECTION.heading}`,
       source: 'extractor argument',
-      expected: 'env (dev|demo|prod) provided by caller',
+      expected: 'env (dev|prod) provided by caller',
       recovery: 'Pass {env} from the briefer entry point.'
     });
   }
@@ -164,10 +164,10 @@ export async function extract({ env, cliPaths } = {}) {
 
   const markdown = [
     `- **Apps are the central unit. Everything is an agentic app.** Communities are themselves agentic apps that share IP with other apps in the same community. The platform is fundamentally an agentic-app store, not a generic SaaS platform with apps bolted on. — \`${AGENTIC_RECORD}\` (CEO broadcast \`AGENTIC-APP-INHERITANCE-INVARIANT-2026-05-26\`, sha=\`${beastSha}\`)`,
-    `- \`app_id\` is a globally unique slug (e.g., \`daita\`, \`powch\`, \`egpt\`). Same value across DEV, DEMO, PROD. Never contains the environment.`,
+    `- \`app_id\` is a globally unique slug (e.g., \`daita\`, \`powch\`, \`egpt\`). Same value across DEV and PROD. Never contains the environment.`,
     `- \`community_id\` is operational metadata stored INSIDE \`Products/{app_id}\`. Never parsed from URL. Never trusted from client.`,
     `- \`product_id === app_id\` — the same opaque slug. Server re-derives \`community_id\` from \`Products/{app_id}\` via \`hydrateCommunityIdFromProducts()\`. — \`${HYDRATE_FILE}:${hydrateMatch.lineNumber}\``,
-    `- Domain pattern: \`{app_id}.{env}.descix.net\` for DEV/DEMO; \`{app_id}.descix.net\` for PROD. — \`${MESH_FILE}:${hostMatch.lineNumber}\``,
+    `- Domain pattern: \`{app_id}.{env}.descix.net\` for DEV; \`{app_id}.descix.net\` for PROD. — \`${MESH_FILE}:${hostMatch.lineNumber}\``,
     '  ```js',
     `  ${hostLine}`,
     '  ```',

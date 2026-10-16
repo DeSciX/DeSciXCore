@@ -21,7 +21,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
-import { execFileSync, execFile } from 'child_process';
+import { execFile } from 'child_process';
 import https from 'https';
 import { promisify } from 'util';
 
@@ -224,41 +224,19 @@ async function grepOneFile(absPath, repoRoot, regex, matches, excludePaths) {
   }
 }
 
-/**
- * Optional gcloud probe. Returns null if gcloud is unavailable OR command
- * fails — callers decide whether to hard-fail or render a "skipped" note.
- *
- * Per scope §3 routing extractor: gcloud is BEST-EFFORT for the verification
- * block, MANDATORY only when --env=demo|prod AND scope says hard-fail.
- *
- * Returns: { ok: true, json } | { ok: false, error }
- */
-export function tryGcloudJson(args) {
-  try {
-    const out = execFileSync('gcloud', args, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
-    return { ok: true, json: JSON.parse(out) };
-  } catch (err) {
-    return { ok: false, error: err.message || String(err) };
-  }
-}
-
-
 // ─────────────────────────────────────────────────────────────────────────────
-// M3 — env-aware live-state probes (gcloud + Firestore REST)
+// M3 — live-state probes (gcloud + Firestore REST)
 //
-// These helpers replace the M2 best-effort tryGcloudJson() pattern for sections
-// that NEED live state to be authoritative (§2 environments, §3 routing, §4
+// Sections that NEED live state to be authoritative (§2 environments, §3 routing, §4
 // microservice-deploy, §5 entitlements).
 //
 // Contract per scope §M3 / feedback_no-hardcoded-fallbacks:
-//   - --env=demo|prod → gcloud probe MUST succeed; failure → HARD-FAIL with
-//     code BRIEFER-GCLOUD-FAIL and an actionable remediation message.
-//   - --env=dev       → gcloud probe is SKIPPED (DEV is local; no LB / no
-//     cloud Firestore). Caller emits a "DEV: gcloud probes skipped" stanza.
-//   - Each successful probe yields a citation with source=gcloud and a
-//     sha-of-output-slice so --check detects drift in LIVE STATE, not just
-//     code state. Two-sided drift detection: code OR cloud changes both
-//     trigger.
+//   - Every env is a deployed platform: the probe MUST succeed; failure → HARD-FAIL
+//     with code BRIEFER-GCLOUD-FAIL and an actionable remediation message.
+//   - The caller passes `project(json)`, the facts it renders. The citation SHA is
+//     over those facts, so --check moves when a rendered fact moves (code OR cloud)
+//     and never on response churn the briefer does not render (etag,
+//     earliestVersionTime, updateTime).
 //
 // Spawn pattern: child_process.execFile (NOT exec) for safety — arguments are
 // passed as an array, never shell-interpolated. Timeout 30s; on timeout we
@@ -268,26 +246,34 @@ export function tryGcloudJson(args) {
 const GCLOUD_TIMEOUT_MS = 30_000;
 
 /**
- * Run a gcloud command and return parsed JSON, with env-aware HARD-FAIL
- * semantics.
+ * How an operator gives the probes a credential: an ADC access token handed to gcloud via
+ * CLOUDSDK_AUTH_ACCESS_TOKEN_FILE. The runbook owns the procedure; no login is required.
+ */
+export const CREDENTIAL_RECOVERY =
+  'Mint an ADC token file for gcloud (DeSciX/V2_docs/deployment/dev-deploy-runbook.md §1: ' +
+  '`gcloud auth application-default print-access-token` into a 0600 file, exported as ' +
+  'CLOUDSDK_AUTH_ACCESS_TOKEN_FILE; ADC tokens expire after ~1 h), then re-run.';
+
+/**
+ * Run a gcloud command and return parsed JSON plus the projected facts, HARD-FAILING
+ * on any probe failure.
  *
  * @param {object} args
  * @param {string[]} args.command   gcloud argv (e.g., ['compute','url-maps','describe','foo','--format=json']).
- * @param {string}   args.env       'dev' | 'demo' | 'prod' (REQUIRED — controls failure semantics).
+ * @param {string}   args.env       'dev' | 'prod' (REQUIRED — recorded in the citation).
+ * @param {function} args.project   json → the facts the caller renders (REQUIRED — the citation SHA is over these).
  * @param {string}   args.section   Briefer section label for error messages.
  * @param {string}   args.anchor    Short label embedded in the citation (e.g., 'lb-url-map').
  * @param {string}   [args.expected] Construct shape description on failure.
  * @param {string}   [args.recovery] Operator recovery hint on failure.
  *
- * @returns {Promise<null | {json:any, raw:string, citation:object}>}
- *   - null when env==='dev' (probe intentionally skipped — caller emits stanza).
- *   - { json, raw, citation } on success. citation has shape:
- *       { source:'gcloud', probe:<argv-as-string>, env, anchor, sha, lines }
+ * @returns {Promise<{json:any, facts:any, citation:object}>}
+ *   citation has shape { source:'gcloud', probe:<argv-as-string>, env, anchor, sha, lines }
  *
- * HARD-FAILS with BrieferExtractorError code=GCLOUD_FAIL when env!=='dev' AND
- * the probe fails (auth, empty output, JSON parse fail, timeout).
+ * HARD-FAILS with BrieferExtractorError code=GCLOUD_FAIL when the probe fails
+ * (auth, empty output, JSON parse fail, timeout).
  */
-export async function probeGcloudJson({ command, env, section, anchor, expected, recovery }) {
+export async function probeGcloudJson({ command, env, section, anchor, expected, recovery, project }) {
   if (!Array.isArray(command) || command.length === 0) {
     throw new Error('probeGcloudJson: command must be a non-empty argv array');
   }
@@ -297,9 +283,8 @@ export async function probeGcloudJson({ command, env, section, anchor, expected,
   if (!section || !anchor) {
     throw new Error('probeGcloudJson: section and anchor are required');
   }
-
-  if (env === 'dev') {
-    return null;
+  if (typeof project !== 'function') {
+    throw new Error('probeGcloudJson: project(json) is required — the citation SHA is over the rendered facts, never the raw response');
   }
 
   const probeStr = 'gcloud ' + command.join(' ');
@@ -318,7 +303,7 @@ export async function probeGcloudJson({ command, env, section, anchor, expected,
       section,
       source: 'gcloud',
       expected: expected || `successful response from: ${probeStr}`,
-      recovery: recovery || `Run 'gcloud auth login' or 'gcloud config set project descix', then re-run \`node scripts/briefer/run.mjs --env ${env}\`. If the auth is fine but the resource doesn't exist for env=${env}, that is a real platform-state issue — investigate before regenerating the briefer.`,
+      recovery: recovery || `${CREDENTIAL_RECOVERY} If the credential is fine but the resource does not exist for env=${env}, that is a real platform-state issue — investigate before regenerating the briefer.`,
       detail: `probe: ${probeStr}\n  env: ${env}\n  ${timedOut ? 'timed out after ' + GCLOUD_TIMEOUT_MS + 'ms' : 'failed: ' + (err.stderr || err.message || String(err)).split('\n')[0].slice(0, 240)}`
     });
   }
@@ -348,52 +333,53 @@ export async function probeGcloudJson({ command, env, section, anchor, expected,
     });
   }
 
-  const sha = sha12(raw);
+  return { json, ...projectedCitation({ json, project, source: 'gcloud', probe: probeStr, env, anchor }) };
+}
+
+/**
+ * The facts a probe's caller renders, and the citation over exactly those facts.
+ * 'lines' reuses the code-citation field so extractCitationTrail reads both uniformly.
+ */
+function projectedCitation({ json, project, source, probe, env, anchor }) {
+  const facts = project(json);
+  const canonical = JSON.stringify(facts);
   return {
-    json,
-    raw,
-    citation: {
-      source: 'gcloud',
-      probe: probeStr,
-      env,
-      anchor,
-      sha,
-      // For the citation comment line: 'lines' field convention is reused so
-      // the existing extractCitationTrail regex captures these uniformly.
-      lines: `out:${raw.length}b`
-    }
+    facts,
+    citation: { source, probe, env, anchor, sha: sha12(canonical), lines: `facts:${canonical.length}b` }
   };
 }
 
 /**
  * Probe a Firestore REST endpoint using gcloud-derived auth token, with the
- * same env-aware HARD-FAIL semantics as probeGcloudJson().
+ * same HARD-FAIL semantics and projected-facts citation as probeGcloudJson().
  *
  * Per AC-7 anti-regression: this does NOT import @google-cloud/firestore. It
  * uses the gcloud-CLI-derived access token + a raw HTTPS GET. This is a
  * separate API surface from the Node SDK and is permitted.
  *
  * @param {object} args
- * @param {string} args.dbPath      e.g., 'descix-demo/documents/Products'
+ * @param {string} args.dbPath      e.g., 'descix-dev/documents/Products'
  *                                  (the part after 'projects/descix/databases/').
  * @param {object} [args.query]     query params (e.g., { pageSize: 50, 'mask.fieldPaths': 'app_id' }).
  * @param {string} args.env
  * @param {string} args.section
  * @param {string} args.anchor
+ * @param {function} args.project   json → the facts the caller renders (REQUIRED).
  * @param {string} [args.expected]
  * @param {string} [args.recovery]
  *
- * @returns {Promise<null | {json:any, raw:string, citation:object}>}
+ * @returns {Promise<{json:any, facts:any, citation:object}>}
  */
-export async function probeFirestoreRest({ dbPath, query, env, section, anchor, expected, recovery }) {
+export async function probeFirestoreRest({ dbPath, query, env, section, anchor, expected, recovery, project }) {
   if (!dbPath) throw new Error('probeFirestoreRest: dbPath is required');
   if (!env) throw new Error('probeFirestoreRest: env is required');
   if (!section || !anchor) throw new Error('probeFirestoreRest: section and anchor are required');
-
-  if (env === 'dev') return null;
+  if (typeof project !== 'function') {
+    throw new Error('probeFirestoreRest: project(json) is required — the citation SHA is over the rendered facts, never the raw response');
+  }
 
   // Resolve gcloud access token. This is itself a gcloud probe — re-use the
-  // env-aware HARD-FAIL surface so the same operator-recovery path applies.
+  // HARD-FAIL surface so the same operator-recovery path applies.
   let token;
   try {
     const { stdout } = await execFileP('gcloud', ['auth', 'print-access-token'], {
@@ -407,7 +393,7 @@ export async function probeFirestoreRest({ dbPath, query, env, section, anchor, 
       section,
       source: 'gcloud auth print-access-token',
       expected: 'access token for Firestore REST',
-      recovery: recovery || "Run 'gcloud auth login' and retry.",
+      recovery: recovery || CREDENTIAL_RECOVERY,
       detail: `probe: gcloud auth print-access-token\n  env: ${env}\n  error: ${(err.stderr || err.message || String(err)).split('\n')[0].slice(0, 240)}`
     });
   }
@@ -417,7 +403,7 @@ export async function probeFirestoreRest({ dbPath, query, env, section, anchor, 
       section,
       source: 'gcloud auth print-access-token',
       expected: 'non-empty access token',
-      recovery: recovery || "Run 'gcloud auth login' and retry.",
+      recovery: recovery || CREDENTIAL_RECOVERY,
       detail: `probe: gcloud auth print-access-token returned empty\n  env: ${env}`
     });
   }
@@ -471,32 +457,5 @@ export async function probeFirestoreRest({ dbPath, query, env, section, anchor, 
     });
   }
 
-  const sha = sha12(raw);
-  return {
-    json,
-    raw,
-    citation: {
-      source: 'firestore-rest',
-      probe: probeStr,
-      env,
-      anchor,
-      sha,
-      lines: `out:${raw.length}b`
-    }
-  };
-}
-
-/**
- * Render a gcloud / firestore-rest citation as a hidden HTML comment line for
- * embedding into the stitched briefer markdown. Mirrors makeCitation()'s shape
- * but uses 'source=...' + 'probe=...' instead of 'file=...'.
- *
- * @param {object} c   Citation object from probeGcloudJson / probeFirestoreRest.
- */
-export function renderProbeCitationComment(c) {
-  if (!c) return '';
-  // Probe string can contain spaces and special chars — wrap in single quotes
-  // and escape any embedded single quote with a printable sentinel.
-  const probeEsc = (c.probe || '').replace(/'/g, "\\'");
-  return `<!-- briefer-cite: source=${c.source} env=${c.env} probe='${probeEsc}' sha=${c.sha} anchor=${c.anchor} lines=${c.lines} -->`;
+  return { json, ...projectedCitation({ json, project, source: 'firestore-rest', probe: probeStr, env, anchor }) };
 }
