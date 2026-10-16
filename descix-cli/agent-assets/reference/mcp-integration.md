@@ -303,18 +303,17 @@ User asks question
 When `--scope project` is used:
 
 1. CLI/MCP loads `workspace.json`
-2. Extracts configured communities and apps
-3. Filters `tell_me_how` results to only tools applicable to those apps
+2. Extracts the app this repo holds (`env.app`)
+3. Filters `tell_me_how` results to only tools applicable to that app
 4. Returns focused recommendations
 
 ```javascript
-// workspace.json (v2.1)
+// workspace.json (v3 single-app)
 {
+  "version": "3.0",
   "env": {
-    "apiUrl": "https://dev.descix.net",
-    "products": [
-      { "appId": "daita-agent", "communityId": "daita", "localPath": ".", "kbId": "General" }
-    ]
+    "apiUrl": "https://descix.net",
+    "app": { "appId": "daita-agent", "communityId": "daita", "kbId": "General" }
   }
 }
 
@@ -338,11 +337,11 @@ descix tell-me-how "How do I sync my knowledge base?"
 
 ### 6.2 workspace.json from Hydration
 
-`descix config init --env …` creates `workspace.json`; `descix app init` adds the app's `env.products[]` entry; no verb writes `driveConfig.base_folder_id` — set it in `.descix/workspace.json` when you use `descix drive pull/push`:
+`descix config init --env …` creates `workspace.json`; `descix app init` (from the repo root) writes the app's `env.app`; no verb writes `driveConfig.base_folder_id` — set it in `.descix/workspace.json` when you use `descix drive pull/push`:
 
 ```javascript
 {
-  "env": { "apiUrl": "https://dev.descix.net", "products": [ /* one entry per app */ ] },
+  "env": { "apiUrl": "https://descix.net", "app": { /* THE app this repo holds */ } },
   "driveConfig": {
     "base_folder_id": "..."  // Only used by `descix drive pull/push` — unrelated to tell_me_how scope
   }

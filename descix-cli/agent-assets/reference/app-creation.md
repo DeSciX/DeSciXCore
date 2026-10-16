@@ -12,7 +12,7 @@ This document describes how apps and communities are created in the DeSciX platf
 
 **"One path to an app"**
 
-- **Apps:** `descix app init -a <name> -c <community> -p <dir>` creates the app on the platform (`create_app_for_community`, which composes the id `<community>-<short>` and guarantees the default KB) and registers it in the local workspace in one idempotent step. The PWA creates apps too; both reach the same server command. Entitlement checks run server-side either way.
+- **Apps:** `descix app init -a <name> -c <community>`, run from the app repo's root, creates the app on the platform (`create_app_for_community`, which composes the id `<community>-<short>` and guarantees the default KB) and writes it as the repo's `env.app` in one idempotent step. The PWA creates apps too; both reach the same server command. Entitlement checks run server-side either way.
 - **Communities:** created by platform admins only (`descix community create` is `[ADMIN]` and writes live Polygon). A developer builds inside an existing community.
 - **Development:** the CLI is the tool for the local workspace, content, and syncing to the cloud.
 
@@ -211,18 +211,19 @@ sequenceDiagram
 ## 4. Local Workspace
 
 There is no PWA "workspace builder" hand-off and no hydration step. The local workspace is built by
-CLI verbs, each writing one part of `.descix/workspace.json` (v2.1 — see `workspace-config.md`):
+CLI verbs, each writing one part of `.descix/workspace.json` (v3 single-app — see `workspace-config.md`). Run them
+from the repo root — it becomes the workspace root:
 
 ```bash
-descix config init --env dev                        # creates .descix/workspace.json, pins env.apiUrl
+descix config init --env prod                       # creates .descix/workspace.json, pins env.apiUrl
 descix login                                        # .descix/wallet.json (add it to .gitignore yourself)
-descix app init -a <name> -c <community> -p .       # env.products[] entry + site/ microservice/ assets/ + default KB
+descix app init -a <name> -c <community>           # env.app + site/ microservice/ assets/ + default KB
 descix app set-site -a <app_id> --static site       # what the gateway serves at /p/<app_id>
 descix app set-port -a <app_id> -p 4001             # required before descix microservice init
 ```
 
 `descix app init` creates `site/`, `microservice/` and `assets/` (with starter
-`system_instructions.md` and `app_description.md`) under the app directory. Knowledge-base content
+`system_instructions.md` and `app_description.md`) under the repo root. Knowledge-base content
 is whatever your corpus manifest names (`.descix/manifests/<KB>.json`); Drive content arrives via
 `descix drive pull -c <community> -a <app_id>` into `kb/<KB>/` and goes back via `descix drive push`.
 The CLI auto-detects the app from the directory you are standing in; `-c`/`-a` flags win over
@@ -304,13 +305,13 @@ async function copyFolderRecursive(sourceFolderId, destParentId, newName) {
 ### App Creation
 
 ```bash
-descix config init --env dev                       # pin the environment first (no default)
+descix config init --env prod                      # pin the environment first
 descix login                                       # device-code sign-in
-descix app init -a <name> -c <community> -p .      # create on the platform + register locally + default KB
+descix app init -a <name> -c <community>           # create on the platform + write env.app + default KB
 ```
 
 An app created in the PWA is initialized locally with the same verb, minus `-c`:
-`descix app init -a <app_id> -p .`.
+`descix app init -a <app_id>`, from the repo root.
 
 ### Post-Creation Commands
 
