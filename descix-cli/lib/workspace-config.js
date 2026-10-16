@@ -1,6 +1,6 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { ENV_ORIGINS, resolveWorkspaceApps } from '@descix/app-sdk/dev';
+import { ENV_ORIGINS, resolveWorkspaceApps, assertSiteStatic } from '@descix/app-sdk/dev';
 import { resolveOrigin } from './origin.js';
 // The one canonical KB-sync surface, from its owner. The example in requireContext() is a remedy
 // a stuck developer will copy verbatim, so it must resolve to the live verb rather than a literal
@@ -860,9 +860,9 @@ export class WorkspaceConfig {
    * Update the app's site config on env.app (v3 single-app).
    *
    * Parallel to setMicroservicePort(), but operates on the entry's site.{} slot. This is the
-   * canonical write path for site.static — the relative path the dev gateway's
-   * staticSitePlugin serves at /p/{appId}/ (see createViteProxyConfig: site.static is
-   * resolved against the app's localPath; "." means the localPath itself) — and for
+   * canonical write path for site.static — the path, relative to the workspace root (the repo
+   * root; "." means the root itself), that the dev gateway's staticSitePlugin serves at
+   * /p/{appId}/; anything that is not a plain relative path is refused (assertSiteStatic) — and for
    * site.port / site.protocol, the dev-server upstream the gateway proxies /p/{appId} to.
    * Backs the `descix app set-site` command, closing the site.static workspace gap without
    * hand-editing workspace.json (the org rule forbids hand edits — CEO-D-2026-06-02-SSGPOD-SITE-PREPROD).
@@ -897,6 +897,12 @@ export class WorkspaceConfig {
     const settingStatic = 'static' in fields && fields.static !== null && fields.static !== undefined;
     const settingPort = 'port' in fields && fields.port !== null && fields.port !== undefined;
     const settingProtocol = 'protocol' in fields && fields.protocol !== null && fields.protocol !== undefined;
+
+    // site.static path rule — ONE owner (@descix/app-sdk/dev siteStatic.js), applied before
+    // anything is computed so a refusal writes NOTHING.
+    if (settingStatic) {
+      assertSiteStatic(fields.static, { subject: '--static', remedy: `Nothing was written for ${appId}.` });
+    }
 
     if (settingProtocol && fields.protocol !== 'http' && fields.protocol !== 'https') {
       throw new Error(
