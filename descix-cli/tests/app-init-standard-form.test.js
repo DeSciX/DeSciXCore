@@ -16,6 +16,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { runAppInit } from '../lib/commands/appInit.js';
 import { CLI_VERSION } from '../lib/cli-version.js';
+import { RUNBOOK_URL } from '@descix/platform-api/mcp-tools';
 
 const ORIGINAL_CWD = process.cwd();
 const FRONTPAGE_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'templates', 'scaffolds', 'frontpage');
@@ -49,7 +50,7 @@ test('CLAUDE.md opens with the app-lane header, rendered from the workspace and 
   assert.match(header, /without `-p @descix\/cli` resolves the wrong package/);
   assert.ok(!/@descix\/app-sdk@\d/.test(header), 'app-sdk is not pinned');
   assert.ok(header.includes('descix tell-me-how'));
-  assert.ok(header.includes('https://descix.net/prod/daita-docs/site/app-sdk/app-developer-runbook.html'));
+  assert.ok(header.includes(RUNBOOK_URL), 'the header does not name the runbook at its owner-exported URL');
   assert.match(header, /^PLATFORM WALL:/m);
   assert.ok(md.includes('<!-- BOOTSTRAP'), 'existing template body stays below the header');
   assert.ok(!md.includes('{{'), 'no unrendered placeholder');

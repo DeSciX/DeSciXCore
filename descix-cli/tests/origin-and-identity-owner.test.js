@@ -27,6 +27,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { RUNBOOK_URL } from '@descix/platform-api/mcp-tools';
 
 const CLI_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BIN = path.join(CLI_ROOT, 'bin', 'descix.js');
@@ -359,7 +360,7 @@ test('GATE I2-writer-stores-community: app init records the community, and the i
 // returned — never a placeholder, and never an origin that contradicts the configuration. The
 // second fixture is what makes it discriminate: a generator that simply hardcoded the prod
 // origin would pass the first fixture and FAIL the second.
-const RUNBOOK_URL = 'https://descix.net/prod/daita-docs/site/app-sdk/app-developer-runbook.html';
+// The ONE spelling of the runbook page is its owner's export (tests/runbook-url-owner.test.js).
 
 test('GATE I2-agent-files-name-the-developer: real ids, no my-app, and the RESOLVED origin', async () => {
     const generated = ['CLAUDE.md', '.cursorrules', '.clinerules', '.github/copilot-instructions.md'];
