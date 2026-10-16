@@ -74,13 +74,29 @@ function renderCitationTrail(citations) {
  * Stitch the briefer document.
  *
  * @param {object} args
- * @param {string} args.env                Target env (dev|demo|prod).
+ * @param {string} args.env                Target env (dev|prod).
  * @param {string} args.mechanism          Mechanism description (e.g., "briefer v1.0 (M2 — code-grounded extractors)").
  * @param {string} args.regenBy            Who triggered the regen (e.g., wallet email).
  * @param {Array<{section, extract}>} args.sections
  *                                          Per-section results: section metadata + extract output.
  * @returns {string}                        Final markdown document.
  */
+/**
+ * The regen stamp — the `Last regenerated` timestamp and the provenance row's date and By
+ * cells — with its values masked. These are the only volatile values the stitcher writes;
+ * --check compares masked docs so a regen of unchanged sources is in sync whenever and by
+ * whomever it runs. Owned here because the templates above write the stamp.
+ */
+const REGEN_TS = '\\d{4}-\\d\\d-\\d\\d \\d\\d:\\d\\d:\\d\\d UTC';
+const LAST_REGEN_RE = new RegExp(`^\\*\\*Last regenerated:\\*\\* ${REGEN_TS}$`, 'm');
+const PROVENANCE_ROW_RE = new RegExp(`^\\| ${REGEN_TS} \\| (.*?) \\| [^|]* \\| sources: `, 'm');
+
+export function maskRegenStamp(markdown) {
+  return (markdown || '')
+    .replace(LAST_REGEN_RE, '**Last regenerated:** <regen-ts>')
+    .replace(PROVENANCE_ROW_RE, (_, mechanism) => `| <regen-ts> | ${mechanism} | <regen-by> | sources: `);
+}
+
 export function stitchBriefer({ env, mechanism, regenBy, sections }) {
   if (!env) throw new Error('stitchBriefer: env is required');
   if (!mechanism) throw new Error('stitchBriefer: mechanism is required');

@@ -2,7 +2,7 @@
  * §2 — Environments extractor (M2 implementation).
  *
  * Per WS-DESCIX-BRIEFER-CLI scope doc §2.2 §2, this extractor reads:
- *   - DEV/DEMO/PROD parallelism — architectural fact distilled from
+ *   - DEV/PROD parallelism — architectural fact distilled from
  *     V2_docs/architecture/platform-runtime-mental-model.md (cite the doc).
  *   - ENV_CONFIG block from provision-platform-lb.js:32-47.
  *   - DEPLOY_ENV-bound-once hard-fail from descix-cloud-core/src/config.js
@@ -11,8 +11,8 @@
  *     doc since the values are env-keyed and live in env-vars/secrets, not
  *     code) — locate the "Secret Manager — Per-Environment Isolation" table.
  *
- * Optional gcloud verification: list Cloud Function names matching `apiFront-http`
- * and Firestore database names matching `descix-{env}` / `descix`.
+ * Live gcloud verification (required on every env): Cloud Function names matching
+ * `apiFront-http` and Firestore database names matching `descix*`.
  */
 import {
   readSourceFile,
@@ -45,7 +45,7 @@ export async function extract({ env, cliPaths } = {}) {
       code: BRIEFER_ERROR_CODES.NOT_IMPLEMENTED,
       section: `§${SECTION.number} ${SECTION.heading}`,
       source: 'extractor argument',
-      expected: 'env (dev|demo|prod) provided by caller',
+      expected: 'env (dev|prod) provided by caller',
       recovery: 'Pass {env} from the briefer entry point.'
     });
   }
@@ -70,7 +70,7 @@ export async function extract({ env, cliPaths } = {}) {
     regex: /const\s+ENV_CONFIG\s*=\s*\{/,
     section: `§${SECTION.number} ${SECTION.heading}`,
     source: `${MESH_FILE} (ENV_CONFIG)`,
-    expected: 'const ENV_CONFIG = { prod: {...}, demo: {...}, dev: {...} }',
+    expected: 'const ENV_CONFIG = { prod: {...}, dev: {...} }',
     recovery: `Re-locate the ENV_CONFIG construct in ${MESH_FILE}.`,
     expectedRange: [20, 60]
   });
@@ -94,7 +94,7 @@ export async function extract({ env, cliPaths } = {}) {
 
   // ── Source 3: runtime-mental-model.md doc cite (distilled architectural fact) ──
   // We just verify the doc exists + record SHA of the canonical range. The doc
-  // is the source for "DEV/DEMO/PROD are fully parallel" because that's an
+  // is the source for "DEV and PROD are fully parallel" because that's an
   // assertion spread across many code paths — too noisy to grep.
   const rmm = await readSourceFile({
     cliPaths,
@@ -110,62 +110,53 @@ export async function extract({ env, cliPaths } = {}) {
   });
   const secretTableMatch = findInLines({
     lines: claude.lines,
-    regex: /descix_config_demo/,
+    regex: /descix_config_dev/,
     section: `§${SECTION.number} ${SECTION.heading}`,
-    source: `${CLOUD_CLAUDE} (Secret Manager Per-Environment Isolation table)`,
-    expected: 'descix_config_demo row in the per-env secret table',
+    source: `${CLOUD_CLAUDE} (Secret Manager per-env isolation)`,
+    expected: 'the per-env secret statement naming descix_config_dev',
     recovery: `Re-locate the Secret Manager isolation table in ${CLOUD_CLAUDE}.`
   });
 
-  // ── M3: live gcloud probes (HARD-FAIL on demo/prod, skipped on dev) ──
-  const probeCitations = [];
-  let gcloudCfNote = '';
-  let gcloudFsNote = '';
+  // ── M3: live gcloud probes — required on every env; probeGcloudJson HARD-FAILS otherwise ──
+  const cfProbe = await probeGcloudJson({
+    command: ['functions', 'list', '--v2', '--format=json'],
+    env,
+    section: `§${SECTION.number} ${SECTION.heading}`,
+    anchor: 'cloud-functions-list',
+    expected: 'JSON array of gen2 Cloud Functions for project descix',
+    project: (json) => (json || [])
+      .map(f => (f.name || '').split('/').pop())
+      .filter(n => /apiFront-http/.test(n))
+      .sort()
+  });
+  const apiFrontCfs = cfProbe.facts;
+  const gcloudCfNote = `\n_Live Cloud Functions matching \`apiFront-http\` (probed \`${cfProbe.citation.probe}\`, env=\`${env}\`):_ ${apiFrontCfs.length > 0 ? apiFrontCfs.map(n => '\`' + n + '\`').join(', ') : '_(none found)_'}\n`;
 
-  if (env === 'dev') {
-    // DEV is local. Probe is intentionally skipped; emit a stanza so the
-    // operator knows live state was not verified for this regen.
-    gcloudCfNote = '\n_DEV: gcloud probes skipped (local dev environment — no Cloud Functions or Firestore to probe)._\n';
-  } else {
-    const cfProbe = await probeGcloudJson({
-      command: ['functions', 'list', '--v2', '--format=json'],
-      env,
-      section: `§${SECTION.number} ${SECTION.heading}`,
-      anchor: 'cloud-functions-list',
-      expected: 'JSON array of gen2 Cloud Functions for project descix',
-      recovery: `Run 'gcloud auth login' and 'gcloud config set project descix'. The Cloud Functions list cross-check is required for env=${env}.`
-    });
-    const apiFrontCfs = (cfProbe.json || [])
-      .filter(f => /apiFront-http/.test(f.name || ''))
-      .map(f => (f.name || '').split('/').pop());
-    gcloudCfNote = `\n_Live Cloud Functions matching \`apiFront-http\` (probed \`${cfProbe.citation.probe}\`, env=\`${env}\`):_ ${apiFrontCfs.length > 0 ? apiFrontCfs.map(n => '\`' + n + '\`').join(', ') : '_(none found)_'}\n`;
-    probeCitations.push(cfProbe.citation);
-
-    const fsProbe = await probeGcloudJson({
-      command: ['firestore', 'databases', 'list', '--format=json'],
-      env,
-      section: `§${SECTION.number} ${SECTION.heading}`,
-      anchor: 'firestore-databases-list',
-      expected: 'JSON array of Firestore databases for project descix',
-      recovery: `Run 'gcloud auth login' and 'gcloud config set project descix'. The Firestore databases cross-check is required for env=${env}.`
-    });
-    const dbs = (fsProbe.json || [])
+  const fsProbe = await probeGcloudJson({
+    command: ['firestore', 'databases', 'list', '--format=json'],
+    env,
+    section: `§${SECTION.number} ${SECTION.heading}`,
+    anchor: 'firestore-databases-list',
+    expected: 'JSON array of Firestore databases for project descix',
+    project: (json) => (json || [])
       .map(d => (d.name || '').split('/').pop())
-      .filter(n => /^descix/.test(n));
-    gcloudFsNote = `\n_Live Firestore databases matching \`descix*\` (probed \`${fsProbe.citation.probe}\`, env=\`${env}\`):_ ${dbs.length > 0 ? dbs.map(n => '\`' + n + '\`').join(', ') : '_(none found)_'}\n`;
-    probeCitations.push(fsProbe.citation);
-  }
+      .filter(n => /^descix/.test(n))
+      .sort()
+  });
+  const dbs = fsProbe.facts;
+  const gcloudFsNote = `\n_Live Firestore databases matching \`descix*\` (probed \`${fsProbe.citation.probe}\`, env=\`${env}\`):_ ${dbs.length > 0 ? dbs.map(n => '\`' + n + '\`').join(', ') : '_(none found)_'}\n`;
+  const probeCitations = [cfProbe.citation, fsProbe.citation];
 
   // ── Render markdown ──
   const markdown = [
-    `DEV / DEMO / PROD are **fully parallel cloud deployments.** They co-exist; PROD does not replace DEMO. — \`${RUNTIME_MM}\``,
+    `DEV and PROD are **fully parallel cloud deployments.** They co-exist; each is isolated. — \`${RUNTIME_MM}\``,
     ``,
     `Per env, isolated:`,
     `- Cloud Function: \`apiFront-http-{env}\` (and \`apiFront-http\` for PROD)`,
     `- Firestore DB: \`descix-{env}\` (and \`descix\` for PROD)`,
-    `- Secret Manager config: \`descix_config_{env}\` (DEV/DEMO) or \`descix_config\` with version aliases (PROD/PREVIEW) — \`${CLOUD_CLAUDE}:${secretTableMatch.lineNumber}\``,
+    `- Secret Manager config: \`descix_config_{env}\` @ \`latest\` per env; PREVIEW uses the shared \`descix_config\` with the version alias \`PREVIEW\` — \`${CLOUD_CLAUDE}:${secretTableMatch.lineNumber}\``,
     `- GCS bucket prefix: \`{env}/\``,
-    `- LB host suffix: \`.{env}.descix.net\` for DEV/DEMO, \`.descix.net\` for PROD`,
+    `- LB host suffix: \`.{env}.descix.net\` for DEV, \`.descix.net\` for PROD`,
     ``,
     `ENV_CONFIG (the deploy-time env table — \`${MESH_FILE}:${envConfigMatch.lineNumber}-${envConfigEnd}\`):`,
     ``,
@@ -181,7 +172,7 @@ export async function extract({ env, cliPaths } = {}) {
   const citations = [
     makeCitation({ file: MESH_FILE, lines: `${envConfigMatch.lineNumber}-${envConfigEnd}`, anchor: 'ENV_CONFIG', fileLines: mesh.lines }),
     makeCitation({ file: CONFIG_FILE, lines: String(deployEnvBoundMatch.lineNumber), anchor: 'DEPLOY_ENV bound-once', fileLines: config.lines }),
-    makeCitation({ file: RUNTIME_MM, lines: `1-${rmm.lines.length}`, anchor: 'DEV/DEMO/PROD parallelism', fileLines: rmm.lines }),
+    makeCitation({ file: RUNTIME_MM, lines: `1-${rmm.lines.length}`, anchor: 'DEV/PROD parallelism', fileLines: rmm.lines }),
     makeCitation({ file: CLOUD_CLAUDE, lines: String(secretTableMatch.lineNumber), anchor: 'Secret Manager per-env isolation', fileLines: claude.lines }),
     ...probeCitations
   ];

@@ -43,7 +43,7 @@ export async function extract({ env, cliPaths } = {}) {
       code: BRIEFER_ERROR_CODES.NOT_IMPLEMENTED,
       section: `§${SECTION.number} ${SECTION.heading}`,
       source: 'extractor argument',
-      expected: 'env (dev|demo|prod) provided by caller',
+      expected: 'env (dev|prod) provided by caller',
       recovery: 'Pass {env} from the briefer entry point.'
     });
   }
@@ -168,29 +168,18 @@ export async function extract({ env, cliPaths } = {}) {
   const registerMatch = { lineNumber: registerLine };
 
 
-  // ── M3: live Cloud Run probe (HARD-FAIL on demo/prod, skipped on dev) ──
-  const probeCitations = [];
-  let runProbeNote = '';
-  if (env === 'dev') {
-    runProbeNote = '\n_DEV: gcloud probes skipped (local dev — no Cloud Run services to probe)._\n';
-  } else {
-    const runProbe = await probeGcloudJson({
-      command: ['run', 'services', 'list', '--region=us-central1', `--filter=metadata.name~^.*-${env}$`, '--format=json'],
-      env,
-      section: `§${SECTION.number} ${SECTION.heading}`,
-      anchor: 'cloud-run-services-list',
-      expected: `JSON array of Cloud Run services matching \`-${env}$\` in us-central1`,
-      recovery: `Run 'gcloud auth login' and 'gcloud config set project descix'. The Cloud Run services cross-check is required for env=${env}.`
-    });
-    const services = (runProbe.json || [])
-      .map(svc => ({
-        name: (svc.metadata && svc.metadata.name) || '(unknown)',
-        region: (svc.metadata && svc.metadata.labels && svc.metadata.labels['cloud.googleapis.com/location']) || 'us-central1'
-      }));
-    const names = services.map(s => '\`' + s.name + '\`').join(', ');
-    runProbeNote = `\n**Live Cloud Run state** (probed \`${runProbe.citation.probe}\`, env=\`${env}\`):\n- Services found: \`${services.length}\`\n- Names: ${names || '_(none)_'}\n`;
-    probeCitations.push(runProbe.citation);
-  }
+  // ── M3: live Cloud Run probe — required on every env; probeGcloudJson HARD-FAILS otherwise ──
+  const runProbe = await probeGcloudJson({
+    command: ['run', 'services', 'list', '--region=us-central1', `--filter=metadata.name~^.*-${env}$`, '--format=json'],
+    env,
+    section: `§${SECTION.number} ${SECTION.heading}`,
+    anchor: 'cloud-run-services-list',
+    expected: `JSON array of Cloud Run services matching \`-${env}$\` in us-central1`,
+    project: (json) => (json || []).map(svc => svc.metadata.name).sort()
+  });
+  const names = runProbe.facts.map(n => '\`' + n + '\`').join(', ');
+  const runProbeNote = `\n**Live Cloud Run state** (probed \`${runProbe.citation.probe}\`, env=\`${env}\`):\n- Services found: \`${runProbe.facts.length}\`\n- Names: ${names || '_(none)_'}\n`;
+  const probeCitations = [runProbe.citation];
 
   // ── Render the markdown ──
   const lines = [
@@ -209,10 +198,9 @@ export async function extract({ env, cliPaths } = {}) {
     `**Step 2.** \`descix microservice register\` — writes manifest to Firestore \`ServiceManifests\` so Core dispatches via \`proxyToExternalService\`. Self-registration on boot is equivalent. — \`${CLI_FILE}:${registerMatch.lineNumber}\``,
     ``,
     `**Platform LB (core platform apps at standup):** \`deploy-backend-env.sh\` → \`provision-platform-lb.js\` — daita broker NEG + powch NEG + apex/peer URL map. \`deploy-service-env.sh\` provisions no LB state for any app: hosted apps are routed by the Cloudflare edge Worker by app id. — \`${LB_FILE}:${ensureCoreNegMatch.lineNumber}\``,
-    ``
+    ``,
+    runProbeNote
   ];
-
-  if (runProbeNote) lines.push(runProbeNote);
 
   const markdown = lines.join('\n');
 

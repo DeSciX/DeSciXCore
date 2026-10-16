@@ -3,7 +3,7 @@
  *
  * Per WS-DESCIX-BRIEFER-CLI scope doc §2 (Architecture / Option A):
  *
- *   node scripts/briefer/run.mjs [--env dev|demo|prod] [--out PATH] [--check]
+ *   node scripts/briefer/run.mjs [--env dev|prod] [--out PATH] [--check]
  *
  * Reads the per-section data sources defined in scope doc §2.2, dispatches to
  * the per-section extractors in ./sources/*.js, and emits a structured
@@ -37,7 +37,8 @@ import chalk from 'chalk';
 import { fileURLToPath } from 'url';
 
 import { BrieferExtractorError, BRIEFER_ERROR_CODES } from './errors.js';
-import { stitchBriefer, extractCitationTrail } from './stitcher.js';
+import { stitchBriefer, extractCitationTrail, maskRegenStamp } from './stitcher.js';
+import { BRIEFER_ENVS } from './envs.js';
 
 import * as identifiers from './sources/identifiers.js';
 import * as environments from './sources/environments.js';
@@ -61,8 +62,6 @@ export const EXTRACTORS = Object.freeze([
   whatIsNot,
   canonicalSources
 ]);
-
-export const VALID_ENVS = Object.freeze(['dev', 'demo', 'prod']);
 
 // Default output path (scope doc §2.1). Resolved relative to workspace root
 // via WorkspaceConfig.getWorkspaceRoot() — never a hardcoded absolute path.
@@ -188,27 +187,23 @@ export async function buildBrieferDoc({ env, cliPaths, apiClient = null, gcloud 
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Public CLI entry — invoked by bin/descix.js `briefer` subcommand
+// Public entry — invoked by scripts/briefer/run.mjs
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * @param {object} options Commander options object.
- * @param {string} [options.env]      dev|demo|prod (default: 'dev' for M1; M2 will hard-fail dev per scope doc §2.1).
+ * @param {string} [options.env]      dev|prod (default: 'dev').
  * @param {string} [options.out]      Output path override.
  * @param {boolean} [options.check]   Drift-detection mode: regen to memory, diff against canonical, exit non-zero on drift.
  * @param {boolean} [options.verbose] Print per-source timing + extractor names.
  */
 export async function runBriefer(options = {}) {
   const env = (options.env || 'dev').toLowerCase();
-  if (!VALID_ENVS.includes(env)) {
-    console.error(chalk.red(`\n❌ Invalid --env=${options.env}. Must be one of: ${VALID_ENVS.join(', ')}\n`));
+  if (!BRIEFER_ENVS.includes(env)) {
+    console.error(chalk.red(`\n❌ Invalid --env=${options.env}. Must be one of: ${BRIEFER_ENVS.join(', ')}\n`));
     process.exit(1);
   }
 
-  // Per scope §2.1: --env=dev is rejected by the routing extractor specifically
-  // (DEV has no LB URL map). Other extractors accept dev because they read
-  // only source files (no gcloud probe required). The rejection lives in
-  // sources/routing.js; this entry point passes env through unchanged.
   if (options.verbose) {
     console.log(chalk.gray(`[briefer] env=${env}`));
   }
@@ -289,7 +284,8 @@ export async function runCheckMode({ doc, outPath, verbose }) {
     throw err;
   }
 
-  if (canonical === doc.markdown) {
+  // The regen stamp (when, by whom) is not content: two regens of unchanged sources are in sync.
+  if (maskRegenStamp(canonical) === maskRegenStamp(doc.markdown)) {
     console.log(chalk.green(`\n✅ Briefer is in sync — no drift detected.\n`));
     return { drift: false, doc };
   }

@@ -50,7 +50,7 @@ export async function extract({ env, cliPaths } = {}) {
       code: BRIEFER_ERROR_CODES.NOT_IMPLEMENTED,
       section: `§${SECTION.number} ${SECTION.heading}`,
       source: 'extractor argument',
-      expected: 'env (dev|demo|prod) provided by caller',
+      expected: 'env (dev|prod) provided by caller',
       recovery: 'Pass {env} from the briefer entry point.'
     });
   }
@@ -148,39 +148,32 @@ export async function extract({ env, cliPaths } = {}) {
     runtimeReadersList = unique.map(f => `  - \`${f}\``).join('\n');
   }
 
-  // ── M3: live Firestore Products probe (HARD-FAIL on demo/prod, skipped on dev) ──
+  // ── M3: live Firestore Products probe — required on every env; HARD-FAILS otherwise ──
   // Uses Firestore REST API via gcloud-derived access token. Per AC-7
   // anti-regression: no @google-cloud/firestore import — this is a different
   // API surface (REST + gcloud-CLI token), explicitly permitted.
-  const probeCitations = [];
-  let productsLiveNote = '';
-  if (env === 'dev') {
-    productsLiveNote = '\n_DEV: Firestore probe skipped (local dev — no cloud Firestore for the descix-dev database in this regen scope)._\n';
-  } else {
-    const productsProbe = await probeFirestoreRest({
-      dbPath: `descix-${env}/documents/Products`,
-      query: { pageSize: 200, 'mask.fieldPaths': 'app_id' },
-      env,
-      section: `§${SECTION.number} ${SECTION.heading}`,
-      anchor: 'products-collection-list',
-      expected: `Firestore Products list for env=${env}`,
-      recovery: `Run 'gcloud auth login' and ensure the account has Firestore read scope. The Products collection cross-check is required for env=${env}.`
-    });
-    const docs = (productsProbe.json && productsProbe.json.documents) || [];
-    const names = docs
+  const productsProbe = await probeFirestoreRest({
+    dbPath: `descix-${env}/documents/Products`,
+    query: { pageSize: 200, 'mask.fieldPaths': 'app_id' },
+    env,
+    section: `§${SECTION.number} ${SECTION.heading}`,
+    anchor: 'products-collection-list',
+    expected: `Firestore Products list for env=${env}`,
+    project: (json) => ((json && json.documents) || [])
       .map(d => (d.name || '').split('/').pop())
       .filter(Boolean)
-      .sort();
-    const sample = names.slice(0, 8);
-    productsLiveNote = [
-      '',
-      `**Live Products collection** (probed \`Firestore REST listDocuments\` against \`descix-${env}/documents/Products\`):`,
-      `- Docs returned: \`${names.length}\` (pageSize=200; further pages not enumerated this milestone)`,
-      `- Sample app_ids: ${sample.length > 0 ? sample.map(n => '\`' + n + '\`').join(', ') : '_(none)_'}${names.length > sample.length ? ` (+ ${names.length - sample.length} more)` : ''}`,
-      ''
-    ].join('\n');
-    probeCitations.push(productsProbe.citation);
-  }
+      .sort()
+  });
+  const names = productsProbe.facts;
+  const sample = names.slice(0, 8);
+  const productsLiveNote = [
+    '',
+    `**Live Products collection** (probed \`Firestore REST listDocuments\` against \`descix-${env}/documents/Products\`):`,
+    `- Docs returned: \`${names.length}\` (pageSize=200; further pages not enumerated this milestone)`,
+    `- Sample app_ids: ${sample.length > 0 ? sample.map(n => '\`' + n + '\`').join(', ') : '_(none)_'}${names.length > sample.length ? ` (+ ${names.length - sample.length} more)` : ''}`,
+    ''
+  ].join('\n');
+  const probeCitations = [productsProbe.citation];
 
   // ── Render markdown ──
   const markdown = [
