@@ -44,7 +44,7 @@ Instead of exposing implementation details (like GCS bucket URLs or specific por
 
 **Port:** `--port` → `env.gateway.port` → built-in `5173`, with `strictPort` on. The resolved port and **its source** are printed at startup. Do not assume `:5173`; give a checkout its own with `descix config set-gateway-port <n>`.
 
-**It serves ONE app, standalone — the shell opens ON your app instead of the store.** (Standalone is the INITIAL VIEW, not a reduced mode: the platform views stay reachable by navigation.) The app is detected from the directory you are standing in (the product whose `localPath` contains your cwd; longest match wins), or named with `--app <id>`. Nothing is persisted to `workspace.json`. When it cannot name an app it fails loud and lists the workspace's apps rather than falling back to the store.
+**It serves ONE app, standalone — the shell opens ON your app instead of the store.** (Standalone is the INITIAL VIEW, not a reduced mode: the platform views stay reachable by navigation.) The app is detected from the directory you are standing in (the app whose repo root contains your cwd — your own repo's `env.app`, or on a gateway workspace the `env.gateway` repo you are inside; longest match wins), or named with `--app <id>`. Nothing is persisted to `workspace.json`. When it cannot name an app it fails loud and lists the workspace's apps rather than falling back to the store.
 
 The binding is **served, not compiled**: the gateway answers `GET /__descix/app-binding.json` on the shell's own origin with `{mode:'standalone', appId, appUrl, source}`, and the shell reads it before it mounts. One pre-built cloud shell bundle therefore boots as the store on `descix.net` and as your app locally, with no rebuild. No binding (or a timeout, or a malformed body) means the store — the safe degradation. There is no `__STANDALONE_APP_ID__` build define; an app that builds itself standalone declares it at its own mount, `<AppShell appId="..." standalone>`.
 
@@ -71,10 +71,11 @@ the per-app host; keep `/p/` for the local gateway, where it is the correct and 
 Typical app-dev session, in full:
 
 ```bash
-descix config set-env dev
-descix app init -a <app-id> -p ./my-app
-descix app set-site -a <app-id> --static .
-cd my-app && descix serve
+cd my-app-repo                                   # the repo root is the workspace root
+descix config init --env prod                    # pins env.apiUrl
+descix app init -a <app-id>                      # writes env.app
+descix app set-site -a <app-id> --static site    # relative to the repo root
+descix serve
 ```
 
 ### 3.1. Configuration: `.descix/workspace.json`
@@ -90,39 +91,41 @@ The `workspace.json` file is the **single source of truth** for local routing an
 
 | Key | Verb |
 |---|---|
-| `env.apiUrl` | `descix config set-env <dev\|demo\|prod> [--url <url>]` (env is positional) |
+| `env.apiUrl` | `descix config init --env dev\|demo\|prod`, or `descix config set-env <custom-name> --url <url>` (`--url` is refused on a known name) |
 | `env.gateway.port` | `descix config set-gateway-port <n\|none>` |
 | `env.devCerts` | `descix config set-dev-certs --dir\|--cert\|--key\|--clear` |
 | `env.powchUrl` | `descix config set-powch-url <url\|none>` |
 | `env.siteUrl` | `descix config set-site-url <url\|none>` |
-| `env.products[]` | `descix app init` / `app set-site` / `app set-port` / `app set-localpath` / `app unmap` |
+| `env.app` | `descix app init` / `app set-site` / `app set-port` |
 
-#### Format (v2.1 — the only format)
+#### Format (v3 — single-app)
 
 ```json
 {
-  "version": "2.1",
+  "version": "3.0",
+  "type": "workspace",
   "env": {
-    "environment": "DEV",
-    "apiUrl": "https://dev.descix.net",
+    "environment": "PROD",
+    "apiUrl": "https://descix.net",
     "gateway": { "port": 5599 },
     "devCerts": { "dir": "/Users/you/.descix/dev-certs-san" },
-    "powchUrl": "https://powch.dev.descix.net/",
-    "platform": {
-      "appId": "daita",
-      "localPath": "DeSciX_Cloud",
-      "site": { "port": 5174 },
-      "microservice": { "port": 4000 }
-    },
-    "products": [
-      { "appId": "my-app", "localPath": "my-app", "site": { "static": "." } },
-      { "appId": "other-app", "localPath": "other", "site": { "port": 5599 }, "microservice": { "port": 4001 } }
-    ]
+    "app": {
+      "appId": "my-app",
+      "communityId": "egpt",
+      "kbId": "General",
+      "site": { "static": "site" },
+      "microservice": { "port": 4001 }
+    }
   }
 }
 ```
 
-`env.platform` is optional — an app developer has no platform checkout and needs none. A top-level `apiUrl` key (the v1 shape) fails loud naming its replacement.
+One repo, one app: `env.app` is THE app, and the repo root is the workspace root (`descix app init`
+from the repo root; inside another workspace it refuses). A gateway workspace that serves several
+local app repos lists them as `env.gateway.shell` and `env.gateway.appRepos[]` (paths relative to its
+root), and each listed repo carries its own v3 workspace — see `reference/workspace-config.md`. A
+top-level `apiUrl` key (the v1 shape) and an `env.platform` / `env.products` block (the v2.1
+multi-app shape) fail loud on load, naming the migration.
 
 #### KB sync is manifest-driven
 
@@ -164,15 +167,14 @@ the survey outranks the paper for exactly the reader who does not yet know the p
 
 | Target | 1. flag / env | 2. workspace | 3. global | 4. default |
 |---|---|---|---|---|
-| **API** | `--api-url` / `--env` / `DESCIX_API_URL` | `env.apiUrl`, then the legacy top-level `apiUrl` | `~/.descix/config.json` `api_url` | **the declared default: PROD** |
-| **Shell** (`/`) | `--site-url` | `env.siteUrl` | **the API origin, when the API is remote** | `env.platform.site.port`, else fail loud |
+| **API** | `--api-url` / `--env` / `DESCIX_API_URL` | `env.apiUrl` | `~/.descix/config.json` `api_url` | **the declared default: PROD** |
+| **Shell** (`/`) | `--site-url` | `env.siteUrl` | **the API origin, when the API is remote** | the `env.gateway.shell` repo's own `site.port`, else fail loud |
 
-**There is no port-derived step for the API.** An environment NAME never becomes an origin, and
-`env.platform.microservice.port` is not consulted: a local backend is a URL you name
-(`descix config set-env dev --url https://localhost:4000`, or `env.apiUrl` direct). **This is
+**There is no port-derived step for the API.** An environment NAME never becomes an origin: a
+local backend is a URL you name — per run with `descix --api-url https://localhost:4000 <command>`,
+or persistently under a custom name with `descix config set-env local --url https://localhost:4000`. **This is
 platform-dev mode** — running your own local backend (Scenario 2 below), not part of standard app
-development, which targets a hosted environment (`descix config set-env dev` with no `--url`, or
-`demo`/`prod`). The single owner of this order is `lib/origin.js::PRECEDENCE`; this table is a
+development, which targets a hosted environment (`descix config init --env dev|demo|prod`). The single owner of this order is `lib/origin.js::PRECEDENCE`; this table is a
 description of it, not a second copy of the rule.
 
 **Every resolution carries its SOURCE, and every network-bound command prints it on stderr** —
@@ -187,7 +189,7 @@ An unconfigured workspace resolving to PROD is the shipped product's declared ta
 fallback; what makes it legitimate is that it is announced. A configured-but-unusable origin is
 a different case and FAILS LOUD naming the remedy, rather than quietly becoming the default.
 
-The derived Shell rule is the important one: point the API at a cloud environment and the shell comes from that same origin, so one origin carries shell + app + `/apifront` with nothing else configured. A stale `env.platform.site` block does not hijack the root once the API is remote. Platform developers opt IN to a local shell by naming it (`--site-url https://localhost:5174` or `env.siteUrl`).
+The derived Shell rule is the important one: point the API at a cloud environment and the shell comes from that same origin, so one origin carries shell + app + `/apifront` with nothing else configured. A local shell repo listed in `env.gateway.shell` does not hijack the root once the API is remote. Platform developers opt IN to a local shell by naming it (`--site-url https://localhost:5174` or `env.siteUrl`).
 
 ### 3.3. The dev certificate and passkey sign-in
 
@@ -233,7 +235,7 @@ human it is unverified.
 
 ### Scenario 1: App Dev (the common case)
 *   **User**: App developer. No platform checkout.
-*   **Setup**: `descix config set-env dev`, `descix app init`, `descix app set-site`, `descix dev-certs check` (if not trusted, the human runs `descix dev-certs trust` once — §3.3), then `cd my-app && descix serve`.
+*   **Setup**: from the app repo's root, `descix config init --env prod`, `descix app init`, `descix app set-site`, `descix dev-certs check` (if not trusted, the human runs `descix dev-certs trust` once — §3.3), then `descix serve`.
 *   **Result**: one HTTPS origin. `/` → the cloud App Shell, `/apifront` → the cloud API, `/p/my-app` → your app, and the shell boots **standalone into your app** — its INITIAL VIEW is your app rather than the store, with the platform views still reachable from there.
 
 ### Scenario 2: Platform Dev ("Dogfooding")

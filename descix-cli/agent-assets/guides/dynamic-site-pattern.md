@@ -57,13 +57,12 @@ Keeping the scaffold's shape is what lets the service keep inheriting platform b
 
 ## Configuration (`workspace.json`)
 
-One `env.products[]` entry, written by `descix app init` and `descix app set-port` (never by hand):
+The repo's `env.app`, written by `descix app init` (run from the repo root) and `descix app set-port` (never by hand):
 
 ```json
 {
   "appId": "my-community-my-dynamic-app",
   "communityId": "my-community",
-  "localPath": "my-dynamic-app",
   "kbId": "General",
   "microservice": { "port": 4001 }
 }

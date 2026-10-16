@@ -101,25 +101,28 @@ descix kb corpus sync  # Walk the manifest's sources, chunk what changed, upsert
 
 ## Configuration Files
 
-### `.descix/workspace.json` (Root) — v2.1, the only supported format
+### `.descix/workspace.json` (Root) — v3 single-app, the only supported format
 
 ```json
 {
-  "version": "2.1",
+  "version": "3.0",
+  "type": "workspace",
   "env": {
-    "environment": "DEV",
-    "apiUrl": "https://dev.descix.net",
-    "products": [
-      { "appId": "my-dao-governance", "communityId": "my-dao", "localPath": "my-dao/governance", "kbId": "General" },
-      { "appId": "my-dao-treasury", "communityId": "my-dao", "localPath": "my-dao/treasury", "kbId": "General" }
-    ]
+    "environment": "PROD",
+    "apiUrl": "https://descix.net",
+    "app": { "appId": "my-dao-governance", "communityId": "my-dao", "kbId": "General" }
   }
 }
 ```
 
-Written by CLI verbs only — `descix config init`, `descix app init`, `descix app set-site`,
-`descix app set-port`. A `communities`-keyed block with no `env` block is the removed v1 shape and
-is refused on load: `v1 workspace format is not supported. Migrate to v2.1.`
+One repo, one app: `env.app` is THE app and the repo root is the workspace root. A second app
+(`my-dao-treasury`) is its own repo, a sibling checkout with its own `workspace.json`.
+
+Written by CLI verbs only — `descix config init`, `descix app init` (from the repo root; refused
+inside another workspace), `descix app set-site`, `descix app set-port`. The loader refuses the
+retired shapes by name: a `communities`-keyed block with no `env` block (`v1 workspace format is not
+supported. Migrate to v3.`) and an `env.platform` / `env.products` block (`v2.1 multi-app workspace
+format is not supported. Migrate to v3 (single-app).`).
 
 **Sync mode:** The CLI only performs **git-mode** operations (local files → corpus manifest →
 Pinecone, via `descix kb corpus sync`). Drive-mode (Drive → GCS → Pinecone, fully server-side) is

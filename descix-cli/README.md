@@ -30,7 +30,8 @@ npm install -g @descix/cli
     ```
     An unconfigured workspace resolves to the declared default, PROD, and every network-bound
     command prints the environment, origin and source it resolved on stderr. For a local backend,
-    name the URL: `descix config set-env dev --url https://localhost:4000`.
+    name the URL: per run `descix --api-url https://localhost:4000 <command>`, or persistently
+    `descix config set-env local --url https://localhost:4000` (`set-env` refuses a known name).
 
 3.  **Check your status**:
     ```bash
@@ -111,21 +112,22 @@ The command is idempotent, so re-running it on a half-made app finishes the job.
   **server-side** as `{community}-{short}`; defaults to `--app`.
 - `--overwrite`: when creating, overwrite an existing app record intentionally.
 - `--kb <name>`: knowledge base name (default: `General`).
-- `-p, --path <dir>`: local app directory (default: auto-detected, else the current directory).
 
 **What it does, in order:**
 
 1.  **Creates the app** (only when `-c` is given and the app does not exist): the server composes
     the unique `app_id` and writes `Products/{app_id}` and `Community/{community}/Apps/{app_id}`.
     Every app is guaranteed a default knowledge base at creation.
-2.  **Registers it in `.descix/workspace.json`** if it is not already mapped.
+2.  **Writes it as `env.app` in `.descix/workspace.json`** — the current directory, the repo root,
+    becomes the workspace root. A workspace holds one app: a repo that already holds a different
+    app is refused, and so is a directory nested inside another DeSciX workspace.
 3.  **Scaffolds the app folder**: creates `site/`, `microservice/` and `assets/`, and writes
     `assets/system_instructions.md` and `assets/app_description.md` when they do not exist.
 4.  **Creates the knowledge base record** for Git-mode sync.
 
 It fails loud rather than guessing: initializing an app that does not exist without `-c` names the
 `-c` invocation that would create it; a `-c` that disagrees with the app's real community is
-refused; and `-p` against an already-mapped app names `descix app set-localpath` instead.
+refused.
 
 **Next step** — author a corpus manifest at `.descix/manifests/<kb_name>.json`, then
 `descix kb corpus sync -a <app_id>`.
@@ -147,7 +149,7 @@ descix site upload --env dev
 ### `descix site init`
 
 Copies the site scaffold — `index.html`, `app.js`, `styles.css`, `DeSciXAppSDK.js`, `README.md` —
-into the app's `site/` directory. The app must already be mapped in `.descix/workspace.json`.
+into the app's `site/` directory. The workspace must already hold the app (`env.app`, written by `descix app init`).
 
 - `-f, --force`: overwrite an existing `site/` folder.
 - `-c, --community <id>` / `-a, --app <id>`: auto-detected from context when omitted.
