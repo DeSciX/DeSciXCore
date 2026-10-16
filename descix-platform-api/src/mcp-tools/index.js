@@ -43,6 +43,9 @@ export {
     PLATFORM_BASICS_SUMMARY,
     PLATFORM_BASICS_DOC,
 } from './platform-basics.js';
+// eabadir/DeSciXCloud#20 (option B) — the CLI verb list, GENERATED from the live commander tree
+// of @descix/cli (descix-cli: npm run generate:cli-verbs). Cloud tell_me_how consumes it.
+export { CLI_VERBS } from './cli-verbs.js';
 // ws-chat-multimodal-image-attach — THE canonical media-on-a-chat-turn contract: kinds, MIME
 // vocabulary, byte policy, normalize(partial)->bag, and the ONE provider-block encoder. Both
 // the Cloud chat pipeline and the advertised nativeTools schema consume this; nobody

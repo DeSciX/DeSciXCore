@@ -17,6 +17,7 @@
     "test": "node --experimental-test-module-mocks --test \"tests/*.test.js\"",
     "pack": "npm pack",
     "check:doc-paths": "node scripts/check-doc-paths.js",
+    "generate:cli-verbs": "node scripts/generate-cli-verbs.mjs",
     "briefer": "node scripts/briefer/run.mjs"
   },
   "keywords": [

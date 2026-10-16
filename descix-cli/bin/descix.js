@@ -7,7 +7,8 @@
  * Combines CLI and MCP functionality with unified authentication.
  */
 
-import { Command, Option } from 'commander';
+import { Option } from 'commander';
+import { DescixCommand } from '../lib/descix-command.js';
 import chalk from 'chalk';
 import { DeSciXApiClient } from '../lib/api-client.js';
 import { requireAuth } from '../lib/auth-guard.js';
@@ -73,7 +74,7 @@ function fail(error) {
   process.exit(1);
 }
 
-const program = new Command();
+const program = new DescixCommand();
 
 program
   .name('descix')
@@ -155,6 +156,7 @@ program.hook('preAction', (thisCommand) => {
 
 program
   .command('login')
+  .runbookAnchor('#_3-pin-production-then-sign-in')
   .description('Authenticate with DeSciX via device login (opens browser)')
   .option('-u, --url <url>', 'API URL override')
   .option('--wallet', 'Use direct wallet connection (advanced, not yet implemented)')
@@ -174,6 +176,7 @@ program
 
 program
   .command('logout')
+  .runbookAnchor('#_3-pin-production-then-sign-in')
   .description('Clear saved credentials')
   .action(async () => {
     try {
@@ -229,6 +232,7 @@ program
 
 program
   .command('whoami')
+  .runbookAnchor('#_3-pin-production-then-sign-in')
   .description('Show current authentication status')
   .action(async () => {
     try {
@@ -265,6 +269,7 @@ program
 
 program
   .command('doctor')
+  .runbookAnchor('#_3-pin-production-then-sign-in')
   .description('Diagnose environment issues (Node, Auth, gcloud, ADC)')
   .action(async () => {
     try {
@@ -1041,6 +1046,7 @@ appCommand
 
 appCommand
   .command('init')
+  .runbookAnchor('#_4-connect-the-repository-to-its-app')
   // ONE PATH TO AN APP (CEO-D-2026-08-14): `app init` is THE app entry point — it creates the
   // app when it does not exist yet and then registers/scaffolds it locally. The separate
   // `app create` command is DELETED (no compat fence): two commands for one outcome is how apps
@@ -1151,6 +1157,7 @@ appCommand
 
 appCommand
   .command('set-listed')
+  .runbookAnchor('#_9-list-it-and-discover-the-rest')
   .description('List or unlist your app in the app store (on: shown in the public store; off: not shown to non-admin visitors)')
   .argument('<state>', 'on or off')
   .requiredOption('-c, --community <id>', 'Community ID')
@@ -1532,6 +1539,7 @@ appCommand
 // Backed by WorkspaceConfig.setStaticSite. It writes ONLY the local workspace.json site.{} slot.
 appCommand
   .command('set-site')
+  .runbookAnchor('#_5-run-it-locally-descix-serve')
   .description("Set this workspace app's site config (env.app.site). One active mode per write: --static <dir> (built site served at /p/<app>/) or --port <n> [--protocol http|https] (dev server proxied at /p/<app>); setting one clears the other. Pass both flags together to keep both — the gateway then serves the dev server (site.port wins). --unset clears site.{} entirely.")
   .requiredOption('-a, --app <app_id>', 'App ID (must be this workspace\'s app, env.app)')
   .option('--static <path>', 'Static mode: a dir relative to the workspace root (the repo root), e.g. "site" or "../scratch"; "." = the root itself. An absolute path is refused. Alone, it clears site.port and site.protocol (one active mode per write).')
@@ -1696,6 +1704,7 @@ const kbCommand = program
 
 kbCommand
   .command('list')
+  .runbookAnchor('#_6-knowledge-bases')
   .description('List knowledge bases for an app')
   .requiredOption('-a, --app <app_id>', 'App ID')
   .option('--cached', 'Show the fast cached vector counter instead of the TRUE live Pinecone count. The cached counter is written ONLY by the CLI/PWA sync path, so it reports 0 for KBs ingested by any other route even when their vectors retrieve. Default is the live count.')
@@ -1992,6 +2001,7 @@ const corpusCommand = kbCommand
 
 corpusCommand
   .command('sync')
+  .runbookAnchor('#_6-knowledge-bases')
   .description('Sync the files a corpus manifest names into the app\'s knowledge base')
   .requiredOption('-a, --app <id>', 'App ID')
   .option('-c, --community <community_id>', 'Community ID (optional; resolved from Products when omitted)')
@@ -2021,6 +2031,7 @@ corpusCommand
 
 corpusCommand
   .command('status')
+  .runbookAnchor('#_6-knowledge-bases')
   .description('Show corpus sync state (files, chunks, last sync, resolved ref)')
   .requiredOption('-a, --app <id>', 'App ID')
   .option('-k, --kb <name>', 'KB name (default: all)')
@@ -2183,6 +2194,7 @@ siteCommand
 // site upload - Deploy to GCS (context-aware, manifest-aware)
 siteCommand
   .command('upload')
+  .runbookAnchor('#_8-deploy-the-site')
   .description('Upload site to GCS and update app metadata (uses .descix/manifests/site.json when present)')
   .option('-c, --community <id>', 'Community ID (auto-detects from context)')
   .option('-a, --app <id>', 'App ID (auto-detects from context)')
@@ -2586,6 +2598,7 @@ siteCommand
 // site status - Get deployment status (context-aware)
 siteCommand
   .command('status')
+  .runbookAnchor('#_8-deploy-the-site')
   .description('Get deployment status and manifest')
   .option('-c, --community <id>', 'Community ID (auto-detects from context)')
   .option('-a, --app <id>', 'App ID (auto-detects from context)')
@@ -3349,6 +3362,7 @@ program
 
 program
   .command('chat [question...]')
+  .runbookAnchor('#_6-knowledge-bases')
   .description('Chat with an app agent. Usage: descix chat "Your question" or descix chat -q "Your question"')
   .option('-c, --community <id>', 'Community ID (optional; server resolves it from Products)')
   .option('-a, --app <id>', 'App ID (required unless run from inside a mapped app directory)')
@@ -3665,6 +3679,7 @@ const configCommand = program
 
 configCommand
   .command('show')
+  .runbookAnchor('#_3-pin-production-then-sign-in')
   .description('Show current configuration')
   .action(async () => {
     try {
@@ -3676,6 +3691,7 @@ configCommand
 
 configCommand
   .command('init')
+  .runbookAnchor('#_3-pin-production-then-sign-in')
   .description('Pin this workspace to an environment (requires the global --env dev|demo|prod)')
   // `--dev` DELETED, not deprecated: its absence meant PRODUCTION, so the most common
   // invocation (`descix config init`) wrote a prod origin nobody named. There is no default.
@@ -4096,6 +4112,7 @@ mcpCommand
 
 program
   .command('tell-me-how')
+  .runbookAnchor('#_9-list-it-and-discover-the-rest')
   .description('Discover platform tools using natural language (Intelligent MCP Mesh)')
   .argument('<question>', 'What do you want to accomplish? Use natural language.')
   .option('-s, --scope <scope>', 'Search scope (validated against the published tell_me_how enum): bootstrap, artifact, project, entitlements (default), discovery', 'entitlements')
@@ -4236,6 +4253,7 @@ program
 
 program
   .command('serve')
+  .runbookAnchor('#_5-run-it-locally-descix-serve')
   .description('Start the unified local gateway (one HTTPS origin: App Shell at /, your app at /p/<app>, /apifront to the API)')
   .option('-p, --port <port>', 'Gateway port for this run (default: env.gateway.port, else 5173)')
   .option('-w, --workspace <path>', 'Workspace root override')
@@ -4267,6 +4285,7 @@ const devCertsCommand = program
 
 devCertsCommand
   .command('check')
+  .runbookAnchor('#_5-run-it-locally-descix-serve')
   .description('Check whether the dev-server cert is trusted for https://localhost (exit 0 only when trusted)')
   .option('--json', 'Output raw JSON')
   .action(async (options) => {
@@ -4280,6 +4299,7 @@ devCertsCommand
 
 devCertsCommand
   .command('trust')
+  .runbookAnchor('#_5-run-it-locally-descix-serve')
   .description('Trust the dev-server cert in the macOS keychain (prompts for your password)')
   .action(async () => {
     try {
