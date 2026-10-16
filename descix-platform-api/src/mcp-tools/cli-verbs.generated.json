@@ -1,0 +1,2123 @@
+[
+  {
+    "verbPath": "admin-login",
+    "description": "Bootstrap CLI credentials for platform admins (requires admin group membership)",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-e, --email <email>",
+        "description": "Admin email (must be in platform admin Google Group)",
+        "required": true
+      },
+      {
+        "flags": "-u, --url <url>",
+        "description": "API URL override",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "app delete",
+    "description": "Delete an app with full cascade cleanup (Pinecone, GCS, Firestore, Products)",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-a, --app <app_id>",
+        "description": "App ID to delete",
+        "required": true
+      },
+      {
+        "flags": "-c, --community <community_id>",
+        "description": "Community ID (auto-resolved from Products if omitted)",
+        "required": false
+      },
+      {
+        "flags": "--dry-run",
+        "description": "Preview what would be deleted without executing",
+        "required": false
+      },
+      {
+        "flags": "--soft",
+        "description": "Soft delete only (mark as hidden, no cascade)",
+        "required": false
+      },
+      {
+        "flags": "--yes",
+        "description": "Skip confirmation prompt",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "app init",
+    "description": "Create (if needed) and initialize an app: platform record + default KB + local workspace registration and scaffold. Idempotent. Pass -c to create a new app; omit it to initialize one that already exists.",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-a, --app <app_id>",
+        "description": "App ID (e.g. daita). With -c this is the app NAME to create.",
+        "required": true
+      },
+      {
+        "flags": "-c, --community <id>",
+        "description": "Community ID — REQUIRED to create an app that does not exist yet. The community must already be materialized in this environment.",
+        "required": false
+      },
+      {
+        "flags": "-s, --short <short_name>",
+        "description": "SHORT id segment (no hyphens) used when creating; the app_id is composed server-side as {community}-{short}. Defaults to --app.",
+        "required": false
+      },
+      {
+        "flags": "--overwrite",
+        "description": "When creating, overwrite an existing app record intentionally",
+        "required": false
+      },
+      {
+        "flags": "--kb <name>",
+        "description": "Knowledge base name",
+        "required": false
+      }
+    ],
+    "runbookAnchor": "#_4-connect-the-repository-to-its-app"
+  },
+  {
+    "verbPath": "app invite",
+    "description": "Generate invite links to share your app",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-a, --app <id>",
+        "description": "App ID",
+        "required": true
+      },
+      {
+        "flags": "--type <type>",
+        "description": "Invite type: try or install",
+        "required": false
+      },
+      {
+        "flags": "--hint <text>",
+        "description": "Context for the AI agent (e.g., \"Physics students, no coding background\")",
+        "required": false
+      },
+      {
+        "flags": "--expires <duration>",
+        "description": "Expiry duration (e.g., 30d, 7d, 24h)",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "app list",
+    "description": "List apps you have access to (purchases + owned)",
+    "arguments": [],
+    "options": [],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "app media-upload",
+    "description": "Upload media/asset files to an app's GCS assets prefix (200 MB per app today; app owners, community admins and platform admins may upload — returns asset references)",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-a, --app <id>",
+        "description": "App ID (community is resolved server-side from Products)",
+        "required": true
+      },
+      {
+        "flags": "-f, --file <path...>",
+        "description": "One or more local file paths to upload",
+        "required": true
+      },
+      {
+        "flags": "--prefix <relPath>",
+        "description": "Optional sub-path under the app assets/ prefix (e.g. \"shows/myshow\")",
+        "required": false
+      },
+      {
+        "flags": "--json",
+        "description": "Print the asset references as JSON (for scripting)",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "app open",
+    "description": "Resolve (and optionally open) an app's local gateway dev URL. Hard-fails if the app has no site config.",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-a, --app <app_id>",
+        "description": "App ID (an app this workspace serves, with a site)",
+        "required": true
+      },
+      {
+        "flags": "--open",
+        "description": "Open the resolved URL in the default browser",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "app records delete",
+    "description": "Delete records by id (or by file_id grouping key)",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-a, --app <app_id>",
+        "description": "App ID",
+        "required": true
+      },
+      {
+        "flags": "-k, --kb <kb_id>",
+        "description": "Record collection ID",
+        "required": true
+      },
+      {
+        "flags": "-i, --ids <csv>",
+        "description": "Comma-separated record ids to delete",
+        "required": false
+      },
+      {
+        "flags": "--file-ids <csv>",
+        "description": "Comma-separated file_id grouping keys to delete",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "app records get",
+    "description": "Fetch specific records by id (point lookup) with an arbitrary metadata projection",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-a, --app <app_id>",
+        "description": "App ID",
+        "required": true
+      },
+      {
+        "flags": "-k, --kb <kb_id>",
+        "description": "Record collection ID",
+        "required": true
+      },
+      {
+        "flags": "-i, --ids <csv>",
+        "description": "Comma-separated record ids to fetch",
+        "required": true
+      },
+      {
+        "flags": "--fields <csv>",
+        "description": "Comma-separated metadata projection (omit or \"*\" for all metadata)",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "app records put",
+    "description": "Store/replace records in your app data store with custom metadata (your app as a database table). You supply file_id (+ optional chunk_idx); the id is built for you.",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-a, --app <app_id>",
+        "description": "App ID",
+        "required": true
+      },
+      {
+        "flags": "-k, --kb <kb_id>",
+        "description": "Record collection ID (acts like a table)",
+        "required": true
+      },
+      {
+        "flags": "-r, --records <json>",
+        "description": "JSON array of records: [{ \"file_id\", \"text\"?, \"chunk_idx\"?, ...customMetadata }] — id is built from file_id (+ chunk_idx); pass a full \"id\" only for back-compat. Example: '[{\"file_id\":\"e1\",\"text\":\"...\",\"type\":\"episode\",\"show\":\"x\"}]'",
+        "required": true
+      },
+      {
+        "flags": "--mode <mode>",
+        "description": "upsert (default) | create — \"create\" is an atomic all-or-nothing conditional create: it fails if any key already exists and reports who holds it, instead of overwriting",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "app records query",
+    "description": "STRUCTURED metadata-filtered scan (non-ANN) returning full records: \"all records where type=episode AND show=X\"",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-a, --app <app_id>",
+        "description": "App ID",
+        "required": true
+      },
+      {
+        "flags": "-k, --kb <kb_id>",
+        "description": "Record collection ID",
+        "required": true
+      },
+      {
+        "flags": "-f, --filter <json>",
+        "description": "Metadata predicate JSON. Scalar fields: $eq/$ne/$in or a bare value; ARRAY fields: $contains. e.g. '{\"type\":\"episode\",\"tags\":{\"$contains\":\"handoff\"}}'",
+        "required": false
+      },
+      {
+        "flags": "--fields <csv>",
+        "description": "Comma-separated metadata projection (omit or \"*\" for all metadata)",
+        "required": false
+      },
+      {
+        "flags": "--limit <n>",
+        "description": "Cap on returned records",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "app set-api-url",
+    "description": "Set API base URL for app's own backend",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-c, --community <id>",
+        "description": "Community ID",
+        "required": true
+      },
+      {
+        "flags": "-a, --app <id>",
+        "description": "App ID",
+        "required": true
+      },
+      {
+        "flags": "-u, --url <url>",
+        "description": "API base URL (e.g., https://api.example.com)",
+        "required": true
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "app set-default-model",
+    "description": "Set or clear App.default_app_model (model used when no KB override is set)",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-a, --app <app_id>",
+        "description": "App ID (e.g. unk-cos)",
+        "required": true
+      },
+      {
+        "flags": "-m, --model <model_name>",
+        "description": "Model name (e.g. gemini-3.8-flash). Mutually exclusive with --clear.",
+        "required": false
+      },
+      {
+        "flags": "--clear",
+        "description": "Delete App.default_app_model via FieldValue.delete() (resets to platform-default inheritance)",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "app set-listed",
+    "description": "List or unlist your app in the app store (on: shown in the public store; off: not shown to non-admin visitors)",
+    "arguments": [
+      {
+        "name": "state",
+        "required": true,
+        "variadic": false,
+        "description": "on or off"
+      }
+    ],
+    "options": [
+      {
+        "flags": "-c, --community <id>",
+        "description": "Community ID",
+        "required": true
+      },
+      {
+        "flags": "-a, --app <id>",
+        "description": "App ID",
+        "required": true
+      }
+    ],
+    "runbookAnchor": "#_9-list-it-and-discover-the-rest"
+  },
+  {
+    "verbPath": "app set-name",
+    "description": "Set app display name",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-c, --community <id>",
+        "description": "Community ID",
+        "required": true
+      },
+      {
+        "flags": "-a, --app <id>",
+        "description": "App ID",
+        "required": true
+      },
+      {
+        "flags": "--name <name>",
+        "description": "Display name for the app",
+        "required": true
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "app set-port",
+    "description": "Set the microservice port for this workspace's app (writes env.app.microservice.port). Pass \"n\" to remove.",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-a, --app <app_id>",
+        "description": "App ID (must be this workspace's app, env.app)",
+        "required": true
+      },
+      {
+        "flags": "-p, --port <port>",
+        "description": "Microservice port number (1-65535), or \"n\" to remove",
+        "required": true
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "app set-price",
+    "description": "Set app price in USDCX",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-c, --community <id>",
+        "description": "Community ID",
+        "required": true
+      },
+      {
+        "flags": "-a, --app <id>",
+        "description": "App ID",
+        "required": true
+      },
+      {
+        "flags": "-p, --price <amount>",
+        "description": "Price in USDCX (decimal number)",
+        "required": true
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "app set-repo",
+    "description": "Link a GitHub repository to your app",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-a, --app <id>",
+        "description": "App ID",
+        "required": true
+      },
+      {
+        "flags": "--repo <url>",
+        "description": "SSH git URL (e.g., git@github.com:user/repo.git)",
+        "required": false
+      },
+      {
+        "flags": "--unlink",
+        "description": "Remove the linked repository",
+        "required": false
+      },
+      {
+        "flags": "--branch <name>",
+        "description": "Default branch",
+        "required": false
+      },
+      {
+        "flags": "--subfolder <path>",
+        "description": "Subfolder within repo",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "app set-site",
+    "description": "Set this workspace app's site config (env.app.site). One active mode per write: --static <dir> (built site served at /p/<app>/) or --port <n> [--protocol http|https] (dev server proxied at /p/<app>); setting one clears the other. Pass both flags together to keep both — the gateway then serves the dev server (site.port wins). --unset clears site.{} entirely.",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-a, --app <app_id>",
+        "description": "App ID (must be this workspace's app, env.app)",
+        "required": true
+      },
+      {
+        "flags": "--static <path>",
+        "description": "Static mode: a dir relative to the workspace root (the repo root), e.g. \"site\" or \"../scratch\"; \".\" = the root itself. An absolute path is refused. Alone, it clears site.port and site.protocol (one active mode per write).",
+        "required": false
+      },
+      {
+        "flags": "--port <port>",
+        "description": "Dev-server mode: proxy /p/<app> to your local dev server on this port (1-65535). Alone, it clears site.static. With --static in the same call, both are kept and the gateway serves the dev server.",
+        "required": false
+      },
+      {
+        "flags": "--protocol <scheme>",
+        "description": "Dev-server upstream scheme: \"http\" or \"https\" (default https when unset). Dev-server mode only — requires site.port. A wrong scheme fails loud at the gateway (502); there is no auto-detection.",
+        "required": false
+      },
+      {
+        "flags": "--unset",
+        "description": "Remove site.static, site.port and site.protocol for the app, clearing the site.{} slot",
+        "required": false
+      }
+    ],
+    "runbookAnchor": "#_5-run-it-locally-descix-serve"
+  },
+  {
+    "verbPath": "app sync-assets",
+    "description": "Sync local assets (system_instructions.md, app_description.md, icon.png) to platform.",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-a, --app <app_id>",
+        "description": "App ID",
+        "required": true
+      },
+      {
+        "flags": "-k, --kb <name>",
+        "description": "Target KB for system_instructions",
+        "required": false
+      },
+      {
+        "flags": "-p, --path <dir>",
+        "description": "App directory (default: auto-detected)",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "buy chains",
+    "description": "List supported blockchains for payments",
+    "arguments": [],
+    "options": [],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "buy poll",
+    "description": "Poll for quote status until completed (with exponential backoff)",
+    "arguments": [
+      {
+        "name": "quoteId",
+        "required": true,
+        "variadic": false,
+        "description": ""
+      }
+    ],
+    "options": [
+      {
+        "flags": "--max <attempts>",
+        "description": "Maximum poll attempts",
+        "required": false
+      },
+      {
+        "flags": "--interval <ms>",
+        "description": "Initial poll interval in ms",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "buy quote",
+    "description": "Create a crypto payment quote",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-a, --amount <usd>",
+        "description": "USD amount to purchase",
+        "required": true
+      },
+      {
+        "flags": "-c, --chain <chain>",
+        "description": "Blockchain to use (polygon, ethereum, bnb)",
+        "required": true
+      },
+      {
+        "flags": "-t, --type <type>",
+        "description": "Purchase type: usdcx or community_token",
+        "required": false
+      },
+      {
+        "flags": "-e, --email <email>",
+        "description": "Email for claim link (guest mode)",
+        "required": false
+      },
+      {
+        "flags": "--community <id>",
+        "description": "Community ID for community token purchase",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "buy status",
+    "description": "Check status of a payment quote",
+    "arguments": [
+      {
+        "name": "quoteId",
+        "required": true,
+        "variadic": false,
+        "description": ""
+      }
+    ],
+    "options": [],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "chat",
+    "description": "Chat with an app agent. Usage: descix chat \"Your question\" or descix chat -q \"Your question\"",
+    "arguments": [
+      {
+        "name": "question",
+        "required": false,
+        "variadic": true,
+        "description": ""
+      }
+    ],
+    "options": [
+      {
+        "flags": "-c, --community <id>",
+        "description": "Community ID (optional; server resolves it from Products)",
+        "required": false
+      },
+      {
+        "flags": "-a, --app <id>",
+        "description": "App ID (required unless run from inside a mapped app directory)",
+        "required": false
+      },
+      {
+        "flags": "-q, --question <text>",
+        "description": "Question to ask (alternative to positional argument)",
+        "required": false
+      },
+      {
+        "flags": "-k, --kb <id...>",
+        "description": "Knowledge Base ID(s) — repeat for multi-KB, use * for all",
+        "required": false
+      },
+      {
+        "flags": "--apps <ids>",
+        "description": "Comma-separated app IDs for cross-app query",
+        "required": false
+      },
+      {
+        "flags": "--level <n>",
+        "description": "Intelligence level (1-5)",
+        "required": false
+      },
+      {
+        "flags": "--model <name>",
+        "description": "Explicit model override",
+        "required": false
+      },
+      {
+        "flags": "--thinking-level <level>",
+        "description": "Thinking level for this call: minimal, low, medium or high. The server refuses a level the resolved model does not support.",
+        "required": false
+      },
+      {
+        "flags": "--tokens",
+        "description": "Show token usage in response footer",
+        "required": false
+      },
+      {
+        "flags": "--new",
+        "description": "Start a new conversation (clear session)",
+        "required": false
+      }
+    ],
+    "runbookAnchor": "#_6-knowledge-bases"
+  },
+  {
+    "verbPath": "clone",
+    "description": "Clone a DeSciX app repository",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-a, --app <id>",
+        "description": "App ID",
+        "required": true
+      },
+      {
+        "flags": "--path <dir>",
+        "description": "Target directory",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "community check-token",
+    "description": "Check if a token symbol is available",
+    "arguments": [
+      {
+        "name": "symbol",
+        "required": true,
+        "variadic": false,
+        "description": "Token symbol to check (1-7 chars)"
+      }
+    ],
+    "options": [],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "community contract",
+    "description": "Get details about a deployed contract",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-a, --address <address>",
+        "description": "Contract address",
+        "required": false
+      },
+      {
+        "flags": "-t, --token <symbol>",
+        "description": "Token symbol",
+        "required": false
+      },
+      {
+        "flags": "-c, --community <id>",
+        "description": "Community ID",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "community create",
+    "description": "Create a new community with token contract (requires platform admin, deploys to live Polygon)",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-n, --name <name>",
+        "description": "Community display name (e.g. \"SMILE\")",
+        "required": true
+      },
+      {
+        "flags": "-t, --token <symbol>",
+        "description": "Token symbol (e.g. SMILE)",
+        "required": true
+      },
+      {
+        "flags": "--icon <url>",
+        "description": "Icon URL for the community",
+        "required": false
+      },
+      {
+        "flags": "--yes",
+        "description": "Skip confirmation prompt (use with caution)",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "community delete",
+    "description": "Delete a community with full cascade cleanup (all apps, KBs, vectors, GCS)",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-n, --name <community_id>",
+        "description": "Community ID to delete",
+        "required": true
+      },
+      {
+        "flags": "--dry-run",
+        "description": "Preview what would be deleted without executing",
+        "required": false
+      },
+      {
+        "flags": "--soft",
+        "description": "Soft delete only (mark as hidden, no cascade)",
+        "required": false
+      },
+      {
+        "flags": "--yes",
+        "description": "Skip confirmation prompt",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "community deploy-token",
+    "description": "Deploy a new token contract (without creating a community)",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-t, --token <symbol>",
+        "description": "Token symbol (e.g., POWCH)",
+        "required": true
+      },
+      {
+        "flags": "-n, --name <name>",
+        "description": "Token name (e.g., \"Powch Token\")",
+        "required": true
+      },
+      {
+        "flags": "--treasury <address>",
+        "description": "Treasury wallet address (defaults to platform wallet)",
+        "required": false
+      },
+      {
+        "flags": "-c, --community <id>",
+        "description": "Community ID to link the token to (optional)",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "community info",
+    "description": "Get community information",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-c, --community <id>",
+        "description": "Community ID",
+        "required": false
+      },
+      {
+        "flags": "-n, --name <id>",
+        "description": "Community ID (alias for -c)",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "community link-token",
+    "description": "Link an existing token contract to a community",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-c, --community <id>",
+        "description": "Community ID to link to",
+        "required": true
+      },
+      {
+        "flags": "-a, --address <address>",
+        "description": "Contract address to link",
+        "required": true
+      },
+      {
+        "flags": "-t, --token <symbol>",
+        "description": "Token symbol (optional, uses contract symbol if not provided)",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "community list",
+    "description": "List all communities",
+    "arguments": [],
+    "options": [],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "community refresh-identity",
+    "description": "Mirror a community's token symbol and icon from the descix-chain registry into this environment (the icon only if it serves)",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-c, --community <id>",
+        "description": "Community ID",
+        "required": true
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "community rename",
+    "description": "Rename a community_id across all surfaces (Firestore, Products, Pinecone metadata, ServiceManifests, descix-chain registry). On-chain contract + token symbol are UNTOUCHED. Dry-run first.",
+    "arguments": [
+      {
+        "name": "old_community_id",
+        "required": true,
+        "variadic": false,
+        "description": "Current community_id (e.g. unkamon)"
+      },
+      {
+        "name": "new_community_id",
+        "required": true,
+        "variadic": false,
+        "description": "New canonical community_id (e.g. unk)"
+      }
+    ],
+    "options": [
+      {
+        "flags": "--dry-run",
+        "description": "Preview the full cascade plan without executing",
+        "required": false
+      },
+      {
+        "flags": "--yes",
+        "description": "Skip confirmation prompt",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "config gateway add-repo",
+    "description": "List a repo whose app the gateway serves at /p/<appId> (env.gateway.appRepos[])",
+    "arguments": [
+      {
+        "name": "repo",
+        "required": true,
+        "variadic": false,
+        "description": "Repo root relative to the workspace root"
+      }
+    ],
+    "options": [],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "config gateway remove-repo",
+    "description": "Remove a listed repo from env.gateway.appRepos[]",
+    "arguments": [
+      {
+        "name": "repo",
+        "required": true,
+        "variadic": false,
+        "description": "Repo root relative to the workspace root, as listed"
+      }
+    ],
+    "options": [],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "config gateway set-shell",
+    "description": "Set the repo whose app the gateway serves at / (env.gateway.shell)",
+    "arguments": [
+      {
+        "name": "repo",
+        "required": true,
+        "variadic": false,
+        "description": "Repo root relative to the workspace root, or \"none\" to remove"
+      }
+    ],
+    "options": [],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "config init",
+    "description": "Pin this workspace to an environment (requires the global --env dev|demo|prod)",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "--url <url>",
+        "description": "Explicit origin (for a self-hosted or port-forwarded gateway)",
+        "required": false
+      },
+      {
+        "flags": "-g, --global",
+        "description": "Save to global config (~/.descixrc)",
+        "required": false
+      }
+    ],
+    "runbookAnchor": "#_3-pin-production-then-sign-in"
+  },
+  {
+    "verbPath": "config set-dev-certs",
+    "description": "Point local dev servers at your own TLS cert pair (env.devCerts) — the gateway AND every app behind it",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-d, --dir <path>",
+        "description": "Directory holding cert.pem + key.pem",
+        "required": false
+      },
+      {
+        "flags": "-c, --cert <path>",
+        "description": "Certificate file",
+        "required": false
+      },
+      {
+        "flags": "-k, --key <path>",
+        "description": "Private key file",
+        "required": false
+      },
+      {
+        "flags": "--clear",
+        "description": "Remove the setting and fall back to the SDK-tracked SAN pair",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "config set-env",
+    "description": "Set target environment persistently (updates workspace.json, auto-reconnects)",
+    "arguments": [
+      {
+        "name": "env",
+        "required": true,
+        "variadic": false,
+        "description": "Environment: dev, demo, prod, or custom name"
+      }
+    ],
+    "options": [
+      {
+        "flags": "-u, --url <url>",
+        "description": "API URL override (for custom environments)",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "config set-gateway-port",
+    "description": "Set the port `descix serve` listens on (env.gateway.port)",
+    "arguments": [
+      {
+        "name": "port",
+        "required": true,
+        "variadic": false,
+        "description": "Port number 1-65535, or \"none\" to remove"
+      }
+    ],
+    "options": [],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "config set-powch-url",
+    "description": "Set where Powch lives (env.powchUrl) — its OWN origin; Powch is cross-origin from the shell by design",
+    "arguments": [
+      {
+        "name": "url",
+        "required": true,
+        "variadic": false,
+        "description": "Powch origin (e.g. https://powch.dev.descix.net), or \"none\" to remove"
+      }
+    ],
+    "options": [],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "config set-site-url",
+    "description": "Set the App Shell origin `descix serve` proxies / to (env.siteUrl)",
+    "arguments": [
+      {
+        "name": "url",
+        "required": true,
+        "variadic": false,
+        "description": "App Shell origin, or \"none\" to remove"
+      }
+    ],
+    "options": [],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "config show",
+    "description": "Show current configuration",
+    "arguments": [],
+    "options": [],
+    "runbookAnchor": "#_3-pin-production-then-sign-in"
+  },
+  {
+    "verbPath": "credits balance",
+    "description": "Show your AI-credits balance",
+    "arguments": [],
+    "options": [],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "credits buy",
+    "description": "Buy AI credits with USD (Stripe checkout)",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "--usd <amount>",
+        "description": "USD amount of credits to buy",
+        "required": true
+      },
+      {
+        "flags": "--return-base <url>",
+        "description": "Base URL for the checkout success/cancel landing (default: the API origin in use)",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "credits grant",
+    "description": "Grant AI credits to a user",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "--user <user_id>",
+        "description": "Target user id",
+        "required": true
+      },
+      {
+        "flags": "--usd <amount>",
+        "description": "USD amount to grant",
+        "required": true
+      },
+      {
+        "flags": "--reason <text>",
+        "description": "Audit reason",
+        "required": true
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "credits history",
+    "description": "Show your credit ledger (purchases, debits, grants)",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "--limit <n>",
+        "description": "Max entries (default 50)",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "credits refund",
+    "description": "Remove AI credits from a user (e.g. after a Stripe refund)",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "--user <user_id>",
+        "description": "Target user id",
+        "required": true
+      },
+      {
+        "flags": "--usd <amount>",
+        "description": "USD amount to remove",
+        "required": true
+      },
+      {
+        "flags": "--reason <text>",
+        "description": "Audit reason",
+        "required": true
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "dev-certs check",
+    "description": "Check whether the dev-server cert is trusted for https://localhost (exit 0 only when trusted)",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "--json",
+        "description": "Output raw JSON",
+        "required": false
+      }
+    ],
+    "runbookAnchor": "#_5-run-it-locally-descix-serve"
+  },
+  {
+    "verbPath": "dev-certs trust",
+    "description": "Trust the dev-server cert in the macOS keychain (prompts for your password)",
+    "arguments": [],
+    "options": [],
+    "runbookAnchor": "#_5-run-it-locally-descix-serve"
+  },
+  {
+    "verbPath": "doctor",
+    "description": "Diagnose environment issues (Node, Auth, gcloud, ADC)",
+    "arguments": [],
+    "options": [],
+    "runbookAnchor": "#_3-pin-production-then-sign-in"
+  },
+  {
+    "verbPath": "drive pull",
+    "description": "Pull content from Drive and convert to local markdown",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-c, --community <id>",
+        "description": "Community ID",
+        "required": false
+      },
+      {
+        "flags": "-a, --app <id>",
+        "description": "App ID",
+        "required": false
+      },
+      {
+        "flags": "-k, --kb <id>",
+        "description": "Knowledge Base ID (default: General)",
+        "required": false
+      },
+      {
+        "flags": "--folder <id_or_url>",
+        "description": "Override Drive folder (raw ID or full Drive URL) — one-time import without modifying workspace.json",
+        "required": false
+      },
+      {
+        "flags": "-v, --verbose",
+        "description": "Show verbose output",
+        "required": false
+      },
+      {
+        "flags": "--merge-mode <mode>",
+        "description": "Merge mode: merge|overwrite|force-overwrite (default: merge)",
+        "required": false
+      },
+      {
+        "flags": "--dry-run",
+        "description": "Show what would happen without making changes",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "drive push",
+    "description": "Push staging files to Drive",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-c, --community <id>",
+        "description": "Community ID",
+        "required": false
+      },
+      {
+        "flags": "-a, --app <id>",
+        "description": "App ID",
+        "required": false
+      },
+      {
+        "flags": "-k, --kb <id>",
+        "description": "Knowledge Base ID (default: General)",
+        "required": false
+      },
+      {
+        "flags": "-v, --verbose",
+        "description": "Show verbose output",
+        "required": false
+      },
+      {
+        "flags": "-i, --interactive",
+        "description": "Enable interactive prompts for conflicts",
+        "required": false
+      },
+      {
+        "flags": "--on-conflict <action>",
+        "description": "Conflict handling: overwrite|skip (default: overwrite)",
+        "required": false
+      },
+      {
+        "flags": "--no-move",
+        "description": "Do not move files to .processed after upload",
+        "required": false
+      },
+      {
+        "flags": "--dry-run",
+        "description": "Show what would happen without making changes",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "health",
+    "description": "Check platform service health (env-aware: local-port in DEV, gcloud+HTTPS in DEMO/PROD)",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "--env <name>",
+        "description": "Target environment: dev|demo|prod (default: dev). Also accepted at top level: descix --env=demo health ...",
+        "required": false
+      },
+      {
+        "flags": "-m, --microservice <name>",
+        "description": "Check a specific service/app by appId",
+        "required": false
+      },
+      {
+        "flags": "-j, --json",
+        "description": "Output raw JSON",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "init",
+    "description": "Initialize workspace for DeSciX app development (Git-aware)",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-c, --community <id>",
+        "description": "Community ID",
+        "required": false
+      },
+      {
+        "flags": "-a, --app <name>",
+        "description": "App name",
+        "required": false
+      },
+      {
+        "flags": "-p, --path <path>",
+        "description": "Project path (defaults to current directory)",
+        "required": false
+      },
+      {
+        "flags": "-f, --force",
+        "description": "Restart the app registrations in an existing workspace (its environment settings are kept)",
+        "required": false
+      },
+      {
+        "flags": "-y, --yes",
+        "description": "Skip the confirmation — with -c and -a, init runs without a terminal",
+        "required": false
+      },
+      {
+        "flags": "--from-invite <token>",
+        "description": "Resolve an invite token to pre-fill app context",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "kb clear-override-model",
+    "description": "Delete KB.kb_model_override via FieldValue.delete() (resets to App.default_app_model inheritance)",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-a, --app <app_id>",
+        "description": "App ID",
+        "required": true
+      },
+      {
+        "flags": "-k, --kb <kb_name>",
+        "description": "KB name",
+        "required": true
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "kb corpus status",
+    "description": "Show corpus sync state (files, chunks, last sync, resolved ref)",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-a, --app <id>",
+        "description": "App ID",
+        "required": true
+      },
+      {
+        "flags": "-k, --kb <name>",
+        "description": "KB name (default: all)",
+        "required": false
+      },
+      {
+        "flags": "--ref <ref>",
+        "description": "Preview status as if --ref were applied to a sync (does not change manifests)",
+        "required": false
+      },
+      {
+        "flags": "-v, --verbose",
+        "description": "Show verbose output including change detection",
+        "required": false
+      }
+    ],
+    "runbookAnchor": "#_6-knowledge-bases"
+  },
+  {
+    "verbPath": "kb corpus sync",
+    "description": "Sync the files a corpus manifest names into the app's knowledge base",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-a, --app <id>",
+        "description": "App ID",
+        "required": true
+      },
+      {
+        "flags": "-c, --community <community_id>",
+        "description": "Community ID (optional; resolved from Products when omitted)",
+        "required": false
+      },
+      {
+        "flags": "-k, --kb <name>",
+        "description": "KB name (syncs specific manifest; default: all)",
+        "required": false
+      },
+      {
+        "flags": "-v, --verbose",
+        "description": "Show verbose output",
+        "required": false
+      },
+      {
+        "flags": "--ref <ref>",
+        "description": "Override the git ref for ALL manifest sources (e.g., --ref my-feature-branch). Precedence: --ref > manifest source.ref > \"main\".",
+        "required": false
+      },
+      {
+        "flags": "--rebuild",
+        "description": "Delete EVERYTHING in the knowledge base, then re-sync the whole corpus. Not needed to remove deleted or changed files — an ordinary sync already removes any corpus file that is live in the knowledge base but no longer in the corpus (see --dry-run, which names them). Use --rebuild only to clear content an ordinary sync cannot see. Prompts before deleting unless --yes is supplied.",
+        "required": false
+      },
+      {
+        "flags": "--dry-run",
+        "description": "Show what a sync would add and remove — naming each file it would remove — without changing anything. Exit 0 if nothing would change, 1 if something would.",
+        "required": false
+      },
+      {
+        "flags": "--show-walk",
+        "description": "Print the resolved ref and the first 50 files the manifest selects, before syncing anything. Useful for checking --ref and the manifest sources.",
+        "required": false
+      },
+      {
+        "flags": "--yes",
+        "description": "Skip the interactive purge confirmation in --rebuild mode. Use in scripting/CI.",
+        "required": false
+      },
+      {
+        "flags": "--skip-retrieval-canary",
+        "description": "Skip the post-sync check that a synced passage is actually searchable (a large sync can take several minutes to become searchable). Skipping saves one credit-metered query and up to ~25 s; the sync then reports success on upload alone. Leave the check on for anything user-facing.",
+        "required": false
+      }
+    ],
+    "runbookAnchor": "#_6-knowledge-bases"
+  },
+  {
+    "verbPath": "kb delete",
+    "description": "Delete a knowledge base registry doc (refuses a non-empty KB unless --force)",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-a, --app <app_id>",
+        "description": "App ID",
+        "required": true
+      },
+      {
+        "flags": "-k, --kb <kb_name>",
+        "description": "KB name",
+        "required": true
+      },
+      {
+        "flags": "--force",
+        "description": "Purge the KB's live vectors and delete it even if non-empty. An empty KB deletes without this flag.",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "kb doctor",
+    "description": "Check a KB against its last sync by FILE IDENTITY: live corpus files that were not walked (orphans) and walked files that are not live (missing)",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-a, --app <id>",
+        "description": "App ID",
+        "required": true
+      },
+      {
+        "flags": "-k, --kb <name>",
+        "description": "KB name",
+        "required": true
+      },
+      {
+        "flags": "--live",
+        "description": "Compute vectorCount from the TRUE live Pinecone scope (bypass the cached counter, which lies after an interrupted op)",
+        "required": false
+      },
+      {
+        "flags": "--reconcile",
+        "description": "Compute the live count AND write it back to rag_vector_count so the cached read is truthful again (implies --live)",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "kb list",
+    "description": "List knowledge bases for an app",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-a, --app <app_id>",
+        "description": "App ID",
+        "required": true
+      },
+      {
+        "flags": "--cached",
+        "description": "Show the fast cached vector counter instead of the TRUE live Pinecone count. The cached counter is written ONLY by the CLI/PWA sync path, so it reports 0 for KBs ingested by any other route even when their vectors retrieve. Default is the live count.",
+        "required": false
+      }
+    ],
+    "runbookAnchor": "#_6-knowledge-bases"
+  },
+  {
+    "verbPath": "kb set-override-model",
+    "description": "Set KB.kb_model_override (per-KB model selection)",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-a, --app <app_id>",
+        "description": "App ID",
+        "required": true
+      },
+      {
+        "flags": "-k, --kb <kb_name>",
+        "description": "KB name",
+        "required": true
+      },
+      {
+        "flags": "-m, --model <model_name>",
+        "description": "Model name (e.g. gemini-3.8-flash)",
+        "required": true
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "login",
+    "description": "Authenticate with DeSciX via device login (opens browser)",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-u, --url <url>",
+        "description": "API URL override",
+        "required": false
+      },
+      {
+        "flags": "--wallet",
+        "description": "Use direct wallet connection (advanced, not yet implemented)",
+        "required": false
+      },
+      {
+        "flags": "--no-oauth",
+        "description": "Skip the OAuth long-lived token leg (wallet-signature login only)",
+        "required": false
+      },
+      {
+        "flags": "--scope <scope>",
+        "description": "OAuth scope to request (default: mcp:read mcp:tools mcp:write mcp:admin)",
+        "required": false
+      }
+    ],
+    "runbookAnchor": "#_3-pin-production-then-sign-in"
+  },
+  {
+    "verbPath": "logout",
+    "description": "Clear saved credentials",
+    "arguments": [],
+    "options": [],
+    "runbookAnchor": "#_3-pin-production-then-sign-in"
+  },
+  {
+    "verbPath": "mcp execute",
+    "description": "Execute a registered MCP tool by name with JSON parameters",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "--tool <name>",
+        "description": "Tool/command name (e.g., find_communities, ask_question_to_app)",
+        "required": true
+      },
+      {
+        "flags": "--params <json>",
+        "description": "JSON parameters for the tool",
+        "required": false
+      },
+      {
+        "flags": "-a, --app <app_id>",
+        "description": "App context (sets app_id in params if not already present)",
+        "required": false
+      },
+      {
+        "flags": "--json",
+        "description": "Output raw JSON response",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "mcp-serve",
+    "description": "Start MCP server for Cursor/VS Code integration (used by npx)",
+    "arguments": [],
+    "options": [],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "microservice health",
+    "description": "Check health of a registered microservice",
+    "arguments": [
+      {
+        "name": "name",
+        "required": true,
+        "variadic": false,
+        "description": ""
+      }
+    ],
+    "options": [],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "microservice init",
+    "description": "Initialize microservice scaffold in current app",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-f, --force",
+        "description": "Overwrite existing microservice/ folder",
+        "required": false
+      },
+      {
+        "flags": "-c, --community <id>",
+        "description": "Community ID (auto-detects from context)",
+        "required": false
+      },
+      {
+        "flags": "-a, --app <id>",
+        "description": "App ID (auto-detects from context)",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "microservice list",
+    "description": "List all registered microservices",
+    "arguments": [],
+    "options": [],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "microservice register",
+    "description": "Register microservice with gateway (-r <local SERVICE_README>; git-mode only — no Drive)",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-m, --manifest <path>",
+        "description": "Path to manifest.json",
+        "required": false
+      },
+      {
+        "flags": "-r, --readme <path>",
+        "description": "Path to local SERVICE_README file",
+        "required": false
+      },
+      {
+        "flags": "-c, --community <id>",
+        "description": "Community ID (auto-detects from context)",
+        "required": false
+      },
+      {
+        "flags": "-a, --app <id>",
+        "description": "App ID (auto-detects from context)",
+        "required": false
+      },
+      {
+        "flags": "--skip-readme-check",
+        "description": "Skip SERVICE_README check (not recommended)",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "microservice reload",
+    "description": "Reload microservice manifests",
+    "arguments": [],
+    "options": [],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "microservice restart",
+    "description": "Restart a local microservice (DEV only; DEMO/PROD use deploy scripts)",
+    "arguments": [
+      {
+        "name": "name",
+        "required": true,
+        "variadic": false,
+        "description": ""
+      }
+    ],
+    "options": [
+      {
+        "flags": "--env <env>",
+        "description": "Target environment: dev | demo | prod",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "microservice vectorize",
+    "description": "Vectorize SERVICE_README for tell_me_how discovery",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-n, --name <name>",
+        "description": "Service name (reads from manifest.json if not provided)",
+        "required": false
+      },
+      {
+        "flags": "-c, --community <id>",
+        "description": "Community ID (auto-detects from context)",
+        "required": false
+      },
+      {
+        "flags": "-a, --app <id>",
+        "description": "App ID (auto-detects from context)",
+        "required": false
+      },
+      {
+        "flags": "-r, --readme <path>",
+        "description": "Path to SERVICE_README file",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "new-chat",
+    "description": "Clear chat session for an app (start fresh conversation)",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-c, --community <id>",
+        "description": "Community ID (optional; clears only that community key)",
+        "required": false
+      },
+      {
+        "flags": "-a, --app <id>",
+        "description": "App ID (required)",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "purchases",
+    "description": "List your purchased communities and apps",
+    "arguments": [],
+    "options": [],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "quickstart",
+    "description": "One-command setup: sign in → workspace → app (with -c and -a) → agent files → MCP config",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-u, --url <url>",
+        "description": "API URL override",
+        "required": false
+      },
+      {
+        "flags": "-c, --community <id>",
+        "description": "Community to create the app in",
+        "required": false
+      },
+      {
+        "flags": "-a, --app <name>",
+        "description": "Name of the app to create (the platform issues its id; see app init)",
+        "required": false
+      },
+      {
+        "flags": "-y, --yes",
+        "description": "Skip the confirmation — with -c and -a, quickstart runs without a terminal",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "reconnect",
+    "description": "Reconnect using saved wallet credentials",
+    "arguments": [],
+    "options": [],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "referral create",
+    "description": "Generate a referral code for a community/app",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-c, --community <id>",
+        "description": "Community ID",
+        "required": true
+      },
+      {
+        "flags": "-a, --app <id>",
+        "description": "App ID (optional)",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "role create",
+    "description": "Create a new role",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "--scope <scope>",
+        "description": "Scope: PLATFORM, COMMUNITY, or APP",
+        "required": true
+      },
+      {
+        "flags": "--scope-id <id>",
+        "description": "Scope ID (community_id or app_id)",
+        "required": true
+      },
+      {
+        "flags": "--role-id <id>",
+        "description": "Role ID (e.g., \"member\", \"admin\")",
+        "required": true
+      },
+      {
+        "flags": "--name <name>",
+        "description": "Role display name",
+        "required": true
+      },
+      {
+        "flags": "--description <text>",
+        "description": "Role description",
+        "required": false
+      },
+      {
+        "flags": "--price-usdsci <amount>",
+        "description": "Price in USDCX (default: 0 = free)",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "serve",
+    "description": "Start the unified local gateway (one HTTPS origin: App Shell at /, your app at /p/<app>, /apifront to the API)",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-p, --port <port>",
+        "description": "Gateway port for this run (default: env.gateway.port, else 5173)",
+        "required": false
+      },
+      {
+        "flags": "-w, --workspace <path>",
+        "description": "Workspace root override",
+        "required": false
+      },
+      {
+        "flags": "--site-url <url>",
+        "description": "App Shell target for this run (default: env.siteUrl, a local platform site, else the API origin)",
+        "required": false
+      },
+      {
+        "flags": "-a, --app <id>",
+        "description": "App to serve standalone (default: detected from the directory you are standing in)",
+        "required": false
+      }
+    ],
+    "runbookAnchor": "#_5-run-it-locally-descix-serve"
+  },
+  {
+    "verbPath": "site delete",
+    "description": "Delete deployed site",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-c, --community <id>",
+        "description": "Community ID (auto-detects from context)",
+        "required": false
+      },
+      {
+        "flags": "-a, --app <id>",
+        "description": "App ID (auto-detects from context)",
+        "required": false
+      },
+      {
+        "flags": "--preview",
+        "description": "Delete preview site only",
+        "required": false
+      },
+      {
+        "flags": "--confirm",
+        "description": "Skip confirmation prompt",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "site init",
+    "description": "Initialize site scaffold in current app",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-f, --force",
+        "description": "Overwrite existing site/ folder",
+        "required": false
+      },
+      {
+        "flags": "-c, --community <id>",
+        "description": "Community ID (auto-detects from context)",
+        "required": false
+      },
+      {
+        "flags": "-a, --app <id>",
+        "description": "App ID (auto-detects from context)",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "site list",
+    "description": "List deployed site files",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-c, --community <id>",
+        "description": "Community ID (auto-detects from context)",
+        "required": false
+      },
+      {
+        "flags": "-a, --app <id>",
+        "description": "App ID (auto-detects from context)",
+        "required": false
+      },
+      {
+        "flags": "--preview",
+        "description": "List preview site",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "site status",
+    "description": "Get deployment status and manifest",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-c, --community <id>",
+        "description": "Community ID (auto-detects from context)",
+        "required": false
+      },
+      {
+        "flags": "-a, --app <id>",
+        "description": "App ID (auto-detects from context)",
+        "required": false
+      },
+      {
+        "flags": "--preview",
+        "description": "Check preview site",
+        "required": false
+      }
+    ],
+    "runbookAnchor": "#_8-deploy-the-site"
+  },
+  {
+    "verbPath": "site upload",
+    "description": "Upload site to GCS and update app metadata (uses .descix/manifests/site.json when present)",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-c, --community <id>",
+        "description": "Community ID (auto-detects from context)",
+        "required": false
+      },
+      {
+        "flags": "-a, --app <id>",
+        "description": "App ID (auto-detects from context)",
+        "required": false
+      },
+      {
+        "flags": "-p, --path <localPath>",
+        "description": "Local directory to deploy (ignored when site manifest exists)",
+        "required": false
+      },
+      {
+        "flags": "--preview",
+        "description": "Deploy to preview path",
+        "required": false
+      },
+      {
+        "flags": "--dry-run",
+        "description": "Show what would be uploaded and which server files would be removed",
+        "required": false
+      },
+      {
+        "flags": "--no-cache",
+        "description": "Set Cache-Control: no-cache",
+        "required": false
+      }
+    ],
+    "runbookAnchor": "#_8-deploy-the-site"
+  },
+  {
+    "verbPath": "stats",
+    "description": "Get user stats (REP/REF/DIP) for a community",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-c, --community <id>",
+        "description": "Community ID",
+        "required": true
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "status",
+    "description": "Show comprehensive status of developer environment",
+    "arguments": [],
+    "options": [],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "store generate-summary",
+    "description": "Generate AI summary for an entity",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-t, --type <type>",
+        "description": "Entity type (COMMUNITY, APP, KB, IPDOC)",
+        "required": true
+      },
+      {
+        "flags": "-i, --id <id>",
+        "description": "Entity ID",
+        "required": true
+      },
+      {
+        "flags": "-c, --community <id>",
+        "description": "Community ID (required for APP, KB, IPDOC)",
+        "required": false
+      },
+      {
+        "flags": "-a, --app <id>",
+        "description": "App ID (required for KB, IPDOC)",
+        "required": false
+      },
+      {
+        "flags": "-k, --kb <id>",
+        "description": "KB ID (required for IPDOC)",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "store search",
+    "description": "Search store catalog (communities, apps, products, documents)",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-q, --query <text>",
+        "description": "Search query",
+        "required": false
+      },
+      {
+        "flags": "-t, --type <types>",
+        "description": "Entity types (comma-separated: COMMUNITY,APP,KB,IPDOC,ROLE)",
+        "required": false
+      },
+      {
+        "flags": "-c, --community <id>",
+        "description": "Filter by community ID",
+        "required": false
+      },
+      {
+        "flags": "-a, --app <id>",
+        "description": "Filter by app ID",
+        "required": false
+      },
+      {
+        "flags": "-k, --kb <id>",
+        "description": "Filter by knowledge base ID",
+        "required": false
+      },
+      {
+        "flags": "--price-min <number>",
+        "description": "Minimum price filter",
+        "required": false
+      },
+      {
+        "flags": "--price-max <number>",
+        "description": "Maximum price filter",
+        "required": false
+      },
+      {
+        "flags": "--tags <tags>",
+        "description": "Filter by tags (comma-separated)",
+        "required": false
+      },
+      {
+        "flags": "-l, --limit <number>",
+        "description": "Number of results",
+        "required": false
+      },
+      {
+        "flags": "--offset <number>",
+        "description": "Pagination offset",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "tell-me-how",
+    "description": "Discover platform tools using natural language (Intelligent MCP Mesh)",
+    "arguments": [
+      {
+        "name": "question",
+        "required": true,
+        "variadic": false,
+        "description": "What do you want to accomplish? Use natural language."
+      }
+    ],
+    "options": [
+      {
+        "flags": "-s, --scope <scope>",
+        "description": "Search scope (validated against the published tell_me_how enum): bootstrap, artifact, project, entitlements (default), discovery",
+        "required": false
+      },
+      {
+        "flags": "-j, --json",
+        "description": "Output raw JSON response",
+        "required": false
+      }
+    ],
+    "runbookAnchor": "#_9-list-it-and-discover-the-rest"
+  },
+  {
+    "verbPath": "whoami",
+    "description": "Show current authentication status",
+    "arguments": [],
+    "options": [],
+    "runbookAnchor": "#_3-pin-production-then-sign-in"
+  }
+]
