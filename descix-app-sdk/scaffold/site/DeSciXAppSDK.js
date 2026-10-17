@@ -264,6 +264,7 @@ window.DeSciX = (() => {
          *     DeSciX.view.set('CodeSite');   // this app gets the whole frame
          *     DeSciX.view.set('SplitView');  // this app beside the chat panel (default)
          *     DeSciX.view.set('Chat');       // chat only
+         *     DeSciX.view.set('NoChrome');   // no shell chrome; this app fills the viewport
          *
          * `DeSciX.view.available()` reports whether a host is actually LISTENING.
          * Check it: on a host that renders a bare iframe, set() validates and returns

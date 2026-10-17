@@ -36,8 +36,9 @@ beforeEach(() => {
   resetView();
 });
 
-test('the three modes the ruling names, and nothing else', () => {
-  assert.deepEqual(Object.values(VIEW_MODES).sort(), ['Chat', 'CodeSite', 'SplitView']);
+test('exactly four views, and nothing else', () => {
+  assert.deepEqual(Object.values(VIEW_MODES).sort(), ['Chat', 'CodeSite', 'NoChrome', 'SplitView']);
+  assert.ok(Object.isFrozen(VIEW_MODES));
 });
 
 test('the default is SplitView — an app that says nothing gets what it always got', () => {
@@ -45,7 +46,7 @@ test('the default is SplitView — an app that says nothing gets what it always 
   assert.equal(getView(), VIEW_MODES.SPLITVIEW);
 });
 
-test('an app can ask for any of the three', () => {
+test('an app can ask for any of the four', () => {
   for (const mode of Object.values(VIEW_MODES)) {
     assert.equal(setView(mode), mode);
     assert.equal(getView(), mode);
@@ -53,11 +54,45 @@ test('an app can ask for any of the three', () => {
 });
 
 test('an unknown view FAILS LOUD and names the valid ones', () => {
-  assert.throws(() => setView('splitview'), /not a view[\s\S]*CodeSite, SplitView, Chat/,
+  assert.throws(() => setView('splitview'), /not a view[\s\S]*CodeSite, SplitView, Chat, NoChrome/,
     'case matters, and silently ignoring a typo would hand the app the wrong layout');
   assert.throws(() => setView(null), /not a view/);
-  assert.throws(() => setView('FullScreen'), /not a view/);
+  assert.throws(() => setView('FullScreen'), /not a view/,
+    'FullScreen is the browser Fullscreen API, not a shell view; NoChrome is the shell view');
+  assert.throws(() => setView('Kiosk'), /not a view/);
   assert.equal(getView(), DEFAULT_VIEW, 'a rejected request must not change the view');
+});
+
+test('the not-a-view error describes every view, from the one list', () => {
+  let message = '';
+  try { setView('Kiosk'); } catch (e) { message = e.message; }
+  for (const mode of Object.values(VIEW_MODES)) {
+    assert.match(message, new RegExp(`^  ${mode} +=`, 'm'), `the error must describe ${mode}`);
+  }
+});
+
+test('NoChrome: setView sets it and notifies the shell', () => {
+  const seen = [];
+  const off = subscribeView((m) => seen.push(m));
+  assert.equal(setView('NoChrome'), 'NoChrome');
+  assert.equal(getView(), VIEW_MODES.NOCHROME);
+  assert.deepEqual(seen, ['NoChrome']);
+  off();
+});
+
+test('every developer doc that lists the views names all of them', () => {
+  const docs = [
+    'templates/DeSciXAppSDK.template.js',
+    'scaffold/site/DeSciXAppSDK.js',
+    'APP_SHELL_API.md',
+    'README.md',
+  ];
+  for (const rel of docs) {
+    const src = fs.readFileSync(path.join(SDK_ROOT, rel), 'utf8');
+    for (const mode of Object.values(VIEW_MODES)) {
+      assert.match(src, new RegExp(`view\\.set\\('${mode}'\\)`), `${rel} must show DeSciX.view.set('${mode}')`);
+    }
+  }
 });
 
 test('the shell is notified, because the app loads AFTER the layout is drawn', () => {

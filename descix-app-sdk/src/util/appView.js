@@ -23,6 +23,14 @@
  *     DeSciX.view.set('CodeSite');   // give me the whole frame
  *     DeSciX.view.set('SplitView');  // app + chat side by side
  *     DeSciX.view.set('Chat');       // chat only
+ *     DeSciX.view.set('NoChrome');   // no shell chrome; the app fills the viewport
+ *
+ * NoChrome: the shell renders NO chrome (no TopNavBar, no Main padding, no chat)
+ * and the app iframe fills the shell's viewport. The shell is the consumer of
+ * this value (DeSciX_Cloud site/src/App.jsx and AppSurfaceWidget.jsx). NoChrome
+ * is a shell view: the shell drops its chrome inside the browser tab. Browser full
+ * screen is the separate Fullscreen API, which the CodeSite iframe delegates
+ * (`allow="fullscreen"`) and which the app may call on top of any view.
  *
  * That reach works because shell and app are SAME ORIGIN — the property this
  * workstream's G-1 fix restored. It is the identical mechanism SplitView uses in
@@ -36,14 +44,32 @@
 
 import { publishBridgeMember } from './appBridge.js';
 
-/** The three views an app may ask for. */
+/** The four views an app may ask for. The one list of views. */
 export const VIEW_MODES = Object.freeze({
   CODESITE: 'CodeSite',
   SPLITVIEW: 'SplitView',
   CHAT: 'Chat',
+  NOCHROME: 'NoChrome',
 });
 
 const VALID = Object.freeze(Object.values(VIEW_MODES));
+
+/** What each view gives the app, keyed by VIEW_MODES value; the not-a-view error prints it. */
+const VIEW_DESCRIPTIONS = Object.freeze({
+  [VIEW_MODES.CODESITE]: 'your app gets the whole frame, inside the shell chrome',
+  [VIEW_MODES.SPLITVIEW]: 'your app beside the chat panel (the default)',
+  [VIEW_MODES.CHAT]: 'chat only',
+  [VIEW_MODES.NOCHROME]: 'no shell chrome (no top bar, no padding, no chat); your app fills the viewport',
+});
+{
+  const described = Object.keys(VIEW_DESCRIPTIONS);
+  const missing = VALID.filter((m) => !described.includes(m));
+  const extra = described.filter((m) => !VALID.includes(m));
+  if (missing.length || extra.length) {
+    throw new Error(`[DeSciX.view] VIEW_DESCRIPTIONS does not match VIEW_MODES (missing: ${missing.join(', ') || 'none'}; extra: ${extra.join(', ') || 'none'}).`);
+  }
+}
+const WIDTH = Math.max(...VALID.map((m) => m.length));
 
 /**
  * The shell's own default when an app expresses no preference: app plus chat.
@@ -71,9 +97,7 @@ export function setView(mode) {
   if (!VALID.includes(mode)) {
     throw new Error(
       `[DeSciX.view] "${mode}" is not a view. Valid: ${VALID.join(', ')}.\n` +
-      '  CodeSite  = your app gets the whole frame\n' +
-      '  SplitView = your app beside the chat panel (the default)\n' +
-      '  Chat      = chat only'
+      VALID.map((m) => `  ${m.padEnd(WIDTH)} = ${VIEW_DESCRIPTIONS[m]}`).join('\n')
     );
   }
   if (current !== mode) {
