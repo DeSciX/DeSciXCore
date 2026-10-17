@@ -196,7 +196,14 @@ you want something else:
 DeSciX.view.set('CodeSite');   // your app gets the whole frame
 DeSciX.view.set('SplitView');  // your app beside chat (default)
 DeSciX.view.set('Chat');       // chat only
+DeSciX.view.set('NoChrome');   // no shell chrome; your app fills the viewport
 ```
+
+`NoChrome` is a shell view: the shell drops its top bar, padding and chat inside the
+browser tab, which is the way to a chromeless phone view. Browser full screen is the separate
+Fullscreen API; the CodeSite iframe delegates it (`allow="fullscreen"`), so your app may call
+`element.requestFullscreen()` on top of any view where the browser supports it (iPhone Safari
+does not).
 
 | Member | Signature | Notes |
 |---|---|---|
@@ -204,7 +211,7 @@ DeSciX.view.set('Chat');       // chat only
 | `get()` | `() => string` | The mode in effect now. |
 | `subscribe(fn)` | `(fn) => unsubscribe` | Called on every change. |
 | `available()` | `() => boolean` | **Check this.** Is a host actually listening? |
-| `MODES` | `{CODESITE, SPLITVIEW, CHAT}` | The string constants, so you never hand-type them. |
+| `MODES` | `{CODESITE, SPLITVIEW, CHAT, NOCHROME}` | The string constants, so you never hand-type them. |
 | `DEFAULT` | `string` | `SplitView`. |
 
 **`set()` returning your mode does not mean the screen changed.** Wherever the

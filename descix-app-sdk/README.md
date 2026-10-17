@@ -51,6 +51,10 @@ function PowchApp() {
 
 The shell handles init, auth, and providers. When `appState === READY`, it renders `children`.
 
+### Views
+
+An embedded app picks its layout with `DeSciX.view.set('CodeSite')`, `DeSciX.view.set('SplitView')` (default), `DeSciX.view.set('Chat')` or `DeSciX.view.set('NoChrome')`; `DeSciX.view.set('NoChrome')` is the way to a chromeless phone view (no top bar, no padding, no chat; the app fills the viewport). The CodeSite iframe's `allow="fullscreen"` is a different thing: it delegates the browser Fullscreen API, which the app may call on top of any view. Full reference: [APP_SHELL_API.md](APP_SHELL_API.md#descixview--choose-your-layout).
+
 ### PowchClient (Third-Party Sites)
 
 ```js

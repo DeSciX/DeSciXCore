@@ -54,15 +54,15 @@ The gateway serves your app at `/p/<appId>`. **That path does not exist in the c
 apps are served on their own host, `{appId}.{env}.descix.net`. Measured against dev:
 
 ```
-# LOCAL — the /p/ form, served by your own gateway
-https://localhost:5173/p/egpt-godsworld/       works   (gateway port varies)
+# LOCAL — the /p/ form, the frame your own gateway serves into the shell
+https://localhost:5173/p/egpt-godsworld/       the app frame only (gateway port varies)
 
 # CLOUD — measured against dev
 https://egpt-godsworld.dev.descix.net/         -> 200  (the deployed app, per-app host)
 https://dev.descix.net/p/egpt-godsworld/       -> 404  (the /p/ form does not exist here)
 ```
 
-So a URL that works all through local development 404s the moment you point it at a deployed
+So a `/p/` URL that loads locally 404s the moment you point it at a deployed
 environment. If you are writing a link, a redirect, or a test that must survive deployment, use
 the per-app host; keep `/p/` for the local gateway, where it is the correct and necessary form.
 
@@ -77,6 +77,8 @@ descix app init -a <app-id>                      # writes env.app
 descix app set-site -a <app-id> --static site    # relative to the repo root
 descix serve
 ```
+
+Open the gateway ROOT, `https://localhost:<port>/`, to run your app. `/p/<appId>` is only the frame the shell loads; never measure layout, sign-in or fullscreen there.
 
 ### 3.1. Configuration: `.descix/workspace.json`
 The `workspace.json` file is the **single source of truth** for local routing and app configuration. This is the only configuration methodology - `.descix.app/context.json` files are no longer used.
