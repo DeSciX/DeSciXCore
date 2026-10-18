@@ -2198,7 +2198,7 @@ siteCommand
   .description('Upload site to GCS and update app metadata (uses .descix/manifests/site.json when present)')
   .option('-c, --community <id>', 'Community ID (auto-detects from context)')
   .option('-a, --app <id>', 'App ID (auto-detects from context; in a gateway workspace, the listed repo holding this app supplies the manifest and files)')
-  .option('-p, --path <localPath>', 'Local directory to deploy (ignored when site manifest exists)', './site')
+  .option('-p, --path <localPath>', 'Local directory to deploy (ignored when site manifest exists; in a gateway workspace only an explicit -p counts, and it uploads that directory for an app no listed repo holds)', './site')
   .option('--preview', 'Deploy to preview path')
   .option('--dry-run', 'Show what would be uploaded and which server files would be removed')
   .option('--no-cache', 'Set Cache-Control: no-cache')
@@ -2240,37 +2240,26 @@ siteCommand
         process.exit(1);
       }
 
-      // The app's repo root (WorkspaceConfig.resolveAppRepo — gateway entries resolve to their own
-      // repo; a gateway miss throws by name). Env, apiUrl and credential stay with THIS workspace.
-      const appRepo = workspaceConfig.resolveAppRepo(appId);
+      // Which files this upload deploys — the app's repo and its site manifest, or the -p
+      // directory — has one owner (lib/core/SiteSource.js resolveSiteSource). Only a -p the caller
+      // TYPED counts as a choice; commander's './site' default does not. Env, apiUrl and credential
+      // stay with THIS workspace.
+      const { resolveSiteSource } = await import('../lib/core/SiteSource.js');
+      const source = await resolveSiteSource(workspaceConfig, appId, {
+        path: options.path,
+        pathExplicit: command.getOptionValueSource('path') === 'cli',
+      });
+      const { appRoot, siteManifest, uploadDir } = source;
 
       // Derive communityId from workspace config if not provided.
       // Fallback: for NFT apps, community_id === app_id (convention).
       // The backend will validate this via hydrateCommunityIdFromProducts.
       if (!communityId) {
-        communityId = appRepo?.communityId || appId;
-      }
-      const appRoot = appRepo?.dir || path.resolve('.');
-
-      // Check for site manifest (.descix/manifests/site.json)
-      const { loadSiteManifest, siteManifestPath: siteManifestPathOf } = await import('../lib/core/ManifestLoader.js');
-      const siteManifest = await loadSiteManifest(appRoot);
-      const siteManifestPath = siteManifestPathOf(appRoot);
-
-      // A gateway app whose repo carries no site manifest has no deployable set of its own; the
-      // -p default ('./site', relative to the cwd) would read the GATEWAY's tree. Only an explicit
-      // -p names a directory to upload.
-      if (workspaceConfig.isGateway() && !siteManifest && command.getOptionValueSource('path') !== 'cli') {
-        throw new Error(
-          `App "${appId}" resolves to ${appRoot} (gateway ${appRepo.role} entry '${appRepo.entry}'), ` +
-          `which has no site manifest at ${siteManifestPath}. Add one there, or name the directory to upload with -p <dir>.`
-        );
+        communityId = source.communityId || appId;
       }
 
-      console.log(chalk.gray(`\n  App repo: ${appRoot} (${appRepo
-        ? (appRepo.role === 'self' ? 'this workspace\'s app' : `gateway ${appRepo.role} entry '${appRepo.entry}'`)
-        : 'not this workspace\'s app — current directory'})`));
-      console.log(chalk.gray(`  Site manifest: ${siteManifest ? siteManifestPath : `none at ${siteManifestPath} — uploading -p ${path.resolve(options.path)}`}`));
+      console.log('');
+      for (const line of source.lines) console.log(chalk.gray(`  ${line}`));
 
       await requireAuth(apiClient);
 
@@ -2282,7 +2271,7 @@ siteCommand
       // recorded the WRONG repository's commit on every deploy made from outside the app repo
       // (measured 2026-09-18: daita-docs, whose files live in DeSciX/daita, was stamped with the
       // Unkamon commit it happened to be run from).
-      const provenanceDir = siteManifest ? appRoot : path.resolve(options.path);
+      const provenanceDir = siteManifest ? appRoot : uploadDir;
       const gitUtils = new GitUtils(provenanceDir);
       const gitStatus = await gitUtils.getStatus();
 
@@ -2345,8 +2334,8 @@ siteCommand
           localFiles[f.path] = { hash: f.hash, size: f.size };
         }
       } else {
-        // ── Legacy flat-directory flow (unchanged) ──
-        const localPath = path.resolve(options.path);
+        // ── Flat-directory flow: the directory resolveSiteSource chose ──
+        const localPath = uploadDir;
         sourceLabel = localPath;
 
         try {
