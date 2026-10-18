@@ -1956,7 +1956,7 @@
       },
       {
         "flags": "-p, --path <localPath>",
-        "description": "Local directory to deploy (ignored when site manifest exists)",
+        "description": "Local directory to deploy (ignored when site manifest exists; in a gateway workspace only an explicit -p counts, and it uploads that directory for an app no listed repo holds)",
         "required": false
       },
       {

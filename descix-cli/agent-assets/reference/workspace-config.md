@@ -89,9 +89,14 @@ applies the same checks when it reads the file.
 `descix site upload -a <appId>` run from a gateway workspace's root operates on the listed repo
 whose own workspace names that appId: its `.descix/manifests/site.json`, its `buildCommand` (run
 in that repo's root) and its sources. The env, API origin and sign-in are the gateway workspace's.
-A listed repo with no workspace or no `env.app` is skipped; an appId no listed repo holds is
-refused, naming every repo searched. A matched repo with no site manifest is refused unless `-p
-<dir>` names the directory to upload. Every run prints `App repo:` and `Site manifest:` first.
+A listed repo with no workspace or no `env.app` is skipped. A matched repo's site manifest wins over
+`-p`, and the run says the `-p` was ignored; a matched repo with no site manifest is refused unless
+`-p <dir>` names the directory to upload. An appId no listed repo holds uploads the directory an
+explicit `-p <built dist>` names, under the gateway workspace's sign-in, printing `App repo: none
+listed; uploading --path <dir> for app <appId>`; with no `-p` it is refused, naming every repo
+searched and the three remedies (`descix config gateway add-repo <repo>`, run from the app's repo
+root, or `-p`). The `./site` default of `-p` never counts in a gateway workspace. Every run prints
+`App repo:` first.
 
 ### Refused shapes
 

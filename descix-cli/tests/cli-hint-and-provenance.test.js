@@ -25,10 +25,11 @@ test('the app init hint names the app\'s REGISTERED directory, not a guessed app
 });
 
 test('site upload reads provenance from where the FILES come from, never the caller\'s cwd', () => {
-    const upload = CLI.slice(CLI.indexOf("const siteManifest = await loadSiteManifest(appRoot);"),
+    const upload = CLI.slice(CLI.indexOf("const source = await resolveSiteSource("),
                              CLI.indexOf("let fileList;"));
     assert.doesNotMatch(upload, /new GitUtils\(process\.cwd\(\)\)/);
-    assert.match(upload, /const provenanceDir = siteManifest \? appRoot : path\.resolve\(options\.path\);/);
+    // uploadDir is lib/core/SiteSource.js's absolute -p directory (null when a manifest names the files)
+    assert.match(upload, /const provenanceDir = siteManifest \? appRoot : uploadDir;/);
     assert.match(upload, /new GitUtils\(provenanceDir\)/);
 });
 

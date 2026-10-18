@@ -218,6 +218,9 @@ export class WorkspaceRetiredFormatError extends Error {
  * 
  * Loads and manages .descix/workspace.json for workspace-level operations.
  */
+/** Error code of resolveAppRepo's refusal when no gateway entry holds the app. */
+export const APP_NOT_IN_GATEWAY = 'APP_NOT_IN_GATEWAY';
+
 export class WorkspaceConfig {
   constructor(config, workspaceRoot = null) {
     // Store workspace root for later use
@@ -362,7 +365,9 @@ export class WorkspaceConfig {
    * @param {string} appId
    * @returns {{ appId: string, communityId: string|null, dir: string, role: 'self'|'shell'|'repo', entry: string }|null}
    *   null only for a single-app workspace asked about another app
-   * @throws in a gateway workspace when no entry, or more than one, holds appId
+   * @throws in a gateway workspace when no entry, or more than one, holds appId; the no-entry
+   *   refusal carries `code === APP_NOT_IN_GATEWAY` so a caller that has its own remedy (site
+   *   upload's explicit -p) branches on the code, never on the message text
    */
   resolveAppRepo(appId) {
     if (!this.isGateway()) {
@@ -408,12 +413,14 @@ export class WorkspaceConfig {
       );
     }
     if (matches.length === 0) {
-      throw new Error(
+      const err = new Error(
         `App "${appId}" is not held by any entry of the gateway workspace ${gatewayFile}.\n` +
         `Searched (env.gateway.shell / env.gateway.appRepos, relative to ${root}):\n` +
         `${searched.join('\n')}\n` +
         `List the app's repo with \`descix config gateway add-repo <repo>\`, or run the command from that repo's root.`
       );
+      err.code = APP_NOT_IN_GATEWAY;
+      throw err;
     }
     return matches[0];
   }

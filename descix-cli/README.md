@@ -171,8 +171,12 @@ metadata. Files are uploaded straight to GCS with short-lived **signed URLs** is
 
 **From a gateway workspace**, `-a <appId>` names the listed repo (`env.gateway.shell` or
 `env.gateway.appRepos[]`) whose own workspace holds that app; its manifest, build and sources are
-read there, while the env, origin and sign-in stay the gateway's. An appId no listed repo holds is
-refused, naming the repos searched. Every run prints `App repo:` and `Site manifest:` first.
+read there, while the env, origin and sign-in stay the gateway's; an explicit `-p` is then ignored
+and the run says so. For an appId no listed repo holds, an explicit `-p <built dist>` uploads that
+directory for the app under the gateway's sign-in (`App repo: none listed; uploading --path <dir> for
+app <appId>`); without one the upload is refused, naming the repos searched and the three remedies
+(`add-repo`, run from the app's repo, or `-p`). The `./site` default never counts as a `-p` in a
+gateway workspace. Every run prints `App repo:` (and, for a listed repo, `Site manifest:`) first.
 
 **Site deploys target a cloud environment.** An upload that resolves to a local backend without
 this invocation naming its target is refused — pass `--env <dev|demo|prod>`.
