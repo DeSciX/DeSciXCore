@@ -262,16 +262,18 @@ call. One balance per user, platform-wide.
 
 **Commands:**
 ```bash
-descix credits balance          # current USD balance + lifetime totals
+descix credits balance          # current USD balance, lifetime totals, the listed credit bundles
 descix credits history          # ledger rows (debits carry app/community attribution)
-descix credits buy --usd 10     # prints a Stripe checkout URL — complete it in a browser
+descix credits buy --usd 10     # prints a Stripe Checkout URL from Powch — complete it in a browser
 ```
+
+The Powch Buy menu sells the same bundles in the browser.
 
 **Zero balance behavior:** metered calls are rejected with a structured
 `CREDITS_REQUIRED` error (HTTP 402 over `/apifront`; `isError` tool result over MCP)
 that carries a machine-readable purchase action: `data.purchase.cli`
 (`descix credits buy --usd <amount>`), `data.purchase.command`
-(`create_stripe_checkout_session` with `purchase_type: 'ai_credits'`), and
+(Powch's `create_checkout_session` with `purchase_type: 'ai_credits'`), and
 `data.purchase.balance_tool` (`get_credit_balance`). There is no SILENT free fallback: eligible free/new users may first draw a lazy daily grant from the publicly-funded sponsored-credits pool (per-user + pool daily caps, drawn only at balance <= 0); once the pool is empty or capped (and always for paid users) the metered call fails loud with `CREDITS_REQUIRED` as above — free degrades to paid, never invisible free (CEO-D-2026-07-07 sponsored pool).
 
 **MCP tools:** `get_credit_balance` (check balance from any MCP client) — see also the

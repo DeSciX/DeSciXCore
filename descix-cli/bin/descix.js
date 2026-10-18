@@ -27,7 +27,6 @@ import {
 import { GlobalConfig } from '../lib/global-config.js';
 import * as authCommands from '../lib/commands/auth.js';
 import * as configCommands from '../lib/commands/config.js';
-import * as buyCommands from '../lib/commands/buy.js';
 import * as creditsCommands from '../lib/commands/credits.js';
 import { MICROSERVICE_AUTH_MODEL } from '../lib/commands/microservice-auth-model.js';
 import { runInit } from '../lib/commands/init.js';
@@ -304,65 +303,8 @@ program
   });
 
 
-// ============ Buy Commands (Crypto Payments) ============
-
-const buyCommand = program
-  .command('buy')
-  .description('Crypto payment operations');
-
-buyCommand
-  .command('quote')
-  .description('Create a crypto payment quote')
-  .requiredOption('-a, --amount <usd>', 'USD amount to purchase')
-  .requiredOption('-c, --chain <chain>', 'Blockchain to use (polygon, ethereum, bnb)')
-  .option('-t, --type <type>', 'Purchase type: usdcx or community_token', 'usdcx')
-  .option('-e, --email <email>', 'Email for claim link (guest mode)')
-  .option('--community <id>', 'Community ID for community token purchase')
-  .action(async (options) => {
-    try {
-      await buyCommands.createQuote(options);
-    } catch (error) {
-      fail(error);
-    }
-  });
-
-buyCommand
-  .command('status <quoteId>')
-  .description('Check status of a payment quote')
-  .action(async (quoteId) => {
-    try {
-      await buyCommands.checkStatus(quoteId);
-    } catch (error) {
-      fail(error);
-    }
-  });
-
-buyCommand
-  .command('poll <quoteId>')
-  .description('Poll for quote status until completed (with exponential backoff)')
-  .option('--max <attempts>', 'Maximum poll attempts', '120')
-  .option('--interval <ms>', 'Initial poll interval in ms', '5000')
-  .action(async (quoteId, options) => {
-    try {
-      await buyCommands.pollStatus(quoteId, {
-        maxAttempts: parseInt(options.max),
-        initialInterval: parseInt(options.interval)
-      });
-    } catch (error) {
-      fail(error);
-    }
-  });
-
-buyCommand
-  .command('chains')
-  .description('List supported blockchains for payments')
-  .action(() => {
-    buyCommands.listChains();
-  });
-
 // ============ AI Credits Commands (WS-HEADLESS-MVP-A2, CEO-D-2026-07-01 D2) ============
-// Platform-wide USD AI-credits: metered RAG/agent calls debit this balance.
-// NOT community tokens (those are under `descix buy`).
+// Platform-wide USD AI-credits: metered RAG/agent calls debit this balance. NOT community tokens.
 
 const creditsCommand = program
   .command('credits')
@@ -393,14 +335,11 @@ creditsCommand
 
 creditsCommand
   .command('buy')
-  .description('Buy AI credits with USD (Stripe checkout)')
-  .requiredOption('--usd <amount>', 'USD amount of credits to buy')
-  // The default is the origin this invocation is already talking to, NOT a fixed production
-  // host — see commands/credits.js. Naming a prod origin here made --help itself the misreport.
-  .option('--return-base <url>', 'Base URL for the checkout success/cancel landing (default: the API origin in use)')
+  .description('Buy AI credits: starts a Powch checkout and prints its Stripe Checkout URL (the Powch Buy menu is the same purchase)')
+  .requiredOption('--usd <amount>', 'USD amount of credits to buy: a listed bundle (`descix credits balance` lists them)')
   .action(async (options) => {
     try {
-      await creditsCommands.buyCredits({ usd: options.usd, returnBase: options.returnBase });
+      await creditsCommands.buyCredits({ usd: options.usd });
     } catch (error) {
       fail(error);
     }

@@ -506,85 +506,6 @@
     "runbookAnchor": null
   },
   {
-    "verbPath": "buy chains",
-    "description": "List supported blockchains for payments",
-    "arguments": [],
-    "options": [],
-    "runbookAnchor": null
-  },
-  {
-    "verbPath": "buy poll",
-    "description": "Poll for quote status until completed (with exponential backoff)",
-    "arguments": [
-      {
-        "name": "quoteId",
-        "required": true,
-        "variadic": false,
-        "description": ""
-      }
-    ],
-    "options": [
-      {
-        "flags": "--max <attempts>",
-        "description": "Maximum poll attempts",
-        "required": false
-      },
-      {
-        "flags": "--interval <ms>",
-        "description": "Initial poll interval in ms",
-        "required": false
-      }
-    ],
-    "runbookAnchor": null
-  },
-  {
-    "verbPath": "buy quote",
-    "description": "Create a crypto payment quote",
-    "arguments": [],
-    "options": [
-      {
-        "flags": "-a, --amount <usd>",
-        "description": "USD amount to purchase",
-        "required": true
-      },
-      {
-        "flags": "-c, --chain <chain>",
-        "description": "Blockchain to use (polygon, ethereum, bnb)",
-        "required": true
-      },
-      {
-        "flags": "-t, --type <type>",
-        "description": "Purchase type: usdcx or community_token",
-        "required": false
-      },
-      {
-        "flags": "-e, --email <email>",
-        "description": "Email for claim link (guest mode)",
-        "required": false
-      },
-      {
-        "flags": "--community <id>",
-        "description": "Community ID for community token purchase",
-        "required": false
-      }
-    ],
-    "runbookAnchor": null
-  },
-  {
-    "verbPath": "buy status",
-    "description": "Check status of a payment quote",
-    "arguments": [
-      {
-        "name": "quoteId",
-        "required": true,
-        "variadic": false,
-        "description": ""
-      }
-    ],
-    "options": [],
-    "runbookAnchor": null
-  },
-  {
     "verbPath": "chat",
     "description": "Chat with an app agent. Usage: descix chat \"Your question\" or descix chat -q \"Your question\"",
     "arguments": [
@@ -1046,18 +967,13 @@
   },
   {
     "verbPath": "credits buy",
-    "description": "Buy AI credits with USD (Stripe checkout)",
+    "description": "Buy AI credits: starts a Powch checkout and prints its Stripe Checkout URL (the Powch Buy menu is the same purchase)",
     "arguments": [],
     "options": [
       {
         "flags": "--usd <amount>",
-        "description": "USD amount of credits to buy",
+        "description": "USD amount of credits to buy: a listed bundle (`descix credits balance` lists them)",
         "required": true
-      },
-      {
-        "flags": "--return-base <url>",
-        "description": "Base URL for the checkout success/cancel landing (default: the API origin in use)",
-        "required": false
       }
     ],
     "runbookAnchor": null
