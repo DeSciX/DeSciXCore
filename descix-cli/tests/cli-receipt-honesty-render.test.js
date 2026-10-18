@@ -41,6 +41,12 @@ const STORE_DERIVED = ['Upserted', 'Purged', 'Chunks created', 'Chunks deleted']
 // Counts derived from local work or local state: what we walked, chunked, or previously
 // recorded. Honest by construction — they describe our own side, not the store's.
 const LOCALLY_DERIVED = ['Found', 'Chunked', 'Files synced', 'Files unchanged', 'Previous sync'];
+/**
+ * "Label: value" lines that state no quantity even though the value can hold digits — named here,
+ * one by one, so the digit heuristic below cannot hide a real count behind a blanket rule.
+ * 'App repo' is the resolved repo's PATH (workspace-config.js describeAppRepo).
+ */
+const NOT_A_COUNT = ['App repo'];
 
 /** Strip ANSI so an assertion reads the text, not the colouring. */
 const plain = (s) => s.replace(/\[[0-9;]*m/g, '');
@@ -149,6 +155,7 @@ function receiptCounts(output) {
     const m = line.match(/^([A-Z][A-Za-z ]*?):\s+(\S.*?)\s*$/);
     if (!m) continue;
     const [, label, value] = m;
+    if (NOT_A_COUNT.includes(label)) continue;
     if (!/\d/.test(value) && !/unreported/.test(value)) continue;
     if (!map.has(label)) map.set(label, value);
   }

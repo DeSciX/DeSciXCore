@@ -34,6 +34,7 @@ import * as driveADC from '../google-storage-adc.js';
 // and nothing else.
 import { CANONICAL_KB_SYNC } from './kb-sync-surface.js';
 import { loadSyncState, syncStatePath } from '../core/syncState.js';
+import { resolveCorpusRepo } from './corpus.js';
 
 // ============ Pull Command ============
 
@@ -278,18 +279,14 @@ export async function runKbPush(apiClient, options) {
  *   (e) Exits 1 on orphans or missing files, 2 when the state cannot be read.
  */
 export async function runKbDoctor(apiClient, options) {
-  const { WorkspaceConfig } = await import('../workspace-config.js');
-  const workspaceConfig = await WorkspaceConfig.load();
-
   const appId = options.app;
   const kbName = options.kb;
   if (!appId) throw new Error('-a, --app <id> is required');
   if (!kbName) throw new Error('-k, --kb <name> is required');
 
-  const appMeta = workspaceConfig.getAppByAppId(appId);
-  if (!appMeta) throw new Error(`App '${appId}' not found in workspace.json`);
-  const appRoot = appMeta.absolutePath;
-  const communityId = appMeta.communityId || appMeta.community_id || null;
+  // The app's repo — sync-state and sync logs live under it — from the one kb-verb resolver.
+  const { appRepo, appRoot } = await resolveCorpusRepo(appId);
+  const communityId = appRepo.communityId || null;
 
   const scope = communityId ? `${communityId}/${appId}/${kbName}` : `${appId}/${kbName}`;
   console.log(chalk.cyan(`\n🩺 kb doctor — ${scope}\n`));

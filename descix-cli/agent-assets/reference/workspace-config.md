@@ -98,6 +98,14 @@ searched and the three remedies (`descix config gateway add-repo <repo>`, run fr
 root, or `-p`). The `./site` default of `-p` never counts in a gateway workspace. Every run prints
 `App repo:` first.
 
+`descix kb corpus sync`, `descix kb corpus status` and `descix kb doctor` with `-a <appId>`, run
+from a gateway workspace's root, operate on the same listed repo: its
+`.descix/manifests/<kb_name>.json`, its git tree walked at the manifest ref, its sync-state and its
+`env.app.communityId`. The env, API origin and sign-in are the gateway workspace's. An appId no
+listed repo holds is refused, naming every repo searched and the two remedies (`descix config
+gateway add-repo <repo>`, or run from the app's repo root); there is no `-p` form, because the corpus
+manifest is required. Every run prints `App repo:` first.
+
 ### Refused shapes
 
 - A `communities` block with no `env` block — the v1 format — fails on load: `v1 workspace format is

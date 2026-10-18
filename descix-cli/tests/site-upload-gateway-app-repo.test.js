@@ -202,9 +202,9 @@ test('CLI: site upload -a <gateway app with no site manifest> and no -p refuses,
 // caller NAMED the directory with -p. The default `./site` is not a choice and is refused. A listed
 // repo still wins over -p, and the run says the -p was ignored.
 
-const MOCK = path.resolve(__dirname, 'tools', 'site-upload-mock-backend.mjs');
+const MOCK = path.resolve(__dirname, 'tools', 'cli-mock-backend.mjs');
 
-/** The real binary with the backend mocked (tests/tools/site-upload-mock-backend.mjs). */
+/** The real binary with the backend mocked (tests/tools/cli-mock-backend.mjs). */
 function cliMocked(cwd, args, home) {
   const env = { ...process.env, HOME: home };
   delete env.DESCIX_API_URL;

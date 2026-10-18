@@ -221,6 +221,18 @@ export class WorkspaceRetiredFormatError extends Error {
 /** Error code of resolveAppRepo's refusal when no gateway entry holds the app. */
 export const APP_NOT_IN_GATEWAY = 'APP_NOT_IN_GATEWAY';
 
+/**
+ * THE ONE spelling of the line every `-a <appId>` verb prints to say which repo it resolved:
+ * `App repo: <dir> (this workspace's app | gateway <role> entry '<entry>')`.
+ *
+ * @param {{ dir: string, role: 'self'|'shell'|'repo', entry: string }} appRepo - from resolveAppRepo
+ * @returns {string}
+ */
+export function describeAppRepo(appRepo) {
+  const where = appRepo.role === 'self' ? 'this workspace\'s app' : `gateway ${appRepo.role} entry '${appRepo.entry}'`;
+  return `App repo: ${appRepo.dir} (${where})`;
+}
+
 export class WorkspaceConfig {
   constructor(config, workspaceRoot = null) {
     // Store workspace root for later use
@@ -423,6 +435,22 @@ export class WorkspaceConfig {
       throw err;
     }
     return matches[0];
+  }
+
+  /**
+   * resolveAppRepo for a verb whose only source is the app's repo — the kb verbs, which read
+   * `<repo>/.descix/manifests/<kbId>.json`, walk that repo's git tree and keep its sync-state. There
+   * is no directory to fall back to, so an app this workspace cannot name is a refusal: in a gateway,
+   * resolveAppRepo's own (APP_NOT_IN_GATEWAY, naming every entry searched); in a single-app
+   * workspace, the canonical unmapped-app message.
+   *
+   * @param {string} appId
+   * @returns {{ appId: string, communityId: string|null, dir: string, role: 'self'|'shell'|'repo', entry: string }}
+   */
+  requireAppRepo(appId) {
+    const repo = this.resolveAppRepo(appId);
+    if (!repo) throw new Error(unmappedAppMessage(appId));
+    return repo;
   }
 
   /**
