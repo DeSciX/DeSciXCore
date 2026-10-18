@@ -1,12 +1,15 @@
 /**
  * Credits Commands — platform-wide USD AI credits (WS-HEADLESS-MVP-A2, CEO-D-2026-07-01 D2).
  *
- * `descix credits balance | history | buy | grant | refund` over the backend commands
- * get_credit_balance / get_credit_history / create_stripe_checkout_session
- * (purchase_type:'ai_credits') / grant_credits / refund_credits.
+ * `descix credits balance | history | buy | grant | refund` over get_credit_balance /
+ * get_credit_history / create_checkout_session / grant_credits / refund_credits.
+ *
+ * `buy` starts Powch's checkout ceremony: create_checkout_session is a Powch command that /apifront
+ * proxies under the caller's identity; it returns a Stripe Checkout `url`, and the purchase settles
+ * into the ledger when Powch confirms payment. The Powch Buy menu makes the same call.
  *
  * Credits are the metered AI-consumption balance (RAG chat / agents debit it per call).
- * They are NOT community tokens — token purchases live under `descix buy`.
+ * They are NOT community tokens.
  */
 
 import chalk from 'chalk';
@@ -31,6 +34,10 @@ export async function showBalance() {
         console.log(chalk.yellow(`\n  Balance empty — metered AI calls will be rejected.`));
         console.log(`  Buy credits: ${chalk.cyan('descix credits buy --usd <amount>')}`);
     }
+    const bundles = creditBundles(result);
+    console.log(bundles
+        ? `  Credit bundles:     ${bundles.map((usd) => `$${usd}`).join(', ')}`
+        : chalk.yellow('  Credit bundles:     none listed (get_credit_balance returned no ai_credits purchase_catalogue)'));
     return result;
 }
 
@@ -66,33 +73,41 @@ export async function showHistory(options = {}) {
     return result;
 }
 
-/** Start a Stripe checkout to buy AI credits. Prints the checkout URL. */
+/** The purchase type `credits buy` buys (Cloud's purchase catalogue names it). */
+const AI_CREDITS = 'ai_credits';
+
+/** The listed ai_credits bundle amounts from a get_credit_balance bag, or null when none are listed. */
+function creditBundles(balance) {
+    const entry = Array.isArray(balance?.purchase_catalogue)
+        ? balance.purchase_catalogue.find((p) => p?.purchase_type === AI_CREDITS)
+        : null;
+    return Array.isArray(entry?.bundles) && entry.bundles.length ? entry.bundles.map((b) => b.amount_usd) : null;
+}
+
+/** A positive USD amount, whole string or nothing: `10abc` is a typo, not $10. */
+function parseUsd(raw) {
+    const text = String(raw ?? '').trim();
+    const usd = /^\d+(\.\d{1,2})?$/.test(text) ? Number(text) : NaN;
+    if (!(usd > 0)) throw new Error(`--usd must be a positive USD amount such as 10 or 25.50 (got ${JSON.stringify(raw)})`);
+    return usd;
+}
+
+/** Buy AI credits: start Powch's checkout and print the Stripe Checkout URL it returns. */
 export async function buyCredits(options) {
+    const usd = parseUsd(options.usd);
     const apiClient = new DeSciXApiClient();
     await requireAuth(apiClient);
-    const usd = parseFloat(options.usd);
-    if (!Number.isFinite(usd) || usd <= 0) {
-        console.error(chalk.red('A positive --usd amount is required.'));
-        throw new Error('invalid --usd');
+    const session = unwrap(await apiClient.invoke('create_checkout_session', { purchase_type: AI_CREDITS, amount_usd: usd }));
+    if (!session?.url) {
+        throw new Error(`create_checkout_session returned no checkout url (response keys: ${Object.keys(session || {}).join(', ') || 'none'})`);
     }
-    // success/cancel URLs: platform site (informational landing; settlement is webhook-driven).
-    // The landing page belongs to the SAME deployment the checkout session is created against.
-    // Hardcoding the production origin sent a DEV purchase's success/cancel links to prod.
-    const base = options.returnBase || apiClient.baseUrl;
-    const result = unwrap(await apiClient.invoke('create_stripe_checkout_session', {
-        amount_usd: usd,
-        purchase_type: 'ai_credits',
-        success_url: `${base}/?credits_purchase=success`,
-        cancel_url: `${base}/?credits_purchase=cancelled`,
-    }));
-    if (!result?.checkoutUrl) throw new Error('No checkout URL returned');
-    console.log(chalk.green('\n✓ Stripe checkout session created.'));
+    console.log(chalk.green('\n✓ Checkout session created.'));
     console.log(chalk.bold('\nComplete your purchase here:'));
-    console.log(`  ${chalk.cyan(result.checkoutUrl)}`);
-    console.log(chalk.dim(`\n  Session: ${result.sessionId}`));
-    console.log(chalk.dim('  Credits are added automatically once payment completes (webhook settlement).'));
+    console.log(`  ${chalk.cyan(session.url)}`);
+    if (session.session_id) console.log(chalk.dim(`\n  Session: ${session.session_id}`));
+    console.log(chalk.dim('  Credits are added once Powch confirms the payment.'));
     console.log(`  Check with: ${chalk.cyan('descix credits balance')}`);
-    return result;
+    return session;
 }
 
 /** ADMIN: grant credits to a user. (target_user_id — `user_id` is middleware-reserved.) */

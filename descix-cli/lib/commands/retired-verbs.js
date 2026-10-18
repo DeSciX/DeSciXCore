@@ -29,6 +29,12 @@ const AIRDROP_QUEUE_REFUSAL = (invocation) =>
   `exists, and neither does the server command behind it.\n\n` +
   `Distributions run through the offers rail on daita-sam (act plan + the role holder's own wallet signs).`;
 
+const CRYPTO_QUOTE_REFUSAL = (invocation) =>
+  `❌ \`${invocation}\` has been REMOVED: the platform no longer sells through crypto payment quotes, ` +
+  `and the commands behind it are gone.\n\n` +
+  `Buy AI credits with \`descix credits buy --usd <amount>\` (prints a Stripe Checkout URL from Powch), ` +
+  `or in the Powch Buy menu.`;
+
 /**
  * Every retired verb. `invocation` is what a user types; `parent` is the id of the commander
  * parent it hangs off (a root passed to registerAllRetiredVerbs, or an earlier row); `refusal`
@@ -63,6 +69,13 @@ export const RETIRED_VERBS = Object.freeze([
   { id: 'airdrop.execute-queue', parent: 'airdrop', name: 'execute-queue',
     invocation: 'descix airdrop execute-queue', description: 'removed — see error text',
     refusal: (invocation) => AIRDROP_QUEUE_REFUSAL(invocation) },
+  // Cloud's crypto-purchase rail is deleted (CEO "cloud rails: A", eabadir/DeSciXCloud#39).
+  { id: 'buy', parent: 'program', name: 'buy', invocation: 'descix buy',
+    description: 'removed — see error text', refusal: CRYPTO_QUOTE_REFUSAL },
+  ...['quote', 'status', 'poll', 'chains'].map((name) => ({
+    id: `buy.${name}`, parent: 'buy', name, invocation: `descix buy ${name}`,
+    description: 'removed — see error text', refusal: CRYPTO_QUOTE_REFUSAL,
+  })),
 ]);
 
 /** Implementations deleted with the KB sync surfaces. No exported symbol survives without a caller. */

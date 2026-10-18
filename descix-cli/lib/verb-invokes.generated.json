@@ -46,16 +46,6 @@
   "app sync-assets": [
     "sync_app_assets"
   ],
-  "buy chains": [],
-  "buy poll": [
-    "get_quote_status"
-  ],
-  "buy quote": [
-    "create_crypto_quote"
-  ],
-  "buy status": [
-    "get_quote_status"
-  ],
   "chat": [
     "ask_multiple_apps",
     "ask_question_to_app"
@@ -107,7 +97,7 @@
     "get_credit_balance"
   ],
   "credits buy": [
-    "create_stripe_checkout_session"
+    "create_checkout_session"
   ],
   "credits grant": [
     "grant_credits"

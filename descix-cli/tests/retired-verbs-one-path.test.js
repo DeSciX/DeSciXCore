@@ -63,7 +63,9 @@ test('the table holds every retirement the three old mechanisms owned', async ()
   const { RETIRED_VERBS } = await loadOwner();
   const invocations = RETIRED_VERBS.map((v) => v.invocation);
   for (const inv of ['descix sync', 'descix sync kb', 'descix kb chunk', 'descix kb sync',
-    'descix config set-url', 'descix microservice register-delegate']) {
+    'descix config set-url', 'descix microservice register-delegate',
+    // the crypto-quote verbs, retired with Cloud's CryptoAPIs purchase rail (eabadir/DeSciXCloud#39)
+    'descix buy', 'descix buy quote', 'descix buy status', 'descix buy poll', 'descix buy chains']) {
     assert.ok(invocations.includes(inv), `missing retirement: ${inv}`);
   }
 });
