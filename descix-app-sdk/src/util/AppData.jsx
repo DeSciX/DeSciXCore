@@ -613,7 +613,6 @@ export const ResponseStatus = {
  * - Browsing public/promoted communities (find_communities, get_community_details, get_community, list_apps_for_community)
  * - Fetching featured communities (fetch_my_purchases - backend returns featured for GUEST)
  * - Viewing token contract info (get_token_contract_addresses)
- * - Anonymous payment flows (create_stripe_checkout_session, get_crypto_deposit_info)
  * 
  * Note: Backend entitlement checks remain authoritative. This list is for frontend UI gating only.
  * 
@@ -626,8 +625,6 @@ export const GUEST_ALLOWED_COMMANDS = [
     'list_apps_for_community',       // Browse apps in community (read-only)
     'get_token_contract_addresses', // Get token contract addresses (read-only)
     'fetch_my_purchases',            // Returns featured communities for GUEST (backend handles fallback)
-    'create_stripe_checkout_session', // Initiate Stripe payment (anonymous)
-    'get_crypto_deposit_info',       // Get crypto deposit info (anonymous)
     // Trading dashboard (returns demo data for guests)
     'get_platform_holdings',         // Platform holdings (demo for guests)
     'get_market_overview',           // Market overview with token prices
