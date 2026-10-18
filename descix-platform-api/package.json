@@ -1,6 +1,6 @@
 {
   "name": "@descix/platform-api",
-  "version": "4.0.1",
+  "version": "5.0.0",
   "description": "Shared platform infrastructure: Firestore models, auth/session, permissions, entitlements, email",
   "repository": {
     "type": "git",
