@@ -1241,7 +1241,7 @@
     "options": [
       {
         "flags": "-a, --app <id>",
-        "description": "App ID",
+        "description": "App ID (in a gateway workspace, the listed repo holding this app supplies the corpus manifest, the git tree walked and the sync-state)",
         "required": true
       },
       {
@@ -1269,7 +1269,7 @@
     "options": [
       {
         "flags": "-a, --app <id>",
-        "description": "App ID",
+        "description": "App ID (in a gateway workspace, the listed repo holding this app supplies the corpus manifest, the git tree walked and the sync-state)",
         "required": true
       },
       {
@@ -1350,7 +1350,7 @@
     "options": [
       {
         "flags": "-a, --app <id>",
-        "description": "App ID",
+        "description": "App ID (in a gateway workspace, the listed repo holding this app supplies the sync-state)",
         "required": true
       },
       {

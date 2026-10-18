@@ -87,6 +87,14 @@ now exit non-zero and name this replacement.
     flags: `--dry-run` (report drift, write nothing), `--show-walk` (print the resolved ref and the
     files it would walk), `--ref <ref>` (override the git ref for all manifest sources).
 
+**From a gateway workspace**, `-a <appId>` on `kb corpus sync`, `kb corpus status` and `kb doctor`
+names the listed repo (`env.gateway.shell` or `env.gateway.appRepos[]`) whose own workspace holds
+that app: its `.descix/manifests/<kb_name>.json`, its git tree (walked at the manifest ref), its
+sync-state and its `env.app.communityId` are used, while the env, origin and sign-in stay the
+gateway's. An appId no listed repo holds is refused, naming the repos searched and the remedies
+(`descix config gateway add-repo <repo>`, or run from the app's repo root); there is no `-p` form,
+the manifest is required. Every run prints `App repo:` first.
+
 To fetch source documents from Google Drive into local markdown, use `descix drive pull`.
 
 ## Creating an App

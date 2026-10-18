@@ -9,7 +9,10 @@
  * - corpus status:  Show sync state (files, chunks, last sync)
  *
  * Architecture:
- * - ManifestLoader reads {app_root}/.descix/manifests/{kb_name}.json
+ * - The app's repo is WorkspaceConfig.requireAppRepo(-a): this workspace's own app, or in a gateway
+ *   workspace the listed repo (shell / appRepos) that holds the app. That repo is the corpus root:
+ *   ManifestLoader reads {repo}/.descix/manifests/{kb_name}.json, the walk reads its git tree and the
+ *   sync-state lives under it. Env, origin and credential stay with the workspace the command runs in.
  * - CorpusWalker walks dirs, applies syncignore, computes git blob SHAs
  * - Chunker (existing) chunks files by type (code, docs, generic)
  * - Syncer (existing) pushes chunks to Pinecone via kb_sync_chunks API
@@ -23,7 +26,7 @@ import ora from 'ora';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { createRequire } from 'module';
-import { WorkspaceConfig } from '../workspace-config.js';
+import { WorkspaceConfig, describeAppRepo } from '../workspace-config.js';
 import { loadManifests } from '../core/ManifestLoader.js';
 import { walkCorpus } from '../core/CorpusWalker.js';
 import { chunkFile, categorizeFile } from '../core/Chunker.js';
@@ -36,13 +39,41 @@ import { pickCanaryChunk, runRetrievalCanary, DEFAULT_CANARY_DELAYS_MS } from '.
 import { loadSyncState, saveSyncState, syncStatePath, syncFailureLogPath } from '../core/syncState.js';
 
 /**
- * Resolve community_id for corpus sync — same precedence as site upload / update kb:
- * CLI -c > workspace.json > Products registry (get_product_context). No hardcoded defaults.
+ * THE ONE OWNER of "which repo does a kb verb given `-a <appId>` read" — the corpus manifest, the
+ * git tree walked at the manifest ref, the sync-state and the sync logs all live under it. Consumed
+ * by `kb corpus sync`, `kb corpus status` and `kb doctor`. The repo comes from
+ * WorkspaceConfig.requireAppRepo (gateway entries, or this workspace's own app; refuses otherwise),
+ * and the resolved repo is printed so a run always says which tree it read.
+ *
+ * @param {string} appId
+ * @param {import('ora').Ora} [spinner] - stopped (failed on refusal) before anything is printed
+ * @returns {Promise<{ appRepo: object, appRoot: string }>}
  */
-async function resolveCorpusCommunityId(apiClient, workspaceConfig, appId, options) {
-  const ctx = workspaceConfig.resolveContextWithOptions(options);
-  const appConfig = workspaceConfig.getAppByAppId(appId);
-  let communityId = ctx.communityId || appConfig?.communityId || null;
+export async function resolveCorpusRepo(appId, spinner = null) {
+  if (!appId) {
+    spinner?.fail('App ID required');
+    throw new Error('Use -a <app_id> to specify the app.');
+  }
+  const workspaceConfig = await WorkspaceConfig.load();
+  let appRepo;
+  try {
+    appRepo = workspaceConfig.requireAppRepo(appId);
+  } catch (err) {
+    spinner?.fail(`App not resolved: ${appId}`);
+    throw err;
+  }
+  spinner?.stop();
+  console.log(chalk.gray(describeAppRepo(appRepo)));
+  spinner?.start();
+  return { appRepo, appRoot: appRepo.dir };
+}
+
+/**
+ * Resolve community_id for corpus sync: CLI -c > the app repo's own env.app.communityId >
+ * Products registry (get_product_context). No hardcoded defaults.
+ */
+async function resolveCorpusCommunityId(apiClient, appRepo, appId, options) {
+  let communityId = options.community || appRepo.communityId || null;
 
   if (!communityId) {
     const productCtx = await apiClient.invoke('get_product_context', { app_id: appId });
@@ -231,14 +262,14 @@ export function renderCount(value, unknownText = 'an unreported number of') {
  */
 
 /**
- * Detect the current git branch in workspaceRoot.
+ * Detect the current git branch in the app's repo.
  * Returns the branch name (e.g., "ws-admin-b1") or null if detached / not a repo.
  *
  * Used by `corpus sync` to emit a one-line advisory when the operator is on a
  * non-main branch and --ref was not provided — flags the silent "synced main
  * not your branch" gotcha that surfaced in WS-CLI-MANIFEST-REF-FEATURE-BRANCH.
  */
-function getCurrentBranch(workspaceRoot) {
+function getCurrentBranch(repoRoot) {
   // Lazy-require child_process via createRequire — corpus.js is ESM and lacks
   // a synchronous import path, but execSync is itself sync and we want to
   // avoid making the advisory async (it runs once before the manifest loop).
@@ -247,7 +278,7 @@ function getCurrentBranch(workspaceRoot) {
     const requireFn = createRequire(import.meta.url);
     const { execSync } = requireFn('child_process');
     const branch = execSync('git symbolic-ref --short HEAD', {
-      cwd: workspaceRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe']
+      cwd: repoRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe']
     }).trim();
     return branch || null;
   } catch {
@@ -337,8 +368,8 @@ async function confirmYesNo(prompt) {
  * Run corpus sync for an app.
  *
  * Algorithm:
- * 1. Load WorkspaceConfig, find app by app_id, get localPath
- * 2. Load manifest(s) from {localPath}/.descix/manifests/
+ * 1. Resolve the app's repo (resolveCorpusRepo)
+ * 2. Load manifest(s) from {repo}/.descix/manifests/
  * 3. For each manifest:
  *    a. Run CorpusWalker to get file list with blob SHAs
  *    b. Query Pinecone for existing chunks with this app_id + kb_name
@@ -359,29 +390,14 @@ export async function runCorpusSync(apiClient, options) {
       throw new Error('Run "descix login" first.');
     }
 
-    // 1. Load WorkspaceConfig
-    const workspaceConfig = await WorkspaceConfig.load();
-    const workspaceRoot = workspaceConfig.getWorkspaceRoot();
-
-    // Resolve app
+    // 1. Resolve the app's repo — the corpus root for everything below
+    const { appRepo, appRoot } = await resolveCorpusRepo(options.app, spinner);
     const appId = options.app;
-    if (!appId) {
-      spinner.fail('App ID required');
-      throw new Error('Use -a <app_id> to specify the app.');
-    }
-
-    const appConfig = workspaceConfig.getAppByAppId(appId);
-    if (!appConfig) {
-      spinner.fail(`App not found: ${appId}`);
-      throw new Error(`App "${appId}" is not this workspace's app (workspace.json env.app).`);
-    }
-
-    const appRoot = appConfig.absolutePath;
-    const communityId = await resolveCorpusCommunityId(apiClient, workspaceConfig, appId, options);
+    const communityId = await resolveCorpusCommunityId(apiClient, appRepo, appId, options);
 
     // 2. Load manifests
     spinner.text = 'Loading manifests...';
-    const manifests = await loadManifests(appRoot, workspaceRoot, options.kb || null);
+    const manifests = await loadManifests(appRoot, appRoot, options.kb || null);
 
     if (manifests.length === 0) {
       spinner.fail('No manifests found');
@@ -411,7 +427,7 @@ export async function runCorpusSync(apiClient, options) {
         m._resolvedSources.every(s => s.ref === 'main')
       );
       if (allManifestsDefault) {
-        const currentBranch = getCurrentBranch(workspaceRoot);
+        const currentBranch = getCurrentBranch(appRoot);
         if (currentBranch && currentBranch !== 'main') {
           console.log(chalk.yellow(
             `  Advisory: you are on branch "${currentBranch}" but every manifest is configured to walk "main". ` +
@@ -499,7 +515,7 @@ export async function runCorpusSync(apiClient, options) {
         const lintSpinner = ora('  [deny-lint] Linting Tier-P manifest for deny-classes...').start();
         let denyReport;
         try {
-          denyReport = await lintManifestForDenyClasses(manifest, workspaceRoot);
+          denyReport = await lintManifestForDenyClasses(manifest, appRoot);
         } catch (lintErr) {
           lintSpinner.fail(`  [deny-lint] Lint could not run: ${lintErr.message}`);
           throw lintErr;
@@ -518,7 +534,7 @@ export async function runCorpusSync(apiClient, options) {
 
       // 3a. Walk corpus
       const walkSpinner = ora('  Walking source directories...').start();
-      const { files, commitSha, provenance, gateBoundary } = await walkCorpus(manifest, workspaceRoot);
+      const { files, commitSha, provenance, gateBoundary } = await walkCorpus(manifest, appRoot);
       walkSpinner.succeed(`  Found ${files.length} files (commit: ${commitSha.substring(0, 8)})`);
 
       // A gate prints its own COVERAGE BOUNDARY with its verdict — on GREEN as well as
@@ -1075,23 +1091,8 @@ export async function runCorpusStatus(apiClient, options) {
   const spinner = ora('Loading workspace configuration...').start();
 
   try {
-    // Load WorkspaceConfig
-    const workspaceConfig = await WorkspaceConfig.load();
-    const workspaceRoot = workspaceConfig.getWorkspaceRoot();
-
+    const { appRoot } = await resolveCorpusRepo(options.app, spinner);
     const appId = options.app;
-    if (!appId) {
-      spinner.fail('App ID required');
-      throw new Error('Use -a <app_id> to specify the app.');
-    }
-
-    const appConfig = workspaceConfig.getAppByAppId(appId);
-    if (!appConfig) {
-      spinner.fail(`App not found: ${appId}`);
-      throw new Error(`App "${appId}" not found in workspace.json.`);
-    }
-
-    const appRoot = appConfig.absolutePath;
 
     // Sync state is per-ORIGIN, so status cannot report it without knowing which origin is
     // being asked about. Resolved from the same client the sync would use — never re-derived
@@ -1107,7 +1108,7 @@ export async function runCorpusStatus(apiClient, options) {
     const statusOrigin = await apiClient.ensureBaseUrl();
 
     // Load manifests
-    const manifests = await loadManifests(appRoot, workspaceRoot, options.kb || null);
+    const manifests = await loadManifests(appRoot, appRoot, options.kb || null);
 
     if (manifests.length === 0) {
       spinner.info('No manifests found');
@@ -1142,7 +1143,7 @@ export async function runCorpusStatus(apiClient, options) {
       // single most useful piece of information for diagnosing "why does this
       // not match what I expect" and is cheap (no Pinecone read).
       try {
-        const { files } = await walkCorpus(manifest, workspaceRoot);
+        const { files } = await walkCorpus(manifest, appRoot);
         console.log(chalk.white(`  Live file count: ${files.length}`));
       } catch (err) {
         console.log(chalk.gray(`  Live file count: (walk error: ${err.message})`));
@@ -1186,7 +1187,7 @@ export async function runCorpusStatus(apiClient, options) {
       // Quick change detection: walk and compare blob SHAs
       if (options.verbose) {
         try {
-          const { files } = await walkCorpus(manifest, workspaceRoot);
+          const { files } = await walkCorpus(manifest, appRoot);
           // Compare current blob SHAs against what we'd expect from last sync
           console.log(chalk.white(`  Current files:   ${files.length}`));
 
@@ -1196,7 +1197,7 @@ export async function runCorpusStatus(apiClient, options) {
             try {
               const diffOutput = execSync(
                 `git diff --name-only "${syncState.last_sync_commit}" HEAD`,
-                { cwd: workspaceRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
+                { cwd: appRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
               ).trim();
 
               if (diffOutput) {
@@ -1239,4 +1240,4 @@ export async function runCorpusStatus(apiClient, options) {
   }
 }
 
-export default { runCorpusSync, runCorpusStatus };
+export default { runCorpusSync, runCorpusStatus, resolveCorpusRepo };

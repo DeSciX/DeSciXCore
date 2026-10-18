@@ -18,7 +18,7 @@
  */
 
 import path from 'path';
-import { APP_NOT_IN_GATEWAY } from '../workspace-config.js';
+import { APP_NOT_IN_GATEWAY, describeAppRepo } from '../workspace-config.js';
 import { loadSiteManifest, siteManifestPath } from './ManifestLoader.js';
 
 export const NOT_HELD_PATH_REMEDY = 'or pass -p <built dist> to upload a directory for an app this workspace does not hold.';
@@ -64,9 +64,7 @@ export async function resolveSiteSource(workspaceConfig, appId, { path: localPat
 
   const uploadDir = manifest ? null : (explicitDir || path.resolve(localPath));
   const lines = [
-    `App repo: ${appRoot} (${appRepo
-      ? (appRepo.role === 'self' ? 'this workspace\'s app' : `gateway ${appRepo.role} entry '${appRepo.entry}'`)
-      : 'not this workspace\'s app — current directory'})`,
+    appRepo ? describeAppRepo(appRepo) : `App repo: ${appRoot} (not this workspace's app — current directory)`,
     `Site manifest: ${manifest ? manifestPath : `none at ${manifestPath} — uploading -p ${uploadDir}`}`,
   ];
   if (manifest && explicitDir) lines.push(`-p ${explicitDir} ignored: the site manifest names the files`);
