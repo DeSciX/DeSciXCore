@@ -1,5 +1,5 @@
 /**
- * ApiPayments - Payments, quotes, claims, Stripe, crypto
+ * ApiPayments - roles, catalogue purchases, crypto price reads, wallet file
  */
 
 import {
@@ -44,35 +44,6 @@ export const purchaseRole = async (roleId, scope = null, scopeId = null) => {
   }
 };
 
-export const initiateStripeCheckout = async (amountUsd, successUrl, cancelUrl, clientPaymentId = null, communityToken = null, email = null) => {
-  try {
-    const params = {
-      amount_usd: amountUsd,
-      success_url: successUrl,
-      cancel_url: cancelUrl,
-      client_payment_id: clientPaymentId || undefined,
-      community_token: communityToken || AppData.selectedCommunityToken || null,
-      email: email || undefined,
-    };
-    const data = await makeCommandRequestJSON('create_stripe_checkout_session', params, true);
-    return data.status === ResponseStatus.OK ? data.message : null;
-  } catch (error) {
-    console.error('Error initiating Stripe checkout:', error);
-    throw error;
-  }
-};
-
-export const getCryptoDepositInfo = async (amountUsd = null) => {
-  try {
-    const params = amountUsd ? { amount_usd: amountUsd } : {};
-    const data = await makeCommandRequestJSON('get_crypto_deposit_info', params, true);
-    return data.status === ResponseStatus.OK ? data.message : null;
-  } catch (error) {
-    console.error('Error getting crypto deposit info:', error);
-    throw error;
-  }
-};
-
 export const generateWalletFile = async () => {
   try {
     const data = await makeCommandRequestJSON('generate_wallet_file', {});
@@ -112,39 +83,6 @@ export const getAllCryptoPrices = async () => {
     return data.status === ResponseStatus.OK ? data.message : {};
   } catch (error) {
     console.error('Error getting all crypto prices:', error);
-    throw error;
-  }
-};
-
-export const verifyCryptoPayment = async (params) => {
-  try {
-    const data = await makeCommandRequestJSON('verify_crypto_payment', params);
-    if (data.status === ResponseStatus.OK) return data.message;
-    throw new Error(data.message || 'Verification failed');
-  } catch (error) {
-    console.error('Error verifying crypto payment:', error);
-    throw error;
-  }
-};
-
-export const createCryptoQuote = async (params) => {
-  try {
-    const data = await makeCommandRequestJSON('create_crypto_quote', params, true);
-    if (data.status === ResponseStatus.OK) return data.message;
-    throw new Error(data.message || 'Failed to create crypto quote');
-  } catch (error) {
-    console.error('Error creating crypto quote:', error);
-    throw error;
-  }
-};
-
-export const getQuoteStatus = async (quoteId) => {
-  try {
-    const data = await makeCommandRequestJSON('get_quote_status', { quote_id: quoteId }, true);
-    if (data.status === ResponseStatus.OK) return data.message;
-    throw new Error(data.message || 'Failed to get quote status');
-  } catch (error) {
-    console.error('Error getting quote status:', error);
     throw error;
   }
 };

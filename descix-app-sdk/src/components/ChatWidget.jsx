@@ -36,6 +36,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { useNetworkLoading } from '../util/NetworkAPI';
 import { NetworkLoadingType, makeCommandRequestJSON, AppData, ProductTypes, isAppEntitled } from '../util/AppData';
 import { Api } from '../util/api';
+import { creditBundleAmounts, startCreditsCheckout } from '../util/creditsCheckout';
 import { usePowchBridge } from '../providers/PowchBridgeProvider';
 import { normalizeContribution, composeTurnInput, collectTurnMedia, createContributionStage } from '../util/chatIngress';
 import { describeActionCard } from '../util/actionCard';
@@ -613,11 +614,6 @@ const ChatWidget = (props = {}) => {
   // CREDITS_REQUIRED CTA), instead of the CTA appearing only on the zero-balance error.
   const [buyMenuAnchor, setBuyMenuAnchor] = useState(null);
   const [signingIn, setSigningIn] = useState(false);
-  // WS-HEADLESS-MVP-R7 (defect #3): minimal post-checkout status indicator. Stripe
-  // redirects the SAME tab back to success_url/cancel_url (handleBuyCredits opens it
-  // via window.open — the checkout itself still navigates within that new tab), so on
-  // return there is otherwise no visual feedback at all. 'success' | 'cancelled' | null.
-  const [checkoutStatus, setCheckoutStatus] = useState(null);
 
   // REACTIVE session from context (AppData.sessionInfo alone is a non-reactive cache —
   // reading it here would freeze the widget in its pre-login state after Powch login).
@@ -678,25 +674,6 @@ const ChatWidget = (props = {}) => {
 
   useEffect(() => { refreshCredits(); }, [refreshCredits, appId]);
 
-  // WS-HEADLESS-MVP-R7 (defect #3): on mount, detect a return from Stripe checkout via
-  // the `checkout=success|cancelled` query param handleBuyCredits appends to
-  // success_url/cancel_url, show a small status indicator, refresh the balance (the
-  // authoritative source — this UI is advisory), then strip the param so a later
-  // reload doesn't re-show stale status. Deliberately minimal: no transactions/history
-  // page (that's the separate, later Powch payments migration).
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const status = params.get('checkout');
-    if (status !== 'success' && status !== 'cancelled') return;
-    setCheckoutStatus(status);
-    if (status === 'success') refreshCredits();
-    params.delete('checkout');
-    const query = params.toString();
-    const cleanUrl = `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`;
-    window.history.replaceState(window.history.state, '', cleanUrl);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   // Round 5: while the CREDITS_REQUIRED alert is showing, poll the balance so a
   // purchase completed in another tab (Stripe checkout return) or a grant clears the
   // alert automatically — refreshCredits() already dismisses it once balance > 0.
@@ -708,32 +685,17 @@ const ChatWidget = (props = {}) => {
     return () => clearInterval(t);
   }, [creditsRequired, isAuthenticated, refreshCredits]);
 
-  // WS-HEADLESS-MVP-R7 (defect #3): append a distinguishing `checkout` query param so
-  // the page returned to after Stripe checkout can tell success from cancel (the
-  // mount-time effect above reads it). Preserves any existing query params.
-  const buildCheckoutReturnUrl = (status) => {
-    const url = new URL(window.location.href);
-    url.searchParams.set('checkout', status);
-    return url.toString();
-  };
+  // The amounts on offer are Cloud's purchase catalogue (get_credit_balance), never a local list.
+  const bundleAmounts = creditBundleAmounts(creditsBalance);
 
+  // Buying is Powch's checkout (util/creditsCheckout.js): open the Stripe Checkout it returns.
+  // The balance is re-read while the CREDITS_REQUIRED alert shows and on every chip click.
   const handleBuyCredits = async (amountUsd) => {
     setBuyingCredits(true);
     try {
-      const res = await makeCommandRequestJSON('create_stripe_checkout_session', {
-        amount_usd: amountUsd,
-        purchase_type: 'ai_credits',
-        success_url: buildCheckoutReturnUrl('success'),
-        cancel_url: buildCheckoutReturnUrl('cancelled'),
-      });
-      const msg = res.message || res;
-      // Canonical response contract: create_stripe_checkout_session returns
-      // { sessionId, checkoutUrl, paymentId } (purchase.js) — the same field the
-      // CLI's `descix credits buy` consumes.
-      const url = msg.checkoutUrl;
-      if (!url) throw new Error(`No checkout URL returned (response keys: ${Object.keys(msg).join(',')})`);
-      window.open(url, '_blank', 'noopener');
-      setSnackbar({ open: true, message: `Stripe checkout opened for $${amountUsd} of AI credits — your balance updates after payment.` });
+      const session = await startCreditsCheckout(amountUsd);
+      window.open(session.url, '_blank', 'noopener');
+      setSnackbar({ open: true, message: `Checkout opened for $${amountUsd} of AI credits — your balance updates after payment.` });
     } catch (e) {
       console.error('[ChatWidget] buy credits failed:', e);
       setSnackbar({ open: true, message: `Could not start checkout: ${e.message}` });
@@ -1607,22 +1569,6 @@ const ChatWidget = (props = {}) => {
         </Box>
       )}
 
-      {/* WS-HEADLESS-MVP-R7 (defect #3): minimal post-checkout status indicator — no
-          transactions/history page (out of scope; separate Powch payments migration). */}
-      {checkoutStatus !== null && (
-        <Alert
-          severity={checkoutStatus === 'success' ? 'success' : 'info'}
-          data-testid="checkout-status-alert"
-          data-checkout-status={checkoutStatus}
-          sx={{ mx: 2, mt: 1, alignItems: 'center' }}
-          onClose={() => setCheckoutStatus(null)}
-        >
-          {checkoutStatus === 'success'
-            ? 'Checkout complete — your AI credits balance has been refreshed.'
-            : 'Checkout cancelled — no charge was made.'}
-        </Alert>
-      )}
-
       {/* WS-HEADLESS-MVP-A4: Powch sign-in affordance — chat is auth'd via Powch */}
       {!isAuthenticated && (
         <Alert
@@ -1653,11 +1599,11 @@ const ChatWidget = (props = {}) => {
           sx={{ mx: 2, mt: 1, alignItems: 'center' }}
           action={
             <Box sx={{ display: 'flex', gap: 0.5 }}>
-              {[5, 10, 20].map(amt => (
+              {(bundleAmounts || []).map((amt, i) => (
                 <Button
                   key={amt}
                   size="small"
-                  variant={amt === 10 ? 'contained' : 'outlined'}
+                  variant={i === 0 ? 'contained' : 'outlined'}
                   color="warning"
                   disabled={buyingCredits}
                   onClick={() => handleBuyCredits(amt)}
@@ -1670,7 +1616,9 @@ const ChatWidget = (props = {}) => {
           }
         >
           You&apos;re out of AI credits{creditsBalance ? ` (balance $${(creditsBalance.usd_balance ?? 0).toFixed(2)})` : ''}.
-          Buy credits to continue chatting.
+          {bundleAmounts
+            ? 'Buy credits to continue chatting.'
+            : 'No credit bundles are listed (get_credit_balance returned no ai_credits purchase catalogue), so nothing can be bought here.'}
         </Alert>
       )}
       {isAuthenticated && creditsBalance && creditsRequired === null && (
@@ -1705,15 +1653,14 @@ const ChatWidget = (props = {}) => {
             />
           </Tooltip>
           {/* Round 5: proactive buy-credits flow from the chip (CEO retest 2026-07-02).
-              Same purchase path as the zero-balance CTA — handleBuyCredits ->
-              create_stripe_checkout_session (purchase_type: ai_credits) -> window.open. */}
+              Same purchase path as the zero-balance CTA — handleBuyCredits. */}
           <Menu
             anchorEl={buyMenuAnchor}
             open={!!buyMenuAnchor}
             onClose={() => setBuyMenuAnchor(null)}
             data-testid="credits-buy-menu"
           >
-            {[5, 10, 20].map(amt => (
+            {(bundleAmounts || []).map(amt => (
               <MenuItem
                 key={amt}
                 disabled={buyingCredits}
@@ -1723,6 +1670,11 @@ const ChatWidget = (props = {}) => {
                 Buy ${amt} AI credits
               </MenuItem>
             ))}
+            {!bundleAmounts && (
+              <MenuItem disabled data-testid="chip-no-credit-bundles">
+                No credit bundles are listed
+              </MenuItem>
+            )}
             <Divider />
             <MenuItem
               data-testid="chip-refresh-balance"
