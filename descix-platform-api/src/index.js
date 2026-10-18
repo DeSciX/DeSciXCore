@@ -46,8 +46,6 @@ export {
 export {
     sendEmail,
     sendVerificationEmail,
-    sendPaymentPending,
-    sendPaymentConfirmation,
     renderMigrationQueuedEmail,
     sendMigrationQueued,
     normalizeEmail,
