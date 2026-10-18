@@ -1,6 +1,6 @@
 {
   "name": "@descix/cloud-core",
-  "version": "2.0.2",
+  "version": "2.0.3",
   "description": "Shared config bootstrap, Firestore, PubSub, and service manifest for DeSciX platform microservices",
   "repository": {
     "type": "git",
