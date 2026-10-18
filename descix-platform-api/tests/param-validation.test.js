@@ -299,7 +299,7 @@ test('the citation read_command shape validates against the schema it targets', 
 const NON_PARAM_IDENTIFIERS = new Set([
     // response fields
     'ai_credits', 'amount_usd', 'daily_free_credit_available_today', 'daily_free_credit_usd',
-    'purchase_type', 'interaction_id', 'created_at', 'received_at', 'chunk_idx',
+    'purchase_type', 'purchase_catalogue', 'interaction_id', 'created_at', 'received_at', 'chunk_idx',
     'current_holder_hint', 'agent_hint',
     // fabric heartbeat record fields — SERVER-written and read back, never passed. `occurred_at`
     // is the beat's server clock; the two beat clocks are BEAT_CLOCK_FIELDS, and they are named
@@ -335,7 +335,7 @@ const NON_PARAM_IDENTIFIERS = new Set([
     // commands reached through execute_remote_command / the BEAST surface, not native tools
     'beast_rag_ingest', 'beast_seat_read',
     // commands reached through execute_remote_command, not native tools
-    'beast_get_dashboard', 'create_stripe_checkout_session', 'fetch_my_purchases',
+    'beast_get_dashboard', 'create_checkout_session', 'fetch_my_purchases',
 ]);
 
 test('class guard: no tool documents a parameter it does not declare', () => {

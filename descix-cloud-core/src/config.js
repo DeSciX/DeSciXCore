@@ -149,7 +149,6 @@ const PERMISSIONS = {
 const GUEST_ALLOWED_COMMANDS = [
     'find_communities', 'get_community_details', 'get_community', 'list_apps_for_community',
     'get_store_bundle', 'list_quests', 'list_lp_pools', 'get_token_contract_addresses', 'fetch_my_purchases', 'log_content_event',
-    'create_stripe_checkout_session', 'get_crypto_deposit_info', 'get_stripe_status',
     'powch_register_begin', 'powch_register_finish', 'powch_login_begin', 'powch_login_finish',
     'powch_write_wallet_begin', 'powch_send_verification_code', 'powch_verify_code',
     'powch_check_verification_proof', 'check_onboarding_status', 'register_powch_wallet_address',
@@ -157,11 +156,11 @@ const GUEST_ALLOWED_COMMANDS = [
     'get_command_surface',
     'authenticate_by_signature',
     'get_crypto_price', 'get_all_crypto_prices', 'get_supported_chains', 'crypto_to_usd',
-    'usd_to_crypto', 'create_crypto_quote', 'get_quote_status', 'get_claim_details',
+    'usd_to_crypto', 'get_claim_details',
     // Pre-account claim transfer: the claim_code is the bearer credential and the emailed
     // verification code proves control of the claim's current address — no session exists yet.
     'claim_transfer_request', 'claim_transfer_confirm',
-    'auth_discord', 'auth_google', 'get_google_config', 'get_discord_config', 'get_stripe_config',
+    'auth_discord', 'auth_google', 'get_google_config', 'get_discord_config',
     'get_wallet_config', 'send_email_verification', 'verify_email_code', 'register_email_tos',
     'register_native_user', 'reconnect_by_wallet', 'login_wallet_session', 'device_request_login',
     'device_check_status', 'device_validate', 'device_complete', 'get_platform_holdings',

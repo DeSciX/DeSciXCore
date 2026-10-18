@@ -1,11 +1,11 @@
 /**
  * The queued-migration receipt carries NO payment-quote fields.
  *
- * The airdrop migration lane used to send its receipt through `sendPaymentPending`, a crypto
- * payment-quote template (deposit address, quote id, expiry). Fed a migration it rendered
- * "DEPOSIT ADDRESS: undefined" and "Expires: Invalid Date". The NEGATIVE CONTROL below renders
- * exactly that call through the real template and shows the detector fires on it, so the
- * positive assertion on the migration receipt cannot pass vacuously.
+ * The airdrop migration lane once sent its receipt through a crypto payment-quote template
+ * (deposit address, quote id, expiry). Fed a migration it rendered "DEPOSIT ADDRESS: undefined"
+ * and "Expires: Invalid Date". That template is deleted with the quote rail; the NEGATIVE CONTROL
+ * below feeds the detector the text it rendered, so the positive assertion on the migration
+ * receipt cannot pass vacuously.
  *
  * The Gmail transport and the config are mocked; nothing is sent.
  *
@@ -55,11 +55,17 @@ const MIGRATION = {
     tokens: [{ symbol: 'DAITA', amount: '2500' }, { symbol: 'EGPT', amount: '10' }]
 };
 
-test('NEGATIVE CONTROL: the payment template, called the way the migration lane called it, trips the detector', async () => {
-    sent.length = 0;
-    await email.sendPaymentPending({ amount_tokens: 2510, source: 'airdrop', pending_id: 'chal-1' }, 'user@fixture.invalid');
-    assert.equal(sent.length, 1);
-    const hits = present(sent[0]);
+/** What the deleted payment-quote template rendered when fed a migration (the defect's own output). */
+const QUOTE_TEMPLATE_FED_A_MIGRATION = `Subject: Payment Instructions - $undefined via undefined
+
+PAYMENT DETAILS
+Quote ID:        undefined
+DEPOSIT ADDRESS:
+undefined
+Expires: Invalid Date`;
+
+test('NEGATIVE CONTROL: the payment-quote rendering of a migration trips the detector', () => {
+    const hits = present(QUOTE_TEMPLATE_FED_A_MIGRATION);
     assert.ok(hits.includes('DEPOSIT ADDRESS') && hits.includes('Invalid Date'), `detector must fire; hits=${hits}`);
 });
 
