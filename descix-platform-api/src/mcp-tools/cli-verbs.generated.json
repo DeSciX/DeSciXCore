@@ -1321,6 +1321,29 @@
     "runbookAnchor": "#_6-knowledge-bases"
   },
   {
+    "verbPath": "kb create",
+    "description": "Create a knowledge base on an existing app (refuses a KB that already exists)",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-a, --app <app_id>",
+        "description": "App ID",
+        "required": true
+      },
+      {
+        "flags": "-k, --kb <kb_name>",
+        "description": "Name of the KB to create",
+        "required": true
+      },
+      {
+        "flags": "--system-instructions <text>",
+        "description": "System instructions for the new KB",
+        "required": false
+      }
+    ],
+    "runbookAnchor": "#_6-knowledge-bases"
+  },
+  {
     "verbPath": "kb delete",
     "description": "Delete a knowledge base registry doc (refuses a non-empty KB unless --force)",
     "arguments": [],

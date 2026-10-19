@@ -211,8 +211,9 @@ test('I4: the unregistered-KB refusal names the verb that actually creates a KB'
     corpus.indexOf('// 4. Process each manifest')
   );
   assert.ok(kbRefusal.length > 50, 'fixture: the KB refusal block must be located');
-  // `descix app init --kb` invokes init_git_mode_kb, the verb that creates a KB.
-  assert.match(kbRefusal, /descix app init -a \$\{appId\} --kb/, 'the KB refusal must name `descix app init --kb`');
+  // `descix kb create` creates a KB on an existing app; its spelling comes from kb-sync-surface.js.
+  assert.match(kbRefusal, /kbCreateInvocation\(appId, name\)/, 'the KB refusal must name `descix kb create` through its owner');
+  assert.doesNotMatch(kbRefusal, /descix app init/, 'mapping an existing app never creates a KB, so the refusal must not name app init');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

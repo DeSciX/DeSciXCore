@@ -41,6 +41,7 @@ import { assertKnownCommandForHelp } from '../lib/help-guard.js';
 import { runDoctor } from '../lib/commands/doctor.js';
 import { runHealth } from '../lib/commands/health.js';
 import * as kbCommands from '../lib/commands/kb.js';
+import { runKbCreate } from '../lib/commands/kb-create.js';
 import { kbVectorCell, kbCountSource } from '../lib/commands/kb-list-render.js';
 import * as corpusCommands from '../lib/commands/corpus.js';
 import * as modelConfigCommands from '../lib/commands/model-config.js';
@@ -1717,6 +1718,29 @@ KB's vectors by id-prefix). The Source column shows how each count was obtained:
 
 
 kbCommand
+  .command('create')
+  .runbookAnchor('#_6-knowledge-bases')
+  .description('Create a knowledge base on an existing app (refuses a KB that already exists)')
+  .requiredOption('-a, --app <app_id>', 'App ID')
+  .requiredOption('-k, --kb <kb_name>', 'Name of the KB to create')
+  .option('--system-instructions <text>', 'System instructions for the new KB')
+  .addHelpText('after', `
+Requires the app's owner or an app/community/platform admin. A KB that already
+exists is a refusal (exit 1), never a success: see the app's KBs with
+\`descix kb list -a <app_id>\`. Every other refusal is printed with its code.`)
+  .action(async (options) => {
+    try {
+      const apiClient = new DeSciXApiClient();
+      await requireAuth(apiClient);
+      await runKbCreate(apiClient, options);
+    } catch (error) {
+      console.error(chalk.red(`\n\u274c ${error.code ? `${error.code}: ` : ''}${error.message}\n`));
+      process.exit(1);
+    }
+  });
+
+
+kbCommand
   .command('delete')
   .description('Delete a knowledge base registry doc (refuses a non-empty KB unless --force)')
   .requiredOption('-a, --app <app_id>', 'App ID')
@@ -2323,6 +2347,10 @@ siteCommand
       // state — BEFORE any token is requested, so a dry run refuses too (SiteDenyLint).
       const { assertSitePublishable } = await import('../lib/core/SiteDenyLint.js');
       assertSitePublishable(fileList.map((f) => f.path));
+      // 1c. A shipped share.json must meet the app-sdk share contract, checked here for the same
+      // reason: before any token is requested, so a dry run refuses too (SiteShareCheck).
+      const { assertShareJsonValid } = await import('../lib/core/SiteShareCheck.js');
+      await assertShareJsonValid(fileList);
 
       // 2. Request deploy token with file list
       const tokenResponse = await apiClient.invoke('get_site_deploy_token', {

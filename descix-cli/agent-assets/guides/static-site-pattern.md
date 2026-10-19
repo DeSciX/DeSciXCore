@@ -111,4 +111,6 @@ This copies the site template with:
 
 ## Deployment
 
-`descix site upload -a <app_id>` uploads the files (delta) to the app's site prefix in Google Cloud Storage and records the deploy manifest. The app is then served on its own host, `https://<app_id>.dev.descix.net/` on DEV and `https://<app_id>.descix.net/` on PROD; `descix site status -c <community> -a <app_id>` shows the deployed manifest.
+`descix site upload -a <app_id>` uploads every file of the build to the app's site prefix in Google Cloud Storage, removes site files the build no longer contains, and records the deploy manifest. The app is then served on its own host, `https://<app_id>.dev.descix.net/` on DEV and `https://<app_id>.descix.net/` on PROD; `descix site status -c <community> -a <app_id>` shows the deployed manifest.
+
+A `share.json` at the site root is validated against the app-sdk share contract (`@descix/app-sdk/share`) before anything is uploaded; an invalid file refuses the whole upload, naming the field and the rule.
