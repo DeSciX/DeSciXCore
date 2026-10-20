@@ -189,8 +189,9 @@ which is a different question with a different answer.
 
 ### `DeSciX.view` — choose your layout
 
-The shell defaults to **SplitView** (your app beside the chat panel). Say so if
-you want something else:
+The shell starts in the view your site's `share.json` declares as `default_view`
+(README, "default_view"), painted from the first frame, and in **SplitView** (your app
+beside the chat panel) when it declares none. Change it at any time:
 
 ```js
 DeSciX.view.set('CodeSite');   // your app gets the whole frame
@@ -212,7 +213,7 @@ does not).
 | `subscribe(fn)` | `(fn) => unsubscribe` | Called on every change. |
 | `available()` | `() => boolean` | **Check this.** Is a host actually listening? |
 | `MODES` | `{CODESITE, SPLITVIEW, CHAT, NOCHROME}` | The string constants, so you never hand-type them. |
-| `DEFAULT` | `string` | `SplitView`. |
+| `DEFAULT` | `string` | `SplitView`: the start view when the site declares no `default_view`. |
 
 **`set()` returning your mode does not mean the screen changed.** Wherever the
 publishing host is mounted but nothing has subscribed, `set()` validates, updates the
@@ -227,8 +228,8 @@ else console.warn('this host does not implement view switching');
 ```
 
 Call it whenever you like — at boot, or later when your app changes what it is
-doing. The shell re-renders. Your choice is reset when the user switches to a
-different app, so it never leaks into someone else's.
+doing. The shell re-renders. Your choice is reset to the shell's starting view when the
+user switches to a different app, so it never leaks into someone else's.
 
 **Say `DeSciX.view`, never a frame level.** The bus lives on the shell's window, not
 yours — but which window that is depends on your embedding depth, so `DeSciXAppSDK.js`
@@ -237,7 +238,7 @@ the moment your app is nested one level deeper; hard-coding `window.top.DeSciX.v
 breaks the moment the shell is itself embedded in an outer page.
 
 **Do not import the view functions from the package.** `@descix/app-sdk` exports
-`setView`, `resetView` and `publishViewApi`, but those are the **shell's** side of the
+`setView`, `resetView`, `seedView`, `initialViewFor` and `publishViewApi`, but those are the **shell's** side of the
 API. Imported into your app they mutate your own module copy of the state — same name,
 same arguments, same return value, and **no effect on the shell whatsoever**. The working
 path is `DeSciX.view`; the import is a silent no-op.

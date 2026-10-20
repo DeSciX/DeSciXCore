@@ -108,6 +108,20 @@ test('NEGATIVE CONTROL: a missing title, a non-string icon, and invalid JSON are
   }
 });
 
+test('default_view: CodeSite uploads; FullScreen refuses the whole upload by name before the deploy token', () => {
+  withSite({ ...VALID_SHARE, default_view: 'CodeSite' }, (t) => {
+    const r = upload(t, ['--dry-run']);
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /MOCK invoke get_site_deploy_token \["/);
+  });
+  withSite({ ...VALID_SHARE, default_view: 'FullScreen' }, (t) => {
+    const r = upload(t, ['--dry-run']);
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /share\.json: default_view 'FullScreen' is not a view; one of CodeSite, SplitView, Chat, NoChrome/);
+    assert.doesNotMatch(r.out, /MOCK invoke get_site_deploy_token/);
+  });
+});
+
 test('the CLI restates no share rule: the check imports the app-sdk owner', () => {
   const src = fs.readFileSync(path.resolve(__dirname, '..', 'lib', 'core', 'SiteShareCheck.js'), 'utf8');
   assert.match(src, /from '@descix\/app-sdk\/share'/);

@@ -35,7 +35,7 @@ export class AppData {
   static _refType = null; // 'DEVICE' | 'REFERRAL' | null
   static _deviceUserCode = null; // For device login only
   static _referralData = null; // For referral: { custom_id, referrer_id, guild_id }
-  static _appModeConfig = null; // NEW: Config for standalone app mode (appId, url)
+  static _appModeConfig = null; // standalone app mode: { appId, url, defaultView } (AppContext, SDK_READY)
   static _platformHomeAppId = null; // The store bundle's platform_home_app_id (util/frontPage.js reads this)
   static _workspaceProducts = typeof __WORKSPACE_PRODUCTS__ !== 'undefined' ? __WORKSPACE_PRODUCTS__ : null;
 

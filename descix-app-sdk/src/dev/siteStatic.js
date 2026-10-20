@@ -51,3 +51,16 @@ export function assertSiteStatic(value, { subject, remedy = '' }) {
     (remedy ? ` ${remedy}` : '')
   );
 }
+
+/**
+ * The directory the gateway serves a static site from: site.static resolved against the app's
+ * repo root. One owner: the static route (createViteProxyConfig) and the serve binding's
+ * share.json read (serveBinding.js) both call it.
+ *
+ * @param {string} appDir - the app's repo root (absolute)
+ * @param {string} value - site.static, already held to the rule
+ * @returns {string} absolute directory
+ */
+export function siteStaticRoot(appDir, value) {
+  return path.resolve(appDir, value);
+}

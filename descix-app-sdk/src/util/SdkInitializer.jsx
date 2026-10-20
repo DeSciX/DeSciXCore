@@ -303,6 +303,9 @@ const SdkInitializer = ({ children, standalone = false, appId = null }) => {
                     mode: 'STANDALONE_APP',
                     appId: standaloneAppId,
                     url: appUrl,
+                    // The view the shell paints first (share.json default_view, via the binding);
+                    // AppContext seeds it before READY. A declared standalone app has no binding.
+                    defaultView: servedBinding?.defaultView ?? null,
                     deepLink: deepLinkData
                 }
             });
