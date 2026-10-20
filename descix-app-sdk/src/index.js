@@ -26,7 +26,7 @@ export { PowchClient } from './powch/PowchClient.js';
 export { toSignableTypedData, TypedDataError } from './powch/typedData.js';
 export { NetworkLoadingProvider, useNetworkLoading } from './util/NetworkAPI.jsx';
 export { useDeSciXView } from './hooks/useDeSciXView.js';
-export { VIEW_MODES, DEFAULT_VIEW, getView, setView, subscribeView, resetView, publishViewApi, viewAvailable, VIEW_OUTCOMES, requestView } from './util/appView.js';
+export { VIEW_MODES, DEFAULT_VIEW, initialViewFor, seedView, getView, setView, subscribeView, resetView, publishViewApi, viewAvailable, VIEW_OUTCOMES, requestView } from './util/appView.js';
 export { SHARE_JSON_FILE, SHARE_CONTRACT, parseShareJson, validateShareJson } from './util/share.js';
 export { BRIDGE_READY_EVENT, BRIDGE_VERSION, getBridge, publishBridgeMember, retractBridgeMember } from './util/appBridge.js';
 export { CHAT_MEMBER, publishChatApi, retractChatApi } from './util/appChat.js';

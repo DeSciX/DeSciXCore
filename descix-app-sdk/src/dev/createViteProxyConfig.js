@@ -19,6 +19,7 @@ import { resolveWorkspaceApps } from './workspaceApps.js';
 import { localUpstreamOrigin } from './localOrigin.js';
 import { devServerProxyGuard } from './devServerProxyGuard.js';
 import { invokedBin } from './invokedBin.js';
+import { siteStaticRoot } from './siteStatic.js';
 
 /**
  * @param {string} workspacePath - Path to workspace root (contains .descix/workspace.json)
@@ -78,8 +79,7 @@ export function createViteProxyConfig(workspacePath, options = {}) {
       }
     } else if (!isShell && app.site?.static) {
       // Static site: the path is relative to the APP'S OWN repo root (its workspace owns it).
-      const staticDir = app.site.static === '.' ? app.dir : path.join(app.dir, app.site.static);
-      staticRoutes[appId] = path.resolve(staticDir);
+      staticRoutes[appId] = siteStaticRoot(app.dir, app.site.static);
     }
     if (app.microservice?.port) serviceRoutes[appId] = { port: app.microservice.port, protocol: app.microservice.protocol };
   }

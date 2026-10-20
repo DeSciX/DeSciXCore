@@ -188,8 +188,40 @@ export function requestView(mode, { fallback } = {}) {
  */
 export const DEFAULT_VIEW = VIEW_MODES.SPLITVIEW;
 
-let current = DEFAULT_VIEW;
+/**
+ * The view a shell bound by `binding` starts in: the binding's defaultView (the app site's
+ * share.json `default_view`, copied in by the edge or `descix serve`), else DEFAULT_VIEW. The
+ * one owner of "which view first": seedView (the first paint) and resetView both read it.
+ *
+ * @param {{defaultView?: string|null}|null|undefined} binding - an app binding
+ *   (util/appBinding.js), AppData.appModeConfig, or null for the store
+ * @returns {string} a VIEW_MODES value
+ * @throws {Error} "not a view" when the binding names a view outside VIEW_MODES
+ */
+export function initialViewFor(binding) {
+  const declared = binding?.defaultView;
+  if (declared === undefined || declared === null) return DEFAULT_VIEW;
+  assertViewMode(declared);
+  return declared;
+}
+
+let initial = DEFAULT_VIEW;
+let current = initial;
 const subscribers = new Set();
+
+/**
+ * Seed the shell's starting view from its binding. Called once, where the shell learns its
+ * binding and BEFORE it renders the app surface (AppContext, SDK_READY), so the first paint is
+ * the app's declared view rather than DEFAULT_VIEW followed by a switch.
+ *
+ * @param {{defaultView?: string|null}|null|undefined} binding
+ * @returns {string} the seeded view
+ * @throws {Error} as initialViewFor
+ */
+export function seedView(binding) {
+  initial = initialViewFor(binding);
+  return setView(initial);
+}
 
 /** @returns {string} the view the shell should currently render */
 export function getView() {
@@ -230,9 +262,12 @@ export function subscribeView(fn) {
   return () => subscribers.delete(fn);
 }
 
-/** Back to the shell's default. Used when the shell switches to another app. */
+/**
+ * Back to the view this shell started in (seedView; DEFAULT_VIEW when nothing was seeded, as on
+ * the store). Used when the shell switches to another app.
+ */
 export function resetView() {
-  setView(DEFAULT_VIEW);
+  setView(initial);
 }
 
 /**

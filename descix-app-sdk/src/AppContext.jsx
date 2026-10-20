@@ -12,6 +12,7 @@ import {
 } from './util/AppData';
 import { Api } from './util/api';
 import { useDeSciXBridge } from './hooks/useDeSciXBridge';
+import { seedView } from './util/appView.js';
 
 
 
@@ -302,8 +303,13 @@ export const AppProvider = ({ children }) => {
             // Store app mode config in AppData for the shell's STANDALONE_APP view
             AppData.appModeConfig = {
               appId: payload.appId,
-              url: payload.url
+              url: payload.url,
+              defaultView: payload.defaultView ?? null
             };
+            // Seed the view BEFORE READY: ShellContent shows LoadingWidget until READY, so the
+            // app surface's first render is already the declared view. An invalid defaultView
+            // throws here, into this state machine's ERROR state.
+            seedView(AppData.appModeConfig);
 
             setAppState(AppContextState.READY);
             triggerViewChange(AppContextView.STANDALONE_APP);
