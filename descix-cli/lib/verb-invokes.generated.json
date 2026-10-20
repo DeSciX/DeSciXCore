@@ -131,6 +131,9 @@
     "list_knowledge_bases",
     "query_knowledge_base"
   ],
+  "kb create": [
+    "init_git_mode_kb"
+  ],
   "kb delete": [
     "delete_knowledge_base"
   ],

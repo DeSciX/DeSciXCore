@@ -1,6 +1,6 @@
 {
   "name": "@descix/app-sdk",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "DeSciX App Shell - init-to-READY logic, core API, Powch integration, dev proxy config",
   "repository": {
     "type": "git",
@@ -12,6 +12,7 @@
   "exports": {
     ".": "./src/index.js",
     "./dev": "./src/dev/index.js",
+    "./share": "./src/util/share.js",
     "./scaffold": "./scaffold/index.js",
     "./powch-client": "./src/powch/PowchClient.js",
     "./AppShell": "./src/AppShell.jsx",

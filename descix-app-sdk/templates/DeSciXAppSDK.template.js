@@ -3,7 +3,7 @@
  *
  * !!! GENERATED FILE — DO NOT EDIT !!!
  * Source:    @descix/app-sdk templates/DeSciXAppSDK.template.js
- *            + src/util/bridgeResolver.js (inlined below)
+ *            + src/util/bridgeResolver.js and src/util/appView.js (inlined below)
  * Regenerate: node descix-app-sdk/scripts/generate-app-sdk-copies.js
  * Verify:     node descix-app-sdk/scripts/generate-app-sdk-copies.js --check
  * A hand-edit here is drift by construction and the --check gate will fail loud.
@@ -14,6 +14,7 @@
  *
  *     await DeSciX.ready();                      // is the shell's bus there?
  *     DeSciX.view.set('CodeSite');               // ask for the whole frame
+ *     DeSciX.requestView('NoChrome', { fallback: 'CodeSite' });  // …and learn what happened
  *     if (DeSciX.chat.available()) { … }         // can chat take an attachment now?
  *     await DeSciX.chat.sendMedia({ … });        // hand the model something to look at
  *     await DeSciX.call('some_command', { … });  // call the platform through the shell
@@ -34,6 +35,10 @@ window.DeSciX = (() => {
 /* ── inlined from @descix/app-sdk src/util/bridgeResolver.js ─────────────── */
 __BRIDGE_RESOLVER__
 /* ── end inlined resolver ───────────────────────────────────────────────── */
+
+/* ── inlined from @descix/app-sdk src/util/appView.js ────────────────────── */
+__VIEW_REQUEST__
+/* ── end inlined view region ────────────────────────────────────────────── */
 
     // ── Never clobber an owner ───────────────────────────────────────────────
     // If the bus resolves at hop 0, THIS page published it: the page is the shell
@@ -173,6 +178,24 @@ __BRIDGE_RESOLVER__
         get view() {
             return member('view', 'View switching is a shell capability (this host renders the app frame without a view-aware container).');
         },
+
+        /** The views an app may ask for (the one list, from appView.js). */
+        VIEW_MODES,
+
+        /** What a requestView() call did (the one list, from appView.js). */
+        VIEW_OUTCOMES,
+
+        /**
+         * Ask whatever shell hosts this page for a view and learn what happened:
+         *
+         *     const { outcome } = DeSciX.requestView('NoChrome', { fallback: 'CodeSite' });
+         *
+         * Returns { outcome, mode, requested, bridge, reason }; outcome is a VIEW_OUTCOMES value.
+         * Standalone, cross-origin or a shell that lacks the mode is an outcome (see
+         * VIEW_OUTCOMES), never a throw. It throws for a mode that is not a view,
+         * and (code VIEW_CONTRACT_VIOLATED) for a shell that breaks the view contract.
+         */
+        requestView,
 
         /**
          * Chat contributions — hand the model something to LOOK AT:

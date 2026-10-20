@@ -26,8 +26,9 @@ npm install @descix/app-sdk
 
 | Export | Description |
 |--------|-------------|
-| `.` | AppShell, AppContext, AppProvider, useAppContext, Api, ErrorBoundary, LoadingWidget, DebugWidget, CodeSiteWidget, ChatWidget, PowchSideBarWidget, PowchBridgeProvider, usePowchBridge, PowchClient, toSignableTypedData, TypedDataError, useDeSciXView, VIEW_MODES, viewAvailable, publishChatApi, retractChatApi, publishBridgeMember, retractBridgeMember, getBridge, BRIDGE_READY_EVENT |
+| `.` | AppShell, AppContext, AppProvider, useAppContext, Api, ErrorBoundary, LoadingWidget, DebugWidget, CodeSiteWidget, ChatWidget, PowchSideBarWidget, PowchBridgeProvider, usePowchBridge, PowchClient, toSignableTypedData, TypedDataError, useDeSciXView, VIEW_MODES, viewAvailable, requestView, VIEW_OUTCOMES, SHARE_CONTRACT, parseShareJson, validateShareJson, SHARE_JSON_FILE, publishChatApi, retractChatApi, publishBridgeMember, retractBridgeMember, getBridge, BRIDGE_READY_EVENT |
 | `./dev` | createViteProxyConfig, createViteServerConfig, getViteHttpsConfig, resolveGatewayPort, resolveServeBinding, resolvePowchUrl, resolveDevCertOptions, buildWorkspaceProducts |
+| `./share` | SHARE_JSON_FILE, SHARE_CONTRACT, parseShareJson, validateShareJson (pure: no DOM, no Node-only import) |
 | `./powch-client` | PowchClient (for third-party sites) |
 
 ## Usage
@@ -54,6 +55,39 @@ The shell handles init, auth, and providers. When `appState === READY`, it rende
 ### Views
 
 An embedded app picks its layout with `DeSciX.view.set('CodeSite')`, `DeSciX.view.set('SplitView')` (default), `DeSciX.view.set('Chat')` or `DeSciX.view.set('NoChrome')`; `DeSciX.view.set('NoChrome')` is the way to a chromeless phone view (no top bar, no padding, no chat; the app fills the viewport). The CodeSite iframe's `allow="fullscreen"` is a different thing: it delegates the browser Fullscreen API, which the app may call on top of any view. Full reference: [APP_SHELL_API.md](APP_SHELL_API.md#descixview--choose-your-layout).
+
+### requestView: ask for a view and learn what happened
+
+`requestView(mode, { fallback })` finds the shell that hosts your page at any frame depth and returns `{ outcome, mode, requested, bridge, reason }`. `outcome` is one of `VIEW_OUTCOMES`:
+
+| outcome | meaning |
+|---------|---------|
+| `requested` | a listening shell set `mode` |
+| `fallback` | the shell's `view.MODES` lacks `mode`; it set your `fallback` |
+| `unoffered` | nothing was set: no shell (`bridge: 'standalone'`), a framed page with no readable shell (`bridge: 'embedded-no-bridge'`), no view member, no listening host, or the shell offers neither `mode` nor `fallback` |
+| `view-no-modes` | you gave a `fallback`, and the shell publishes no `view.MODES` to choose by |
+| `set-threw` | the shell's `view.set()` threw; `reason` carries its message |
+
+```js
+import { requestView } from '@descix/app-sdk';
+const { outcome } = requestView('NoChrome', { fallback: 'CodeSite' });
+```
+
+It throws only for a mode or fallback that is not a `VIEW_MODES` value (`requestView('FullScreen')` is "not a view") and for a shell that breaks the view contract (`err.code === 'VIEW_CONTRACT_VIOLATED'`). Where the page runs is never an error.
+
+A plain-script site gets the same function from the generated `DeSciXAppSDK.js`: `DeSciX.requestView(...)`, with `DeSciX.VIEW_OUTCOMES` and `DeSciX.VIEW_MODES`.
+
+### share.json: the link-preview contract
+
+A site bundle may ship `share.json` beside its `index.html`; the edge rewrites the served page head from it. `SHARE_CONTRACT` is the field table the edge enforces: `title` and `description` are required non-empty strings, `icon`, `og_image`, `twitter_card` and `apple_touch_icon` are optional strings, and `twitter_card` defaults to `summary_large_image`. A present optional field that is not a non-empty string is refused.
+
+```js
+import { parseShareJson } from '@descix/app-sdk/share';
+const share = parseShareJson(text); // the full bag, absent optional fields null; or throws, e.g.
+// "share.json: description is required (a non-empty string)"
+```
+
+`descix site upload` runs this check on a shipped `share.json` and refuses the whole upload when it fails.
 
 ### PowchClient (Third-Party Sites)
 
