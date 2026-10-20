@@ -29,7 +29,8 @@ import { staticSitePlugin } from './staticSitePlugin.js';
 import { resolveGatewayTargets, proxyEntry, isLocalOrigin } from './resolveGatewayTargets.js';
 import { resolveGatewayPort, portInUseMessage } from './gatewayPort.js';
 import { assertVitePin } from './vitePin.js';
-import { resolveServeBinding, appBindingPlugin, APP_BINDING_PATH } from './serveBinding.js';
+import { resolveServeBinding, appBindingPlugin, APP_BINDING_PATH, bindableApps, servedShareJsonFile } from './serveBinding.js';
+import { initialViewFor } from '../util/appView.js';
 import { resolvePowchUrl } from './powchUrl.js';
 import { resolveDevCertOptions } from './devCerts.js';
 import { localUpstreamOrigin } from './localOrigin.js';
@@ -160,6 +161,7 @@ export async function runGateway(options = {}) {
   log(`  App:       ${binding.appId}   [${binding.source}]   mode: ${binding.mode}`);
   log(`  Open:      ${gatewayOrigin(port)}/   → App Shell; reads ${APP_BINDING_PATH} and boots ${binding.appId} ${binding.mode}`);
   log(`  App route: ${binding.appUrl}   → this app's route on the gateway (the URL the shell loads it from)`);
+  log(`  First view: ${initialViewFor(binding)}${binding.defaultView ? '' : ' (shell default; the site declares no default_view)'}   [share.json: ${servedShareJsonFile(bindableApps(workspaceRoot).find((a) => a.appId === binding.appId)).why}]`);
   log('');
 
   const proxyRules = buildGatewayProxy(workspaceRoot, targets);

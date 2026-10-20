@@ -28,6 +28,7 @@
  * cannot name an app it FAILS LOUD naming both fixes rather than quietly
  * falling back to the store.
  */
+import fs from 'fs';
 import path from 'path';
 import { gatewayProductUrl } from './workspaceProducts.js';
 import { resolveWorkspaceApps } from './workspaceApps.js';
@@ -36,7 +37,10 @@ import { resolveWorkspaceApps } from './workspaceApps.js';
 import { invokedBin } from './invokedBin.js';
 // ONE spelling of the path, shared with the browser-side reader. That module is
 // deliberately node-free so both sides can import the same constant.
-import { APP_BINDING_PATH } from '../util/appBinding.js';
+import { APP_BINDING_PATH, standaloneBinding } from '../util/appBinding.js';
+// The share.json contract owner: the same parse the upload gate and the edge run.
+import { SHARE_JSON_FILE, parseShareJson } from '../util/share.js';
+import { siteStaticRoot } from './siteStatic.js';
 
 export { APP_BINDING_PATH };
 
@@ -44,11 +48,55 @@ export { APP_BINDING_PATH };
  * Every app this workspace serves locally, with the directory that means "I am
  * working on this one" — from the ONE owner (workspaceApps, v3 fork (b)).
  * @param {string} workspaceRoot
- * @returns {Array<{appId: string, dir: string, isPlatform: boolean}>}
+ * @returns {Array<{appId: string, dir: string, site: Object, isPlatform: boolean}>}
  */
 export function bindableApps(workspaceRoot) {
   const { shellApp, apps } = resolveWorkspaceApps(workspaceRoot);
-  return apps.map((a) => ({ appId: a.appId, dir: a.dir, isPlatform: a === shellApp }));
+  return apps.map((a) => ({ appId: a.appId, dir: a.dir, site: a.site || {}, isPlatform: a === shellApp }));
+}
+
+/**
+ * Where this gateway reads the served app's share.json: beside the index.html it serves, the
+ * same file `descix site upload` validates and the edge reads beside the deployed index.html.
+ * A dev-server site (site.port, which wins over site.static, as the proxy config rules) is
+ * served by a process whose file tree the gateway cannot name, so nothing is read there.
+ *
+ * @param {{appId: string, dir: string, site: Object}} app - a bindableApps entry
+ * @returns {{file: string|null, why: string}} file is null when nothing can be read; why says
+ *   which case applied, for the serve banner
+ */
+export function servedShareJsonFile(app) {
+  const site = app.site || {};
+  if (site.port) {
+    return { file: null, why: `not read: /p/${app.appId} is a dev server (site.port ${site.port}); the gateway reads ${SHARE_JSON_FILE} only from a static site` };
+  }
+  if (site.static === undefined || site.static === null) {
+    return { file: null, why: `not read: ${app.appId} has no site.static` };
+  }
+  const file = path.join(siteStaticRoot(app.dir, site.static), SHARE_JSON_FILE);
+  return { file, why: file };
+}
+
+/**
+ * The served app's declared starting view: share.json `default_view`, parsed by the contract
+ * owner. An invalid share.json refuses the serve, as it refuses the upload.
+ *
+ * @param {{appId: string, dir: string, site: Object}} app
+ * @returns {string|null} a VIEW_MODES value, or null when no share.json is read or none declares it
+ * @throws {Error} naming the file and the contract's field-named error
+ */
+function servedDefaultView(app) {
+  const { file } = servedShareJsonFile(app);
+  if (!file || !fs.existsSync(file)) return null;
+  try {
+    return parseShareJson(fs.readFileSync(file, 'utf8')).default_view;
+  } catch (e) {
+    throw new Error(
+      `[serve binding] ${file} does not meet the share.json contract (@descix/app-sdk/share):\n` +
+      `  ${e.message}\n` +
+      `  Fix ${SHARE_JSON_FILE}, or leave it out of the site, then serve again.`,
+      { cause: e });
+  }
 }
 
 /**
@@ -77,8 +125,10 @@ export function detectAppFromCwd(workspaceRoot, cwd) {
  * @param {string} [options.app] - explicit --app override
  * @param {string} [options.cwd] - directory to detect from (default process.cwd())
  * @param {number} options.gatewayPort - the port the gateway is listening on
- * @returns {{mode: 'standalone', appId: string, appUrl: string, source: string}}
- * @throws {Error} fail-loud when the app cannot be named, or names nothing real
+ * @returns {{mode: 'standalone', appId: string, appUrl: string, source: string, defaultView?: string}}
+ *   built by standaloneBinding (util/appBinding.js); defaultView from the served share.json
+ * @throws {Error} fail-loud when the app cannot be named, or names nothing real, or its served
+ *   share.json is invalid
  */
 export function resolveServeBinding(workspaceRoot, config, options = {}) {
   const { app, cwd = process.cwd(), gatewayPort } = options;
@@ -121,12 +171,12 @@ export function resolveServeBinding(workspaceRoot, config, options = {}) {
     source = 'cwd';
   }
 
-  return {
-    mode: 'standalone',
+  return standaloneBinding({
     appId,
     appUrl: gatewayProductUrl(gatewayPort, appId),
     source,
-  };
+    defaultView: servedDefaultView(apps.find((a) => a.appId === appId)),
+  });
 }
 
 /**

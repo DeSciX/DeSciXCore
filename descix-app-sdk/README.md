@@ -26,9 +26,9 @@ npm install @descix/app-sdk
 
 | Export | Description |
 |--------|-------------|
-| `.` | AppShell, AppContext, AppProvider, useAppContext, Api, ErrorBoundary, LoadingWidget, DebugWidget, CodeSiteWidget, ChatWidget, PowchSideBarWidget, PowchBridgeProvider, usePowchBridge, PowchClient, toSignableTypedData, TypedDataError, useDeSciXView, VIEW_MODES, viewAvailable, requestView, VIEW_OUTCOMES, SHARE_CONTRACT, parseShareJson, validateShareJson, SHARE_JSON_FILE, publishChatApi, retractChatApi, publishBridgeMember, retractBridgeMember, getBridge, BRIDGE_READY_EVENT |
+| `.` | AppShell, AppContext, AppProvider, useAppContext, Api, ErrorBoundary, LoadingWidget, DebugWidget, CodeSiteWidget, ChatWidget, PowchSideBarWidget, PowchBridgeProvider, usePowchBridge, PowchClient, toSignableTypedData, TypedDataError, useDeSciXView, VIEW_MODES, initialViewFor, seedView, viewAvailable, requestView, VIEW_OUTCOMES, SHARE_CONTRACT, parseShareJson, validateShareJson, SHARE_JSON_FILE, publishChatApi, retractChatApi, publishBridgeMember, retractBridgeMember, getBridge, BRIDGE_READY_EVENT |
 | `./dev` | createViteProxyConfig, createViteServerConfig, getViteHttpsConfig, resolveGatewayPort, resolveServeBinding, resolvePowchUrl, resolveDevCertOptions, buildWorkspaceProducts |
-| `./share` | SHARE_JSON_FILE, SHARE_CONTRACT, parseShareJson, validateShareJson (pure: no DOM, no Node-only import) |
+| `./share` | SHARE_JSON_FILE, SHARE_CONTRACT, parseShareJson, validateShareJson (no DOM, no Node-only import; imports the view list from appView.js) |
 | `./powch-client` | PowchClient (for third-party sites) |
 
 ## Usage
@@ -79,7 +79,7 @@ A plain-script site gets the same function from the generated `DeSciXAppSDK.js`:
 
 ### share.json: the link-preview contract
 
-A site bundle may ship `share.json` beside its `index.html`; the edge rewrites the served page head from it. `SHARE_CONTRACT` is the field table the edge enforces: `title` and `description` are required non-empty strings, `icon`, `og_image`, `twitter_card` and `apple_touch_icon` are optional strings, and `twitter_card` defaults to `summary_large_image`. A present optional field that is not a non-empty string is refused.
+A site bundle may ship `share.json` beside its `index.html`; the edge rewrites the served page head from it. `SHARE_CONTRACT` is the field table, and the edge, `descix serve` and `descix site upload` all run `parseShareJson`: `title` and `description` are required non-empty strings, `icon`, `og_image`, `twitter_card` and `apple_touch_icon` are optional strings, `twitter_card` defaults to `summary_large_image`, and `default_view` is optional (below). A present optional field that is not a non-empty string is refused.
 
 ```js
 import { parseShareJson } from '@descix/app-sdk/share';
@@ -88,6 +88,16 @@ const share = parseShareJson(text); // the full bag, absent optional fields null
 ```
 
 `descix site upload` runs this check on a shipped `share.json` and refuses the whole upload when it fails.
+
+### default_view: the view your app starts in
+
+`default_view` in `share.json` names the shell view your app's face paints FIRST, one of `VIEW_MODES`: `CodeSite`, `SplitView`, `Chat`, `NoChrome`. Any other value is refused by name (`share.json: default_view 'FullScreen' is not a view; one of CodeSite, SplitView, Chat, NoChrome`). Absent, the shell starts in `SplitView`.
+
+```json
+{ "title": "EGPT", "description": "Electronic Graph Paper Theory", "default_view": "CodeSite" }
+```
+
+The edge copies it into the app binding (`/__descix/app-binding.json`, `defaultView`) on `{app}.{env}.descix.net`, and `descix serve` does the same from a static site's `share.json` (a site served by a dev server, `site.port`, is not read; the serve banner's `First view:` line says which applied). The shell seeds its view from the binding (`initialViewFor(binding)`) before it renders your app, so there is no SplitView frame first. The app may still change the view at any time with `DeSciX.view.set` or `requestView`. On the store (descix.net) no binding is served and the shell starts in `SplitView`.
 
 ### PowchClient (Third-Party Sites)
 

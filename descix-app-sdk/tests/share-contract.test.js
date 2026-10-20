@@ -1,6 +1,6 @@
 /**
- * share.json has ONE owner (src/util/share.js). Its conformance with the edge worker's
- * parseShareJson is tested beside the edge (edge-router test/share-contract-conformance.test.mjs).
+ * share.json has ONE owner (src/util/share.js). The edge worker imports it; the gate that it
+ * grows no parser of its own is beside the edge (edge-router test/share-contract-conformance.test.mjs).
  *
  * Run: `node --test tests/share-contract.test.js` from descix-app-sdk/.
  */
@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 
 import { SHARE_JSON_FILE, SHARE_CONTRACT, parseShareJson, validateShareJson } from '../src/util/share.js';
 import * as shareModule from '../src/util/share.js';
+import { VIEW_MODES } from '../src/util/appView.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const VALID = {
@@ -22,15 +23,16 @@ const VALID = {
   og_image: 'images/share/share-1200x630.png',
   twitter_card: 'summary',
   apple_touch_icon: 'images/share/icon-180.png',
+  default_view: 'CodeSite',
 };
 
 // ── The table ──────────────────────────────────────────────────────────────────────────────
 
-test('SHARE_CONTRACT is frozen, row by row, and names the six fields', () => {
+test('SHARE_CONTRACT is frozen, row by row, and names the seven fields', () => {
   assert.ok(Object.isFrozen(SHARE_CONTRACT));
   for (const row of SHARE_CONTRACT) assert.ok(Object.isFrozen(row), row.name);
   assert.deepEqual(SHARE_CONTRACT.map((f) => f.name),
-    ['title', 'description', 'icon', 'og_image', 'twitter_card', 'apple_touch_icon']);
+    ['title', 'description', 'icon', 'og_image', 'twitter_card', 'apple_touch_icon', 'default_view']);
   assert.deepEqual(SHARE_CONTRACT.filter((f) => f.required).map((f) => f.name), ['title', 'description']);
   assert.equal(SHARE_JSON_FILE, 'share.json');
 });
@@ -50,7 +52,7 @@ test('POSITIVE: a minimal share.json gets every field, absent optionals null, tw
   const bag = parseShareJson(JSON.stringify({ title: 'T', description: 'D' }));
   assert.deepEqual(bag, {
     title: 'T', description: 'D', icon: null, og_image: null,
-    twitter_card: 'summary_large_image', apple_touch_icon: null,
+    twitter_card: 'summary_large_image', apple_touch_icon: null, default_view: null,
   });
   assert.deepEqual(Object.keys(bag), SHARE_CONTRACT.map((f) => f.name));
 });
@@ -97,13 +99,36 @@ for (const f of SHARE_CONTRACT) {
   });
 }
 
+// ── default_view: one of VIEW_MODES, the one list of views ────────────────────────────────
+
+test('POSITIVE: default_view takes every VIEW_MODES value, and only those', () => {
+  const row = SHARE_CONTRACT.find((f) => f.name === 'default_view');
+  assert.deepEqual(row.oneOf.values, Object.values(VIEW_MODES), 'the accepted set IS VIEW_MODES, not a second list');
+  for (const v of Object.values(VIEW_MODES)) {
+    assert.equal(validateShareJson({ title: 'T', description: 'D', default_view: v }).default_view, v);
+  }
+});
+
+test('POSITIVE: default_view CodeSite is accepted; absent is null, not SplitView (the shell owns the default)', () => {
+  assert.equal(parseShareJson(JSON.stringify({ title: 'T', description: 'D', default_view: 'CodeSite' })).default_view, 'CodeSite');
+  assert.equal(parseShareJson(JSON.stringify({ title: 'T', description: 'D' })).default_view, null);
+});
+
+test('NEGATIVE: default_view FullScreen is refused by name, listing the views', () => {
+  assert.throws(() => parseShareJson(JSON.stringify({ title: 'T', description: 'D', default_view: 'FullScreen' })),
+    /^Error: share\.json: default_view 'FullScreen' is not a view; one of CodeSite, SplitView, Chat, NoChrome$/);
+  // case matters: the view names are exact
+  assert.throws(() => validateShareJson({ title: 'T', description: 'D', default_view: 'codesite' }), /default_view 'codesite' is not a view/);
+});
+
 test('an unknown key is ignored, as the edge ignores it', () => {
   assert.deepEqual(validateShareJson({ ...VALID, extra: 1 }), VALID);
 });
 
-test('the module is pure: no Node-only or DOM import', () => {
+test('the module is pure: its one import is the view list, and no Node-only or DOM import', () => {
   const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'util', 'share.js'), 'utf8');
-  assert.doesNotMatch(src, /^\s*import\b/m);
+  assert.deepEqual([...src.matchAll(/^\s*import\b.*$/gm)].map((m) => m[0].trim()),
+    ["import { VIEW_MODES } from './appView.js';"]);
   assert.doesNotMatch(src, /\b(require\(|window\.|document\.|process\.)/);
   assert.deepEqual(Object.keys(shareModule).sort(),
     ['SHARE_CONTRACT', 'SHARE_JSON_FILE', 'parseShareJson', 'validateShareJson']);
