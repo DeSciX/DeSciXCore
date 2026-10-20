@@ -74,9 +74,9 @@ The CLI exposes exactly ONE knowledge-base sync surface: `descix kb corpus sync`
 git-tracked corpus manifest. The older four-step local pipeline has been REMOVED — its invocations
 now exit non-zero and name this replacement.
 
-1.  **Create** the knowledge base (once per KB):
+1.  **Create** the knowledge base (once per KB; an app created by `descix app init` already has its default KB):
     ```bash
-    descix app init -a <app_id> --kb <kb_name>
+    descix kb create -a <app_id> --kb <kb_name>
     ```
 2.  **Author** a corpus manifest at `.descix/manifests/<kb_name>.json` describing the sources to sync.
 3.  **Sync** the corpus to the platform (Pinecone):

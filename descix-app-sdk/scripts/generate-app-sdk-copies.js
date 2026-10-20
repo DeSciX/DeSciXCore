@@ -15,11 +15,13 @@
  * ── What is generated from what ──────────────────────────────────────────────
  *   SOURCE  templates/DeSciXAppSDK.template.js   (the app-side proxy)
  *         + src/util/bridgeResolver.js           (inlined at __BRIDGE_RESOLVER__)
+ *         + src/util/appView.js                  (VIEW_MODES, VIEW_OUTCOMES, requestView;
+ *                                                 inlined at __VIEW_REQUEST__)
  *   OUTPUT  scaffold/site/DeSciXAppSDK.js                        [this package]
  *           packages/client-core/src/DeSciXAppSDK.js              [DeSciX_Powch]
  *           apps/daita-splitviewdemo/site/DeSciXAppSDK.js         [Unkamon]
  *
- * The resolver is INLINED rather than imported because the outputs are plain browser
+ * The resolver and the view region are INLINED rather than imported because the outputs are plain browser
  * scripts loaded by `<script src>` with no module loader. Re-typing it into each
  * output is the drift; inlining it from the single owner is not.
  *
@@ -46,6 +48,8 @@ const CORE = resolve(APP_SDK, '..');           // …/DeSciX_Core
 const TEMPLATE = join(APP_SDK, 'templates', 'DeSciXAppSDK.template.js');
 const RESOLVER = join(APP_SDK, 'src', 'util', 'bridgeResolver.js');
 const PLACEHOLDER = '__BRIDGE_RESOLVER__';
+const VIEW_SOURCE = join(APP_SDK, 'src', 'util', 'appView.js');
+const VIEW_PLACEHOLDER = '__VIEW_REQUEST__';
 const INLINE_START = '/* ---8<--- INLINE START';
 const INLINE_END = '/* ---8<--- INLINE END';
 
@@ -58,13 +62,13 @@ function arg(name) {
  * Pull the self-contained region out of the resolver and make it valid inside a
  * function body: `export` is a module-only form and the outputs are plain scripts.
  */
-function inlineResolver() {
-  const src = readFileSync(RESOLVER, 'utf8');
+function inlineRegion(file) {
+  const src = readFileSync(file, 'utf8');
   const from = src.indexOf(INLINE_START);
   const to = src.indexOf(INLINE_END);
   if (from === -1 || to === -1) {
     throw new Error(
-      `[generate-app-sdk-copies] ${RESOLVER} is missing its INLINE markers. ` +
+      `[generate-app-sdk-copies] ${file} is missing its INLINE markers. ` +
       'The generator extracts the region between them; without the markers there is ' +
       'no defined source and generation must not guess.'
     );
@@ -73,7 +77,7 @@ function inlineResolver() {
 
   if (/^\s*import\s/m.test(body)) {
     throw new Error(
-      '[generate-app-sdk-copies] the inlined region imports something. It is inlined ' +
+      `[generate-app-sdk-copies] the inlined region of ${file} imports something. It is inlined ` +
       'into plain browser scripts that cannot follow an import — keep it self-contained.'
     );
   }
@@ -88,10 +92,15 @@ function inlineResolver() {
 
 function render() {
   const template = readFileSync(TEMPLATE, 'utf8');
-  if (!template.includes(PLACEHOLDER)) {
-    throw new Error(`[generate-app-sdk-copies] ${TEMPLATE} no longer contains ${PLACEHOLDER}.`);
+  for (const ph of [PLACEHOLDER, VIEW_PLACEHOLDER]) {
+    if (!template.includes(ph)) {
+      throw new Error(`[generate-app-sdk-copies] ${TEMPLATE} no longer contains ${ph}.`);
+    }
   }
-  return template.replace(PLACEHOLDER, inlineResolver());
+  // Function replacers: a string replacement would expand `$&`-style patterns in the source.
+  return template
+    .replace(PLACEHOLDER, () => inlineRegion(RESOLVER))
+    .replace(VIEW_PLACEHOLDER, () => inlineRegion(VIEW_SOURCE));
 }
 
 /** The three outputs, with the repo root each one needs in order to exist. */
@@ -143,8 +152,8 @@ function main() {
         `  DRIFT   ${out.repo}: ${out.path}\n` +
         `          ${actual === null ? 'missing' : 'differs from the generated source'}. ` +
         'This file is GENERATED — do not hand-edit it.\n' +
-        '          Fix the source (@descix/app-sdk templates/DeSciXAppSDK.template.js or ' +
-        'src/util/bridgeResolver.js), then run:\n' +
+        '          Fix the source (@descix/app-sdk templates/DeSciXAppSDK.template.js, ' +
+        'src/util/bridgeResolver.js or src/util/appView.js), then run:\n' +
         '            node descix-app-sdk/scripts/generate-app-sdk-copies.js'
       );
       drifted++;

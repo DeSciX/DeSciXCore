@@ -16,6 +16,8 @@ import { WorkspaceConfig, assertNoParentWorkspace } from '../workspace-config.js
 import { refreshCommunityIdentity, printIdentityReceipt } from './communityIdentity.js';
 import { generateAgentFiles } from '../agent-files.js';
 import { scaffoldAppRepo } from '../app-scaffold.js';
+import { kbCreateInvocation } from './kb-sync-surface.js';
+import { initKnowledgeBase } from './kb-create.js';
 
 /**
  * @param {Object} apiClient an authenticated DeSciXApiClient
@@ -87,7 +89,7 @@ export async function runAppInit(apiClient, options) {
         throw new Error(
           `App '${appId}' has no KB named '${options.kb}' — it has: ${existingKbs.join(', ') || '(none)'}.\n` +
           `Mapping an existing app never creates a KB; name one that exists with --kb, or create ` +
-          `one deliberately with its own verb.`
+          `it deliberately with \`${kbCreateInvocation(appId, options.kb)}\`.`
         );
       }
       kbId = options.kb;
@@ -136,8 +138,7 @@ export async function runAppInit(apiClient, options) {
   // 3. The default KB — CREATE leg only (see the adopt block above: map never creates).
   let kbResult = null;
   if (createdHere) {
-    const kbResponse = await apiClient.invoke('init_git_mode_kb', { app_id: appId, kb_name: kbId });
-    kbResult = kbResponse.message || kbResponse;
+    kbResult = await initKnowledgeBase(apiClient, { appId, kbName: kbId });
   }
 
   console.log(chalk.green(`\n✓ ${appId} initialized`));

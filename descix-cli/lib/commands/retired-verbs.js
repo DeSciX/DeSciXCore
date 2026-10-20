@@ -13,7 +13,7 @@
 import chalk from 'chalk';
 import { TOP_LEVEL_API_URL_REMEDY } from '../workspace-config.js';
 import { MICROSERVICE_AUTH_MODEL } from './microservice-auth-model.js';
-import { CANONICAL_KB_SYNC, CANONICAL_KB_CREATE } from './kb-sync-surface.js';
+import { CANONICAL_KB_SYNC, kbCreateInvocation } from './kb-sync-surface.js';
 
 const kbSyncRefusal = (invocation) =>
   `❌ \`${invocation}\` has been REMOVED. There is no replacement flag and no fallback.\n\n` +
@@ -21,7 +21,7 @@ const kbSyncRefusal = (invocation) =>
   `  ${CANONICAL_KB_SYNC} -a <app_id> [-k <kb_name>]\n\n` +
   `It syncs from a git-tracked corpus manifest (.descix/manifests/), which the removed ` +
   `path could not do. If the KB does not exist yet, create it first with ` +
-  `\`${CANONICAL_KB_CREATE}\`.`;
+  `\`${kbCreateInvocation()}\`.`;
 const KB_SYNC_DESCRIPTION = `REMOVED — use \`${CANONICAL_KB_SYNC}\``;
 
 const AIRDROP_QUEUE_REFUSAL = (invocation) =>

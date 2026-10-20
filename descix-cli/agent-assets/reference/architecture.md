@@ -152,7 +152,7 @@ The DeSciX CLI publishes content with one verb per plane. Each command resolves 
 
 | Command | Description |
 |---------|-------------|
-| `descix app init -a <app_id> --kb <kb_name>` | Create a knowledge base on the app |
+| `descix kb create -a <app_id> --kb <kb_name>` | Create a knowledge base on an existing app (refuses one that already exists) |
 | `descix kb corpus sync` | Sync the manifest's git files to Pinecone |
 | `descix kb corpus status` | Show corpus sync state (files, chunks, last sync, resolved ref) |
 | `descix kb list` | List knowledge bases for an app |

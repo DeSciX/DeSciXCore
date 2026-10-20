@@ -37,6 +37,7 @@ import {
 import { lintManifestForDenyClasses, assertNoViolations } from '../core/CorpusDenyLint.js';
 import { pickCanaryChunk, runRetrievalCanary, DEFAULT_CANARY_DELAYS_MS } from '../core/RetrievalCanary.js';
 import { loadSyncState, saveSyncState, syncStatePath, syncFailureLogPath } from '../core/syncState.js';
+import { CANONICAL_KB_CREATE, kbCreateInvocation } from './kb-sync-surface.js';
 
 /**
  * THE ONE OWNER of "which repo does a kb verb given `-a <appId>` read" — the corpus manifest, the
@@ -469,13 +470,14 @@ export async function runCorpusSync(apiClient, options) {
     const missingKbNames = requestedKbNames.filter(name => !registeredKbNames.has(name));
     if (missingKbNames.length > 0) {
       // Hard-fail: every KB we are about to sync into must already be registered in Firestore.
-      // No hardcoded fallback. `app init --kb` is the verb that creates a KB (init_git_mode_kb).
+      // No hardcoded fallback. `descix kb create` is the verb that creates a KB on an existing app.
       spinner.fail(`Unregistered KB(s) for app "${appId}"`);
       throw new Error(
         `KnowledgeBase document(s) missing in Firestore for app "${appId}": ${missingKbNames.join(', ')}.\n` +
         `Registered KBs for this app: ${[...registeredKbNames].join(', ') || '(none)'}.\n` +
         `Syncing vectors into Pinecone without a matching KB doc would orphan them (chat queries hard-fail).\n` +
-        `Fix: run \`descix app init -a ${appId} --kb <kb_name>\` for each missing KB — it creates the KB and needs no Drive folder.`
+        missingKbNames.map((name) => `Fix: run \`${kbCreateInvocation(appId, name)}\``).join('\n') + '\n' +
+        `(${CANONICAL_KB_CREATE} creates the KB on the existing app and needs no Drive folder.)`
       );
     }
 
