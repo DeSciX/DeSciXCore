@@ -80,7 +80,7 @@ secret
 *.vrb
 
 # DeSciX
-.descix/wallet.json
+.descix/*wallet*.json
 *.secret.json
 # ── Editor / tool transient backups (never tracked) ──
 *.bak-*
