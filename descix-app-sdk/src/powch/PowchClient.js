@@ -9,10 +9,8 @@
 import { requirePowchUrl } from './powchOrigin.js';
 import { resolveBridge } from '../util/bridgeResolver.js';
 import { toSignableTypedData } from './typedData.js';
+import { PowchReadyGate, POWCH_READY } from './readyGate.js';
 
-// Bound on how long a request may wait for the iframe's POWCH_READY. Independent of the
-// per-request timeout, which only starts once the request is actually posted.
-const DEFAULT_READY_TIMEOUT_MS = 30000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 120000;
 
 export class PowchClient {
@@ -21,7 +19,6 @@ export class PowchClient {
     this.pendingRequests = new Map();
     this.requestIdCounter = 0;
     this._user = null;
-    this.isReady = false;
     this._iframeVisible = false;
 
     // 1. Check for Shell Bridge (Embedded Mode)
@@ -29,7 +26,6 @@ export class PowchClient {
 
     if (this.shellBridge) {
       console.log('[PowchClient] Running in Embedded Mode (Shell Bridge detected)');
-      this.isReady = true;
       // In embedded mode, we don't manage the iframe.
       // We assume the shell is ready.
       setTimeout(() => this.emit('ready'), 0);
@@ -43,11 +39,10 @@ export class PowchClient {
       this.container = config.container || document.body;
       this.origin = new URL(this.bridgeUrl).origin;
       this.iframe = null;
-      this.readyTimeoutMs = config.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS;
       this.requestTimeoutMs = config.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
-      // Requests made before POWCH_READY. Posting earlier is lost: the iframe has not
-      // armed its message listener yet.
-      this._readyQueue = [];
+      // Requests made before POWCH_READY wait here (posting earlier is lost: the iframe
+      // has not armed its message listener yet). See ./readyGate.js.
+      this._readyGate = new PowchReadyGate({ label: this.bridgeUrl, readyTimeoutMs: config.readyTimeoutMs });
 
       this._initIframe();
       this._setupListeners();
@@ -81,7 +76,10 @@ export class PowchClient {
    */
   _initIframe() {
     this.iframe = document.createElement('iframe');
-    this.iframe.sandbox="allow-scripts allow-same-origin"
+    // allow-popups + allow-popups-to-escape-sandbox: a framed Powch opens its own page
+    // top-level for New account (WebKit refuses credentials.create() in a cross-origin
+    // frame); without them that window.open is blocked on every standalone host.
+    this.iframe.sandbox = 'allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox';
     this.iframe.src = this.bridgeUrl;
     this.iframe.id = 'powch-sdk-bridge';
     this.iframe.allow = "publickey-credentials-get *; publickey-credentials-create *";
@@ -118,9 +116,8 @@ export class PowchClient {
       const { type, requestId, success, payload, error } = data;
 
       // Handle internal protocol events
-      if (type === 'POWCH_READY') {
-        this.isReady = true;
-        this._flushReadyQueue();
+      if (type === POWCH_READY) {
+        this._readyGate.markReady();
         this.emit('ready');
         return;
       }
@@ -224,32 +221,12 @@ export class PowchClient {
     const requestId = `req_${++this.requestIdCounter}_${Date.now()}`;
 
     return new Promise((resolve, reject) => {
-      const entry = { type, payload, timeout, requestId, resolve, reject, timer: null };
-
-      if (this.isReady) {
-        this._post(entry);
-        return;
-      }
-
-      entry.timer = setTimeout(() => {
-        const i = this._readyQueue.indexOf(entry);
-        if (i === -1) return;
-        this._readyQueue.splice(i, 1);
-        reject(new Error(
-          `Powch iframe (${this.bridgeUrl}) did not send POWCH_READY within ${this.readyTimeoutMs}ms; ` +
-          `${type} was never posted`
-        ));
-      }, this.readyTimeoutMs);
-      this._readyQueue.push(entry);
+      this._readyGate.run(
+        type,
+        () => this._post({ type, payload, timeout, requestId, resolve, reject }),
+        reject
+      );
     });
-  }
-
-  _flushReadyQueue() {
-    const queued = this._readyQueue.splice(0);
-    for (const entry of queued) {
-      clearTimeout(entry.timer);
-      this._post(entry);
-    }
   }
 
   _post({ type, payload, timeout, requestId, resolve, reject }) {
@@ -268,6 +245,11 @@ export class PowchClient {
     });
 
     this.iframe.contentWindow.postMessage({ type, requestId, payload }, this.origin);
+  }
+
+  /** Embedded: the shell bridge owns readiness. Standalone: the iframe's POWCH_READY (the gate). */
+  get isReady() {
+    return this.shellBridge ? true : this._readyGate.isReady;
   }
 
   /**

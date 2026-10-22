@@ -9,6 +9,7 @@ import { useAppContext } from '../AppContext';
 import ChatWidget from './ChatWidget';
 import { actionResultContribution, actionErrorContribution } from '../util/chatIngress';
 import { publishChatApi, retractChatApi } from '../util/appChat.js';
+import { clearStoredChatContext } from '../util/chatContext.js';
 import { chatLayout } from '../util/chatLayout.js';
 import {
   readSelfGuidedDeclaration,
@@ -175,12 +176,20 @@ const CodeSiteWidget = ({
     publishChatApi({
       deliver: deliverToChat,
       isAvailable: () => !!chatIngressRef.current?.contribute,
+      // Page context is stamped with the app mounted at call time and read back only for it.
+      appId: () => AppData.selectedApp?.app_id || null,
     });
     return () => retractChatApi();
     // Published once per mount: `deliver` reads chatIngressRef at CALL time, so the
     // handle never goes stale as the chat pane mounts and unmounts beneath it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // A different app (or a different site) in this frame: the previous page's context leaves
+  // with it, so one app's page never shapes another app's chat.
+  useEffect(() => {
+    clearStoredChatContext();
+  }, [selectedApp?.app_id, iframeSrc]);
 
   /**
    * Self-guidance: the page DECLARES which of its ops may run unattended, the shell DECIDES

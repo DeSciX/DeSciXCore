@@ -1656,6 +1656,20 @@
     "runbookAnchor": null
   },
   {
+    "verbPath": "plugin check",
+    "description": "Check a Claude plugin or marketplace directory against the limits claude.ai enforces on sync, before you publish it. Exit 0 clean, 1 on a violation, 2 when a file cannot be read.",
+    "arguments": [
+      {
+        "name": "dir",
+        "required": false,
+        "variadic": false,
+        "description": "Plugin or marketplace directory (default: the current directory)"
+      }
+    ],
+    "options": [],
+    "runbookAnchor": "#the-app-s-claude-plugin"
+  },
+  {
     "verbPath": "purchases",
     "description": "List your purchased communities and apps",
     "arguments": [],

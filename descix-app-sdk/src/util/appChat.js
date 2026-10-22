@@ -41,6 +41,7 @@
 
 import { mediaContribution } from './chatIngress.js';
 import { publishBridgeMember, retractBridgeMember } from './appBridge.js';
+import { setStoredChatContext, clearStoredChatContext, getChatContextFor } from './chatContext.js';
 
 /** Bus member name. Stated once so publisher and retractor cannot drift. */
 export const CHAT_MEMBER = 'chat';
@@ -51,10 +52,12 @@ export const CHAT_MEMBER = 'chat';
  * @param {object} host
  * @param {(contribution: object) => any} host.deliver - the host's `deliverToChat`
  * @param {() => boolean} host.isAvailable - is the ingress mounted RIGHT NOW
+ * @param {() => string|null} host.appId - the app whose face is mounted RIGHT NOW; page context
+ *   is stamped with it and read back only for it (util/chatContext.js)
  */
-export function publishChatApi({ deliver, isAvailable }) {
-  if (typeof deliver !== 'function' || typeof isAvailable !== 'function') {
-    throw new TypeError('[DeSciX.chat] publishChatApi requires { deliver, isAvailable } functions');
+export function publishChatApi({ deliver, isAvailable, appId }) {
+  if (typeof deliver !== 'function' || typeof isAvailable !== 'function' || typeof appId !== 'function') {
+    throw new TypeError('[DeSciX.chat] publishChatApi requires { deliver, isAvailable, appId } functions');
   }
 
   return publishBridgeMember(CHAT_MEMBER, {
@@ -104,10 +107,28 @@ export function publishChatApi({ deliver, isAvailable }) {
         return false;
       }
     },
+
+    /**
+     * Page context: what the page has open, for the chat pane (util/chatContext.js owns the
+     * contract). An app calls `DeSciX.setChatContext(...)` from DeSciXAppSDK.js, which reports
+     * an outcome; these are the members it reaches.
+     *
+     *     DeSciX.chat.setContext({ sourceUrl: location.href, data: { title }, script })
+     *
+     * @returns {{ revision: number }} - throws CHAT_CONTEXT_INVALID on a malformed bag
+     */
+    setContext: (partial) => setStoredChatContext(partial, { appId: appId() }),
+
+    /** @param {number} [revision] - clear only if this revision is still the one held */
+    clearContext: (revision) => clearStoredChatContext(revision),
+
+    /** @returns {object|null} the context the mounted app set */
+    getContext: () => getChatContextFor(appId())?.bag ?? null,
   });
 }
 
-/** Retract the handle when the host unmounts. */
+/** Retract the handle when the host unmounts; the context of the app leaving goes with it. */
 export function retractChatApi() {
+  clearStoredChatContext();
   retractBridgeMember(CHAT_MEMBER);
 }

@@ -454,6 +454,20 @@ export class WorkspaceConfig {
   }
 
   /**
+   * The empty v3 workspace, rooted at `root` and not yet saved: the one owner of that shape.
+   * Every verb that creates a workspace where none exists (`config init`, `config set-env`,
+   * `init`, `app init`) starts from this, so the in-memory version always matches what save()
+   * writes.
+   *
+   * @param {string} root - the directory that becomes the workspace root
+   * @returns {WorkspaceConfig}
+   */
+  static empty(root) {
+    if (!root) throw new Error('WorkspaceConfig.empty(root): root is required.');
+    return new WorkspaceConfig({ version: '3.0', type: 'workspace', env: {} }, root);
+  }
+
+  /**
    * Find the workspace root by searching up from startDir
    * 
    * Workspace root is identified by (in priority order):

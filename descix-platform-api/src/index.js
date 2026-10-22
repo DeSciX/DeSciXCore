@@ -18,6 +18,8 @@ export {
     Role,
     App,
     User,
+    EmailIdentityRefusal,
+    EmailIdentityError,
     Community,
     UserCommunityStats,
     GuildSettings,
@@ -38,6 +40,7 @@ export {
     createUserSession,
     sendEmailVerification,
     verifyEmailCode,
+    assertEmailVerifiedFor,
     EmailVerificationRefusal,
     migrateUserIfNeeded
 } from './auth/index.js';

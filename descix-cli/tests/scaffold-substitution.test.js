@@ -88,11 +88,17 @@ test('GREEN: the microservice scaffold carries the caller community, not a hardc
   assert.equal(defaults.community_id, COMMUNITY);
   assert.equal(defaults.app_id, APP);
 
-  // The sample RAG call is the site item 9 named. It must query the developer's own community.
+  // The sample RAG call is the site item 9 named. It must query the developer's own APP, and send
+  // only what query_knowledge_base publishes: no community_id (the server derives it from the app's
+  // Products row, and every /apifront door refuses a param the schema does not declare).
   const sample = text['services/commandHandlers/sampleCommands.js'];
   assert.ok(
-    sample.includes(`community_id: '${COMMUNITY}'`),
-    'sampleCommands must query the caller community'
+    sample.includes(`app_id: '${APP}'`),
+    'sampleCommands must query the caller app'
+  );
+  assert.ok(
+    !/community_id:/.test(sample.slice(sample.indexOf("callTool('query_knowledge_base'"), sample.indexOf("callTool('query_knowledge_base'") + 400)),
+    'the sample query_knowledge_base call must not send community_id, which the command does not publish'
   );
 
   // No hardcoded community may survive ANYWHERE in what the developer receives.

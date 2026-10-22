@@ -2,8 +2,7 @@
  * WS-HEADLESS-MVP-A1 — CLI-side unit tests for the OAuth long-lived token seams
  * (mcp-oauth-longlived-tokens-design-2026-06-30.md §2.2/§4.1/§4.5).
  *
- * Covers, WITHOUT a live backend (the live loop is proven by the Cloud E2E
- * wsOauthLongLivedE2E.test.mjs + the live-DEV CLI run):
+ * Covers, WITHOUT a live backend (the live loop is proven by a live-DEV CLI run):
  *   - PKCE S256 pair correctness
  *   - the persisted `oauth` credential-block contract + freshness check
  *   - wallet.json: oauth block round-trip + API_KEY alias (read-normalize, write-mirror)

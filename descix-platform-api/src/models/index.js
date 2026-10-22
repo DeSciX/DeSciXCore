@@ -24,10 +24,36 @@ import {
     ProductTypes,
     getCloudConfig,
 } from '@descix/cloud-core';
+import { normalizeEmail } from '../email/index.js';
 
-// Inline normalizeEmail — avoids circular dependency with email module
-function normalizeEmail(email) {
-    return email ? email.trim().toLowerCase() : null;
+/**
+ * Why an email could not be attached to an account (one email, one account). Every refusal is
+ * an EmailIdentityError carrying one of these as `code`; a consumer branches on the code, never
+ * on the message.
+ */
+export const EmailIdentityRefusal = Object.freeze({
+    /** No verified EMAIL_VERIFICATIONS record for this email. */
+    NOT_VERIFIED: 'EMAIL_NOT_VERIFIED',
+    /** The verification record was requested by a different account. */
+    VERIFICATION_NOT_YOURS: 'EMAIL_VERIFICATION_NOT_YOURS',
+    /** The verification record is past its expires_at. */
+    VERIFICATION_EXPIRED: 'EMAIL_VERIFICATION_EXPIRED',
+    /** The verification record pre-dates the account binding (no uid field): request a new code. */
+    VERIFICATION_UNBOUND: 'EMAIL_VERIFICATION_UNBOUND',
+    /** Another (passkey) account already holds this email. */
+    ALREADY_REGISTERED: 'EMAIL_ALREADY_REGISTERED',
+    /** The only other holder is a legacy email-keyed account (USERS doc id = the email; no passkey). */
+    ALREADY_REGISTERED_LEGACY: 'EMAIL_ALREADY_REGISTERED_LEGACY',
+});
+
+/** A refused email-to-account attachment. `statusCode` is the HTTP status a handler answers with. */
+export class EmailIdentityError extends Error {
+    constructor(code, message) {
+        super(message);
+        this.name = 'EmailIdentityError';
+        this.code = code;
+        this.statusCode = 403;
+    }
 }
 
 // --- Helper Functions ---
@@ -663,14 +689,58 @@ export class User {
         }
     }
 
+    /** The PROVIDER_INDEX doc id for an email: `email_<sanitizeProviderId(normalized)>`. */
+    static emailIndexKey(email) {
+        const normalized = normalizeEmail(email);
+        if (!normalized) throw new Error('User.emailIndexKey: an email is required');
+        return `email_${User.sanitizeProviderId(normalized)}`;
+    }
+
+    /**
+     * The one-email-one-account rule. Resolves when no
+     * account other than `uid` holds `email`. "Holds" = the email ProviderIndex row points at
+     * another account, another USERS doc carries the email as `email` or `verified_email`
+     * (accounts that pre-date the index row), or a USERS doc is keyed by the email itself (the
+     * legacy email-keyed form, which has no passkey). Throws EmailIdentityError
+     * ALREADY_REGISTERED_LEGACY when every other holder is that legacy form, else
+     * ALREADY_REGISTERED. A failed read throws: an unanswerable question is never read as "free".
+     */
+    static async assertEmailFreeFor(uid, email) {
+        if (!uid || typeof uid !== 'string') throw new Error('User.assertEmailFreeFor: uid is required');
+        const normalized = normalizeEmail(email);
+        if (!normalized) throw new Error('User.assertEmailFreeFor: email is required');
+        const db = new CacheFirestore();
+        const index = await db.get_doc(FirestoreCollections.PROVIDER_INDEX(), User.emailIndexKey(normalized));
+        const holders = new Set();
+        if (index?.descix_user_id) holders.add(index.descix_user_id);
+        if (await db.get_doc(FirestoreCollections.USERS(), normalized)) holders.add(normalized);
+        for (const field of ['email', 'verified_email']) {
+            const docs = await db.get_docs_with_ids(FirestoreCollections.USERS(), null, [[field, '==', normalized]]);
+            if (!Array.isArray(docs)) {
+                throw new Error(`User.assertEmailFreeFor: the USERS query on ${field} failed; cannot tell whether the email is free`);
+            }
+            for (const d of docs) holders.add(d._id);
+        }
+        holders.delete(uid);
+        if (holders.size === 0) return;
+        if ([...holders].every((id) => id === normalized)) {
+            throw new EmailIdentityError(
+                EmailIdentityRefusal.ALREADY_REGISTERED_LEGACY,
+                'This email belongs to a DeSciX account created before passkeys. Use a different email; linking that account to a passkey is not available yet.'
+            );
+        }
+        throw new EmailIdentityError(
+            EmailIdentityRefusal.ALREADY_REGISTERED,
+            'This email belongs to another account. Sign in with that account\'s passkey instead.'
+        );
+    }
+
     static async findByEmail(email) {
         if (!email) return null;
         const normalized = normalizeEmail(email);
         if (!normalized) return null;
         const db = new CacheFirestore();
-        const sanitizedId = User.sanitizeProviderId(normalized);
-        const emailIndexKey = `email_${sanitizedId}`;
-        const index = await db.get_doc(FirestoreCollections.PROVIDER_INDEX(), emailIndexKey);
+        const index = await db.get_doc(FirestoreCollections.PROVIDER_INDEX(), User.emailIndexKey(normalized));
         if (index && index.descix_user_id) {
             return await User.from_firestore(index.descix_user_id);
         }
@@ -987,18 +1057,42 @@ export class User {
             gate_passed_at: Timestamp.now(),
             gate_source: gate_source
         };
+        const normalized = verified_email ? normalizeEmail(verified_email) : null;
+        if (normalized) {
+            // One email, one account: refuse before any write, then write the
+            // email ProviderIndex row findByEmail reads, and release this account's previous row.
+            await User.assertEmailFreeFor(this.id, normalized);
+            const key = User.emailIndexKey(normalized);
+            const wrote = await this.db.put_doc(FirestoreCollections.PROVIDER_INDEX(), key, {
+                descix_user_id: this.id,
+                provider_type: 'email',
+                provider_id: normalized,
+                linked_at: Timestamp.now()
+            });
+            if (wrote !== true) {
+                throw new Error(`commitTosAndConnect: the email ProviderIndex write (${key}) failed; the email was not committed`);
+            }
+            const previous = normalizeEmail(this.email);
+            if (previous && previous !== normalized) {
+                const prevKey = User.emailIndexKey(previous);
+                const prevRow = await this.db.get_doc(FirestoreCollections.PROVIDER_INDEX(), prevKey);
+                if (prevRow?.descix_user_id === this.id) {
+                    await this.db.delete_doc(FirestoreCollections.PROVIDER_INDEX(), prevKey);
+                }
+            }
+            updates.verified_email = normalized;
+            updates.email = normalized;
+        }
+        const result = await this.db.update_doc_fields(FirestoreCollections.USERS(), this.id, updates);
         this.tos_accepted_at = updates.tos_accepted_at;
         this.tos_version = updates.tos_version;
         this.gate_passed_at = updates.gate_passed_at;
         this.gate_source = updates.gate_source;
-        if (verified_email) {
-            const normalized = normalizeEmail(verified_email);
-            updates.verified_email = normalized;
-            updates.email = normalized;
+        if (normalized) {
             this.verified_email = normalized;
             this.email = normalized;
         }
-        return await this.db.update_doc_fields(FirestoreCollections.USERS(), this.id, updates);
+        return result;
     }
 
     isConnected() {

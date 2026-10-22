@@ -17,17 +17,25 @@
  *         + src/util/bridgeResolver.js           (inlined at __BRIDGE_RESOLVER__)
  *         + src/util/appView.js                  (VIEW_MODES, VIEW_OUTCOMES, requestView;
  *                                                 inlined at __VIEW_REQUEST__)
+ *         + src/util/chatContext.js              (CHAT_CONTEXT, CHAT_CONTEXT_DATA, CHAT_SCRIPT_API,
+ *                                                 CHAT_CONTEXT_OUTCOMES, setChatContext,
+ *                                                 clearChatContext; inlined at __CHAT_CONTEXT__)
  *   OUTPUT  scaffold/site/DeSciXAppSDK.js                        [this package]
  *           packages/client-core/src/DeSciXAppSDK.js              [DeSciX_Powch]
  *           apps/daita-splitviewdemo/site/DeSciXAppSDK.js         [Unkamon]
  *
- * The resolver and the view region are INLINED rather than imported because the outputs are plain browser
+ * The resolver, the view region and the chat-context region are INLINED rather than imported because the outputs are plain browser
  * scripts loaded by `<script src>` with no module loader. Re-typing it into each
  * output is the drift; inlining it from the single owner is not.
  *
  * ── Usage ────────────────────────────────────────────────────────────────────
  *   node scripts/generate-app-sdk-copies.js            # write every reachable output
  *   node scripts/generate-app-sdk-copies.js --check    # verify; non-zero exit on drift
+ *   node scripts/generate-app-sdk-copies.js --only=powch --powch-root=<path>
+ *                                                      # write ONE output (app-sdk | powch | apps)
+ *
+ * `--check` prints, for every drifted copy, the exact command that regenerates that one
+ * copy from inside its own repo, so each owner can land it in its own PR.
  *
  * Outputs live in sibling repos, so a partial checkout cannot see them all. An output
  * whose repo is absent is reported SKIPPED and is not a failure; an output that is
@@ -41,7 +49,8 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SITE_SCAFFOLD_BRIDGE } from '../scaffold/index.js';
 
-const HERE = dirname(fileURLToPath(import.meta.url));
+const GENERATOR = fileURLToPath(import.meta.url);
+const HERE = dirname(GENERATOR);
 const APP_SDK = resolve(HERE, '..');           // …/descix-app-sdk
 const CORE = resolve(APP_SDK, '..');           // …/DeSciX_Core
 
@@ -50,6 +59,8 @@ const RESOLVER = join(APP_SDK, 'src', 'util', 'bridgeResolver.js');
 const PLACEHOLDER = '__BRIDGE_RESOLVER__';
 const VIEW_SOURCE = join(APP_SDK, 'src', 'util', 'appView.js');
 const VIEW_PLACEHOLDER = '__VIEW_REQUEST__';
+const CHAT_CONTEXT_SOURCE = join(APP_SDK, 'src', 'util', 'chatContext.js');
+const CHAT_CONTEXT_PLACEHOLDER = '__CHAT_CONTEXT__';
 const INLINE_START = '/* ---8<--- INLINE START';
 const INLINE_END = '/* ---8<--- INLINE END';
 
@@ -92,7 +103,7 @@ function inlineRegion(file) {
 
 function render() {
   const template = readFileSync(TEMPLATE, 'utf8');
-  for (const ph of [PLACEHOLDER, VIEW_PLACEHOLDER]) {
+  for (const ph of [PLACEHOLDER, VIEW_PLACEHOLDER, CHAT_CONTEXT_PLACEHOLDER]) {
     if (!template.includes(ph)) {
       throw new Error(`[generate-app-sdk-copies] ${TEMPLATE} no longer contains ${ph}.`);
     }
@@ -100,27 +111,62 @@ function render() {
   // Function replacers: a string replacement would expand `$&`-style patterns in the source.
   return template
     .replace(PLACEHOLDER, () => inlineRegion(RESOLVER))
-    .replace(VIEW_PLACEHOLDER, () => inlineRegion(VIEW_SOURCE));
+    .replace(VIEW_PLACEHOLDER, () => inlineRegion(VIEW_SOURCE))
+    .replace(CHAT_CONTEXT_PLACEHOLDER, () => inlineRegion(CHAT_CONTEXT_SOURCE));
 }
 
-/** The three outputs, with the repo root each one needs in order to exist. */
+/**
+ * The three outputs. Each carries the key `--only` selects it by, the repo it is committed
+ * in (`repoRoot`), and the flags that point the generator at that repo — together they make
+ * the one command that regenerates THAT copy and nothing else.
+ */
 function outputs() {
-  const powchRoot = arg('powch-root') || resolve(CORE, '..', 'DeSciX_Powch');
-  const appsRoot = arg('apps-root') || resolve(CORE, '..', '..', 'apps');
+  const powchRoot = resolve(arg('powch-root') || join(CORE, '..', 'DeSciX_Powch'));
+  const appsRoot = resolve(arg('apps-root') || join(CORE, '..', '..', 'apps'));
   return [
     {
+      key: 'app-sdk',
       repo: '@descix/app-sdk',
       path: SITE_SCAFFOLD_BRIDGE,
+      repoRoot: CORE,
+      rootFlag: null,
     },
     {
+      key: 'powch',
       repo: 'DeSciX_Powch',
       path: join(powchRoot, 'packages', 'client-core', 'src', 'DeSciXAppSDK.js'),
+      repoRoot: powchRoot,
+      rootFlag: `--powch-root=${powchRoot}`,
     },
     {
+      key: 'apps',
       repo: 'Unkamon/apps',
       path: join(appsRoot, 'daita-splitviewdemo', 'site', 'DeSciXAppSDK.js'),
+      repoRoot: dirname(appsRoot),
+      rootFlag: `--apps-root=${appsRoot}`,
     },
   ];
+}
+
+/** The exact command that regenerates ONE output, run from inside the repo that commits it. */
+function regenCommand(out) {
+  const flags = [`--only=${out.key}`, out.rootFlag].filter(Boolean).join(' ');
+  return `cd ${out.repoRoot} && node ${GENERATOR} ${flags}`;
+}
+
+/** `--only=<key>` narrows to one output; an unknown key is an error, never "nothing to do". */
+function selectedOutputs() {
+  const all = outputs();
+  const only = arg('only');
+  if (only === null) return all;
+  const hit = all.filter((o) => o.key === only);
+  if (hit.length === 0) {
+    throw new Error(
+      `[generate-app-sdk-copies] --only=${only} names no output. ` +
+      `Known: ${all.map((o) => o.key).join(', ')}.`
+    );
+  }
+  return hit;
 }
 
 function main() {
@@ -131,7 +177,7 @@ function main() {
   let written = 0;
   let ok = 0;
 
-  for (const out of outputs()) {
+  for (const out of selectedOutputs()) {
     // Absent because the sibling repo is not checked out — not drift.
     if (!existsSync(dirname(out.path))) {
       console.log(`  SKIP    ${out.repo}: ${out.path} (repo not present)`);
@@ -153,8 +199,9 @@ function main() {
         `          ${actual === null ? 'missing' : 'differs from the generated source'}. ` +
         'This file is GENERATED — do not hand-edit it.\n' +
         '          Fix the source (@descix/app-sdk templates/DeSciXAppSDK.template.js, ' +
-        'src/util/bridgeResolver.js or src/util/appView.js), then run:\n' +
-        '            node descix-app-sdk/scripts/generate-app-sdk-copies.js'
+        'src/util/bridgeResolver.js, src/util/appView.js or src/util/chatContext.js), then regenerate\n' +
+        `          this copy from its own repo (${out.repo}) and commit it there:\n` +
+        `            ${regenCommand(out)}`
       );
       drifted++;
       continue;

@@ -75,10 +75,6 @@ export async function getWalletConfig() {
   }
 }
 
-export function acceptTos(email, version = '1.0.0') {
-  return makeCommandRequestJSON('descix_accept_tos', { email, version });
-}
-
 export async function checkAuthenticationStatus(newWalletAddress = null, newSignature = null) {
   try {
     const sessionInfo = AppData.sessionInfo;
@@ -237,17 +233,26 @@ export async function validateDeviceLoginRequest(userCode) {
   }
 }
 
+/**
+ * Complete a device login from the browser: `{ user_code, tos_accepted }`. The request is named by
+ * its user_code ONLY (the device_code is the requesting CLI's secret and the browser never holds it).
+ * The proof is the Powch session apiFront validates: the backend reads the account, its email and
+ * its wallet from that session's user record, so the browser sends no email.
+ */
 export async function completeDeviceLogin(params) {
   try {
-    const { device_code, user_code, email, tos_accepted, verification_code } = params;
-    if (!device_code && !user_code) throw new Error('Device code or user code is required');
-    if (!email || !email.includes('@')) throw new Error('Valid email address is required');
+    if (params?.device_code != null) {
+      throw new Error('completeDeviceLogin does not accept device_code: pass user_code only.');
+    }
+    for (const key of ['email', 'verification_code']) {
+      if (params?.[key] != null) {
+        throw new Error(`completeDeviceLogin does not accept ${key}: the account comes from the signed-in session; pass { user_code, tos_accepted }.`);
+      }
+    }
+    const { user_code, tos_accepted } = params;
+    if (!user_code) throw new Error('user_code is required');
     if (!tos_accepted) throw new Error('Terms of Service acceptance is required');
-    // wallet_address + signature are NOT required — the backend reads them from the user record.
-    // Powch passkey IS the identity; the PRF-derived wallet IS the system wallet.
-    const data = await makeCommandRequestJSON('device_complete', {
-      device_code, user_code, email, tos_accepted, verification_code,
-    }, true);
+    const data = await makeCommandRequestJSON('device_complete', { user_code, tos_accepted }, true);
     if (data && data.status === ResponseStatus.OK) {
       return { status: ResponseStatus.OK, message: data.message };
     }

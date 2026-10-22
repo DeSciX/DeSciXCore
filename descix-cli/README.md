@@ -170,6 +170,15 @@ Builds (when a manifest declares a build) and uploads the site to GCS, then upda
 metadata. Files are uploaded straight to GCS with short-lived **signed URLs** issued by
 `get_site_deploy_token`; `confirm_site_deploy` then records the deploy and returns the site URL.
 
+After a non-preview deploy the server purges the edge cache for the files the deploy made stale
+and returns a receipt, printed as one line: `edge purge: ok, 33/33 cache keys` (each stale path
+is purged once plain and once per page origin, so the count is cache keys, not files). When the
+purge is not complete (`status` not `ok`, or fewer keys purged than attempted), or the confirm
+carries no receipt, the command prints the receipt and the failed batches and **exits non-zero**:
+the deploy is confirmed, but the edge may serve stale copies until their cache TTL. Re-running
+the same `descix site upload` re-purges every file. A preview deploy is not purged
+(`edge purge: not run (preview deploy)`).
+
 - `-p, --path <localPath>`: directory to deploy (default `./site`). **Ignored when a site manifest
   exists.**
 - `--preview`: deploy to the preview path.

@@ -48,6 +48,7 @@ import * as modelConfigCommands from '../lib/commands/model-config.js';
 import { isHelpInvocation, getCommandSurface, applyVisibility } from '../lib/command-visibility.js';
 import { progress } from '../lib/output.js';
 import { runMediaUpload } from '../lib/commands/media-upload.js';
+import { runPluginCheck } from '../lib/commands/plugin-check.js';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
@@ -2472,6 +2473,13 @@ siteCommand
           console.log(chalk.green(`\n  Deploy CONFIRMED — ${verdict.detail}.`));
           console.log(chalk.gray(`  The server may still be finishing the stale-file prune; ` +
             `'descix site status -c ${communityId} -a ${appId}' shows the deploy, 'descix site list' what is served.`));
+          // The purge receipt rode on the lost response: a non-preview deploy cannot claim a clean
+          // edge it never heard about (SitePurgeReceipt).
+          if (!options.preview) {
+            const { PURGE_RECEIPT_LOST_LINES } = await import('../lib/core/SitePurgeReceipt.js');
+            PURGE_RECEIPT_LOST_LINES.forEach((l) => console.error(chalk.red(`  ${l}`)));
+            process.exit(1);
+          }
           process.exit(0);
         }
         if (verdict.outcome === 'unconfirmed') {
@@ -2485,8 +2493,16 @@ siteCommand
       });
 
       const result = confirmResponse.message;
+      // The edge purge receipt has one owner (lib/core/SitePurgeReceipt.js): its line is printed
+      // below, and a purge that is not complete fails the command — never a bare success.
+      const { assessPurgeReceipt } = await import('../lib/core/SitePurgeReceipt.js');
+      const purgeReceipt = assessPurgeReceipt(result, { preview: options.preview || false });
 
-      console.log(chalk.green(`\n  Site uploaded successfully!\n`));
+      if (purgeReceipt.ok) {
+        console.log(chalk.green(`\n  Site uploaded successfully!\n`));
+      } else {
+        console.log(chalk.yellow(`\n  Site uploaded and deploy confirmed; the edge purge is NOT complete (below).\n`));
+      }
       console.log(chalk.cyan(`  URL: ${result.site_url}`));
       console.log(chalk.gray(`  Files: ${result.files_count}`));
       const pruned = Array.isArray(result.pruned_files) ? result.pruned_files : null;
@@ -2503,6 +2519,12 @@ siteCommand
       if (result.preview) {
         console.log(chalk.yellow(`  Mode: PREVIEW`));
       }
+      if (!purgeReceipt.ok) {
+        purgeReceipt.lines.forEach((l) => console.error(chalk.red(`  ${l}`)));
+        console.error('');
+        process.exit(1);
+      }
+      console.log(chalk.gray(`  ${purgeReceipt.lines[0]}`));
 
       if (!options.preview) {
         console.log(chalk.gray(`\n  For local development, run:`));
@@ -4078,6 +4100,28 @@ mcpCommand
       if (error.response) {
         console.error(chalk.gray(JSON.stringify(error.response, null, 2)));
       }
+      process.exit(1);
+    }
+  });
+
+// ============ Claude Plugin ============
+// `plugin check` is local: it reads the plugin files and calls no backend. Every rule lives in
+// lib/core/ClaudePluginLimits.js (validatePluginDir); lib/commands/plugin-check.js renders it.
+
+const pluginCommand = program
+  .command('plugin')
+  .description("The app's Claude plugin (.claude-plugin/, skills/, agents/)");
+
+pluginCommand
+  .command('check')
+  .runbookAnchor('#the-app-s-claude-plugin')
+  .description('Check a Claude plugin or marketplace directory against the limits claude.ai enforces on sync, before you publish it. Exit 0 clean, 1 on a violation, 2 when a file cannot be read.')
+  .argument('[dir]', 'Plugin or marketplace directory (default: the current directory)')
+  .action(async (dir) => {
+    try {
+      process.exitCode = await runPluginCheck(dir);
+    } catch (error) {
+      console.error(chalk.red(`\n❌ Error: ${error.message}\n`));
       process.exit(1);
     }
   });

@@ -15,7 +15,7 @@ import {
 } from '../src/naming/index.js';
 
 test('communityIdFromTokenSymbol: id derived from SYMBOL not name (descix/daita root cause)', () => {
-    // The split bug: community NAME "DeSciX" + token "DAITA" must yield id 'daita', NOT 'descix'.
+    // The split bug: a community NAME that differs from its token (e.g. NAME "DeSciX", token "DAITA") must yield id 'daita', NOT 'descix'.
     // Regression guard for WS-DESCIX-DAITA-CANON: the bootstrap "already exists" fallback at
     // admin/bootstrap.js:1238 previously derived community_id from the NAME (-> 'descix'); it now
     // derives from the token symbol (tokenSymbol.toLowerCase()), matching this contract.
@@ -27,7 +27,7 @@ test('communityIdFromTokenSymbol: id derived from SYMBOL not name (descix/daita 
 
 test('communityIdFromTokenSymbol: name != symbol no longer splits', () => {
     // Two different display names with the SAME token symbol resolve to the SAME id.
-    const fromBrandName = communityIdFromTokenSymbol('DAITA'); // token for "DeSciX" brand
+    const fromBrandName = communityIdFromTokenSymbol('DAITA'); // root community, labelled DAITA
     const fromOther = communityIdFromTokenSymbol('daita');
     assert.equal(fromBrandName, fromOther);
     assert.equal(fromBrandName, 'daita');

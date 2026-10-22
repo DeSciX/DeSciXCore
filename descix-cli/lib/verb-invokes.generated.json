@@ -173,6 +173,7 @@
     "vectorize_service_readme"
   ],
   "new-chat": [],
+  "plugin check": [],
   "purchases": [
     "fetch_my_purchases"
   ],

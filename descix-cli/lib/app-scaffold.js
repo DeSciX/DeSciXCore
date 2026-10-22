@@ -13,6 +13,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { validatePluginManifest } from './core/ClaudePluginLimits.js';
 
 const FRONTPAGE_TEMPLATE = path.join(
   path.dirname(fileURLToPath(import.meta.url)), '..', 'templates', 'scaffolds', 'frontpage', 'index.html',
@@ -51,6 +52,15 @@ export async function scaffoldAppRepo(appPath, { appId, communityId }) {
     version: '0.1.0',
     author: { name: communityId },
   };
+  const pluginViolations = validatePluginManifest(plugin, { file: '.claude-plugin/plugin.json' });
+  if (pluginViolations.length) {
+    const err = new Error(
+      `app init REFUSED: the generated plugin stub breaks a claude.ai plugin limit (lib/core/ClaudePluginLimits.js):\n` +
+      pluginViolations.map((v) => `  ${v.message}`).join('\n') +
+      `\nappId '${appId}' and communityId '${communityId}' produce it. Nothing was written.`);
+    err.code = 'CLAUDE_PLUGIN_LIMIT';
+    throw err;
+  }
   const frontpage = (await fs.readFile(FRONTPAGE_TEMPLATE, 'utf8'))
     .replace(/\{\{APP_ID\}\}/g, escapeHtml(appId))
     .replace(/\{\{COMMUNITY_ID\}\}/g, escapeHtml(communityId));

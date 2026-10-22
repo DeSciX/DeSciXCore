@@ -109,7 +109,7 @@ test('a READY that never arrives fails loud at the ready bound, naming the cause
   await assert.rejects(client.auth(), /POWCH_READY.*50ms/);
   assert.equal(iframe.lost.length, 0);
   assert.equal(client.pendingRequests.size, 0);
-  assert.equal(client._readyQueue.length, 0, 'the queue does not retain the failed request');
+  assert.equal(client._readyGate.queuedCount, 0, 'the queue does not retain the failed request');
   // and a late READY must not post the already-failed request
   iframeBecomesReady();
   await tick();
@@ -133,7 +133,7 @@ test('EMBEDDED mode is untouched: delegates to the shell bridge, no iframe, no q
   assert.equal(client.shellBridge, bridge);
   assert.equal(client.isReady, true);
   assert.equal(client.iframe, undefined);
-  assert.equal(client._readyQueue, undefined);
+  assert.equal(client._readyGate, undefined);
   assert.equal((await client.auth()).email, 'e@b.test');
   assert.equal(calls.length, 1);
   assert.equal(iframe.lost.length + iframe.delivered.length, 0);

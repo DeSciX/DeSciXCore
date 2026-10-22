@@ -33,7 +33,6 @@ export const commands = {
             // CALL CORE TOOL: query_knowledge_base
             // This goes Service -> Cloud -> Vector DB -> Cloud -> Service
             const ragResult = await mcpClient.callTool('query_knowledge_base', {
-                community_id: '{{COMMUNITY_ID}}',
                 app_id: '{{APP_ID}}',
                 kb_id: 'sdk',
                 query: query

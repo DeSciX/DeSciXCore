@@ -5,5 +5,5 @@
  */
 
 export { createUserSession } from './session.js';
-export { sendEmailVerification, verifyEmailCode, EmailVerificationRefusal } from './emailVerification.js';
+export { sendEmailVerification, verifyEmailCode, assertEmailVerifiedFor, EmailVerificationRefusal } from './emailVerification.js';
 export { migrateUserIfNeeded } from './migration.js';

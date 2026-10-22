@@ -29,15 +29,20 @@ export function PowchBridgeProvider({ children, config = {} }) {
   // passkeys are typed. See ../powch/powchOrigin.js.
   const bridgeUrl = requirePowchUrl(config.bridgeUrl, 'PowchBridgeProvider');
 
+  // One bridge per Powch iframe: a re-created bridge never sees the POWCH_READY the
+  // iframe already sent, so identity is keyed on VALUES, not on the brand object (AppShell
+  // builds a fresh one every render).
+  const brandName = config.brand ? config.brand.name : 'DeSciX';
+  const brandLogo = config.brand ? config.brand.logo : null;
   const bridge = useMemo(() => {
     const client = new PowchBridgeClient({
       bridgeUrl,
-      brand: config.brand ?? { name: 'DeSciX', logo: null },
+      brand: { name: brandName, logo: brandLogo },
       getApi: () => Api,
     });
     bridgeRef.current = client;
     return client;
-  }, [bridgeUrl, config.brand]);
+  }, [bridgeUrl, brandName, brandLogo]);
 
   useEffect(() => {
     // activate() sets up the window message listener. Must be in useEffect (not

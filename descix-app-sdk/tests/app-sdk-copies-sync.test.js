@@ -112,3 +112,38 @@ test('no consumer-facing window.parent.DeSciX / window.top.DeSciX survives in th
   assert.deepEqual(reaches, [],
     `the app-side SDK must resolve its own level:\n${reaches.map(([n, l]) => `  ${n}: ${l.trim()}`).join('\n')}`);
 });
+
+test('a drifted sibling copy prints the one command that regenerates it from its own repo, and that command works', () => {
+  // The copies outside this package are committed in other repos, so the fix for each lands
+  // in that repo's own PR. The check must hand each owner a command that writes THAT copy
+  // and nothing else — and the command is only a fix if running it actually clears the drift.
+  const powchRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'descix-powch-fixture-'));
+  try {
+    const copy = path.join(powchRoot, 'packages', 'client-core', 'src', 'DeSciXAppSDK.js');
+    fs.mkdirSync(path.dirname(copy), { recursive: true });
+    fs.writeFileSync(copy, '// a stale copy\n');
+
+    const before = runCheck([`--powch-root=${powchRoot}`, `--apps-root=${NO_SIBLINGS}`]);
+    assert.equal(before.code, 1, 'a drifted sibling copy must fail the check');
+    const line = before.out.split('\n').map((l) => l.trim())
+      .find((l) => l.startsWith(`cd ${fs.realpathSync(powchRoot)}`) || l.startsWith(`cd ${powchRoot}`));
+    assert.ok(line, `the drift report must print a command run from the Powch repo root:\n${before.out}`);
+    assert.match(line, /--only=powch/, 'the command must write only the drifted copy');
+    assert.match(line, new RegExp(`--powch-root=${powchRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+
+    const [, cwd, cmd] = line.match(/^cd (\S+) && (.*)$/);
+    execFileSync('sh', ['-c', cmd], { cwd, encoding: 'utf8' });
+
+    const after = runCheck([`--powch-root=${powchRoot}`, `--apps-root=${NO_SIBLINGS}`]);
+    assert.equal(after.code, 0, `the printed command must clear the drift:\n${after.out}`);
+    assert.equal(fs.readFileSync(copy, 'utf8'), fs.readFileSync(SCAFFOLD, 'utf8'));
+  } finally {
+    fs.rmSync(powchRoot, { recursive: true, force: true });
+  }
+});
+
+test('--only with an unknown key fails loud instead of doing nothing', () => {
+  const { code, out } = runCheck(['--only=no-such-output']);
+  assert.equal(code, 1);
+  assert.match(out, /--only=no-such-output names no output/);
+});

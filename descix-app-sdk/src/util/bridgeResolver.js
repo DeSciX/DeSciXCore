@@ -190,3 +190,16 @@ function noBusMode(w) {
 }
 
 /* ---8<--- INLINE END */
+
+/**
+ * Is this window framed (not the top of its frame chain)? The same fact `resolveBridge` reports as
+ * `embedded-no-bridge` vs `standalone`, exported for callers that need it independent of where the
+ * bus lives (a shell that owns its own bus is still framed when it runs inside the Powch iframe).
+ * Readable cross-origin; never throws.
+ *
+ * @param {Window} w
+ * @returns {boolean}
+ */
+export function isFramedWindow(w) {
+  return noBusMode(w) === 'embedded-no-bridge';
+}

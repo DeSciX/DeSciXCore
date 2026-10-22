@@ -31,9 +31,8 @@ export class AppData {
   static sdk = null;
   static sdkCode = null;
   static source_guild_id = null;
-  static _refCode = null; // Unified referral/device code
-  static _refType = null; // 'DEVICE' | 'REFERRAL' | null
-  static _deviceUserCode = null; // For device login only
+  static _refCode = null; // Referral code
+  static _refType = null; // 'REFERRAL' | null (device login and MCP connect are pending intents: util/pendingIntent.js)
   static _referralData = null; // For referral: { custom_id, referrer_id, guild_id }
   static _appModeConfig = null; // standalone app mode: { appId, url, defaultView } (AppContext, SDK_READY)
   static _platformHomeAppId = null; // The store bundle's platform_home_app_id (util/frontPage.js reads this)
@@ -103,7 +102,6 @@ export class AppData {
     AppData.source_guild_id = null;
     AppData._refCode = null;
     AppData._refType = null;
-    AppData._deviceUserCode = null;
     AppData._referralData = null;
     AppData._appModeConfig = null;
     AppData._platformHomeAppId = null;
@@ -398,15 +396,17 @@ export class AppData {
     return AppData._refType;
   }
   static set refType(value) {
+    if (value !== null && value !== 'REFERRAL') {
+      throw new Error(`AppData.refType is 'REFERRAL' or null; ${JSON.stringify(value)} is refused. A device login or MCP connect is a pending intent: @descix/app-sdk pendingIntent (capture/peek/consume), rendered from useAppContext().pendingIntentState.`);
+    }
     AppData._refType = value;
   }
 
-  // --- Device User Code Getter/Setter ---
   static get deviceUserCode() {
-    return AppData._deviceUserCode;
+    throw new Error('AppData.deviceUserCode is deleted: read the pending device login from useAppContext().pendingIntentState (or @descix/app-sdk pendingIntent peek()).');
   }
-  static set deviceUserCode(value) {
-    AppData._deviceUserCode = value;
+  static set deviceUserCode(_value) {
+    throw new Error('AppData.deviceUserCode is deleted: a device login is captured by @descix/app-sdk pendingIntent and resumed by the shell once the user is signed in.');
   }
 
   // --- Referral Data Getter/Setter ---
@@ -637,11 +637,6 @@ export const GUEST_ALLOWED_COMMANDS = [
     'powch_login_begin',             // Start WebAuthn authentication (zero-knowledge)
     'powch_login_finish',            // Complete WebAuthn authentication (zero-knowledge)
     'powch_write_wallet_begin',      // Start wallet write ceremony (for largeBlob)
-    
-    // Powch Email Verification (zero-knowledge - hash only)
-    'powch_send_verification_code',  // Generate verification code (hash only)
-    'powch_verify_code',             // Verify code and get proof
-    'powch_check_verification_proof', // Validate a verification proof
     
     // Note: descix_create_from_powch, descix_login_with_powch, descix_link_passkey,
     // and all passkey_* legacy commands have been removed.

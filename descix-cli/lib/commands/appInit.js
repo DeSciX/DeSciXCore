@@ -57,7 +57,6 @@ export async function runAppInit(apiClient, options) {
       community_id: options.community,
       app_name: appId,
       short_name: options.short || undefined,
-      create_skeleton: false,
       overwrite: options.overwrite,
     });
     const created = response.message || response;
@@ -109,7 +108,7 @@ export async function runAppInit(apiClient, options) {
   // registerApp is idempotent for the same id and REFUSES a different one: a repo that already
   // holds another app errors loudly instead of being silently re-pointed.
   const wsRoot = workspaceConfig?.workspaceRoot || process.cwd();
-  const cfg = workspaceConfig || new WorkspaceConfig({ version: '3.0' }, wsRoot);
+  const cfg = workspaceConfig || WorkspaceConfig.empty(wsRoot);
   cfg.registerApp(communityId, appId, { kbId });
   await cfg.save(wsRoot);
   const appPath = wsRoot;

@@ -2,8 +2,10 @@
  * Gateway — Pure reverse proxy for the DeSciX local dev mesh.
  *
  * Boots a Vite server as a reverse-proxy routing the entire mesh through a
- * single HTTPS origin. Mirrors production's GCP Load Balancer locally, so the
- * App Shell, an app's own site and /apifront all share ONE origin (which is
+ * single HTTPS origin. It replicates the edge routing (the Cloudflare Worker on
+ * prod and dev) on one local origin: the shell at /, the listed app repos' sites
+ * at /p/<appId> (a local-only path), /apifront /api /mcp to env.apiUrl, and
+ * /Community to GCS. The shell and the app therefore share ONE origin (which is
  * what makes a shell sign-in visible to the app, and passkeys possible).
  *
  * Routing is data-driven via .descix/workspace.json:

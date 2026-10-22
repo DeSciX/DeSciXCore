@@ -8,6 +8,9 @@
  */
 
 import { requirePowchUrl } from '../powch/powchOrigin.js';
+import { PowchReadyGate, POWCH_READY } from '../powch/readyGate.js';
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 120000;
 
 const TAB_IDS = {
   CARDS: 'cards',
@@ -27,12 +30,16 @@ export class PowchBridgeClient {
       ? { name: config.brand.name ?? 'This site', logo: config.brand.logo ?? null }
       : { name: 'This site', logo: null };
     this.getApi = config.getApi || null;
+    this.requestTimeoutMs = config.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
 
     this.iframe = null;
     this.pendingRequests = new Map();
     this.requestIdCounter = 0;
 
-    this._isBridgeReady = false;
+    // Readiness is Powch's POWCH_READY and nothing else (see ../powch/readyGate.js).
+    this._readyGate = new PowchReadyGate({ label: this.bridgeUrl, readyTimeoutMs: config.readyTimeoutMs });
+    // POWCH_READY arrived before registerIframe(); applied when the iframe registers.
+    this._readyBeforeRegister = false;
     this._isIframeVisible = false;
     this._isAuthenticated = false;
     this._displayAddress = null;
@@ -63,14 +70,24 @@ export class PowchBridgeClient {
 
   /**
    * Register the iframe element. Called when PowchSideBarWidget mounts.
+   *
+   * The element existing does NOT make the bridge ready: Powch is not listening until it
+   * posts POWCH_READY, and a request posted earlier is lost. A different element than the
+   * one registered before is a fresh Powch load and must announce READY itself.
    */
   registerIframe(iframe) {
     if (!iframe || !iframe.contentWindow) return;
+    if (iframe === this.iframe) return;
+    if (this.iframe) this._readyGate.reset();
     this.iframe = iframe;
-    // Mark ready immediately — the iframe element is available for postMessage.
-    // POWCH_READY (from the Powch app's initialization) may arrive later as a secondary confirmation.
-    this._isBridgeReady = true;
-    this._readyBuffered = false;
+    if (this._readyBeforeRegister) {
+      this._readyBeforeRegister = false;
+      this._markReady();
+    }
+  }
+
+  _markReady() {
+    this._readyGate.markReady();
     this._emit('ready');
   }
 
@@ -123,16 +140,12 @@ export class PowchBridgeClient {
       return;
     }
 
-    // POWCH_READY must be checked BEFORE the iframe null-guard.
-    // The iframe app may send READY before React calls registerIframe().
-    if (type === 'POWCH_READY') {
-      if (this.iframe) {
-        this._isBridgeReady = true;
-        this._emit('ready');
-      } else {
-        // Buffer: registerIframe() will apply readiness when the ref arrives.
-        this._readyBuffered = true;
-      }
+    // POWCH_READY must be checked BEFORE the iframe null-guard: the iframe app may send
+    // READY before React calls registerIframe(). Trusted on the origin check above, like
+    // the other pre-source-guard messages.
+    if (type === POWCH_READY) {
+      if (this.iframe) this._markReady();
+      else this._readyBeforeRegister = true;
       return;
     }
 
@@ -172,10 +185,16 @@ export class PowchBridgeClient {
     }
   }
 
-  _sendRequest(type, payload = {}, timeout = 120000) {
+  /**
+   * Before POWCH_READY the request is queued, not posted (the readiness gate owns that);
+   * `timeout` runs from the actual post.
+   */
+  _sendRequest(type, payload = {}, timeout = this.requestTimeoutMs) {
     return new Promise((resolve, reject) => {
-      if (!this._isBridgeReady || !this.iframe?.contentWindow) {
-        reject(new Error('Powch PWA not ready'));
+      if (!this.iframe?.contentWindow) {
+        reject(new Error(
+          `Powch PWA not ready: no Powch iframe is registered with this bridge (PowchSideBarWidget is not mounted); ${type} was not sent`
+        ));
         return;
       }
 
@@ -201,9 +220,11 @@ export class PowchBridgeClient {
       };
 
       this.openUi();
-      requestAnimationFrame(() => {
-        requestAnimationFrame(doSend);
-      });
+      this._readyGate.run(
+        type,
+        () => requestAnimationFrame(() => requestAnimationFrame(doSend)),
+        reject
+      );
     });
   }
 
@@ -231,11 +252,12 @@ export class PowchBridgeClient {
       clearTimeout(timer);
     }
     this.pendingRequests.clear();
+    this._readyGate.cancel(`PowchBridgeClient destroyed before Powch sent ${POWCH_READY}`);
   }
 
   // --- UI State ---
   get isBridgeReady() {
-    return this._isBridgeReady;
+    return this._readyGate.isReady;
   }
   get isIframeVisible() {
     return this._isIframeVisible;

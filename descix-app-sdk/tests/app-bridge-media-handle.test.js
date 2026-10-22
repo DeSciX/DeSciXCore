@@ -87,7 +87,7 @@ test('publishing does not clobber members another publisher already put on the b
   window.DeSciX = { powch: { login: () => 'kept' }, config: { env: 'test' } };
 
   publishViewApi();
-  publishChatApi({ deliver: async () => {}, isAvailable: () => true });
+  publishChatApi({ deliver: async () => {}, isAvailable: () => true, appId: () => 'app-a' });
 
   assert.equal(window.DeSciX.powch.login(), 'kept');
   assert.equal(window.DeSciX.config.env, 'test');
@@ -97,7 +97,7 @@ test('publishing does not clobber members another publisher already put on the b
 
 test('retracting a member removes it rather than leaving a handle to a dead host', () => {
   globalThis.window = makeShellWindow();
-  publishChatApi({ deliver: async () => {}, isAvailable: () => true });
+  publishChatApi({ deliver: async () => {}, isAvailable: () => true, appId: () => 'app-a' });
   assert.equal(typeof window.DeSciX.chat, 'object');
 
   retractChatApi();
@@ -131,7 +131,7 @@ test('view.available() reports SUBSCRIBERS, not mere publication', () => {
 test('chat.available() tracks the ingress moment-to-moment', () => {
   globalThis.window = makeShellWindow();
   let mounted = false;
-  publishChatApi({ deliver: async () => {}, isAvailable: () => mounted });
+  publishChatApi({ deliver: async () => {}, isAvailable: () => mounted, appId: () => 'app-a' });
 
   assert.equal(window.DeSciX.chat.available(), false, 'chat pane closed');
   mounted = true;
@@ -146,6 +146,7 @@ test('an embedded app hands an image across, and it rides the ONE existing lane'
   publishChatApi({
     deliver: (bag) => ingress.contribute(bag),
     isAvailable: () => true,
+    appId: () => 'app-a',
   });
 
   // The real call shape: the app reaches its PARENT's bus.
@@ -175,7 +176,7 @@ test('an embedded app hands an image across, and it rides the ONE existing lane'
 test('an asset_ref attachment is carried too, not just inline bytes', async () => {
   globalThis.window = makeShellWindow();
   const ingress = makeIngress();
-  publishChatApi({ deliver: (b) => ingress.contribute(b), isAvailable: () => true });
+  publishChatApi({ deliver: (b) => ingress.contribute(b), isAvailable: () => true, appId: () => 'app-a' });
 
   const res = await window.DeSciX.chat.sendMedia({
     mime_type: 'video/mp4', asset_ref: 'captures/flyby.mp4', label: 'flyby',
@@ -189,7 +190,7 @@ test('an asset_ref attachment is carried too, not just inline bytes', async () =
 test("disposition 'send' is available for an app that wants the model to react now", async () => {
   globalThis.window = makeShellWindow();
   const ingress = makeIngress();
-  publishChatApi({ deliver: (b) => ingress.contribute(b), isAvailable: () => true });
+  publishChatApi({ deliver: (b) => ingress.contribute(b), isAvailable: () => true, appId: () => 'app-a' });
 
   await window.DeSciX.chat.sendMedia(
     { mime_type: 'image/png', data: PNG_B64, label: 'now' },
@@ -202,7 +203,7 @@ test("disposition 'send' is available for an app that wants the model to react n
 
 test('a malformed attachment THROWS — that is a bug at the call site', async () => {
   globalThis.window = makeShellWindow();
-  publishChatApi({ deliver: async () => {}, isAvailable: () => true });
+  publishChatApi({ deliver: async () => {}, isAvailable: () => true, appId: () => 'app-a' });
 
   await assert.rejects(() => window.DeSciX.chat.sendMedia(null), /requires a media object/);
   await assert.rejects(() => window.DeSciX.chat.sendMedia('image/png'), /requires a media object/);
@@ -214,7 +215,7 @@ test('a closed chat pane is reported, NOT thrown — a throw would kill a runnin
   const realError = console.error;
   console.error = (...a) => errs.push(a.join(' '));
   try {
-    publishChatApi({ deliver: async () => { throw new Error('must not be called'); }, isAvailable: () => false });
+    publishChatApi({ deliver: async () => { throw new Error('must not be called'); }, isAvailable: () => false, appId: () => 'app-a' });
     const res = await window.DeSciX.chat.sendMedia({ mime_type: 'image/png', data: PNG_B64, label: 'x' });
 
     assert.equal(res.delivered, false);
@@ -229,7 +230,7 @@ test('a closed chat pane is reported, NOT thrown — a throw would kill a runnin
 test('the handle refuses to publish without a real host wiring', () => {
   globalThis.window = makeShellWindow();
   assert.throws(() => publishChatApi({ deliver: null, isAvailable: () => true }),
-    /requires \{ deliver, isAvailable \} functions/);
+    /requires \{ deliver, isAvailable, appId \} functions/);
 });
 
 // ───────────────────────────────────────────────────────── no second media path

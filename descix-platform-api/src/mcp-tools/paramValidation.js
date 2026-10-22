@@ -15,9 +15,9 @@
  * That is the silent-failure class. The schema IS the published contract, so anything not in
  * it is an ERROR, named out loud, with the nearest valid parameter suggested.
  *
- * Dependency-free leaf: imported by BOTH the Cloud MCP router (apiFront tools/call + the
- * execute_remote_command gateway, which feed it the per-command commandMeta inputSchema) and
- * the CLI stdio MCP server (which feeds it the NATIVE_MCP_TOOLS inputSchema). ONE validator,
+ * Dependency-free leaf: imported by BOTH Cloud's boundary (every door — the direct /apifront
+ * route, apiFront tools/call and the execute_remote_command gateway — which feed it the
+ * per-command published inputSchema) and the CLI stdio MCP server (which feeds it the NATIVE_MCP_TOOLS inputSchema). ONE validator,
  * one message format, no parallel implementations.
  */
 
@@ -66,8 +66,8 @@ export const PARAM_ALIASES = Object.freeze({
  * WHAT QUALIFIES. A key belongs here iff PLATFORM code WRITES it into a params bag after the
  * caller's bag has been taken, i.e. there is an INJECTOR. Two consumers read this list and they
  * sit on opposite sides of that write:
- *   - the BOUNDARY validators (`validateParamsAgainstSchema`, reached from MCP tools/call and the
- *     execute_remote_command gateway) run BEFORE injection, so the list is what keeps a
+ *   - the BOUNDARY validators (`validateParamsAgainstSchema`, reached from the direct /apifront
+ *     route, MCP tools/call and the execute_remote_command gateway) run BEFORE injection, so the list is what keeps a
  *     RE-validation of an already-decorated bag from failing;
  *   - the HANDLER-level guard (Cloud `assertKnownParams`) and every downstream mesh service run
  *     AFTER injection, so the list is what stops a framework key being reported as an unknown
@@ -176,8 +176,9 @@ export function isPlatformInjectedParam(key) {
  *                      PLATFORM's own writes and are waved; everything else is still refused by
  *                      name.
  *
- * WHY THE PHASE IS PART OF THE CALL AND IS NEVER INFERRED (measured 2026-08-26). BOTH MCP doors
- * validate BEFORE injection — apiFront.js tools/call against the caller's `arguments`, and
+ * WHY THE PHASE IS PART OF THE CALL AND IS NEVER INFERRED (measured 2026-08-26). Every Cloud door
+ * validates BEFORE injection — apiFront.js cloud_function_route against the caller's
+ * `requestJSON.params`, apiFront.js tools/call against the caller's `arguments`, and
  * serviceCommands.js `execute_remote_command` against the caller's inner bag. Waving the owner's
  * keys THERE let a caller-authored `_descix: { user: { id: 'VICTIM' } }` ride a schema that
  * declares no such property straight through the boundary, and `_descix.user` is read AS IDENTITY
