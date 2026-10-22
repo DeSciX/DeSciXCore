@@ -12,10 +12,28 @@
  *                 `exists` (created: false), `app-not-found` (404 APP_NOT_FOUND) or `denied`
  *                 (403 PERMISSION_DENIED); unset, it is refused like any unexpected command.
  *                 Its params are printed as `MOCK params init_git_mode_kb <json>`.
+ *   site upload, confirmed — with CLI_MOCK_CONFIRM set to the JSON of a confirm_site_deploy
+ *                 `message`, get_site_deploy_token mints a signed URL per file (https://mock.invalid/put/…),
+ *                 every PUT to mock.invalid answers 200 (no bytes leave the process), and
+ *                 confirm_site_deploy answers that message — so a test drives the whole upload to
+ *                 its receipt. CLI_MOCK_CONFIRM=lost makes confirm throw (HTTP 504) and get_site_manifest
+ *                 serve this upload's token: the lost-response read-back path. Unset, the token has no
+ *                 signed URLs and confirm is refused.
  * Every other command is refused loudly (a test that reaches one is wrong) — get_product_context
  * included, so a kb verb that could not name the app's community from its repo fails the test.
  */
 import { register } from 'node:module';
+
+if (process.env.CLI_MOCK_CONFIRM) {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).startsWith('https://mock.invalid/')) {
+      process.stderr.write(`MOCK put ${String(url).slice('https://mock.invalid/put/'.length)}\n`);
+      return new Response(null, { status: 200 });
+    }
+    return realFetch(url, init);
+  };
+}
 
 const here = new URL('./', import.meta.url);
 
@@ -42,7 +60,13 @@ register('data:text/javascript,' + encodeURIComponent(`
         '    process.stderr.write("MOCK invoke " + command + " " + JSON.stringify((params.files || []).map((f) => f.path)) + "\\\\n");',
         '    process.stderr.write("MOCK scope " + command + " app=" + params.app_id + " community=" + params.community_id + "\\\\n");',
         '    if (command === "get_site_build_config") return { status: "OK", message: { VITE_BASE_PATH: "/", VITE_GTM_ID: "" } };',
-        '    if (command === "get_site_deploy_token") return { status: "OK", message: { signed_urls: {}, upload_headers: {}, existing_manifest: null, token_id: "t", site_url: "https://mock.invalid/" } };',
+        '    if (command === "get_site_deploy_token") {',
+        '      const signed_urls = process.env.CLI_MOCK_CONFIRM ? Object.fromEntries((params.files || []).map((f) => [f.path, "https://mock.invalid/put/" + f.path])) : {};',
+        '      return { status: "OK", message: { signed_urls, upload_headers: {}, existing_manifest: null, token_id: "t", site_url: "https://mock.invalid/" } };',
+        '    }',
+        '    if (command === "confirm_site_deploy" && process.env.CLI_MOCK_CONFIRM === "lost") throw new Error("HTTP 504");',
+        '    if (command === "get_site_manifest" && process.env.CLI_MOCK_CONFIRM === "lost") return { status: "OK", message: { exists: true, manifest: { deploy: { token_id: "t", deployed_at: "2026-10-22T00:00:00.000Z" } } } };',
+        '    if (command === "confirm_site_deploy" && process.env.CLI_MOCK_CONFIRM) return { status: "OK", message: JSON.parse(process.env.CLI_MOCK_CONFIRM) };',
         '    if (command === "list_knowledge_bases") return { status: "OK", message: { knowledgebases: [{ knowledgebase_name: "General" }] } };',
         '    if (command === "kb_list_file_ids") return { status: "OK", message: { file_ids: [], unique_count: 0, total_chunks: 0 } };',
         '    if (command === "get_kb_rag_status") return { status: "OK", message: { vectorCount: 0 } };',

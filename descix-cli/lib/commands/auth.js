@@ -96,9 +96,16 @@ async function prepareOAuthLeg(apiClient, existingWallet, scope) {
 }
 
 /**
- * Poll for device login completion via HTTP
+ * Refusals from device_check_status that end the poll: the platform delivers a completed login's
+ * credential exactly once, so re-polling after either can never succeed.
  */
-async function pollDeviceLogin(apiClient, deviceCode, onStatus = null) {
+const TERMINAL_DEVICE_LOGIN_CODES = Object.freeze(['DEVICE_LOGIN_CONSUMED', 'DEVICE_LOGIN_INCOMPLETE']);
+
+/**
+ * Poll for device login completion via HTTP. The CLI is the requester and the only holder of the
+ * device_code; the completed credential is delivered to it once.
+ */
+export async function pollDeviceLogin(apiClient, deviceCode, onStatus = null) {
   const startTime = Date.now();
   
   while (true) {
@@ -118,7 +125,7 @@ async function pollDeviceLogin(apiClient, deviceCode, onStatus = null) {
           wallet_address: response.message.wallet_address,
           signature: response.message.signature,
           community_id: response.message.community_id,
-          token_symbol: response.message.token_symbol || 'DAITA',
+          token_symbol: response.message.token_symbol,
           // WS-A1 device→OAuth bridge: single-use authorization code (present exactly once
           // when the request carried an oauth ctx) — redeemed at /oauth/token immediately.
           oauth_code: response.message.oauth_code || null,
@@ -136,6 +143,9 @@ async function pollDeviceLogin(apiClient, deviceCode, onStatus = null) {
       
       await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
     } catch (error) {
+      if (TERMINAL_DEVICE_LOGIN_CODES.includes(error.code)) {
+        throw error;
+      }
       if (error.message.includes('expired') || error.message.includes('timeout')) {
         throw error;
       }
@@ -420,7 +430,7 @@ export async function reconnect() {
     
     spinner.succeed(chalk.green('Reconnected successfully!'));
     diag(chalk.cyan(`\n✅ Status: ${result.auth_status || 'CONNECTED'}`));
-    diag(chalk.gray(`   User: ${sessionInfo?.email || sessionInfo?.id || walletInfo.userId}`));
+    diag(chalk.gray(`   User: ${sessionInfo?.id || walletInfo.userId}`));
     diag(chalk.gray(`   Wallet: ${walletInfo.walletAddress?.substring(0, 10)}...`));
     diag(chalk.gray(`   Session refreshed\n`));
     
@@ -429,6 +439,24 @@ export async function reconnect() {
     console.error(chalk.red(error.message));
     throw error;
   }
+}
+
+/**
+ * The signed-in account from a validate_session reply. The backend contract is
+ * `{ reason, user_id, account: { id, email, username, wallet_address, base_folder_id } }`
+ * (Cloud commandHandlers/userCommands.js validate_session, User#accountView). A reply without
+ * `account` is a backend that predates that contract: refused by name, never guessed at.
+ */
+export function accountFromValidateSession(message) {
+  const account = message?.account;
+  if (!account || typeof account !== 'object' || !account.id) {
+    throw new Error(
+      'validate_session returned no account (message: ' + JSON.stringify(message ?? null) + '). ' +
+      'The backend contract is { reason, user_id, account: { id, email, username, wallet_address, base_folder_id } }; ' +
+      'this backend does not serve it.'
+    );
+  }
+  return account;
 }
 
 /**
@@ -443,7 +471,7 @@ export async function whoami() {
     await requireAuth(apiClient);
     
     const response = await apiClient.invoke('validate_session', {}, { allowGuest: false });
-    const userInfo = response.message;
+    const account = accountFromValidateSession(response.message);
     
     const walletPath = await WalletFileManager.findWalletFile(process.cwd());
     const walletInfo = walletPath ? await WalletFileManager.loadWalletFile(walletPath) : null;
@@ -452,8 +480,8 @@ export async function whoami() {
     spinner.succeed(chalk.green('Authentication status'));
     
     diag(chalk.cyan('\n📋 Current Session:\n'));
-    diag(chalk.white(`   User ID:    ${userInfo?.id || userInfo?.user_id || walletInfo?.userId || 'Unknown'}`));
-    diag(chalk.white(`   Email:      ${userInfo?.email || walletInfo?.email || 'N/A'}`));
+    diag(chalk.white(`   User ID:    ${account.id}`));
+    diag(chalk.white(`   Email:      ${account.email || 'none on the account'}`));
     if (walletInfo) {
       diag(chalk.white(`   Wallet:     ${walletInfo.walletAddress?.substring(0, 10)}...${walletInfo.walletAddress?.slice(-6) || ''}`));
       if (walletInfo.communityId) {
@@ -476,29 +504,27 @@ export async function whoami() {
       }
     }
     
-    if (userInfo) {
-      // Account Details: feature access is entitlement-based (community membership / subscriptions),
-      // NOT a custodial balance or a STAKED state — both removed per CEO-D-2026-06-14-DROP-CUSTODIAL-ELIMINATE-STAKED.
-      diag(chalk.cyan('\n📊 Account Details:\n'));
+    // Account Details: feature access is entitlement-based (community membership / subscriptions),
+    // NOT a custodial balance or a STAKED state — both removed per CEO-D-2026-06-14-DROP-CUSTODIAL-ELIMINATE-STAKED.
+    diag(chalk.cyan('\n📊 Account Details:\n'));
 
-      try {
-        const purchasesResponse = await apiClient.invoke('fetch_my_purchases', { product_type: 'APP' }, { allowGuest: false });
-        const purchases = purchasesResponse.message || {};
-        const communities = purchases.communities || [];
-        const apps = purchases.apps || purchases.products || [];
+    try {
+      const purchasesResponse = await apiClient.invoke('fetch_my_purchases', { product_type: 'APP' }, { allowGuest: false });
+      const purchases = purchasesResponse.message || {};
+      const communities = purchases.communities || [];
+      const apps = purchases.apps || purchases.products || [];
 
-        diag(chalk.white(`   Communities: ${communities.length}`));
-        diag(chalk.white(`   Apps:        ${apps.length}`));
-        if (apps.length > 0) {
-          apps.slice(0, 5).forEach(a => {
-            const id = a.app_id || a.appId || a.id || a.product_id;
-            if (id) diag(chalk.gray(`               - ${id}`));
-          });
-          if (apps.length > 5) diag(chalk.gray(`               ... and ${apps.length - 5} more`));
-        }
-      } catch (err) {
-        // Ignore purchase fetch errors
+      diag(chalk.white(`   Communities: ${communities.length}`));
+      diag(chalk.white(`   Apps:        ${apps.length}`));
+      if (apps.length > 0) {
+        apps.slice(0, 5).forEach(a => {
+          const id = a.app_id || a.appId || a.id || a.product_id;
+          if (id) diag(chalk.gray(`               - ${id}`));
+        });
+        if (apps.length > 5) diag(chalk.gray(`               ... and ${apps.length - 5} more`));
       }
+    } catch (err) {
+      // Ignore purchase fetch errors
     }
     
     diag('');

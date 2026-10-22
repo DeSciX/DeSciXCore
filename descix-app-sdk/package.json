@@ -1,6 +1,6 @@
 {
   "name": "@descix/app-sdk",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "DeSciX App Shell - init-to-READY logic, core API, Powch integration, dev proxy config",
   "repository": {
     "type": "git",
@@ -13,6 +13,8 @@
     ".": "./src/index.js",
     "./dev": "./src/dev/index.js",
     "./share": "./src/util/share.js",
+    "./chat-context": "./src/util/chatContext.js",
+    "./pending-intent": "./src/util/pendingIntent.js",
     "./scaffold": "./scaffold/index.js",
     "./powch-client": "./src/powch/PowchClient.js",
     "./AppShell": "./src/AppShell.jsx",
@@ -21,7 +23,8 @@
   "files": [
     "src",
     "scaffold",
-    "templates"
+    "templates",
+    "APP_SHELL_API.md"
   ],
   "scripts": {
     "lint": "eslint src/",

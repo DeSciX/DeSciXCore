@@ -1,5 +1,5 @@
 // ---------- [./DeSciX_PWA/src/AppContext.jsx] ----------
-import React, { createContext, useState, useContext, useCallback, useEffect } from 'react';
+import React, { createContext, useState, useContext, useCallback, useEffect, useMemo } from 'react';
 import {
   AppContextEvent, AppContextState, AppContextView, AppContextInAppActivity, ProductTypes, RewardTypes, AppData, LoginStatus, AppEventViewData,
   PLATFORM_SCOPE_ID,
@@ -13,6 +13,9 @@ import {
 import { Api } from './util/api';
 import { useDeSciXBridge } from './hooks/useDeSciXBridge';
 import { seedView } from './util/appView.js';
+import { peek as peekPendingIntent, createIntentResumer, PENDING_INTENT_STATUS } from './util/pendingIntent.js';
+import { captureShellIntentFromLocation, SHELL_INTENT_HANDLERS } from './util/shellIntents.js';
+import { handleSessionExpired } from './util/sessionExpiry.js';
 
 
 
@@ -28,8 +31,25 @@ export const AppProvider = ({ children }) => {
   const [currentInAppActivity, _setInAppActivityView] = useState(AppContextInAppActivity.CODESITE);
   const [spinnerMessage, setSpinnerMessage] = useState('');
   const [tokenContractAddresses, setTokenContractAddresses] = useState(null);
-  const [viewEventData, setViewEventData] = useState(null); // Data passed to current view (e.g., deviceCode for DEVICE_LOGIN)
+  const [viewEventData, setViewEventData] = useState(null); // Data passed to current view with CHANGE_VIEW
   const [isAppMode, setIsAppMode] = useState(false); // V2: App Shell mode
+
+  // --- Pending intent (/device, /connect): what this tab was doing when sign-in interrupted it ---
+  // Held in sessionStorage by util/pendingIntent.js, so it survives the Powch round trip, a reload and
+  // SESSION_EXPIRED. This state is what the views render; only the resume effect below completes one.
+  const [pendingIntentState, setPendingIntentState] = useState(() => {
+    try {
+      const intent = peekPendingIntent();
+      return intent ? { intent, status: PENDING_INTENT_STATUS.PENDING } : null;
+    } catch (error) {
+      console.error('AppContext: the pending intent could not be read:', error);
+      return { intent: null, status: PENDING_INTENT_STATUS.FAILED, error, retryable: false };
+    }
+  });
+  const resumePendingIntent = useMemo(
+    () => createIntentResumer(SHELL_INTENT_HANDLERS, { onState: setPendingIntentState }),
+    [],
+  );
 
   // --- Initialize DeSciX Bridge Hook ---
   useDeSciXBridge(appState);
@@ -341,33 +361,19 @@ export const AppProvider = ({ children }) => {
         case AppContextEvent.SDK_CHECKED: {
           console.log("AppContext: SDK_CHECKED event processing - consolidating checks.");
           
-          // 1. EXTRACT AND HANDLE DEVICE CODE / REFERRAL CODE
+          // 1. CAPTURE A PENDING INTENT (/device?code=, /connect?ceremony=) AND THE REFERRAL CODE
           const urlParams = new URLSearchParams(window.location.search);
-          const deviceCode = urlParams.get('code');
-          const path = window.location.pathname;
-          const isDeviceRoute = path === '/device' || path.startsWith('/device');
-          
-          // Handle device code
-          if (deviceCode || isDeviceRoute) {
-            console.log('AppContext: Device code detected in URL:', deviceCode || 'NONE');
-            try {
-              const validationResult = await Api.validateDeviceLoginRequest(deviceCode);
-              if (validationResult.status === 'OK') {
-                AppData.refCode = validationResult.message.device_code;
-                AppData.refType = 'DEVICE';
-                AppData.deviceUserCode = validationResult.message.user_code;
-
-                console.log('AppContext: Device code validated, stored in AppData');
-              } else {
-                console.error('AppContext: Device code validation failed:', validationResult.message);
-                // Continue with normal flow even if validation fails (user can still login normally)
-              }
-            } catch (error) {
-              console.error('AppContext: Error validating device code:', error);
-              // Continue with normal flow
-            }
+          let intentCarried = false;
+          try {
+            const { intent, carried } = await captureShellIntentFromLocation(window.location);
+            intentCarried = carried;
+            if (intent) setPendingIntentState({ intent, status: PENDING_INTENT_STATUS.PENDING });
+          } catch (error) {
+            console.error('AppContext: the pending intent in this URL could not be captured:', error);
+            intentCarried = true;
+            setPendingIntentState({ intent: null, status: PENDING_INTENT_STATUS.FAILED, error, retryable: false });
           }
-          
+
           // Handle referral code
           const custom_id = urlParams.get('custom_id');
           const referrer_id = urlParams.get('referrer_id');
@@ -381,7 +387,7 @@ export const AppProvider = ({ children }) => {
           }
           
           // Strip URL params and redirect to clean URL
-          if (deviceCode || custom_id || referrer_id || isDeviceRoute) {
+          if (intentCarried || custom_id || referrer_id) {
             const cleanUrl = window.location.origin + '/';
             window.history.replaceState({}, '', cleanUrl);
             console.log('AppContext: URL params stripped, redirected to:', cleanUrl);
@@ -529,16 +535,16 @@ export const AppProvider = ({ children }) => {
           break;
 
         case AppContextEvent.SESSION_EXPIRED: {
-          console.log("AppContext: SESSION_EXPIRED - clearing state and reloading host");
-          // Reset React state to match cleared AppData
-          _setSessionInfo(null);
-          _setLoginStatus(LoginStatus.GUEST);
-          _setCustodialBalance(0);
-          setUserRoles(null);
-          // Full cache clear including chat threads
-          AppData.reset();
-          // Browser navigate to host root - full reload ensures clean state, correct app (standalone vs platform)
-          window.location.href = window.location.origin + '/';
+          // Resets in place; navigates to the host root only when this shell is the top window.
+          const { navigated } = handleSessionExpired({
+            resetShellState: () => {
+              _setSessionInfo(null);
+              _setLoginStatus(LoginStatus.GUEST);
+              _setCustodialBalance(0);
+              setUserRoles(null);
+            },
+          });
+          console.log(`AppContext: SESSION_EXPIRED - state cleared${navigated ? ', reloading host' : ' in place (framed shell)'}`);
           break;
         }
 
@@ -561,6 +567,18 @@ export const AppProvider = ({ children }) => {
     };
     awaitStateMachine();
   }, [appEvent, stateMachine]);
+
+  // The ONE place a pending intent resumes: whenever the shell is READY and the user is CONNECTED,
+  // whichever surface signed them in (and at boot when already signed in). resume() consumes the
+  // intent before running it, so a second sign-in event finds nothing to do.
+  const runPendingIntent = useCallback(() => resumePendingIntent().catch((error) => {
+    console.error('AppContext: resuming the pending intent failed:', error);
+    setPendingIntentState({ intent: null, status: PENDING_INTENT_STATUS.FAILED, error, retryable: false });
+  }), [resumePendingIntent]);
+  useEffect(() => {
+    if (appState !== AppContextState.READY || loginStatus !== LoginStatus.CONNECTED) return;
+    runPendingIntent();
+  }, [appState, loginStatus, runPendingIntent]);
 
   useEffect(() => {
     // --- V2: App Shell Initialization ---
@@ -620,8 +638,8 @@ export const AppProvider = ({ children }) => {
     if (!isEmbedded) {
       const path = window.location.pathname;
 
-      // Exclude reserved routes
-      if (path === '/device' || path.startsWith('/device')) {
+      // Exclude reserved routes (the pending-intent links, util/shellIntents.js)
+      if (path.startsWith('/device') || path.startsWith('/connect')) {
         return;
       }
 
@@ -815,7 +833,12 @@ export const AppProvider = ({ children }) => {
         tokenContractAddresses,
         userRoles, // Provide user roles state
         refreshUserRoles, // Provide function to refresh roles
-        viewEventData, // View-specific data (e.g., deviceCode for DEVICE_LOGIN)
+        viewEventData, // View-specific data passed with CHANGE_VIEW
+
+        // Pending intent (/device, /connect): { intent, status, result?, error?, retryable? } | null.
+        // Views render it; retryPendingIntent re-runs a FAILED retryable one for a signed-in user.
+        pendingIntentState,
+        retryPendingIntent: runPendingIntent,
 
         // Derived State
         loginStatus,

@@ -38,9 +38,11 @@ import { NetworkLoadingType, makeCommandRequestJSON, AppData, ProductTypes, isAp
 import { Api } from '../util/api';
 import { creditBundleAmounts, startCreditsCheckout } from '../util/creditsCheckout';
 import { usePowchBridge } from '../providers/PowchBridgeProvider';
+import { descixSessionRequest } from '../powch/sessionRequest';
 import { normalizeContribution, composeTurnInput, collectTurnMedia, createContributionStage } from '../util/chatIngress';
 import { describeActionCard } from '../util/actionCard';
 import { mintMessageId, patchMessageById } from '../util/threadMessages';
+import { getChatContextFor, subscribeChatContext, withChatContext, describeChatContext, runChatContextScript } from '../util/chatContext';
 
 const messages = ["searching knowledgebase", "running analytics"];
 
@@ -600,6 +602,16 @@ const ChatWidget = (props = {}) => {
   const communityId = selectedApp?.community_id || selectedCommunity?.community_id;
   const appId = selectedApp?.app_id;
 
+  // Page context (util/chatContext.js): what THIS app's page has open. Read for this app only,
+  // shown on one visible line, its script run into the pane's own element.
+  const [pageContext, setPageContext] = useState(() => getChatContextFor(appId));
+  const [pageScriptError, setPageScriptError] = useState(null);
+  const pageScriptRootRef = useRef(null);
+  useEffect(() => {
+    setPageContext(getChatContextFor(appId));
+    return subscribeChatContext(() => setPageContext(getChatContextFor(appId)));
+  }, [appId]);
+
   // ── WS-HEADLESS-MVP-A4: AI-credits awareness ─────────────────────────────────
   // Chat is METERED (USD AI credits, one balance per user — CEO-D-2026-07-01 D2).
   // The widget shows the balance, refreshes it after every metered call (debit
@@ -628,15 +640,8 @@ const ChatWidget = (props = {}) => {
         // Standalone host owns the Powch client (PowchClient pattern).
         await onRequestLogin();
       } else if (powchBridge) {
-        // In-shell path (PWA/SignInButton pattern): bridge login + session sync.
-        // GUARDRAIL-2026-07-03-POWCH-CONSENT-INVERSION — request the documented
-        // DeSciX sign-in trio; Powch is deny-by-default and only shares what the
-        // user consents to in ConsentView (`require` is a request list only).
-        const result = await powchBridge.login({
-          purpose: 'chat',
-          registerDeSciX: true,
-          require: ['verified_email', 'wallet_address', 'wallet_signature'],
-        });
+        // In-shell path: the session-only sign-in request (powch/sessionRequest.js) + session sync.
+        const result = await powchBridge.login(descixSessionRequest());
         if (result && window.DeSciX?.loginWithSessionToken) {
           window.DeSciX.loginWithSessionToken(result);
         }
@@ -1156,8 +1161,9 @@ const ChatWidget = (props = {}) => {
 
     setNetworkLoading(NetworkLoadingType.GET_AI_RESPONSE, true, 'Fetching AI response...');
     try {
-      const params = {
-        community_id: communityId,
+      // Page context is read at SUBMIT time (the store, not render state) and folded in by its
+      // owner; with no context the params are exactly what they were without it.
+      const params = withChatContext({
         user_input: composedInput,
         app_id: appId,
         streaming: useStreaming,
@@ -1167,7 +1173,7 @@ const ChatWidget = (props = {}) => {
         // Omitted entirely on an ordinary turn: the param guard accepts it, but sending
         // an empty array on every text turn would be noise on the wire.
         ...(turnMedia.length ? { media: turnMedia } : {})
-      };
+      }, getChatContextFor(appId)?.bag ?? null);
 
       setSelectedDocIds([]);
       const newMessage = {
@@ -1304,6 +1310,21 @@ const ChatWidget = (props = {}) => {
   // renders) but must always see CURRENT state. Assigned every render.
   const submitTurnRef = useRef(submitTurn);
   submitTurnRef.current = submitTurn;
+
+  // Run the page's script into the pane each time a new context arrives (or the pane mounts
+  // with one). Its failures are shown, naming the page, never swallowed.
+  useEffect(() => {
+    setPageScriptError(null);
+    const root = pageScriptRootRef.current;
+    if (!root) return;
+    if (!pageContext?.bag?.script) { root.replaceChildren(); return; }
+    runChatContextScript({
+      bag: pageContext.bag,
+      root,
+      ask: (text) => submitTurnRef.current({ typedText: text }),
+      onError: setPageScriptError,
+    });
+  }, [pageContext?.revision]);
 
   // The composer's submit: the human's typed text plus anything staged on it.
   const handleSubmit = async (e) => {
@@ -1629,13 +1650,9 @@ const ChatWidget = (props = {}) => {
               variant="outlined"
               color="success"
               data-testid="chat-user-chip"
-              // WS-HEADLESS-MVP-R7 (defect #1): the session object carries no display-name
-              // field (AppData.jsx / AppContext.jsx — only id/user_id/wallet_address/
-              // access_token/roles/custodial_balance). Prefer the verified email (Powch
-              // surfaces it under the first-party ToS grant, CEO-D-2026-07-05-R7); NEVER
-              // fall back to the raw passkey id/user_id — that's an opaque internal
-              // identifier, not a human-readable label.
-              label={sessionInfo?.email || 'Signed in'}
+              // The session Powch hands the host carries no email or display name, and the
+              // raw id/user_id is an opaque identifier, never a label.
+              label="Signed in"
             />
           </Tooltip>
           {lastDebit !== null && (
@@ -1691,6 +1708,19 @@ const ChatWidget = (props = {}) => {
         {/* WS-B8: external contributions staged on the composer (CodeSite action
             results with disposition 'stage'; image attachments once
             ws-chat-multimodal-image-attach lands). They ride into the next turn. */}
+        {/* Page context: the one line saying what rides each turn, the page script's controls,
+            and any error the script raised (util/chatContext.js). */}
+        {pageContext && (
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }} data-testid="chat-page-context">
+            {describeChatContext(pageContext.bag)}
+          </Typography>
+        )}
+        {pageScriptError && (
+          <Alert severity="error" sx={{ mb: 1 }} data-testid="chat-page-script-error" onClose={() => setPageScriptError(null)}>
+            {pageScriptError}
+          </Alert>
+        )}
+        <Box ref={pageScriptRootRef} sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mb: pageContext?.bag?.script ? 1 : 0 }} data-testid="chat-page-script-root" />
         {pendingContributions.length > 0 && (
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mb: 1 }} data-testid="chat-pending-contributions">
             {pendingContributions.map((c, idx) => (

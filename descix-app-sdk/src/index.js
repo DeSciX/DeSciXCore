@@ -23,6 +23,7 @@ export {
 export { default as PowchSideBarWidget } from './components/PowchSideBarWidget.jsx';
 export { PowchBridgeProvider, usePowchBridge } from './providers/PowchBridgeProvider.jsx';
 export { PowchClient } from './powch/PowchClient.js';
+export { descixSessionRequest } from './powch/sessionRequest.js';
 export { toSignableTypedData, TypedDataError } from './powch/typedData.js';
 export { NetworkLoadingProvider, useNetworkLoading } from './util/NetworkAPI.jsx';
 export { useDeSciXView } from './hooks/useDeSciXView.js';
@@ -30,3 +31,6 @@ export { VIEW_MODES, DEFAULT_VIEW, initialViewFor, seedView, getView, setView, s
 export { SHARE_JSON_FILE, SHARE_CONTRACT, parseShareJson, validateShareJson } from './util/share.js';
 export { BRIDGE_READY_EVENT, BRIDGE_VERSION, getBridge, publishBridgeMember, retractBridgeMember } from './util/appBridge.js';
 export { CHAT_MEMBER, publishChatApi, retractChatApi } from './util/appChat.js';
+export { CHAT_CONTEXT, CHAT_CONTEXT_DATA, CHAT_SCRIPT_API, CHAT_CONTEXT_OUTCOMES, normalizeChatContext, setChatContext, clearChatContext } from './util/chatContext.js';
+export * as pendingIntent from './util/pendingIntent.js';
+export { PENDING_INTENT_KINDS, PENDING_INTENT_STATUS, createIntentResumer } from './util/pendingIntent.js';

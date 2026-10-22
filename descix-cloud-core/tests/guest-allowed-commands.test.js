@@ -16,3 +16,10 @@ test('submit_transaction is NOT guest-allowed (Powch 2.2.0 requires an authentic
         'submit_transaction broadcasts through the platform RPC endpoint; both measured callers are ' +
         'signed-in flows and Powch refuses guests (401) — Cloud must refuse them at its own gate too');
 });
+
+test('Powch email verification is NOT guest-allowed (codes are bound to the requesting account)', () => {
+    for (const cmd of ['powch_send_verification_code', 'powch_verify_code']) {
+        assert.ok(!GUEST_ALLOWED_COMMANDS.includes(cmd), `${cmd} needs the caller's session (Powch manifest guestAllowed false)`);
+    }
+    assert.ok(!GUEST_ALLOWED_COMMANDS.includes('powch_check_verification_proof'), 'powch_check_verification_proof is deleted');
+});

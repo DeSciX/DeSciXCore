@@ -163,7 +163,7 @@ export async function runInit(apiClient, options = {}) {
     }
 
     console.log(chalk.gray(`\n${existingConfig ? 'Updating' : 'Writing'} .descix/workspace.json...\n`));
-    const config = existingConfig || new WorkspaceConfig({ version: '3.0', type: 'workspace', env: {} }, projectPath);
+    const config = existingConfig || WorkspaceConfig.empty(projectPath);
     if (existingConfig && options.force && config.env) {
       delete config.env.app;
     }

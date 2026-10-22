@@ -8,27 +8,19 @@ The shell resolves which app it is serving at RUNTIME, from a binding served at 
 
 ## Installation
 
-**Future (npm publish):**
 ```bash
 npm install @descix/app-sdk
-```
-
-**Current (monorepo):**
-```json
-{
-  "dependencies": {
-    "@descix/app-sdk": "file:../DeSciX_Core/descix-app-sdk"
-  }
-}
 ```
 
 ## Exports
 
 | Export | Description |
 |--------|-------------|
-| `.` | AppShell, AppContext, AppProvider, useAppContext, Api, ErrorBoundary, LoadingWidget, DebugWidget, CodeSiteWidget, ChatWidget, PowchSideBarWidget, PowchBridgeProvider, usePowchBridge, PowchClient, toSignableTypedData, TypedDataError, useDeSciXView, VIEW_MODES, initialViewFor, seedView, viewAvailable, requestView, VIEW_OUTCOMES, SHARE_CONTRACT, parseShareJson, validateShareJson, SHARE_JSON_FILE, publishChatApi, retractChatApi, publishBridgeMember, retractBridgeMember, getBridge, BRIDGE_READY_EVENT |
+| `.` | AppShell, AppContext, AppProvider, useAppContext, Api, ErrorBoundary, LoadingWidget, DebugWidget, CodeSiteWidget, ChatWidget, PowchSideBarWidget, PowchBridgeProvider, usePowchBridge, PowchClient, toSignableTypedData, TypedDataError, useDeSciXView, VIEW_MODES, initialViewFor, seedView, viewAvailable, requestView, VIEW_OUTCOMES, SHARE_CONTRACT, parseShareJson, validateShareJson, SHARE_JSON_FILE, publishChatApi, retractChatApi, CHAT_CONTEXT, CHAT_CONTEXT_DATA, CHAT_SCRIPT_API, CHAT_CONTEXT_OUTCOMES, normalizeChatContext, setChatContext, clearChatContext, publishBridgeMember, retractBridgeMember, getBridge, BRIDGE_READY_EVENT, pendingIntent (namespace), PENDING_INTENT_KINDS, PENDING_INTENT_STATUS, createIntentResumer |
 | `./dev` | createViteProxyConfig, createViteServerConfig, getViteHttpsConfig, resolveGatewayPort, resolveServeBinding, resolvePowchUrl, resolveDevCertOptions, buildWorkspaceProducts |
 | `./share` | SHARE_JSON_FILE, SHARE_CONTRACT, parseShareJson, validateShareJson (no DOM, no Node-only import; imports the view list from appView.js) |
+| `./chat-context` | the page-context contract and its server half: CHAT_CONTEXT, CHAT_CONTEXT_DATA, normalizeChatContext, renderPageContextBlock (no DOM at load, no Node-only import) |
+| `./pending-intent` | a deep link that waits across sign-in: PENDING_INTENT_KINDS (device-login, mcp-connect, powch-offer), capture, peek, consume, createIntentResumer, PENDING_INTENT_STATUS, PENDING_INTENT_MAX_AGE_MS. sessionStorage, per tab and origin; resumed once when signed in (no React, no network) |
 | `./powch-client` | PowchClient (for third-party sites) |
 
 ## Usage
@@ -77,6 +69,27 @@ It throws only for a mode or fallback that is not a `VIEW_MODES` value (`request
 
 A plain-script site gets the same function from the generated `DeSciXAppSDK.js`: `DeSciX.requestView(...)`, with `DeSciX.VIEW_OUTCOMES` and `DeSciX.VIEW_MODES`.
 
+### setChatContext: tell the chat pane what the page has open
+
+A page hands the shell's chat pane its context so the reader can ask about the page without leaving it. One call, three fields; last write wins:
+
+```js
+const { outcome } = DeSciX.setChatContext({
+  sourceUrl: location.href,                                   // required: names the page
+  data: { title: 'The EGPT paper', kbNames: ['Corpus', 'Sources'], docId: 'corpus:3e1d5aa3',
+          sources: [{ title: 'Rota, Combinatorial Theory', url: 'https://example.org/rota' }] },
+  script: "chat.button('Explain this page', () => chat.ask('Explain this page.'));",
+});
+```
+
+- `data` is any JSON object, up to 32000 characters as JSON. The platform reads three keys (`CHAT_CONTEXT_DATA`): `title` (shown in the pane, up to 200 characters), `kbNames` (the app's knowledge bases each turn searches, up to 8; the first one's instructions shape the reply) and `docId` (the open document's id in the first knowledge base; its whole text is added to each turn, and a turn whose document cannot be loaded is refused). Every other key (a route, a selection, the page's cited sources) goes to the model as page data.
+- `script` (up to 64000 characters) runs in the chat pane's window, which is the shell, on the same origin as your page. It gets `chat` with exactly `CHAT_SCRIPT_API`: `root` (the element it draws into, emptied before each run), `button(label, onClick)`, `ask(text)` (submits a chat turn; metered), `report(error)`, `sourceUrl` and `data`. It calls the platform through the shell's `DeSciX` bus (`DeSciX.call`). It reaches Powch only through the existing `DeSciX.powch` bridge, whose wallet acts prompt the user.
+- The pane shows one line saying what rides each turn (`Reading: The EGPT paper · searching Corpus, Sources`). A script that throws, or a `chat.button` handler that throws or rejects, is shown in the pane naming `sourceUrl`.
+- `outcome` is one of `CHAT_CONTEXT_OUTCOMES`: `attached`, `cleared`, `unavailable` (no shell, no chat member, or a shell older than 0.7.0; `bridge` and `reason` say which) or `refused` (the shell's `chat.setContext` threw). Where the page runs is never a throw; a malformed argument throws `CHAT_CONTEXT_INVALID`, naming the field (`unknown field title; the fields are sourceUrl, data, script (put anything else inside data)`).
+- The context belongs to the app that set it: the shell reads it only on that app's face, and drops it when the app or its site changes, when the CodeSite unmounts, and when the page that set it unloads (`pagehide`). `DeSciX.clearChatContext()` drops it explicitly.
+
+To open the pane on demand, ask for the view: `DeSciX.requestView('SplitView')`. Full reference: [APP_SHELL_API.md](APP_SHELL_API.md#descixsetchatcontext--tell-the-chat-what-the-page-has-open).
+
 ### share.json: the link-preview contract
 
 A site bundle may ship `share.json` beside its `index.html`; the edge rewrites the served page head from it. `SHARE_CONTRACT` is the field table, and the edge, `descix serve` and `descix site upload` all run `parseShareJson`: `title` and `description` are required non-empty strings, `icon`, `og_image`, `twitter_card` and `apple_touch_icon` are optional strings, `twitter_card` defaults to `summary_large_image`, and `default_view` is optional (below). A present optional field that is not a non-empty string is refused.
@@ -97,7 +110,7 @@ const share = parseShareJson(text); // the full bag, absent optional fields null
 { "title": "EGPT", "description": "Electronic Graph Paper Theory", "default_view": "CodeSite" }
 ```
 
-The edge copies it into the app binding (`/__descix/app-binding.json`, `defaultView`) on `{app}.{env}.descix.net`, and `descix serve` does the same from a static site's `share.json` (a site served by a dev server, `site.port`, is not read; the serve banner's `First view:` line says which applied). The shell seeds its view from the binding (`initialViewFor(binding)`) before it renders your app, so there is no SplitView frame first. The app may still change the view at any time with `DeSciX.view.set` or `requestView`. On the store (descix.net) no binding is served and the shell starts in `SplitView`.
+The edge copies it into the app binding (`/__descix/app-binding.json`, `defaultView`) on `{app}.descix.net` (PROD; `{app}.{env}.descix.net` on dev and demo), and `descix serve` does the same from a static site's `share.json` (a site served by a dev server, `site.port`, is not read; the serve banner's `First view:` line says which applied). The shell seeds its view from the binding (`initialViewFor(binding)`) before it renders your app, so there is no SplitView frame first. The app may still change the view at any time with `DeSciX.view.set` or `requestView`. On the store (descix.net) no binding is served and the shell starts in `SplitView`.
 
 ### PowchClient (Third-Party Sites)
 

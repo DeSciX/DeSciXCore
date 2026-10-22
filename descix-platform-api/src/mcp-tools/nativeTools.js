@@ -177,6 +177,10 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
                 // vocabulary, byte caps) rather than restated here — one owner for the
                 // advertised contract and the enforced policy, so the two cannot drift.
                 media: mediaParamSchema(),
+                // The chat pane's page context. Its fields and limits have ONE owner,
+                // @descix/app-sdk/chat-context, which the Cloud handler runs on every value it
+                // receives; they are deliberately not restated here.
+                page_context: { type: 'object', description: 'The page the reader has open, exactly as @descix/app-sdk/chat-context withChatContext() builds it from an app page\'s DeSciX.setChatContext(). The server checks it with that module and adds it ahead of the question, labelled as data supplied by the app page and not as instructions; a value that breaks the module\'s rules is refused, naming the field. It selects no knowledge base and no document: those travel in knowledgebase_names and doc_ids.' },
                 // ws-c3-librarian: a WORKSTREAM is a conversational room (the Discord room model
                 // generalised), so its thread owner is SERVER-derived from the id the caller
                 // names — never from a caller-supplied owner, which apiFront still strips.
