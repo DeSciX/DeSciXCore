@@ -354,23 +354,25 @@ ask_question_to_app({
 
 ## Workspace Configuration
 
-### workspace.json (v2.1 — canonical)
+### workspace.json (v3, single-app)
 
-`.descix/workspace.json` is written and mutated by `descix init` / `descix app init` / `descix app set-*` — never hand-edited. The v2.1 format is `env.platform` (the shell/store app, served at root) plus `env.products[]` (apps hosted inside the shell); the older `communities`-based v1 format is not supported and hard-errors on load ("v1 workspace format is not supported. Migrate to v2.1."):
+`.descix/workspace.json` is written and mutated by `descix config init` / `descix app init` / `descix app set-*` — never hand-edited. It holds exactly one app, `env.app`, and the repo root is the workspace root. `descix app init` runs from the repo root and refuses a checkout nested inside another DeSciX workspace; keep app repos as sibling checkouts:
 
 ```json
 {
-  "version": "2.1",
+  "version": "3.0",
+  "type": "workspace",
   "env": {
-    "platform": { "appId": "daita", "communityId": "daita", "localPath": ".", "kbId": "General" },
-    "products": [
-      { "appId": "docs", "communityId": "daita", "kbId": "sdk", "localPath": "descix-docs" }
-    ]
+    "environment": "PROD",
+    "apiUrl": "https://descix.net",
+    "app": { "appId": "egpt-mydocs", "communityId": "egpt", "kbId": "General", "site": { "static": "site" } }
   }
 }
 ```
 
-A single-app (non-monorepo) workspace uses the same v2.1 shape with only `env.platform` set and an empty (or omitted) `env.products[]` — there is no separate single-app file format.
+A gateway workspace, which serves several local app repos behind one `descix serve`, lists them under `env.gateway`: `env.gateway.shell` names the repo served at `/` and `env.gateway.appRepos[]` the repos served at `/p/<appId>` (`descix config gateway set-shell` / `add-repo` / `remove-repo`). Each listed repo carries its own single-app `.descix/workspace.json`, the sole authority for its app.
+
+A file with an `env.platform` / `env.products` block (the v2.1 multi-app format) or a `communities` block with no `env` (v1) hard-errors on load, naming the migration: run `descix config init --env …` and `descix app init -a <app_id>` from each app repo's own root.
 
 ---
 
@@ -393,13 +395,11 @@ A single-app (non-monorepo) workspace uses the same v2.1 shape with only `env.pl
 4. AI calls `execute_remote_command({ command: "create_app_for_community", params: {...} })` for app creation
 5. AI runs `descix app init` to register the local workspace mapping in `.descix/workspace.json`
 
-### Monorepo Setup
+### Several Apps on One Local Gateway
 
-1. AI calls `fetch_my_purchases` to get entitlements
-2. AI scans workspace folders
-3. AI asks user: "Map `frontend/` to which app?"
-4. AI creates `.descix/workspace.json` with mappings
-5. `tell_me_how --scope project` now uses these mappings
+1. Each app is its own repo, checked out as a sibling; in each repo's root run `descix config init --env …` and `descix app init -a <app_id>`
+2. In the gateway workspace's root, run `descix config gateway set-shell <repo>` and `descix config gateway add-repo <repo>` per app repo
+3. `descix serve` from the gateway workspace serves the shell at `/` and each listed app at `/p/<appId>`
 
 ---
 

@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-This document outlines the unified architecture for local development of DeSciX Apps (CodeSites and Microservices). The core design principle is to treat the local development environment as a **Local Load Balancer** that mirrors the production routing topology.
+This document outlines the unified architecture for local development of DeSciX Apps (CodeSites and Microservices). The core design principle: the local gateway (`descix serve`) replicates the edge routing on one local origin. The edge is the Cloudflare Worker on prod and dev; demo goes through a GCP load balancer.
 
 **Important**: This document applies to **git-mode** developers who use the CLI for app development. For **drive-mode** users (non-developers using the PWA), app management is handled entirely through the web interface with server-side processing.
 
@@ -28,15 +28,17 @@ Instead of exposing implementation details (like GCS bucket URLs or specific por
 
 ### 2.1. Route Patterns
 
-| Canonical Path | Production Target (LB) | Local Target (Gateway) |
+| Canonical Path | Edge Target (Worker, prod/dev) | Local Target (Gateway) |
 | :--- | :--- | :--- |
-| `/apifront`, `/api`, `/mcp`, `/oauth`, `/.well-known/oauth-*` | Core API | the resolved **API origin** (see §3.2) |
-| `/powch` | Powch PWA | the origin the workspace names. **No route at all when unset** — there is no default wallet origin |
-| `/s/{appId}` | service | `http://localhost:{microservice.port}` — prefix **stripped** |
-| `/p/{appId}` | app site | `{proto}://localhost:{site.port}` (**no** path rewrite), or served from disk when the product has `site.static` |
-| `/Community`, `/.proxy/gcs_media` | GCS public bucket | proxied to `storage.googleapis.com` |
-| `/__descix/app-binding.json` | (not served in production) | answered by the gateway itself |
-| `/` | PWA bucket | the resolved **Shell origin** (see §3.2) — always matched **last** |
+| `/apifront`, `/mcp`, `/oauth`, `/.well-known/oauth-*` | the shared broker `apifront-http-{env}` | the resolved **API origin** (see §3.2) |
+| `/api` | the app's own Cloud Run service `{appId}-{env}` (404 when it has none) | the resolved **API origin** (see §3.2) |
+| `/powch` | not an edge route: Powch is its own host, `powch.{env}.descix.net` | the origin the workspace names. **No route at all when unset** — there is no default wallet origin |
+| `/s/{appId}` | not an edge route: an app's service is `/api/*` on the app's own host | `http://localhost:{microservice.port}` — prefix **stripped** |
+| `/p/{appId}` | not an edge route: the app is its own host, `{appId}.{env}.descix.net` (see below) | `{proto}://localhost:{site.port}` (**no** path rewrite), or served from disk when the product has `site.static` |
+| `/Community` | the GCS public bucket | proxied to `storage.googleapis.com` |
+| `/.proxy/gcs_media` | not an edge route | proxied to `storage.googleapis.com` |
+| `/__descix/app-binding.json` | synthesized by the Worker on an app's own host | answered by the gateway itself |
+| `/` | the host's shell site from the GCS public bucket | the resolved **Shell origin** (see §3.2) — always matched **last** |
 
 ## 3. The "Local Mesh" Proxy
 
@@ -50,20 +52,22 @@ The binding is **served, not compiled**: the gateway answers `GET /__descix/app-
 
 ### `/p/<appId>` is a LOCAL route only
 
-The gateway serves your app at `/p/<appId>`. **That path does not exist in the cloud.** Deployed
-apps are served on their own host, `{appId}.{env}.descix.net`. Measured against dev:
+The gateway serves your app at `/p/<appId>`. **That path is not an app route in the cloud.**
+Deployed apps are served on their own host, `{appId}.{env}.descix.net`. At the edge, a request
+for `/p/<appId>/` is treated as a deep route of the host's shell: the Worker answers it with that
+shell's `index.html`. HTTP 200, the shell, not your app.
 
 ```
 # LOCAL — the /p/ form, the frame your own gateway serves into the shell
 https://localhost:5173/p/egpt-godsworld/       the app frame only (gateway port varies)
 
-# CLOUD — measured against dev
-https://egpt-godsworld.dev.descix.net/         -> 200  (the deployed app, per-app host)
-https://dev.descix.net/p/egpt-godsworld/       -> 404  (the /p/ form does not exist here)
+# CLOUD — the edge Worker
+https://egpt-godsworld.dev.descix.net/         -> 200  the deployed app, on its own host
+https://descix.net/p/egpt/                     -> 200  the shell's index.html, NOT the egpt app
 ```
 
-So a `/p/` URL that loads locally 404s the moment you point it at a deployed
-environment. If you are writing a link, a redirect, or a test that must survive deployment, use
+So a `/p/` URL that loads your app locally loads the store shell, not your app, the moment you
+point it at a deployed environment. If you are writing a link, a redirect, or a test that must survive deployment, use
 the per-app host; keep `/p/` for the local gateway, where it is the correct and necessary form.
 
 **Every app the shell iframes is on the GATEWAY origin** — `/p/{appId}`, never the app's own dev-server port. The shell dispatches chat action blocks by reaching straight into `iframe.contentWindow.DeSciX_Actions` (direct interframe scripting, no postMessage bridge), so a cross-origin iframe kills SplitView with a `SecurityError`. **Powch is the deliberate exception** and stays cross-origin: it holds passkeys and the HD wallet, and same-origin would expose it to that same reach.
@@ -250,11 +254,11 @@ human it is unverified.
 ### Scenario 3: Production
 *   **User**: End User.
 *   **Setup**: No Local Proxy.
-*   **Result**: Traffic hits the Cloud Load Balancer, which applies the same routing rules to direct traffic to GCS buckets and Kubernetes services.
+*   **Result**: On prod and dev, traffic hits the Cloudflare Worker, which routes by host and path to the GCS public bucket, the shared `apifront-http-{env}` broker and each app's own Cloud Run service. Demo goes through a GCP load balancer.
 
 ## 5. Client-Side Implications
 
-*   **"Dumb" client**: the shell constructs a canonical relative path and lets the gateway (locally) or the LB (in production) resolve it. No GCS-URL rewriting in client code.
+*   **"Dumb" client**: the shell constructs a canonical relative path and lets the gateway (locally) or the edge (deployed) resolve it. No GCS-URL rewriting in client code.
 *   **The credential is a body field**, not a cookie and not a header: every call is a relative `POST /apifront/` with the token in the JSON body. There is no `SameSite` problem, no credentialed CORS preflight, and the browser origin is irrelevant to the mesh — same-origin is required for *frame scripting*, not for auth.
 *   **Set your framework's base path to `/p/{appId}`.** The gateway does not rewrite paths, so assets requested at `/` will 404.
 

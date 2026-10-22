@@ -25,7 +25,7 @@ export const PLATFORM_BASICS_SUMMARY = [
     "PLATFORM BASICS — the identity model everything else derives from:",
     "1. A community IS its ERC-20 token, per environment: community_id == app_id == lowercased(token_symbol). One token symbol, one on-chain contract, one community.",
     "2. Every community is itself an app (its default app), and every app belongs to exactly one community. Sub-apps are named {community_id}-{short_name} (e.g. egpt-frqtl, daita-docs); the short name never contains '-'.",
-    "3. 'descix' is a BRAND, never an identifier. The community branded 'DeSciX' has id 'daita' (token DAITA). No app or community id is ever 'descix' or 'descix-*'.",
+    "3. 'descix' is a BRAND, never an identifier. The root community is labelled DAITA with community_id 'daita' (== lowercased token symbol DAITA); DeSciX is the platform brand, never an id. No app or community id is ever 'descix' or 'descix-*'.",
     "4. Identifiers are environment-invariant; records are per-environment. A community or app existing in one environment (dev/demo/prod) says nothing about another — each env materializes its own records.",
     "5. An app is three slots: site/ (any web framework), assets/ (its agent instructions and description), microservice/ (optional backend). Each app has knowledge bases; RAG answers are metered against USD AI credits.",
     "6. Developers build with the published @descix/cli and @descix/app-sdk as external users: `app init` creates the record + default KB + scaffold, `descix serve` runs it locally, `kb corpus sync` publishes the KB, `site upload` publishes the site. Start with `descix tell-me-how`.",
@@ -65,10 +65,10 @@ Everything on DeSciX derives from one model:
 ## Brand vs identifier
 
 \`descix\` is the platform's **brand and infrastructure namespace** (the descix.net domain,
-the \`descix\` CLI) — it is **never an identifier**. The community branded "DeSciX" has
-\`community_id\` and \`app_id\` \`daita\` (its token is DAITA). There is no \`descix\`
-community, so no app is ever named \`descix\` or \`descix-*\`. Display names are free-form
-("DeSciX" stays a display name); ids are always the lowercased token symbol.
+the \`descix\` CLI) — it is **never an identifier**. The root community is labelled DAITA,
+with \`community_id\` and \`app_id\` \`daita\` (== the lowercased token symbol DAITA); DeSciX
+is the platform brand, never an id. There is no \`descix\` community, so no app is ever named
+\`descix\` or \`descix-*\`. Display names are free-form; ids are always the lowercased token symbol.
 
 ## What an app is
 

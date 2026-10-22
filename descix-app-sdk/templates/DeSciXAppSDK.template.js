@@ -3,7 +3,8 @@
  *
  * !!! GENERATED FILE — DO NOT EDIT !!!
  * Source:    @descix/app-sdk templates/DeSciXAppSDK.template.js
- *            + src/util/bridgeResolver.js and src/util/appView.js (inlined below)
+ *            + src/util/bridgeResolver.js, src/util/appView.js and src/util/chatContext.js
+ *              (inlined below)
  * Regenerate: node descix-app-sdk/scripts/generate-app-sdk-copies.js
  * Verify:     node descix-app-sdk/scripts/generate-app-sdk-copies.js --check
  * A hand-edit here is drift by construction and the --check gate will fail loud.
@@ -17,6 +18,7 @@
  *     DeSciX.requestView('NoChrome', { fallback: 'CodeSite' });  // …and learn what happened
  *     if (DeSciX.chat.available()) { … }         // can chat take an attachment now?
  *     await DeSciX.chat.sendMedia({ … });        // hand the model something to look at
+ *     DeSciX.setChatContext({ sourceUrl: location.href, data, script });  // what this page has open
  *     await DeSciX.call('some_command', { … });  // call the platform through the shell
  *
  * You never write `window.parent.` or `window.top.` — that hop is DETECTED, not
@@ -39,6 +41,10 @@ __BRIDGE_RESOLVER__
 /* ── inlined from @descix/app-sdk src/util/appView.js ────────────────────── */
 __VIEW_REQUEST__
 /* ── end inlined view region ────────────────────────────────────────────── */
+
+/* ── inlined from @descix/app-sdk src/util/chatContext.js ────────────────── */
+__CHAT_CONTEXT__
+/* ── end inlined chat-context region ────────────────────────────────────── */
 
     // ── Never clobber an owner ───────────────────────────────────────────────
     // If the bus resolves at hop 0, THIS page published it: the page is the shell
@@ -142,14 +148,25 @@ __VIEW_REQUEST__
         return found.bus ? found.bus[name] : null;
     };
 
+    // The revision this page's last setChatContext stored, cleared on pagehide (see below).
+    let lastRevision = null;
+    let clearOnLeaveArmed = false;
+
     return {
-        /** 'shell' when a DeSciX App Shell is hosting this page, else 'standalone'. Live. */
+        /**
+         * One of three modes, read live from the bridge resolver:
+         *   'shell'              — a DeSciX App Shell's bus is readable at this page or above it.
+         *   'standalone'         — no bus, and this window is the top of its frame chain.
+         *   'embedded-no-bridge' — no bus, and this window IS framed: a shell may sit above
+         *                          and be unreadable (cross-origin), or there may be none.
+         */
         get mode() { return resolveBridge().mode; },
 
         /**
          * How many frames up the bus was found: 0 = this page owns it, 1 = the parent
-         * (the ordinary embedded case), 2+ = nested, -1 = standalone. Diagnostics only —
-         * app code should never branch on it, which is the whole point of this file.
+         * (the ordinary embedded case), 2+ = nested, -1 = no bus ('standalone' or
+         * 'embedded-no-bridge'). Diagnostics only — app code should never branch on it,
+         * which is the whole point of this file.
          */
         get bridgeLevel() { return resolveBridge().hops; },
 
@@ -215,6 +232,47 @@ __VIEW_REQUEST__
          */
         get chat() {
             return member('chat', 'There is no chat pane here, so there is no conversation to contribute to.');
+        },
+
+        /** The page-context fields, the data keys the platform reads, the script's `chat`
+         *  members and the outcomes (the one lists, from chatContext.js). */
+        CHAT_CONTEXT,
+        CHAT_CONTEXT_DATA,
+        CHAT_SCRIPT_API,
+        CHAT_CONTEXT_OUTCOMES,
+
+        /**
+         * Tell the chat pane what this page has open, and learn what happened:
+         *
+         *     const { outcome } = DeSciX.setChatContext({
+         *       sourceUrl: location.href,
+         *       data: { title: 'The EGPT paper', kbNames: ['Corpus', 'Sources'] },
+         *       script: "chat.button('Explain this page', () => chat.ask('Explain this page.'));",
+         *     });
+         *
+         * Returns { outcome, revision, bridge, reason }; outcome is a CHAT_CONTEXT_OUTCOMES value.
+         * Standalone, or a shell without chat, is an outcome, never a throw; a malformed argument
+         * throws (code CHAT_CONTEXT_INVALID). Last write wins. When this page goes away
+         * (pagehide) the context it set is cleared, unless a newer one replaced it.
+         */
+        setChatContext: (partial) => {
+            const r = setChatContext(partial);
+            if (r.outcome === CHAT_CONTEXT_OUTCOMES.ATTACHED) {
+                lastRevision = r.revision;
+                if (!clearOnLeaveArmed) {
+                    clearOnLeaveArmed = true;
+                    window.addEventListener('pagehide', () => {
+                        if (lastRevision !== null) clearChatContext({ revision: lastRevision });
+                    });
+                }
+            }
+            return r;
+        },
+
+        /** Drop this page's context from the chat pane. Returns { outcome, bridge, reason }. */
+        clearChatContext: () => {
+            lastRevision = null;
+            return clearChatContext();
         },
 
         /**

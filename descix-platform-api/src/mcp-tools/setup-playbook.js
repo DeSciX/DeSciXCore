@@ -65,7 +65,7 @@ const FIRST_CONTACT_SCRIPT = Object.freeze([
         // EGPT is one example effort. Point the assistant at the DAITA community's own RAG agent so
         // it learns what DeSciX is and how the tokenomics work from the platform's own source,
         // rather than reconstructing it from memory (retrieval-first, applied to onboarding).
-        do: "The first step is to LEARN what DeSciX is from the platform itself: call ask_question_to_app({ app_id: 'daita', user_input: 'What is DeSciX, and how do its tokenomics work — how do researchers and creators earn from their contributions?' }). DAITA is the concept/platform home (the community branded 'DeSciX'); EGPT is one example effort inside it, not the platform itself. Summarize what DAITA returns for the user and cite it — do not answer this from your own memory.",
+        do: "The first step is to LEARN what DeSciX is from the platform itself: call ask_question_to_app({ app_id: 'daita', user_input: 'What is DeSciX, and how do its tokenomics work — how do researchers and creators earn from their contributions?' }). DAITA is the concept/platform home (the root community, labelled DAITA with community_id 'daita' == lowercased token symbol; DeSciX is the platform brand, never an id); EGPT is one example effort inside it, not the platform itself. Summarize what DAITA returns for the user and cite it — do not answer this from your own memory.",
     }),
     Object.freeze({
         step: 'ask_interest',

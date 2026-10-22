@@ -70,7 +70,7 @@ Two different objects wear that name:
 
 | You are holding | What it is | Has `mode`? |
 |---|---|---|
-| `DeSciX` in YOUR page (from `DeSciXAppSDK.js`) | the app-side SDK object | **yes** — a live getter: `'shell'` when a shell hosts you, `'standalone'` when none does |
+| `DeSciX` in YOUR page (from `DeSciXAppSDK.js`) | the app-side SDK object | **yes** — a live getter: `'shell'` when a readable shell bus is above you, `'standalone'` when your page is the top window, `'embedded-no-bridge'` when your page is framed but no ancestor carries a readable bus |
 | the shell's own `window.DeSciX` | the bus `appBridge` publishes (`view`, `chat`, `bridge`, `powch`, …) | no — the bus carries members, not a mode |
 
 As an app author you hold the first one, so `DeSciX.mode` reads correctly and
@@ -150,8 +150,8 @@ So: for chat you *may* check the return; for view you **must** check `available(
 ### Standalone is an INITIAL VIEW, not a reduced mode
 
 There is ONE App Shell. The platform site and a developer's app mount the same
-`@descix/app-sdk/AppShell`, and a developer's shell can be embedded inside the platform's
-— they are the same object, nested.
+`@descix/app-sdk/AppShell`, one shell document per origin, never nested: the shell at
+`descix.net` and the shell at `<appId>.descix.net` are siblings, and neither frames the other.
 
 **Standalone selects what the shell opens ON.** In standalone the initial view is your
 app's CodeSite instead of the store. That is all "no chrome" ever meant: *no store chrome
@@ -177,15 +177,13 @@ initial view is your app rather than the store, with a nav bar present and its s
 suppressed. Both of those are true today; neither is a reading of the other.
 
 ⚠️ **Naming collision, live today — and you meet it in `ready()`.** The `mode` field that
-`await DeSciX.ready()` resolves to (and the same field on the object `bridgeResolver()`
+`await DeSciX.ready()` resolves to (and the same field on the object `resolveBridge()`
 returns, `{ window, bus, hops, mode }`) carries the literal `'standalone'` for the
 **UNMANAGED** case: `bus: null`, `hops: -1`, no shell anywhere above. That is the unmanaged
 condition wearing the managed condition's name. Branch on it for *"is there a shell at
 all?"* — never for *"am I in standalone view?"*, which is a different question with a
 different answer. Filed for rename; do not write `mode: 'unmanaged'` anywhere until it
-ships. That literal is the unmanaged condition wearing the managed condition's name.
-Branch on it for "is there a shell at all?" — never read it as "am I in standalone view?",
-which is a different question with a different answer.
+ships.
 
 ### `DeSciX.view` — choose your layout
 
@@ -271,6 +269,7 @@ const { delivered, reason } = await DeSciX.chat.sendMedia(
 |---|---|---|
 | `sendMedia(media, opts?)` | `=> Promise<{delivered, reason?, contribution?}>` | See below. |
 | `available()` | `() => boolean` | Is the chat pane mounted **right now**? |
+| `setContext(bag)`, `clearContext(revision?)`, `getContext()` | | Page context; use `DeSciX.setChatContext` (below). |
 
 **`media`** — supply **exactly one** of:
 
@@ -303,6 +302,73 @@ inadmissible is refused by name.
 
 **Media persists in the thread.** On a later turn the model still remembers what it
 was shown, so do not resend the same frame. Media tokens are billed as input tokens.
+
+### `DeSciX.setChatContext` — tell the chat what the page has open
+
+So a reader can ask the chat about the page in front of them (its sources, the passage they
+selected) without leaving it, the page tells the chat pane what it has open:
+
+```js
+const { outcome, reason } = DeSciX.setChatContext({
+  sourceUrl: location.href,
+  data: {
+    title: 'The EGPT paper',
+    kbNames: ['Corpus', 'Sources'],
+    docId: 'corpus:3e1d5aa3',
+    sources: [{ title: 'Rota, Combinatorial Theory', url: 'https://example.org/rota' }],
+  },
+  script: "chat.button('Explain this page', () => chat.ask('Explain this page.'));",
+});
+```
+
+| Field | Type | Limit | Required | What happens to it |
+|---|---|---|---|---|
+| `sourceUrl` | string | 2048 chars | yes | names the page to the model and in script errors |
+| `data` | JSON object | 32000 chars as JSON | no | the keys below are read; the rest goes to the model as page data |
+| `script` | string (JavaScript) | 64000 chars | no | run by the chat pane with `(chat, data)` |
+
+The `data` keys the platform reads (`CHAT_CONTEXT_DATA`), each optional:
+
+| Key | Type | Limit | Sent as |
+|---|---|---|---|
+| `title` | string | 200 chars | shown in the pane: `Reading: <title>` |
+| `kbNames` | string[] | 8 names, 128 chars each | `knowledgebase_names`: the knowledge bases each turn searches; the first one's instructions shape the reply |
+| `docId` | string | 256 chars | `doc_ids`: the document's whole text is added to each turn; a document that cannot be loaded refuses the turn |
+
+**The script** runs in the chat pane's window: the shell, on the same origin as your page. It
+receives `chat`, with exactly these members (`CHAT_SCRIPT_API`), and `data`:
+
+| Member | What it does |
+|---|---|
+| `root` | the element the script draws into; emptied before each run |
+| `button(label, onClick)` | appends a button to `root`; a throw or rejection in `onClick` is shown in the pane |
+| `ask(text)` | submits a chat turn with `text`, as if the reader typed it (one metered turn) |
+| `report(error)` | shows an error in the pane, naming `sourceUrl` |
+| `sourceUrl`, `data` | the context it was set with |
+
+It calls the platform through the shell's own `DeSciX` (`DeSciX.call(...)`), exactly as your page
+does. Powch stays on its own origin: the script reaches it only through `DeSciX.powch`, whose wallet
+acts prompt the user. The script runs each time a new context arrives and each time the pane
+opens with one, so draw from scratch.
+
+**Outcomes** (`CHAT_CONTEXT_OUTCOMES`): `attached` (stored; when the pane is closed, `reason` says
+it shows when the pane opens), `cleared`, `unavailable` (no readable shell, no `chat` member, or a
+shell older than `@descix/app-sdk` 0.7.0; `bridge` and `reason` say which), `refused` (the
+shell's `chat.setContext` threw). A malformed argument throws `CHAT_CONTEXT_INVALID`, naming the
+field and the rule it broke.
+
+**Whose context it is.** The shell stamps the context with the app whose face is mounted and
+reads it back only for that app. It drops it when the app or its site changes, when the CodeSite
+unmounts, and when the page that set it unloads (`pagehide`; a newer context is left alone).
+`DeSciX.clearChatContext()` drops it explicitly.
+
+**Opening the pane.** `DeSciX.requestView('SplitView')` shows the chat beside your page. When
+the view is already `SplitView` and the reader hid the pane with its toggle, that request
+changes nothing.
+
+On the bus the members are `DeSciX.chat.setContext(bag)`, `DeSciX.chat.clearContext(revision?)`
+and `DeSciX.chat.getContext()`; `DeSciX.setChatContext` is the wrapper that resolves the shell and
+reports an outcome.
 
 ### `DeSciX.powch` — identity and wallet
 
@@ -367,24 +433,48 @@ registry; the browser origin is irrelevant to it.
 
 ## Why same-origin matters to you
 
-`descix serve` puts the shell and your app on **one origin** — your app is served
-through the gateway at `/p/<yourAppId>`, not on its own dev-server port. That is
-what makes the `DeSciX` bus and `contentWindow.DeSciX_Actions` legal at all;
-across origins the browser refuses the reach and both directions of this contract
-die.
+**Where the frames are.** Deployed, the store at `https://descix.net/` frames your site
+same-origin at `https://descix.net/prod/<yourAppId>/site/index.html`. Your app's own host,
+`https://<yourAppId>.descix.net/`, is a sibling instance of the same shell bundle (it does not
+frame the store, and the store does not frame it) and frames the same site bytes same-origin at
+`https://<yourAppId>.descix.net/prod/<yourAppId>/site/index.html`. Locally, `descix serve` puts
+the shell and your app on one origin, serving your site through the gateway at `/p/<yourAppId>`.
+In every case Powch is a cross-origin iframe that the shell renders as its sidebar, one level
+under the shell, and nothing inside your frame runs a second shell. Your app reaches the shell
+through the `window.DeSciX` bus that `resolveBridge()` finds by walking up the parent windows
+(`DeSciXAppSDK.js` `resolveBridge`; `PowchClient._findShellBridge`,
+`src/powch/PowchClient.js:61-63`): direct JavaScript, never `postMessage`. The only
+`postMessage` traffic is between the shell and Powch. One engine fact follows from Powch being
+cross-origin: WebKit (Safari, and every browser on iOS and iPadOS) refuses to CREATE a passkey in
+a document that is not same-origin with all its ancestors, so a new Powch account on iOS cannot
+be created in the sidebar frame; signing in with an existing passkey works there. New account on
+iOS is therefore a top-level Powch step: the Powch iframe's sandbox allows popups so it can open
+Powch's own page (`src/powch/PowchClient.js`).
+
+Same-origin is what makes the `DeSciX` bus and `contentWindow.DeSciX_Actions` legal at
+all; across origins the browser refuses the reach and both directions of this contract die.
 
 Same-origin is a **hard precondition**. `DeSciXAppSDK.js` catches the browser's refusal
 rather than letting it take your app down, so the symptom is not a `SecurityError` in
 your code but a shell that is simply *not found*:
 
 ```js
-DeSciX.mode          // 'standalone' — even though you ARE inside the shell's iframe
+DeSciX.mode          // 'embedded-no-bridge' — framed, but no ancestor's bus is readable
 DeSciX.view          // null, with a console.error naming the situation
 ```
 
-If you see `'standalone'` where you expected `'shell'`, you are loading your app from
-its own dev-server port instead of through the gateway at `/p/<yourAppId>`. Open the
-gateway URL, not the app port.
+`DeSciX.mode` is resolved on every read by `resolveBridge()` (`src/util/bridgeResolver.js`,
+inlined in `DeSciXAppSDK.js`) and takes one of three values:
+
+- `'shell'` — a readable `window.DeSciX` bus was found on this window or an ancestor.
+- `'standalone'` — no bus was found and this page is the top window: there is no shell.
+- `'embedded-no-bridge'` — no bus was found and this page is framed: the frame above is
+  cross-origin (unreadable) or carries no shell. The resolver cannot tell those apart.
+
+If you see `'embedded-no-bridge'` under `descix serve`, your app is being framed from a
+different origin than the shell: you are loading it from its own dev-server port instead of
+through the gateway at `/p/<yourAppId>`. Open the gateway URL, not the app port. If you see
+`'standalone'`, you opened your site's URL directly in a tab, with no shell above it.
 
 (You may still see the browser's own message in the console, which names nothing about
 views or the shell. The verbatim text to grep for:
@@ -399,8 +489,11 @@ the API this document describes.
 
 Two consequences for your app:
 
-- Configure your framework's base path to `/p/<yourAppId>`. The gateway does not
-  rewrite paths, so assets requested at `/` will 404.
+- Every URL your build emits is page-relative (`./images/logo.png`, never
+  `/images/logo.png`; app-developer runbook §7.2). The same bundle is served at
+  `/prod/<yourAppId>/site/` when deployed and at `/p/<yourAppId>/` under `descix serve`
+  (`/p/` exists only on the local gateway), and the gateway does not rewrite paths, so a
+  root-absolute URL 404s in both.
 - Powch is the deliberate exception and stays cross-origin. Use `DeSciX.powch`;
   do not try to reach Powch's frame yourself.
 

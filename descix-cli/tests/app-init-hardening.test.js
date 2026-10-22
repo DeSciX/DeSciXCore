@@ -203,3 +203,26 @@ test('app init CREATE leg (-c) still creates the default KB', async (t) => {
   const ws = await WorkspaceConfig.load(dir);
   assert.equal(ws.env.app.appId, 'testcomm-myapp');
 });
+
+// Every /apifront door refuses a param the command's published schema does not declare
+// with a named error. The create leg must send only what create_app_for_community publishes —
+// read from the one owner of that schema, never a hand list here.
+test('app init (create leg) sends create_app_for_community only the params its published schema declares', async (t) => {
+  quiet(t);
+  await repoAt(t);
+  const { NATIVE_MCP_TOOLS, validateToolParams, VALIDATION_PHASE } = await import('@descix/platform-api/mcp-tools');
+  const stub = stubWithKbs([]);
+  stub.invoke = (function (orig) {
+    return async function (command, params) {
+      if (command === 'get_product_context') { stub.calls.push({ command, params }); throw new Error('not found'); }
+      return orig.call(this, command, params);
+    };
+  })(stub.invoke);
+  await runAppInit(stub, { app: 'myapp', community: 'testcomm' });
+  const create = stub.calls.find((c) => c.command === 'create_app_for_community');
+  assert.ok(create, 'the create leg must have called create_app_for_community');
+  const sent = Object.fromEntries(Object.entries(create.params).filter(([, v]) => v !== undefined));
+  assert.doesNotThrow(
+    () => validateToolParams(NATIVE_MCP_TOOLS, 'create_app_for_community', sent, { surface: 'test', phase: VALIDATION_PHASE.PRE_INJECTION }),
+    `app init sent ${JSON.stringify(Object.keys(sent))}`);
+});

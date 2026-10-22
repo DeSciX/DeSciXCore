@@ -106,7 +106,7 @@ export async function init(env, options = {}) {
     // after they have already talked to the wrong one.
     const existing = await WorkspaceConfig.tryLoad();
     const workspaceConfig = existing
-      || new WorkspaceConfig({ version: '2.1', type: 'workspace', env: {} }, process.cwd());
+      || WorkspaceConfig.empty(process.cwd());
     const created = !existing;
     const result = await workspaceConfig.setEnvironment(normalized, options.url || null);
 
@@ -159,7 +159,7 @@ export async function setEnv(envName, options = {}) {
     // hop along. A remedy string is only true if the command it names runs.
     const existing = await WorkspaceConfig.tryLoad();
     const workspaceConfig = existing
-      || new WorkspaceConfig({ version: '2.1', type: 'workspace', env: {} }, process.cwd());
+      || WorkspaceConfig.empty(process.cwd());
 
     const result = await workspaceConfig.setEnvironment(envName, options.url || null);
 
