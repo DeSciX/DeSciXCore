@@ -20,6 +20,10 @@ export class PowchClient {
     this.requestIdCounter = 0;
     this._user = null;
     this._iframeVisible = false;
+    // Embedded: the shell's auth event owns signed-in; these hold what this client's own auth()
+    // was released on top of it (email, powchToken), until the shell's session ends.
+    this._shellAuth = null;
+    this._released = null;
 
     // 1. Check for Shell Bridge (Embedded Mode)
     this.shellBridge = this._findShellBridge();
@@ -256,12 +260,20 @@ export class PowchClient {
    * Simple event emitter implementation.
    */
   on(event, callback) {
+    // Embedded: sign-in state is the shell's; subscribe before registering so the shell's
+    // immediate report reaches only the handlers that were already there.
+    if (this.shellBridge && (event === 'auth' || event === 'logout')) this._subscribeShellAuth();
+
     if (!this.handlers[event]) this.handlers[event] = [];
     this.handlers[event].push(callback);
 
     // If ready event is registered and we are already ready, trigger it immediately
     if (event === 'ready' && this.isReady) {
       callback();
+    }
+    // A user who is already signed in is reported at once.
+    if (event === 'auth' && this._user) {
+      callback(this._user);
     }
   }
 
@@ -271,32 +283,75 @@ export class PowchClient {
     }
   }
 
+  /** The one writer of the cached user: emits 'auth' when it becomes or changes to a user, 'logout' when it clears. */
+  _setUser(next) {
+    const prev = this._user;
+    this._user = next;
+    if (next && !(prev && prev.email === next.email && prev.address === next.address && prev.powchToken === next.powchToken)) {
+      this.emit('auth', next);
+    } else if (!next && prev) {
+      this.emit('logout');
+    }
+  }
+
+  /**
+   * Embedded mode: follow the shell's auth event (DeSciX.powch.on('auth')), so a sign-in the
+   * shell holds (its own Sign In, a sidebar sign-in, a restored session) and the end of its
+   * session reach this client, not only this client's own auth(). Subscribed on first need.
+   */
+  _subscribeShellAuth() {
+    if (this._shellAuth) return;
+    if (typeof this.shellBridge.on !== 'function') {
+      throw new Error(
+        "[PowchClient] the DeSciX shell hosting this page publishes no DeSciX.powch.on('auth'), so its " +
+        'sign-in state cannot reach this client: the shell is built with an @descix/app-sdk older than the auth event'
+      );
+    }
+    this._shellAuth = { signedIn: false, address: null };
+    this.shellBridge.on('auth', (state) => {
+      if (this._shellAuth.signedIn && !state.signedIn) this._released = null;
+      this._shellAuth = state;
+      this._refreshEmbeddedUser();
+    });
+  }
+
+  _refreshEmbeddedUser() {
+    const { signedIn, address } = this._shellAuth;
+    const released = this._released;
+    this._setUser(signedIn
+      ? { email: released?.email ?? null, address: address ?? released?.address ?? null, powchToken: released?.powchToken ?? null }
+      : null);
+  }
+
   /**
    * Authenticate the user via Powch. PII-implying: ensures sidebar is shown before request (idempotent).
    * Caches user on success and emits 'auth' so createButton / host can update.
    * @returns {Promise<{email: string, powchToken: string, address: string}>}
    */
   async auth(options = {}) {
-    let payload;
-
     if (this.shellBridge) {
-      // Delegate to Shell
-      // Bridge 'login' maps to 'POWCH_LOGIN' or 'POWCH_AUTH'
-      payload = await this.shellBridge.login(options);
-    } else {
-      this.open();
-      payload = await this._sendRequest('POWCH_AUTH', {
-        origin: window.location.origin,
-        require: options.require || ['email'],
-        ...options
-      });
+      // Embedded: the shell's auth event reports the sign-in (and 'auth' fires from it); this
+      // call adds what Powch released to it.
+      this._subscribeShellAuth();
+      const payload = await this.shellBridge.login(options);
+      this._released = {
+        email: payload?.email ?? null,
+        address: payload?.address ?? null,
+        powchToken: payload?.powchToken ?? null,
+      };
+      this._refreshEmbeddedUser();
+      return payload;
     }
 
-    const user = payload && (payload.email || payload.powchToken)
+    this.open();
+    const payload = await this._sendRequest('POWCH_AUTH', {
+      origin: window.location.origin,
+      require: options.require || ['email'],
+      ...options
+    });
+    this._setUser(payload && (payload.email || payload.powchToken)
       ? { email: payload.email ?? null, address: payload.address ?? null, powchToken: payload.powchToken ?? null }
-      : null;
-    this._user = user;
-    if (user) this.emit('auth', user);
+      : null);
     return payload;
   }
 
@@ -364,23 +419,32 @@ export class PowchClient {
   }
 
   /**
-   * Logout the current Powch session. Clears cached user and emits 'logout'.
+   * Logout the current Powch session.
+   * Standalone: clears the cached user and emits 'logout'.
+   * Embedded: signs Powch out through the shell; 'logout' fires when the shell's session ends
+   * (the shell's auth event), not on this call.
    */
   async logout() {
     if (this.shellBridge) {
+      this._subscribeShellAuth();
       await this.shellBridge.logout();
-    } else {
-      await this._sendRequest('POWCH_LOGOUT');
+      return;
     }
-    this._user = null;
-    this.emit('logout');
+    await this._sendRequest('POWCH_LOGOUT');
+    this._setUser(null);
   }
 
   /**
-   * Return the current cached user (from last successful auth). Read-only; no persistence across reloads.
+   * The signed-in user, or null. Read-only; no persistence across reloads.
+   * Standalone: from this client's last successful auth(). Powch reports a sign-in only to the
+   * host whose request started it, so a sign-in the user starts inside the sidebar this client
+   * opened is not reported to it; auth() is how a standalone host learns of one.
+   * Embedded: the shell's sign-in state (any sign-in the shell holds), with the email and
+   * powchToken this client's own auth() was released.
    * @returns {null|{email: string|null, address: string|null, powchToken: string|null}}
    */
   getUser() {
+    if (this.shellBridge) this._subscribeShellAuth();
     return this._user;
   }
 

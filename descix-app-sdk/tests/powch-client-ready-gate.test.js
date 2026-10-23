@@ -127,7 +127,10 @@ test('after READY, requests post immediately (no queueing)', { timeout: 3000 }, 
 
 test('EMBEDDED mode is untouched: delegates to the shell bridge, no iframe, no queue', { timeout: 3000 }, async () => {
   const calls = [];
-  const bridge = { login: async (o) => { calls.push(['login', o]); return { email: 'e@b.test' }; } };
+  const bridge = {
+    login: async (o) => { calls.push(['login', o]); return { email: 'e@b.test' }; },
+    on: (event, cb) => cb({ signedIn: false, address: null }), // the shell's auth event (DeSciX.powch.on)
+  };
   globalThis.window.DeSciX = { powch: bridge, bridge: { version: 1, ready: true } };
   const client = new PowchClient({});
   assert.equal(client.shellBridge, bridge);

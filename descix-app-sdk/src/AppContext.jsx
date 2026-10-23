@@ -12,6 +12,7 @@ import {
 } from './util/AppData';
 import { Api } from './util/api';
 import { useDeSciXBridge } from './hooks/useDeSciXBridge';
+import { isSession } from './powch/authEvent.js';
 import { seedView } from './util/appView.js';
 import { peek as peekPendingIntent, createIntentResumer, PENDING_INTENT_STATUS } from './util/pendingIntent.js';
 import { captureShellIntentFromLocation, SHELL_INTENT_HANDLERS } from './util/shellIntents.js';
@@ -51,9 +52,6 @@ export const AppProvider = ({ children }) => {
     [],
   );
 
-  // --- Initialize DeSciX Bridge Hook ---
-  useDeSciXBridge(appState);
-
   // --- NEW: State for User Roles ---
   const [userRoles, setUserRoles] = useState(AppData.userRoles); // Initialize from AppData cache
   // --- End NEW State ---
@@ -63,6 +61,9 @@ export const AppProvider = ({ children }) => {
   const [loginStatus, _setLoginStatus] = useState(AppData.loginStatus || LoginStatus.GUEST);
   const [custodialBalance, _setCustodialBalance] = useState(AppData.custodialBalance || 0);
   // --- End NEW State ---
+
+  // --- Initialize DeSciX Bridge Hook (the shell session feeds DeSciX.powch.on('auth')) ---
+  useDeSciXBridge(appState, sessionInfo);
 
   // --- Reactive mirror of AppData.myApps (owned/entitled apps) ---
   // AppData.myApps is the non-reactive cache `refreshMyCommunitiesAndApps()` mutates
@@ -604,7 +605,7 @@ export const AppProvider = ({ children }) => {
         /** Standard app-sdk API: update session from Powch bridge result. Call after bridge.login() resolves. */
         loginWithSessionToken: (sessionData) => {
           const info = sessionData?.sessionInfo ?? sessionData;
-          if (!info?.id && !info?.access_token) return;
+          if (!isSession(info)) return;
           const status = sessionData?.auth_status ?? LoginStatus.CONNECTED;
           AppData.sessionInfo = info;
           AppData.loginStatus = status;

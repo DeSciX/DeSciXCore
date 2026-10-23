@@ -118,6 +118,12 @@
       "GITHUB_CLIENT_SECRET"
     ]
   },
+  "local_only_keys": {
+    "description": "Keys a process may hold ONLY on a developer machine (CloudConfig.isManagedCloudRuntime === false) and ONLY from that machine's dev-overrides.json. Every other layer (defaults-config-{env}.json, defaults-config.json, the Secret Manager blob, a defaults hot-reload) refuses the key at boot, and dev-overrides.json carrying it on a managed cloud runtime refuses the boot, naming the key. A key here is never in bootstrap_keys or dev_override_keys, which read process.env. LOCAL_VERIFICATION_CODE_SINK: absolute path of the JSON-lines file @descix/platform-api auth/emailVerification.js appends each plain verification code to, read by the local Playwright login spec.",
+    "keys": [
+      "LOCAL_VERIFICATION_CODE_SINK"
+    ]
+  },
   "defaults": {
     "description": "Keys with safe default values. Use SPARINGLY \u2014 prefer null to expose config errors. Only add here if the value is stable across all environments and has no security implications.",
     "values": {

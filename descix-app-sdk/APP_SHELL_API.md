@@ -203,6 +203,8 @@ browser tab, which is the way to a chromeless phone view. Browser full screen is
 Fullscreen API; the CodeSite iframe delegates it (`allow="fullscreen"`), so your app may call
 `element.requestFullscreen()` on top of any view where the browser supports it (iPhone Safari
 does not).
+The CodeSite iframe sandbox carries `allow-downloads`, so your app may hand the visitor a file
+with an anchor `download` attribute on a Blob URL; it needs no SDK call.
 
 | Member | Signature | Notes |
 |---|---|---|
@@ -384,7 +386,37 @@ const sig     = await DeSciX.powch.signMessage('hello', address);
 
 `login` · `logout` · `sign` · `signTransaction` · `signMessage` ·
 `signTypedData` · `send` · `receive` · `open` · `isAuthenticated()` ·
-`getAddress()`
+`getAddress()` · `on('auth', cb)` · `off('auth', cb)`
+
+**Knowing when the user is signed in.** `DeSciX.powch.on('auth', cb)` calls `cb` once
+immediately with the current state, then every time it changes, with
+`{ signedIn: boolean, address: string|null }`. It returns a function that unsubscribes;
+`DeSciX.powch.off('auth', cb)` does the same.
+
+```js
+await DeSciX.ready();
+const button = document.querySelector('#powch-login');
+const unsubscribe = DeSciX.powch.on('auth', ({ signedIn }) => {
+  button.textContent = signedIn ? 'Logged In' : 'Log in with Powch';
+  button.disabled = signedIn;
+});
+button.onclick = () => DeSciX.powch.login();
+addEventListener('pagehide', unsubscribe);
+```
+
+- `signedIn` is whether the shell holds a DeSciX session. It covers every sign-in the
+  shell sees: your `login()`, the shell's own Sign In, a sign-in the user makes inside the
+  Powch sidebar, and a session restored when the page loads. It turns `false` when the
+  shell's session ends.
+- `address` is the wallet address Powch released to the shell with a sign-in it asked for;
+  `null` when Powch released none (the shell's own sign-in asks for the session only).
+- `isAuthenticated()` and `getAddress()` return the same two values.
+- `DeSciX.powch.logout()` signs Powch out; it does not end the shell's session, so
+  `signedIn` stays `true` until the shell's session ends.
+- The callback runs in your page from the shell, directly (same origin, no `postMessage`).
+  Unsubscribe on `pagehide` so the shell does not call into a page that has gone.
+- `'auth'` is the only event; any other name, or a `cb` that is not a function, throws.
+  A callback that throws is logged by the shell and the other subscribers still run.
 
 ### `DeSciX.config` — where you are
 
@@ -443,7 +475,7 @@ In every case Powch is a cross-origin iframe that the shell renders as its sideb
 under the shell, and nothing inside your frame runs a second shell. Your app reaches the shell
 through the `window.DeSciX` bus that `resolveBridge()` finds by walking up the parent windows
 (`DeSciXAppSDK.js` `resolveBridge`; `PowchClient._findShellBridge`,
-`src/powch/PowchClient.js:61-63`): direct JavaScript, never `postMessage`. The only
+`src/powch/PowchClient.js:65-67`): direct JavaScript, never `postMessage`. The only
 `postMessage` traffic is between the shell and Powch. One engine fact follows from Powch being
 cross-origin: WebKit (Safari, and every browser on iOS and iPadOS) refuses to CREATE a passkey in
 a document that is not same-origin with all its ancestors, so a new Powch account on iOS cannot

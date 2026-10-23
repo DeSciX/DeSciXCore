@@ -23,6 +23,7 @@ export {
     stripInvalidAndLower,
     isSecretConfigKey,
     loggableConfigValue,
+    LOCAL_ONLY_CONFIG_KEYS,
 } from './config.js';
 
 export {

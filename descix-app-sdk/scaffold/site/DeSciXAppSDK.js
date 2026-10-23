@@ -702,11 +702,24 @@ window.DeSciX = (() => {
 
         /**
          * The shell's Powch wallet bridge — login, logout, sign, send/receive,
-         * isAuthenticated(), getAddress(). Published by the App Shell host
-         * (postMessage protocol; no Powch internals cross this boundary):
+         * isAuthenticated(), getAddress(), on('auth', cb) / off('auth', cb). Published
+         * by the App Shell host (postMessage protocol; no Powch internals cross this
+         * boundary):
          *
          *     await DeSciX.ready();
-         *     if (DeSciX.powch) await DeSciX.powch.login();
+         *     if (DeSciX.powch) {
+         *       const unsubscribe = DeSciX.powch.on('auth', ({ signedIn, address }) => {
+         *         button.textContent = signedIn ? 'Logged In' : 'Log in with Powch';
+         *       });
+         *       addEventListener('pagehide', unsubscribe);
+         *       button.onclick = () => DeSciX.powch.login();
+         *     }
+         *
+         * on('auth', cb) calls cb once immediately with { signedIn, address }, then on
+         * every change, and returns the unsubscribe. signedIn is whether the shell holds a
+         * DeSciX session (any sign-in the shell sees, including one made inside the Powch
+         * sidebar and a session restored on load); address is the wallet address Powch
+         * released to the shell, or null. isAuthenticated() / getAddress() return the same.
          *
          * On successful login the SHELL routes the view (e.g. to the dashboard);
          * the app does not redirect. Null when standalone or when this host

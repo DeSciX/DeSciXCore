@@ -611,6 +611,7 @@ export class User {
         user.migrated_to = user_doc.migrated_to || null;
         user.migrated_at = user_doc.migrated_at || null;
         user.pending_referral_guild_id = user_doc.pending_referral_guild_id || null;
+        user.recovery_confirmed_at = user_doc.recovery_confirmed_at || null;
 
         return user;
     }
@@ -1097,6 +1098,24 @@ export class User {
 
     isConnected() {
         return !!this.tos_accepted_at;
+    }
+
+    /**
+     * Wallet cold-storage backup (design 2026-10-23): the user confirmed "I have printed or written it
+     * down" for the recovery sheet. Stores only when (ISO string); the sheet never reaches the server.
+     */
+    async confirmRecovery() {
+        const recovery_confirmed_at = new Date().toISOString();
+        const result = await this.db.update_doc_fields(FirestoreCollections.USERS(), this.id, { recovery_confirmed_at });
+        if (result !== true) {
+            throw new Error(`User.confirmRecovery: the USERS write for ${this.id} failed; recovery_confirmed_at was not stored`);
+        }
+        this.recovery_confirmed_at = recovery_confirmed_at;
+        return recovery_confirmed_at;
+    }
+
+    hasConfirmedRecovery() {
+        return typeof this.recovery_confirmed_at === 'string' && this.recovery_confirmed_at.length > 0;
     }
 
     async stampBaseEntitlements(stamp) {
