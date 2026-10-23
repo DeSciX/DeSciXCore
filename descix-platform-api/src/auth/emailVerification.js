@@ -5,9 +5,17 @@
  * Generates codes, stores hashed values in Firestore, sends via Gmail.
  *
  * Config values loaded at call time via getCloudConfig() from @descix/cloud-core.
+ *
+ * Local code sink: on a developer machine only, sendEmailVerification ALSO appends the plain code
+ * to the JSON-lines file named by LOCAL_VERIFICATION_CODE_SINK, so a local end-to-end spec can
+ * complete email verification without a mailbox. The key is a cloud-core local-only key
+ * (config-schema.json local_only_keys): admitted only from dev-overrides.json when
+ * isManagedCloudRuntime is false, and refused at boot everywhere else.
  */
 
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import {
     CacheFirestore,
     FirestoreCollections,
@@ -62,9 +70,67 @@ function verificationRefusal(code, message) {
     });
 }
 
+/** The config key naming the local code sink file (a cloud-core local-only key). */
+export const LOCAL_VERIFICATION_CODE_SINK_KEY = 'LOCAL_VERIFICATION_CODE_SINK';
+
+/**
+ * The local code sink path of this process, or null when it has none. Throws when the key is set
+ * on a managed cloud runtime (cloud-core refuses that config at boot; reaching here means the
+ * refusal was bypassed) or is not an absolute path. Resolved BEFORE any side effect of a send.
+ */
+function localVerificationCodeSink(utils) {
+    const sinkPath = utils[LOCAL_VERIFICATION_CODE_SINK_KEY];
+    if (sinkPath === undefined || sinkPath === null) return null;
+    if (utils.isManagedCloudRuntime !== false) {
+        throw new Error(`${LOCAL_VERIFICATION_CODE_SINK_KEY} is set but this process is not on a developer machine ` +
+            `(isManagedCloudRuntime=${utils.isManagedCloudRuntime}); refusing to send a verification code.`);
+    }
+    if (typeof sinkPath !== 'string' || !path.isAbsolute(sinkPath)) {
+        throw new Error(`${LOCAL_VERIFICATION_CODE_SINK_KEY} must be an absolute file path (dev-overrides.json); ` +
+            `got ${JSON.stringify(sinkPath)}.`);
+    }
+    return sinkPath;
+}
+
+/**
+ * Append one sent code to the local code sink at `sinkPath` (from localVerificationCodeSink).
+ * The file is created by this function with mode 600 (parent directories 700); an existing file
+ * readable by group or other is refused, never silently used. The code is never logged.
+ *
+ * Line contract (JSON, one object per line):
+ *   { email, code, requested_by, expires_at, timestamp }
+ *   email        normalized address (the EMAIL_VERIFICATIONS doc id)
+ *   code         the plain 6-digit code verifyEmailCode accepts
+ *   requested_by the requesting account's uid, or null for an account-less send
+ *   expires_at   ISO-8601 expiry of the code
+ *   timestamp    ISO-8601 time the line was written
+ * The newest line for an email is the live code: every send replaces the stored hash.
+ */
+function writeLocalVerificationCode(sinkPath, { email, code, uid, expiresAt }) {
+    fs.mkdirSync(path.dirname(sinkPath), { recursive: true, mode: 0o700 });
+    const fd = fs.openSync(sinkPath, 'a', 0o600);
+    try {
+        const mode = fs.fstatSync(fd).mode & 0o777;
+        if (mode & 0o077) {
+            throw new Error(`${LOCAL_VERIFICATION_CODE_SINK_KEY} file ${sinkPath} has mode ${mode.toString(8)}; ` +
+                'it must be 600. Delete it and let the sink create it.');
+        }
+        fs.writeSync(fd, JSON.stringify({
+            email,
+            code,
+            requested_by: uid,
+            expires_at: expiresAt.toISOString(),
+            timestamp: new Date().toISOString(),
+        }) + '\n');
+    } finally {
+        fs.closeSync(fd);
+    }
+}
+
 /**
  * Send an email verification code to the given address.
- * Generates a 6-digit code, hashes and stores it in Firestore, then emails it.
+ * Generates a 6-digit code, hashes and stores it in Firestore, then emails it; on a developer
+ * machine with LOCAL_VERIFICATION_CODE_SINK set, also appends it to the local code sink.
  *
  * The record is bound to the requesting account: `uid` is stored on it (null for flows with no
  * account, e.g. Discord link or a token-claim recipient), and every send rewrites it, so a new
@@ -92,6 +158,8 @@ export async function sendEmailVerification(params) {
         );
     }
 
+    const sinkPath = localVerificationCodeSink(utils);
+
     const code = crypto.randomInt(100000, 999999).toString();
     const codeHash = crypto.createHash('sha256').update(code).digest('hex');
     const expiresAt = Timestamp.fromDate(new Date(Date.now() + EMAIL_CODE_EXPIRY_MINUTES * 60 * 1000));
@@ -108,6 +176,8 @@ export async function sendEmailVerification(params) {
     });
 
     await sendVerificationEmail(normalized, code, EMAIL_CODE_EXPIRY_MINUTES);
+
+    if (sinkPath) writeLocalVerificationCode(sinkPath, { email: normalized, code, uid, expiresAt: expiresAt.toDate() });
 
     return networkResponse(NetworkStatus.OK, LoginStatus.CONNECTED, {
         sent: true,

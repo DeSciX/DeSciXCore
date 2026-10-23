@@ -59,17 +59,42 @@ export function staticSitePlugin(staticRoutes) {
       // Register middleware BEFORE Vite's own middleware (return function)
       // so that static routes are handled before Vite tries to process them.
       server.middlewares.use((req, res, next) => {
-        const url = req.url?.split('?')[0]; // Strip query string
+        const url = req.url?.split('?')[0]; // Strip query string (raw, still percent-encoded)
         if (!url?.startsWith('/p/')) return next();
 
+        // Decode the pathname EXACTLY ONCE (#62): the site dist holds the decoded names
+        // (a file "Science Computers And People.md" is requested as %20). A malformed escape
+        // is a 400 naming the path — never a retry of the raw path.
+        let decoded;
+        try {
+          decoded = decodeURIComponent(url);
+        } catch {
+          res.statusCode = 400;
+          res.end(`Bad request: malformed percent-encoding in ${url}`);
+          return;
+        }
+
         // Extract appId and file path from /p/{appId}/...
-        const rest = url.slice(3); // remove '/p/'
+        const rest = decoded.slice(3); // remove '/p/'
         const slashIdx = rest.indexOf('/');
         const appId = slashIdx >= 0 ? rest.slice(0, slashIdx) : rest;
         const filePath = slashIdx >= 0 ? rest.slice(slashIdx + 1) : '';
 
         const staticRoot = staticRoutes[appId];
         if (!staticRoot) return next();
+
+        // Refuse BEFORE touching the filesystem: a NUL byte or a `..` segment in the
+        // decoded path (covers %2e%2e and %2f-smuggled separators alike).
+        if (filePath.includes('\0')) {
+          res.statusCode = 400;
+          res.end(`Bad request: NUL byte in decoded path of ${url}`);
+          return;
+        }
+        if (filePath.split(/[\\/]/).includes('..')) {
+          res.statusCode = 403;
+          res.end(`Forbidden: '..' segment in decoded path of ${url}`);
+          return;
+        }
 
         // Redirect /p/{appId} to /p/{appId}/ so relative paths resolve correctly
         if (!filePath && !url.endsWith('/')) {
@@ -82,10 +107,11 @@ export function staticSitePlugin(staticRoutes) {
         // Resolve file path — default to index.html for directory requests
         let resolved = path.join(staticRoot, filePath);
 
-        // Security: prevent path traversal
-        if (!resolved.startsWith(staticRoot)) {
+        // Security: the resolved path must stay inside the site dist
+        const rel = path.relative(staticRoot, resolved);
+        if (rel.startsWith('..') || path.isAbsolute(rel)) {
           res.statusCode = 403;
-          res.end('Forbidden');
+          res.end(`Forbidden: ${url} resolves outside the site dist`);
           return;
         }
 
