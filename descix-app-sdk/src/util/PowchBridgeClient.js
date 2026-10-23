@@ -9,6 +9,7 @@
 
 import { requirePowchUrl } from '../powch/powchOrigin.js';
 import { PowchReadyGate, POWCH_READY } from '../powch/readyGate.js';
+import { createAuthEvent, isSession } from '../powch/authEvent.js';
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 120000;
 
@@ -41,8 +42,10 @@ export class PowchBridgeClient {
     // POWCH_READY arrived before registerIframe(); applied when the iframe registers.
     this._readyBeforeRegister = false;
     this._isIframeVisible = false;
-    this._isAuthenticated = false;
-    this._displayAddress = null;
+    // The shell's sign-in state as apps see it ({ signedIn, address }), published as
+    // DeSciX.powch.on('auth'). Its signed-in half is fed by the shell's session (useDeSciXBridge);
+    // this client feeds the address Powch releases to this host.
+    this.auth = createAuthEvent();
     this._currentTab = TAB_IDS.CARDS;
     this._listeners = new Map();
     this._boundHandleMessage = null;
@@ -54,7 +57,7 @@ export class PowchBridgeClient {
    */
   _syncSessionToHost(payload) {
     const info = payload?.sessionInfo ?? payload;
-    if (!info?.id && !info?.access_token) return;
+    if (!isSession(info)) return;
     try {
       const shell = typeof window !== 'undefined' ? window.DeSciX : null;
       if (shell?.loginWithSessionToken) {
@@ -169,8 +172,7 @@ export class PowchBridgeClient {
     if (!type) return;
 
     if (type === 'POWCH_STATE_UPDATE' && payload) {
-      if (payload.isAuthenticated !== undefined) this._isAuthenticated = payload.isAuthenticated;
-      if (payload.displayAddress !== undefined) this._displayAddress = payload.displayAddress;
+      if (payload.displayAddress !== undefined) this.auth.setReleasedAddress(payload.displayAddress);
       this._syncSessionToHost(payload);
       this._emit('state_update', payload);
       return;
@@ -261,12 +263,6 @@ export class PowchBridgeClient {
   }
   get isIframeVisible() {
     return this._isIframeVisible;
-  }
-  get isAuthenticated() {
-    return this._isAuthenticated;
-  }
-  get displayAddress() {
-    return this._displayAddress;
   }
   get currentTab() {
     return this._currentTab;
@@ -366,14 +362,6 @@ export class PowchBridgeClient {
     return this._sendRequest('POWCH_SIGN_TYPED_DATA', { domain, types, value, address });
   }
 
-  get wallet() {
-    return {
-      crypto: {
-        importedKeys: this._displayAddress ? [{ address: this._displayAddress }] : [],
-      },
-    };
-  }
-
   get config() {
     return { bridgeUrl: this.bridgeUrl, brand: this.brand };
   }
@@ -386,4 +374,17 @@ export class PowchBridgeClient {
       submitTransaction: (params) => Api.call('submit_transaction', params),
     };
   }
+}
+
+// Sign-in state has one owner, `bridge.auth`. A read of a member it replaced fails loud, naming it.
+for (const [member, use] of Object.entries({
+  isAuthenticated: 'bridge.auth.current.signedIn',
+  displayAddress: 'bridge.auth.current.address',
+  wallet: 'bridge.auth.current.address',
+})) {
+  Object.defineProperty(PowchBridgeClient.prototype, member, {
+    get() {
+      throw new Error(`PowchBridgeClient.${member} is removed: read ${use} (or subscribe with bridge.auth.on('auth', cb))`);
+    },
+  });
 }

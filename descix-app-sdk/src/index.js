@@ -24,6 +24,7 @@ export { default as PowchSideBarWidget } from './components/PowchSideBarWidget.j
 export { PowchBridgeProvider, usePowchBridge } from './providers/PowchBridgeProvider.jsx';
 export { PowchClient } from './powch/PowchClient.js';
 export { descixSessionRequest } from './powch/sessionRequest.js';
+export { AUTH_EVENT, isSession } from './powch/authEvent.js';
 export { toSignableTypedData, TypedDataError } from './powch/typedData.js';
 export { NetworkLoadingProvider, useNetworkLoading } from './util/NetworkAPI.jsx';
 export { useDeSciXView } from './hooks/useDeSciXView.js';

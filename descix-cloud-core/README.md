@@ -40,7 +40,7 @@ That three-call shape is the contract: construct, await, then read. `getCloudCon
 
 | Area | Members |
 |---|---|
-| Config | `createCloudConfig`, `initializeCloudConfig`, `getCloudConfig`, `CloudConfigFatalError` |
+| Config | `createCloudConfig`, `initializeCloudConfig`, `getCloudConfig`, `CloudConfigFatalError`, `LOCAL_ONLY_CONFIG_KEYS` |
 | Constants | `ProductTypes`, `LoginStatus`, `NetworkStatus`, `PERMISSIONS`, `GUEST_ALLOWED_COMMANDS` |
 | Mesh context | `mountMeshApi`, `MESH_API_PATH`, `MESH_TRUST_ANCHORS`, `MESH_VERIFY_MODES`, `resolveMeshTrustAnchor`, `normalizeMeshContext`, `serializeMeshContext`, `signMeshContext`, `verifyMeshContext`, `buildOutboundMeshHeaders`, `MeshContextError` |
 | Infrastructure | `getFirestoreInstance`, `publishMessage`, `registerServiceManifest`, `killExistingProcess` |
@@ -66,6 +66,20 @@ service:
 Set `"MESH_CTX_VERIFY_MODE": "enforce"` in the service's `defaults-config.json`. The key the
 service verifies against is the platform's, resolved from `DEPLOY_ENV` (`MESH_TRUST_ANCHORS`); a
 config file that sets `MESH_CTX_PUBLIC_KEY` or `MESH_CTX_KEY_ID` refuses boot.
+
+## Local-only keys
+
+A key listed in `config-schema.json` `local_only_keys` (exported as `LOCAL_ONLY_CONFIG_KEYS`) exists
+only on a developer machine. It is admitted from one layer, the service's `dev-overrides.json`, and
+only when `isManagedCloudRuntime` is false. Each of these refuses boot with `CloudConfigFatalError`,
+naming the key:
+
+- the key in `defaults-config.json`, `defaults-config-{env}.json` or the Secret Manager config blob;
+- the key held by a process on a managed runtime (App Engine, Cloud Run, Cloud Functions), for
+  example from a `dev-overrides.json` that rode into a deploy bundle.
+
+`process.env` never sets a local-only key. The current key is `LOCAL_VERIFICATION_CODE_SINK`, read by
+`@descix/platform-api` email verification.
 
 ## Config
 

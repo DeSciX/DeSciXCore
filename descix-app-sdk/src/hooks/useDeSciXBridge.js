@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { usePowchBridge } from '../providers/PowchBridgeProvider';
 import { AppContextState } from '../util/AppData';
 import { publishViewApi } from '../util/appView.js';
+import { createPowchBus } from '../powch/powchBus.js';
 
 /**
  * useDeSciXBridge Hook
@@ -13,12 +14,20 @@ import { publishViewApi } from '../util/appView.js';
  * not by this hook. The bridge exposes login, sign, etc.; session update is an App Shell
  * responsibility.
  *
+ * Feeds the bridge's auth event (DeSciX.powch.on('auth')) with the shell's session, so it reports
+ * every sign-in and sign-out the shell sees, not only the ones Powch reported to this host.
+ *
  * Runs only in host mode (PowchBridgeProvider mounted). In Case 3 (Powch standalone),
  * PowchBridgeProvider is not mounted; bridge is null and we do not set window.DeSciX.powch.
  */
-export const useDeSciXBridge = (appState) => {
+export const useDeSciXBridge = (appState, sessionInfo) => {
   const bridge = usePowchBridge();
   const initialized = useRef(false);
+
+  useEffect(() => {
+    if (!bridge) return;
+    bridge.auth.setSession(sessionInfo);
+  }, [bridge, sessionInfo]);
 
   useEffect(() => {
     if (!bridge) return;
@@ -29,20 +38,7 @@ export const useDeSciXBridge = (appState) => {
 
     window.DeSciX = window.DeSciX || {};
 
-    window.DeSciX.powch = {
-      login: (opts) => bridge.login(opts),
-      logout: () => bridge.logout(),
-      sign: (data) => bridge.sign(data),
-      signTransaction: (tx, address) => bridge.signTransaction(tx, address),
-      signMessage: (msg, address) => bridge.signMessage(msg, address),
-      signTypedData: (domain, types, value, address) =>
-        bridge.signTypedData(domain, types, value, address),
-      receive: (params) => bridge.receive(params),
-      send: (params) => bridge.send(params),
-      open: (opts) => bridge.open(opts),
-      isAuthenticated: () => bridge.isAuthenticated,
-      getAddress: () => bridge.displayAddress,
-    };
+    window.DeSciX.powch = createPowchBus(bridge);
 
     window.DeSciX.config = {
       ...window.DeSciX.config,

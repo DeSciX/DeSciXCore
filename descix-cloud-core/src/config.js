@@ -13,6 +13,8 @@
  *   + dev only: dev-overrides.json + .env FORCE-WIN over all the above (_loadDevOverrides).
  *     dev-overrides.json may set ANY key, by design — a local override can set any
  *     secret (CEO ruling, 2026-09-29). .env picks up config-schema.json dev_override_keys.
+ *   Local-only keys (config-schema.json local_only_keys) come ONLY from dev-overrides.json on a
+ *   developer machine: every other layer refuses them, and so does a managed cloud runtime.
  * Merge is first-write-wins (_mergeConfig), so more-specific layers load FIRST.
  * "Secret Manager is for secrets only" — non-secret per-env config belongs in the
  * defaults-config-{env}.json layer, not in descix_config_{env} (CEO-D-2026-05-30-
@@ -105,6 +107,17 @@ export function isSecretConfigKey(key) {
 export function loggableConfigValue(key, value) {
     return isSecretConfigKey(key) ? '<redacted>' : String(value);
 }
+
+/**
+ * THE ONE OWNER of "which config keys exist only on a developer machine".
+ *
+ * Declared in config-schema.json `local_only_keys`. Such a key is admitted from ONE layer,
+ * dev-overrides.json, and only when isManagedCloudRuntime is false; every other layer refuses it
+ * (_refuseLocalOnlyFrom), and a managed cloud runtime holding one refuses the boot
+ * (_assertLocalOnlyKeysOffCloud). Consumers read the key as `utils.<KEY>`; it is null/undefined
+ * in every deployed environment.
+ */
+export const LOCAL_ONLY_CONFIG_KEYS = Object.freeze([...(configSchema.local_only_keys?.keys || [])]);
 
 // Constants exported for consumers
 class ProductTypes {
@@ -663,6 +676,7 @@ class CloudConfig {
     _ingestConfigSecretPayload(parsed) {
         this._refuseWalletPkFrom(parsed, `the config secret '${this.CONFIG_SECRET_NAME}'`);
         this._refuseMeshTrustFrom(parsed, `the config secret '${this.CONFIG_SECRET_NAME}'`);
+        this._refuseLocalOnlyFrom(parsed, `the config secret '${this.CONFIG_SECRET_NAME}'`);
         this._mergeConfig(parsed);
     }
 
@@ -683,6 +697,45 @@ class CloudConfig {
             `platform fact owned by @descix/cloud-core (meshContext.js MESH_TRUST_ANCHORS), resolved from ` +
             `DEPLOY_ENV — a service never carries its own copy. Delete ${carried.join(' and ')} from ${sourceLabel}; ` +
             `read them as utils.MESH_CTX_KEY_ID / utils.MESH_CTX_PUBLIC_KEY if you need them.`
+        );
+    }
+
+    /**
+     * Refuse a config source other than dev-overrides.json that carries a local-only key
+     * (LOCAL_ONLY_CONFIG_KEYS). A local-only key in a defaults file or the Secret Manager blob
+     * would reach a deployed environment, so it is a boot failure naming the key and the source,
+     * never a value that quietly applies. A null value is a placeholder, not a source.
+     */
+    _refuseLocalOnlyFrom(parsed, sourceLabel) {
+        if (!parsed || typeof parsed !== 'object') return;
+        const carried = LOCAL_ONLY_CONFIG_KEYS.filter(k =>
+            Object.prototype.hasOwnProperty.call(parsed, k) && parsed[k] !== null && parsed[k] !== undefined);
+        if (carried.length === 0) return;
+        throw new CloudConfigFatalError(
+            `[CloudConfig] FATAL: ${sourceLabel} sets ${carried.join(' and ')}, a local-only key ` +
+            `(config-schema.json local_only_keys). It is admitted only from dev-overrides.json on a developer ` +
+            `machine. Delete ${carried.join(' and ')} from ${sourceLabel}.`
+        );
+    }
+
+    /**
+     * A managed cloud runtime (isManagedCloudRuntime) never holds a local-only key, whatever layer
+     * supplied it (a dev-overrides.json that rode into a deploy bundle is the expected path).
+     * Runs after every config source, so it judges final values; names the key, never the value.
+     */
+    _assertLocalOnlyKeysOffCloud() {
+        if (!this.isManagedCloudRuntime) return;
+        const held = LOCAL_ONLY_CONFIG_KEYS.filter(k => this[k] !== null && this[k] !== undefined);
+        if (held.length === 0) return;
+        const markers = ['GAE_ENV', 'GAE_SERVICE', 'K_SERVICE']
+            .filter(k => process.env[k])
+            .map(k => `${k}=${process.env[k]}`)
+            .join(', ');
+        throw new CloudConfigFatalError(
+            `[CloudConfig] FATAL: ${held.join(' and ')} is set on a managed cloud runtime (${markers}). ` +
+            `It is a local-only key (config-schema.json local_only_keys), valid only in a developer machine's ` +
+            `dev-overrides.json. Remove ${held.join(' and ')} from this deployment: check the deploy bundle ` +
+            `for a dev-overrides.json.`
         );
     }
 
@@ -787,6 +840,7 @@ class CloudConfig {
             const parsed = JSON.parse(raw);
             this._refuseWalletPkFrom(parsed, `defaults-config-${this.DEPLOY_ENV}.json`);
             this._refuseMeshTrustFrom(parsed, `defaults-config-${this.DEPLOY_ENV}.json`);
+            this._refuseLocalOnlyFrom(parsed, `defaults-config-${this.DEPLOY_ENV}.json`);
             this._mergeConfig(parsed);
             const sha = crypto.createHash('sha256').update(raw).digest('hex');
             console.log(`[Config] Loaded defaults-config-${this.DEPLOY_ENV}.json (sha256=${sha.slice(0, 12)}…) — env layer wins over base defaults.`);
@@ -810,6 +864,7 @@ class CloudConfig {
                 const parsed = JSON.parse(raw);
                 this._refuseWalletPkFrom(parsed, 'defaults-config.json');
                 this._refuseMeshTrustFrom(parsed, 'defaults-config.json');
+                this._refuseLocalOnlyFrom(parsed, 'defaults-config.json');
                 this._mergeConfig(parsed);
                 this.__defaults_config_sha = crypto.createHash('sha256').update(raw).digest('hex');
                 // Boot snapshot of the parsed disk defaults — used by _reloadDefaults
@@ -940,6 +995,7 @@ class CloudConfig {
             // Refused before any key is applied: the running process keeps its boot values and the
             // warn below names the refusal; the next boot refuses fatally.
             this._refuseMeshTrustFrom(fresh, 'defaults-config.json');
+            this._refuseLocalOnlyFrom(fresh, 'defaults-config.json');
 
             const snapshot = this.__defaults_config_snapshot || {};
             const changedKeys = [];
@@ -1303,6 +1359,9 @@ class CloudConfig {
         // Runs AFTER Secret Manager + dev-overrides so it sees the FINAL value from
         // every source (env var, secret, leaked .env / dev-overrides.json).
         this._assertLocalDebugNotOnCloud();
+
+        // Local-only keys (config-schema.json local_only_keys) never reach a managed cloud runtime.
+        this._assertLocalOnlyKeysOffCloud();
 
         // Mesh posture: a mesh service on a managed runtime enforces, or does not boot.
         this._assertMeshPosture();

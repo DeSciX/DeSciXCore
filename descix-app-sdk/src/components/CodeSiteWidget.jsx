@@ -304,7 +304,9 @@ const CodeSiteWidget = ({
   // without it the popup inherits the sandbox and a COOP origin (YouTube) lands on a
   // chrome-error page (FRAQTL, CEO report 2026-10-13). The scripts+same-origin pair already
   // lets the frame escape its own sandbox, so this token removes no barrier.
-  const sandboxPermissions = 'allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-same-origin';
+  // allow-downloads: an app may hand the visitor a file (Blob + <a download>); without it the
+  // download drops silently. Same scripts+same-origin reasoning: it removes no barrier.
+  const sandboxPermissions = 'allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads allow-same-origin';
 
   // Layout: chatWidth is ALWAYS the chat pane's fraction; chatPosition picks the side
   // (row-reverse puts the chat pane first visually for 'left' — WS-HEADLESS-MVP-A4 fix:
