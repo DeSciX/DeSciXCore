@@ -1,6 +1,6 @@
 {
   "name": "@descix/app-sdk",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "DeSciX App Shell - init-to-READY logic, core API, Powch integration, dev proxy config",
   "repository": {
     "type": "git",
@@ -13,6 +13,7 @@
     ".": "./src/index.js",
     "./dev": "./src/dev/index.js",
     "./share": "./src/util/share.js",
+    "./share-link": "./src/util/shareLink.js",
     "./chat-context": "./src/util/chatContext.js",
     "./pending-intent": "./src/util/pendingIntent.js",
     "./scaffold": "./scaffold/index.js",

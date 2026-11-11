@@ -17,12 +17,27 @@ import { seedView } from './util/appView.js';
 import { peek as peekPendingIntent, createIntentResumer, PENDING_INTENT_STATUS } from './util/pendingIntent.js';
 import { captureShellIntentFromLocation, SHELL_INTENT_HANDLERS } from './util/shellIntents.js';
 import { handleSessionExpired } from './util/sessionExpiry.js';
+import { capturePendingRef, claimPendingRef, webPageMintParams, requireShareUrl, CLAIM_OUTCOMES } from './util/shareLink.js';
 
 
 
 export const AppContext = createContext();
 
+/** Discord's activity launch param: Discord hands it to the activity as DiscordSDK.customId. */
+const DISCORD_LAUNCH_PARAM = 'custom_id';
+
+/**
+ * A share link's `?ref=` is read once, at the provider's first render — before SdkInitializer hands the
+ * top URL's query to an app frame and before SDK_CHECKED rewrites the URL — held in sessionStorage on this
+ * shell's origin (it survives the Powch sign-in), and removed from the address bar.
+ */
+function captureShareLinkAtMount() {
+  const { cleanUrl } = capturePendingRef(window.location, window.sessionStorage);
+  if (cleanUrl) window.history.replaceState(window.history.state, '', cleanUrl);
+}
+
 export const AppProvider = ({ children }) => {
+  useState(captureShareLinkAtMount); // once per mount: a lazy initializer runs on the first render only
 
 
   const [currentChannel, setCurrentChannel] = useState(null);
@@ -216,59 +231,42 @@ export const AppProvider = ({ children }) => {
     }
   };
 
-  // --- Deep Link Generation Functions ---
-  const makeCustomDeepLink = async (targetView, appId, communityId, documentId, inAppActivityView, rewardType, rewardAmount) => {
-    const guild_id = isEmbedded && AppData.sdk?.guildId ? AppData.sdk.guildId : null;
-    const activityId = import.meta.env.VITE_DISCORD_CLIENT_ID;
-    const channelId = isEmbedded && AppData.sdk?.channelId ? AppData.sdk.channelId : null;
-
-    // Ensure user is logged in
+  // --- Share links (util/shareLink.js owns the contract) ---
+  // A web shell mints a link to the page it is showing: the server answers share_url, `<page>?ref=<custom_id>`.
+  // Inside a Discord activity the link is Discord's own activity URL; Discord hands its `custom_id` launch
+  // param to the activity as DiscordSDK.customId (SdkInitializer stores it for the claim). No referrer id
+  // travels in either: the server derives it from the promotion.
+  const makeCustomDeepLink = async (args) => {
+    if (!args || typeof args !== 'object') {
+      throw new Error('makeCustomDeepLink takes ({ channel, communityId?, rewardType? }); the positional (targetView, appId, communityId, …) form is deleted.');
+    }
+    const { channel, communityId, rewardType } = args;
     if (!AppData.sessionInfo?.id) {
       throw new Error("User not logged in. Cannot generate referral link.");
     }
+    const target_community_id = communityId || AppData.selectedCommunity?.community_id;
 
-    const result = await Api.generateReferralCode({
-      target_view: targetView,
-      target_community_id: communityId || AppData.selectedCommunity?.community_id, // Use selected if not provided
-      target_app_id: appId || AppData.selectedApp?.app_id,           // Use selected if not provided
-      target_document_id: documentId,
-      target_in_app_activity: inAppActivityView,
-      source_guild_id: guild_id,
-      source_channel_id: channelId,
-      source_user_id: AppData.sessionInfo.id, // Included automatically by makeCommandRequestJSON, but explicit here for clarity
-      rewardType: rewardType,
-      rewardAmount: rewardAmount,
-    });
-
-    if (result && result.custom_id) {
-      const customId = result.custom_id;
-      const referrerId = AppData.sessionInfo.id;
-      let baseUrl = isEmbedded ? `https://discord.com/activities/${activityId}` : (import.meta.env.VITE_SITE_URL || window.location.origin);
-
-      // Construct the link using URLSearchParams for safety
-      const linkParams = new URLSearchParams();
-      linkParams.set('referrer_id', referrerId);
-      linkParams.set('custom_id', customId);
-      // Optionally add guild_id if needed for external link context (though backend gets it from Promotion doc)
-      // if (guild_id) linkParams.set('guild_id', guild_id);
-
-      let referralLink = `${baseUrl}?${linkParams.toString()}`;
-      console.log('AppContext: Generated referral link:', referralLink);
-      return referralLink; // Return the generated link
-
-    } else {
-      throw new Error("API did not return a valid custom_id.");
+    if (isEmbedded) {
+      const activityId = import.meta.env.VITE_DISCORD_CLIENT_ID;
+      if (!activityId) throw new Error('VITE_DISCORD_CLIENT_ID is not set: a Discord activity link cannot be built.');
+      const result = await Api.generateReferralCode({
+        target_community_id,
+        source_guild_id: AppData.sdk?.guildId ?? null,
+        source_channel_id: AppData.sdk?.channelId ?? null,
+        rewardType,
+      });
+      if (!result?.custom_id) throw new Error(`generate_referral_code returned no custom_id: ${JSON.stringify(result)}`);
+      return `https://discord.com/activities/${activityId}?${DISCORD_LAUNCH_PARAM}=${encodeURIComponent(result.custom_id)}`;
     }
+
+    const result = await Api.generateReferralCode(
+      webPageMintParams({ page: window.location.href, channel, communityId: target_community_id, rewardType }),
+    );
+    return requireShareUrl(result);
   };
 
-
-  const makeDeepLinkToCurrent = async (rewardType = RewardTypes.REF, rewardAmount = 1) => { // Default reward type/amount
-    const appId = AppData.selectedApp?.app_id;
-    const communityId = AppData.selectedCommunity?.community_id;
-    const documentId = null; // Add logic if specific docs can be linked
-    const inAppActivityView = currentInAppActivity; // Use current in-app view
-    return await makeCustomDeepLink(currentView, appId, communityId, documentId, inAppActivityView, rewardType, rewardAmount);
-  };
+  const makeDeepLinkToCurrent = async (rewardType = RewardTypes.REF) =>
+    makeCustomDeepLink({ channel: 'web_share', communityId: AppData.selectedCommunity?.community_id, rewardType });
 
   // --- State Machine Logic ---
   const stateMachine = useCallback(async (event, payload) => {
@@ -337,7 +335,6 @@ export const AppProvider = ({ children }) => {
             return;
           }
 
-          // Pass referral info if any
           setAppEvent({ 
             type: AppContextEvent.SDK_CHECKED, 
             payload: { 
@@ -362,8 +359,8 @@ export const AppProvider = ({ children }) => {
         case AppContextEvent.SDK_CHECKED: {
           console.log("AppContext: SDK_CHECKED event processing - consolidating checks.");
           
-          // 1. CAPTURE A PENDING INTENT (/device?code=, /connect?ceremony=) AND THE REFERRAL CODE
-          const urlParams = new URLSearchParams(window.location.search);
+          // 1. CAPTURE A PENDING INTENT (/device?code=, /connect?ceremony=). A share link's ?ref= was
+          // captured at mount (util/shareLink.js), before anything read this URL.
           let intentCarried = false;
           try {
             const { intent, carried } = await captureShellIntentFromLocation(window.location);
@@ -375,20 +372,8 @@ export const AppProvider = ({ children }) => {
             setPendingIntentState({ intent: null, status: PENDING_INTENT_STATUS.FAILED, error, retryable: false });
           }
 
-          // Handle referral code
-          const custom_id = urlParams.get('custom_id');
-          const referrer_id = urlParams.get('referrer_id');
-          const guild_id = urlParams.get('guild_id');
-          
-          if (custom_id && referrer_id) {
-            console.log('AppContext: Referral code detected in URL');
-            AppData.refCode = custom_id;
-            AppData.refType = 'REFERRAL';
-            AppData.referralData = { custom_id, referrer_id, guild_id };
-          }
-          
           // Strip URL params and redirect to clean URL
-          if (intentCarried || custom_id || referrer_id) {
+          if (intentCarried) {
             const cleanUrl = window.location.origin + '/';
             window.history.replaceState({}, '', cleanUrl);
             console.log('AppContext: URL params stripped, redirected to:', cleanUrl);
@@ -422,13 +407,6 @@ export const AppProvider = ({ children }) => {
             }
 
             setAppEvent(AppContextEvent.LOGIN_SUCCESS);
-
-            // Handle Referral if passed from SDK_READY
-            const referral = payload?.referral;
-            if (referral) {
-              console.log("AppContext: Handling INCOMING_REFERRAL event - payload:", referral);
-              handleReferral(referral);
-            }
           }
           // AUTHENTICATED, GUEST, other: Platform's initial route handler
           // (useEffect on sdk.appState === READY) handles view routing.
@@ -581,6 +559,16 @@ export const AppProvider = ({ children }) => {
     runPendingIntent();
   }, [appState, loginStatus, runPendingIntent]);
 
+  // The ONE place a held share link is claimed: once the shell is READY and CONNECTED, per session identity.
+  // The claim sends { custom_id } only; the server derives the claimant and the referrer (util/shareLink.js).
+  const sessionIdentity = sessionInfo?.id ?? sessionInfo?.user_id ?? null;
+  useEffect(() => {
+    if (appState !== AppContextState.READY || loginStatus !== LoginStatus.CONNECTED || !sessionIdentity) return;
+    claimPendingRef(window.sessionStorage, Api.call).then((r) => {
+      if (r.outcome !== CLAIM_OUTCOMES.NONE) console.log(`AppContext: share-link claim ${r.ref}: ${r.outcome}`, r.detail);
+    });
+  }, [appState, loginStatus, sessionIdentity]);
+
   useEffect(() => {
     // --- V2: App Shell Initialization ---
     // Expose helpers on window for same-origin interframe scripting
@@ -665,37 +653,6 @@ export const AppProvider = ({ children }) => {
       }
     }
   }, [isEmbedded, setSelectedCommunity]);
-
-  // --- Referral Validation Handler ---
-  const handleReferral = async (payload) => {
-    console.log("AppContext: handleReferral validating:", payload);
-    if (payload?.custom_id && AppData.sessionInfo?.id) {
-      try {
-        const validationPayload = {
-          custom_id: payload.custom_id,
-          referrer_id: payload.referrer_id, // Ensure referrer_id is in payload
-          guild_id: payload.guild_id,      // Ensure guild_id is in payload
-          // new_user_id is added by makeCommandRequestJSON based on AppData.sessionInfo.id
-        };
-        const response = await Api.validateReferral(validationPayload);
-        console.log("AppContext: Referral validation API response:", response);
-        // Optionally show success/error message based on response.message
-        if (response.status === 'OK' && response.message && !response.message.includes("already claimed")) {
-          // Show success feedback (e.g., toast notification) - Implement UI feedback later
-          console.log("Referral success:", response.message);
-        } else if (response.status === 'ERROR') {
-          // Show error feedback - Implement UI feedback later
-          console.error("Referral error:", response.message);
-        }
-      } catch (error) {
-        console.error("AppContext: Referral validation API call failed:", error);
-        // Show error feedback - Implement UI feedback later
-      }
-    } else {
-      console.warn("AppContext: handleReferral - missing referral data or user info.");
-    }
-  };
-
 
   // --- Product Purchase/Join/Install Functions (Refactored slightly) ---
   const installApp = async (app, communityId) => {

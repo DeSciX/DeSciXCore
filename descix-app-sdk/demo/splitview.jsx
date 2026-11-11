@@ -5,9 +5,9 @@
  * statics + /apifront on one host; see frqtl-server-seam-contract.md §7.5).
  *
  * CANONICAL COMPONENTS ONLY (engineering-culture mandate — extend, never re-invent):
- *   - AppShell            → providers + SdkInitializer (deeplinks /claim/:code,
- *                           referral params custom_id/referrer_id/guild_id, community-
- *                           token path parsing — ALL inherited automatically)
+ *   - AppShell            → providers + SdkInitializer (deeplinks /claim/:code, the
+ *                           share link's ?ref= capture and claim, community-token
+ *                           path parsing — ALL inherited automatically)
  *   - DemoChrome          → the PWA TopNavBar pattern, minimal: wallet button
  *                           (bridge.openUi()), user menu with the canonical logout
  *                           (setSessionInfo(null) + setLoginStatus(GUEST))
