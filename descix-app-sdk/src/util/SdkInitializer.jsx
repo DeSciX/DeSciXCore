@@ -6,6 +6,7 @@ import { DiscordSDK, DiscordSDKMock, patchUrlMappings } from '@discord/embedded-
 import ErrorBoundary from './ErrorBoundary';
 import { fetchAppBinding, appFrameUrl } from './appBinding';
 import { POWCH_APP_ID, requirePowchUrl } from '../powch/powchOrigin.js';
+import { storePendingRef } from './shareLink.js';
 
 // Module-level flag for SYNCHRONOUS OAuth detection (prevents race condition)
 let oauthCallbackDetected = false;
@@ -314,7 +315,6 @@ const SdkInitializer = ({ children, standalone = false, appId = null }) => {
 
         let sdkInstance = null;
         let authCode = null;
-        let referralData = null;
         let debugKey = null;
 
         // Skip if OAuth callback was detected (handled by separate useEffect)
@@ -348,16 +348,12 @@ const SdkInitializer = ({ children, standalone = false, appId = null }) => {
                  }
 
 
-                // Check for referral data AFTER ready()
-                const custom_id = DISCORD_SDK?.customId ? (DISCORD_SDK.customId === "undefined" ? null : DISCORD_SDK.customId) : null;
-                const referrer_id = DISCORD_SDK?.referrerId ? (DISCORD_SDK.referrerId === "undefined" ? null : DISCORD_SDK.referrerId) : null;
-                const guild_id = DISCORD_SDK.guildId;
-
-                if (custom_id && referrer_id) {
-                    referralData = { custom_id, referrer_id, guild_id };
-                    console.log('SdkInitializer: Found referral data:', referralData);
-                } else {
-                    console.log('SdkInitializer: No referral data found in SDK context.');
+                // A Discord activity launched from a share link carries Discord's custom_id launch param
+                // (DiscordSDK.customId). Held for the claim, which sends { custom_id } only (util/shareLink.js).
+                const launchCustomId = DISCORD_SDK.customId && DISCORD_SDK.customId !== "undefined" ? DISCORD_SDK.customId : null;
+                if (launchCustomId) {
+                    storePendingRef(window.sessionStorage, launchCustomId);
+                    console.log('SdkInitializer: Discord launch custom_id held for the share-link claim:', launchCustomId);
                 }
 
                 console.log('SdkInitializer: Authorizing...');
@@ -384,36 +380,18 @@ const SdkInitializer = ({ children, standalone = false, appId = null }) => {
                     isGtmInitialized.current = true;
                 }
 
-                // Extract referral data from URL using separate regex searches
                 const url = window.location.href;
-                const referrerMatch = url.match(/(?:referrer_id|user_id)=([^&]+)(?:&|$)/);
-                const customMatch = url.match(/custom_id=([^&]+)(?:&|$)/);
                 const guildMatch = url.match(/guild_id=([^&]+)(?:&|$)/);
                 // Skip code extraction for /device routes — handled by AppContext SDK_CHECKED
                 const isDeviceRoute = window.location.pathname === '/device' || window.location.pathname.startsWith('/device');
                 const codeMatch = isDeviceRoute ? null : url.match(/code=([^&]+)(?:&|$)/);
-                let custom_id = customMatch ? customMatch[1] : null;
-                let referrer_id = referrerMatch ? referrerMatch[1] : null;
                 let guild_id = guildMatch ? guildMatch[1] : 'mock_standalone_guild';
                 AppData.source_guild_id = guild_id;
                 let codeFromUrl = codeMatch ? codeMatch[1] : null;
-                if (custom_id && referrer_id) {
-                    referralData = { custom_id, referrer_id, guildId: guild_id };
-                    console.log('SdkInitializer: Found referral data in URL params:', referralData);
-                } else {
-                    console.log('SdkInitializer: No referral data found in URL.');
-                }
-
-                
                 debugKey = import.meta.env.VITE_DEBUG_KEY;
 
 
                 guild_id = guild_id || 'mock_standalone_guild';
-
-                if (custom_id) {
-                    referralData = { custom_id, referrer_id, guild_id };
-                    console.log('SdkInitializer: Found referral data in URL params:', referralData);
-                }
 
                 if (codeFromUrl) {
                     console.log('SdkInitializer: Found auth code in URL.');
@@ -426,10 +404,6 @@ const SdkInitializer = ({ children, standalone = false, appId = null }) => {
                         import.meta.env.VITE_DISCORD_CLIENT_ID,
                         guild_id, "mock_channel_debug_id", "mock_location_debug_id"
                     );
-                    if (referralData) {
-                        mockSdk.customId = referralData.customId;
-                        mockSdk.referrerId = referralData.referrerId;
-                    }
                     sdkInstance = mockSdk;
                     console.log('SdkInitializer: Mock SDK initialized for debug.');
                 } else {
@@ -444,7 +418,7 @@ const SdkInitializer = ({ children, standalone = false, appId = null }) => {
             AppData.sdkCode = authCode; // Consider if AppData is the right place vs. context state
             AppData.sdk = sdkInstance;
 
-            const sdkReadyPayload = { referral: referralData, deepLink: deepLinkData };
+            const sdkReadyPayload = { deepLink: deepLinkData };
             setAppEvent({ type: AppContextEvent.SDK_READY, payload: sdkReadyPayload });
             console.log('SdkInitializer: SDK_READY dispatched with payload:', JSON.stringify(sdkReadyPayload));
 

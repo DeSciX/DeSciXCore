@@ -34,4 +34,5 @@ export { BRIDGE_READY_EVENT, BRIDGE_VERSION, getBridge, publishBridgeMember, ret
 export { CHAT_MEMBER, publishChatApi, retractChatApi } from './util/appChat.js';
 export { CHAT_CONTEXT, CHAT_CONTEXT_DATA, CHAT_SCRIPT_API, CHAT_CONTEXT_OUTCOMES, normalizeChatContext, setChatContext, clearChatContext } from './util/chatContext.js';
 export * as pendingIntent from './util/pendingIntent.js';
+export * as shareLink from './util/shareLink.js';
 export { PENDING_INTENT_KINDS, PENDING_INTENT_STATUS, createIntentResumer } from './util/pendingIntent.js';

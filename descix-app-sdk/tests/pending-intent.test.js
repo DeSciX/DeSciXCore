@@ -255,8 +255,7 @@ test('(e) the in-memory holder is deleted: AppData.deviceUserCode and refType DE
   assert.throws(() => { AppData.deviceUserCode = 'X'; }, /AppData.deviceUserCode is deleted/);
   assert.throws(() => { AppData.refType = 'DEVICE'; }, /pending intent/);
   assert.throws(() => { AppData.refType = 'CONNECT'; }, /pending intent/);
-  AppData.refType = 'REFERRAL';
-  AppData.refType = null;
+  assert.throws(() => { AppData.refType = 'REFERRAL'; }, /AppData.refType is deleted.*share-link/);
 });
 
 test('(e) AppContext captures through shellIntents and resumes in ONE effect on CONNECTED, with no clear-before-use', () => {

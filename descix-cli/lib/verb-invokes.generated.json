@@ -18,6 +18,12 @@
   "app list": [
     "fetch_my_purchases"
   ],
+  "app media-delete": [
+    "delete_app_asset"
+  ],
+  "app media-list": [
+    "list_app_assets"
+  ],
   "app media-upload": [
     "get_asset_upload_token"
   ],

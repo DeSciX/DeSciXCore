@@ -7,6 +7,7 @@ import {
   AppData,
   ResponseStatus,
 } from '../AppData.jsx';
+import { MINT_COMMAND } from '../shareLink.js';
 
 /**
  * Fetch store bundle + purchases in a single call (authenticated users).
@@ -162,24 +163,15 @@ export const searchStore = async (params) => {
   }
 };
 
+/** generate_referral_code — the share-link mint (params from @descix/app-sdk/share-link). Refusals throw with their code. */
 export const generateReferralCode = async (params) => {
-  try {
-    const data = await makeCommandRequestJSON('generate_referral_code', params);
-    return data.status === ResponseStatus.OK ? data.message : null;
-  } catch (error) {
-    console.error('Error in generateReferralCode:', error);
-    return null;
-  }
+  const data = await makeCommandRequestJSON(MINT_COMMAND, params);
+  return data.message;
 };
 
-export const validateReferral = async (params) => {
-  try {
-    const data = await makeCommandRequestJSON('process_deep_link', params);
-    return data;
-  } catch (error) {
-    console.error('Error in validateReferral:', error);
-    return { status: ResponseStatus.ERROR, message: error.message || 'Referral validation failed.' };
-  }
+/** Deleted: the claim is process_deep_link { custom_id }, sent by the shell (@descix/app-sdk/share-link claimPendingRef). */
+export const validateReferral = () => {
+  throw new Error("Api.validateReferral is deleted: process_deep_link takes only { custom_id } and the shell claims a held share link once signed in (@descix/app-sdk/share-link claimPendingRef). The server refuses referrer_id/new_user_id (REFERRAL_PARAMS_REMOVED).");
 };
 
 export const getCommunityDetails = async (communityId) => {

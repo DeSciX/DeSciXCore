@@ -103,6 +103,18 @@ metering for more) — the cap is enforced server-side by `get_asset_upload_toke
 with its own message when a would-be upload exceeds it; the CLI never pre-checks quota locally,
 so trust that refusal over any local math.
 
+**Seeing and freeing that storage.** `descix app media-list -a <app_id> [--prefix <folder>]
+[--json]` prints each uploaded object's `path`, size, `content_type`, `updated` and `public_url`,
+then the app's `total_bytes` against its `quota_bytes` (backend `list_app_assets`; `--json` is the
+server's object unchanged). With `--prefix`, `total_bytes` sums only the listed objects, so it is
+printed as the total under that prefix, never against the quota. `descix app media-delete -a <app_id> <path>... [--dry-run] [--json]`
+removes objects by the `path` media-list prints, one `delete_app_asset` call per path; a path that
+does not exist is reported as not found and the rest still run, and the exit code is non-zero only
+when a call failed. It ends with `N deleted, M not found, <bytes> bytes freed`. `--dry-run` deletes
+nothing and reports what would go and the bytes a real delete would free. A real delete that
+reports `purged: false` prints a warning: the object is deleted, but the edge cache's copy may
+still be served until its cache lifetime ends (the exit code is unaffected).
+
 **The `gs://` form is accepted.** A `gs://` URI works as an `asset_ref` — it is parsed and
 scope-checked, and the handler then looks the object up by path. What is PROVEN is the form and
 the scoping: two different `gs://` strings return two different errors (out-of-prefix vs

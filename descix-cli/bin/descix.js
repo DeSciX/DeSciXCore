@@ -42,12 +42,14 @@ import { runDoctor } from '../lib/commands/doctor.js';
 import { runHealth } from '../lib/commands/health.js';
 import * as kbCommands from '../lib/commands/kb.js';
 import { runKbCreate } from '../lib/commands/kb-create.js';
+import { runReferralCreate } from '../lib/commands/referral-create.js';
 import { kbVectorCell, kbCountSource } from '../lib/commands/kb-list-render.js';
 import * as corpusCommands from '../lib/commands/corpus.js';
 import * as modelConfigCommands from '../lib/commands/model-config.js';
 import { isHelpInvocation, getCommandSurface, applyVisibility } from '../lib/command-visibility.js';
 import { progress } from '../lib/output.js';
 import { runMediaUpload } from '../lib/commands/media-upload.js';
+import { runMediaList, runMediaDelete } from '../lib/commands/media-assets.js';
 import { runPluginCheck } from '../lib/commands/plugin-check.js';
 import fs from 'fs/promises';
 import path from 'path';
@@ -1030,6 +1032,44 @@ appCommand
       const apiClient = new DeSciXApiClient();
       await requireAuth(apiClient);
       await runMediaUpload(apiClient, options);
+    } catch (error) {
+      console.error(chalk.red(`\n❌ ${error.message}\n`));
+      process.exit(1);
+    }
+  });
+
+// descix app media-list / media-delete — read and remove the objects media-upload put under the
+// app's assets/ prefix (backend list_app_assets / delete_app_asset). Bodies and contract:
+// lib/commands/media-assets.js.
+appCommand
+  .command('media-list')
+  .description('List an app\'s uploaded media (path, size, content type, updated, public_url) and its storage total against the quota')
+  .requiredOption('-a, --app <id>', 'App ID (community is resolved server-side from Products)')
+  .option('--prefix <relPath>', 'Only objects under this sub-path of the app assets/ prefix (e.g. "shows/myshow")')
+  .option('--json', 'Print the server\'s listing object unchanged (for scripting)')
+  .action(async (options) => {
+    try {
+      const apiClient = new DeSciXApiClient();
+      await requireAuth(apiClient);
+      await runMediaList(apiClient, options);
+    } catch (error) {
+      console.error(chalk.red(`\n❌ ${error.message}\n`));
+      process.exit(1);
+    }
+  });
+
+appCommand
+  .command('media-delete')
+  .description('Delete uploaded media from an app\'s assets/ prefix, one path per server call; a path that does not exist is reported and the rest still run (exit 1 only when a call fails)')
+  .requiredOption('-a, --app <id>', 'App ID (community is resolved server-side from Products)')
+  .argument('<path...>', 'One or more object paths relative to the app assets/ prefix, as media-list prints them')
+  .option('--dry-run', 'Ask the server what would be deleted; nothing is deleted')
+  .option('--json', 'Print every per-path server result and the summary as JSON (for scripting)')
+  .action(async (paths, options) => {
+    try {
+      const apiClient = new DeSciXApiClient();
+      await requireAuth(apiClient);
+      await runMediaDelete(apiClient, paths, options);
     } catch (error) {
       console.error(chalk.red(`\n❌ ${error.message}\n`));
       process.exit(1);
@@ -3301,29 +3341,24 @@ const referralCommand = program
 
 referralCommand
   .command('create')
-  .description('Generate a referral code for a community/app')
-  .requiredOption('-c, --community <id>', 'Community ID')
-  .option('-a, --app <id>', 'App ID (optional)')
+  .description('Get your share link to a page: <page>?ref=<code> (the same link each time you ask)')
+  .requiredOption('--url <page>', 'The page to share: an https URL on the platform domain (the query is dropped)')
+  .requiredOption('--channel <channel>', 'How the link travels, e.g. web_share or email (the server names the accepted values)')
+  .requiredOption('-c, --community <id>', 'The community the referral credits')
+  .addHelpText('after', `
+A user who opens the link and signs in becomes your referral if they have no
+referrer yet (one referrer per user, ever): the platform shell holds ?ref= across
+sign-in and the server credits the link's owner. Asking again for
+the same page, channel and community prints the same link. A refusal (a page off
+the platform domain, an unknown channel) exits 1 with its code.`)
   .action(async (options) => {
     try {
       const apiClient = new DeSciXApiClient();
       await requireAuth(apiClient);
-      
-      const response = await apiClient.invoke('generate_referral_code', {
-        community_id: options.community,
-        app_id: options.app || null
-      });
-      const result = response.message || response;
-      
-      console.log(chalk.green('\n✅ Referral code generated!\n'));
-      console.log(chalk.cyan(`  Code: ${result.referral_code || result.code}`));
-      console.log(chalk.gray(`  Community: ${options.community}`));
-      if (options.app) {
-        console.log(chalk.gray(`  App: ${options.app}`));
-      }
-      console.log(chalk.gray(`\n  Share this code to earn REF points!\n`));
+      await runReferralCreate(apiClient, options);
     } catch (error) {
-      console.error(chalk.red(error.message));
+      const coded = error.code && !String(error.message).startsWith(`${error.code}:`) ? `${error.code}: ` : '';
+      console.error(chalk.red(`\n\u274c ${coded}${error.message}\n`));
       process.exit(1);
     }
   });
