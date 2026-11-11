@@ -119,6 +119,59 @@
     "runbookAnchor": null
   },
   {
+    "verbPath": "app media-delete",
+    "description": "Delete uploaded media from an app's assets/ prefix, one path per server call; a path that does not exist is reported and the rest still run (exit 1 only when a call fails)",
+    "arguments": [
+      {
+        "name": "path",
+        "required": true,
+        "variadic": true,
+        "description": "One or more object paths relative to the app assets/ prefix, as media-list prints them"
+      }
+    ],
+    "options": [
+      {
+        "flags": "-a, --app <id>",
+        "description": "App ID (community is resolved server-side from Products)",
+        "required": true
+      },
+      {
+        "flags": "--dry-run",
+        "description": "Ask the server what would be deleted; nothing is deleted",
+        "required": false
+      },
+      {
+        "flags": "--json",
+        "description": "Print every per-path server result and the summary as JSON (for scripting)",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
+    "verbPath": "app media-list",
+    "description": "List an app's uploaded media (path, size, content type, updated, public_url) and its storage total against the quota",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-a, --app <id>",
+        "description": "App ID (community is resolved server-side from Products)",
+        "required": true
+      },
+      {
+        "flags": "--prefix <relPath>",
+        "description": "Only objects under this sub-path of the app assets/ prefix (e.g. \"shows/myshow\")",
+        "required": false
+      },
+      {
+        "flags": "--json",
+        "description": "Print the server's listing object unchanged (for scripting)",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
     "verbPath": "app media-upload",
     "description": "Upload media/asset files to an app's GCS assets prefix (200 MB per app today; app owners, community admins and platform admins may upload — returns asset references)",
     "arguments": [],
@@ -1713,18 +1766,23 @@
   },
   {
     "verbPath": "referral create",
-    "description": "Generate a referral code for a community/app",
+    "description": "Get your share link to a page: <page>?ref=<code> (the same link each time you ask)",
     "arguments": [],
     "options": [
       {
-        "flags": "-c, --community <id>",
-        "description": "Community ID",
+        "flags": "--url <page>",
+        "description": "The page to share: an https URL on the platform domain (the query is dropped)",
         "required": true
       },
       {
-        "flags": "-a, --app <id>",
-        "description": "App ID (optional)",
-        "required": false
+        "flags": "--channel <channel>",
+        "description": "How the link travels, e.g. web_share or email (the server names the accepted values)",
+        "required": true
+      },
+      {
+        "flags": "-c, --community <id>",
+        "description": "The community the referral credits",
+        "required": true
       }
     ],
     "runbookAnchor": null

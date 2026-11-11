@@ -36,6 +36,15 @@ import chalk from 'chalk';
 import { progress } from '../output.js';
 
 /**
+ * ONE OWNER of how the media verbs (upload, list, delete) render a byte count in MB.
+ * @param {number} bytes
+ * @returns {string} e.g. "3.0"
+ */
+export function formatMb(bytes) {
+  return (bytes / (1024 * 1024)).toFixed(1);
+}
+
+/**
  * Run `app media-upload`.
  *
  * @param {import('../api-client.js').DeSciXApiClient} apiClient
@@ -165,9 +174,7 @@ export async function runMediaUpload(apiClient, options) {
     });
     if (result.storage) {
       // projected_bytes is the app's total INCLUDING this upload; used_bytes is the total before it.
-      const usedMb = (result.storage.projected_bytes / (1024 * 1024)).toFixed(1);
-      const limitMb = (result.storage.limit_bytes / (1024 * 1024)).toFixed(1);
-      console.log(chalk.gray(`\n  Storage: ${usedMb} MB / ${limitMb} MB used`));
+      console.log(chalk.gray(`\n  Storage: ${formatMb(result.storage.projected_bytes)} MB / ${formatMb(result.storage.limit_bytes)} MB used`));
     }
     console.log();
   }

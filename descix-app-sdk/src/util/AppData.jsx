@@ -16,6 +16,11 @@ export class ProductTypes {
   static ROLE = 'ROLE'; // <-- Added ROLE type
 }
 
+const SHARE_LINK_CARRIER_DELETED = (name) =>
+  `AppData.${name} is deleted: a share link's ?ref=<custom_id> is held and claimed by @descix/app-sdk/share-link ` +
+  `(AppProvider captures it at mount and claims it once signed in); a device login or MCP connect is a pending intent ` +
+  `(@descix/app-sdk pendingIntent, rendered from useAppContext().pendingIntentState).`;
+
 export class AppData {
   static _sessionInfo = null;
   static _custodialBalance = 0; // NEW: Store custodial balance
@@ -31,9 +36,6 @@ export class AppData {
   static sdk = null;
   static sdkCode = null;
   static source_guild_id = null;
-  static _refCode = null; // Referral code
-  static _refType = null; // 'REFERRAL' | null (device login and MCP connect are pending intents: util/pendingIntent.js)
-  static _referralData = null; // For referral: { custom_id, referrer_id, guild_id }
   static _appModeConfig = null; // standalone app mode: { appId, url, defaultView } (AppContext, SDK_READY)
   static _platformHomeAppId = null; // The store bundle's platform_home_app_id (util/frontPage.js reads this)
   static _workspaceProducts = typeof __WORKSPACE_PRODUCTS__ !== 'undefined' ? __WORKSPACE_PRODUCTS__ : null;
@@ -100,9 +102,6 @@ export class AppData {
     AppData.sdk = null;
     AppData.sdkCode = null;
     AppData.source_guild_id = null;
-    AppData._refCode = null;
-    AppData._refType = null;
-    AppData._referralData = null;
     AppData._appModeConfig = null;
     AppData._platformHomeAppId = null;
 
@@ -383,24 +382,14 @@ export class AppData {
     localStorage.setItem('myApps', JSON.stringify(AppData._myApps));
   }
 
-  // --- Ref Code Getter/Setter ---
-  static get refCode() {
-    return AppData._refCode;
-  }
-  static set refCode(value) {
-    AppData._refCode = value;
-  }
-
-  // --- Ref Type Getter/Setter ---
-  static get refType() {
-    return AppData._refType;
-  }
-  static set refType(value) {
-    if (value !== null && value !== 'REFERRAL') {
-      throw new Error(`AppData.refType is 'REFERRAL' or null; ${JSON.stringify(value)} is refused. A device login or MCP connect is a pending intent: @descix/app-sdk pendingIntent (capture/peek/consume), rendered from useAppContext().pendingIntentState.`);
-    }
-    AppData._refType = value;
-  }
+  // Deleted carriers: a share link's custom_id is held by @descix/app-sdk/share-link (captured at mount,
+  // claimed once signed in); a device login or MCP connect is a pending intent (util/pendingIntent.js).
+  static get refCode() { throw new Error(SHARE_LINK_CARRIER_DELETED('refCode')); }
+  static set refCode(_value) { throw new Error(SHARE_LINK_CARRIER_DELETED('refCode')); }
+  static get refType() { throw new Error(SHARE_LINK_CARRIER_DELETED('refType')); }
+  static set refType(_value) { throw new Error(SHARE_LINK_CARRIER_DELETED('refType')); }
+  static get referralData() { throw new Error(SHARE_LINK_CARRIER_DELETED('referralData')); }
+  static set referralData(_value) { throw new Error(SHARE_LINK_CARRIER_DELETED('referralData')); }
 
   static get deviceUserCode() {
     throw new Error('AppData.deviceUserCode is deleted: read the pending device login from useAppContext().pendingIntentState (or @descix/app-sdk pendingIntent peek()).');
@@ -409,13 +398,6 @@ export class AppData {
     throw new Error('AppData.deviceUserCode is deleted: a device login is captured by @descix/app-sdk pendingIntent and resumed by the shell once the user is signed in.');
   }
 
-  // --- Referral Data Getter/Setter ---
-  static get referralData() {
-    return AppData._referralData;
-  }
-  static set referralData(value) {
-    AppData._referralData = value;
-  }
 }
 
 // State Machine States ... managed by dispatch

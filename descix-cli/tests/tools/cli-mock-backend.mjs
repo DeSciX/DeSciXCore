@@ -19,6 +19,10 @@
  *                 its receipt. CLI_MOCK_CONFIRM=lost makes confirm throw (HTTP 504) and get_site_manifest
  *                 serve this upload's token: the lost-response read-back path. Unset, the token has no
  *                 signed URLs and confirm is refused.
+ *   referral create — generate_referral_code, answered by CLI_MOCK_REFERRAL: `created` (a new share
+ *                 link, `<page>?ref=shr_mock`), `existing` (created: false), `no-share-url` (share_url null)
+ *                 or `off-domain` (400 PROMOTION_TARGET_HOST). Its params are printed as
+ *                 `MOCK params generate_referral_code <json>`.
  * Every other command is refused loudly (a test that reaches one is wrong) — get_product_context
  * included, so a kb verb that could not name the app's community from its repo fails the test.
  */
@@ -79,6 +83,17 @@ register('data:text/javascript,' + encodeURIComponent(`
         '      if (mode === "app-not-found") throw Object.assign(new Error("Could not resolve community for " + params.app_id + ". Run bootstrap first."), { code: "APP_NOT_FOUND", status: 404 });',
         '      if (mode === "denied") throw Object.assign(new Error("init_git_mode_kb requires the app owner or an app/community/platform admin"), { code: "PERMISSION_DENIED", status: 403 });',
         '      throw new Error("cli-mock-backend: unknown CLI_MOCK_INIT_KB " + mode);',
+        '    }',
+        '    if (command === "generate_referral_code" && process.env.CLI_MOCK_REFERRAL) {',
+        '      const mode = process.env.CLI_MOCK_REFERRAL;',
+        '      process.stderr.write("MOCK params generate_referral_code " + JSON.stringify(params) + "\\\\n");',
+        '      const page = String(params.target_identifier).split("?")[0];',
+        '      const bag = { custom_id: "shr_mock", share_url: page + "?ref=shr_mock", target_type: params.target_type, target_identifier: page, channel: params.channel, status: "OK" };',
+        '      if (mode === "created") return { status: "OK", message: { ...bag, created: true } };',
+        '      if (mode === "existing") return { status: "OK", message: { ...bag, created: false } };',
+        '      if (mode === "no-share-url") return { status: "OK", message: { ...bag, created: true, share_url: null } };',
+        '      if (mode === "off-domain") throw Object.assign(new Error("PROMOTION_TARGET_HOST: a WEB_PAGE target must be on descix.net or a subdomain of it (got example.com)."), { code: "PROMOTION_TARGET_HOST", status: 400 });',
+        '      throw new Error("cli-mock-backend: unknown CLI_MOCK_REFERRAL " + mode);',
         '    }',
         '    throw new Error("cli-mock-backend: unexpected command " + command);',
         '  }',
