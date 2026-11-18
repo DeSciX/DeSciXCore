@@ -99,6 +99,7 @@ test('a config-secret payload carrying WALLET_PK is REFUSED, naming the per-env 
             assert.match(err.message, /descix_wallet_pk_dev/,
                 'refusal MUST name the per-env secret the operator has to populate');
             assert.match(err.message, /WALLET_PK/);
+            assert.doesNotMatch(err.message, /DeSciX_Cloud|\.md\b/, 'refusal must name no private runbook path');
             // The refusal must never echo key material, even a placeholder.
             assert.ok(!err.message.includes(NEGATIVE_CONTROL_PK),
                 'refusal must name the KEY, never print its VALUE');
@@ -208,6 +209,7 @@ test('a declaring service that cannot read the secret fails loud, naming it', as
         (err) => {
             assert.ok(err instanceof CloudConfigFatalError);
             assert.match(err.message, /descix_wallet_pk_dev/);
+            assert.doesNotMatch(err.message, /DeSciX_Cloud|\.md\b/, 'refusal must name no private runbook path');
             return true;
         },
         'an unreadable signer secret must fail at boot, not at the first mint',

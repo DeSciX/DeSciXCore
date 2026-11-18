@@ -33,7 +33,7 @@ Most managers come in a class form and a `create*` factory; the factory is the u
 
 - **`@descix/app-sdk`** — the *app shell* SDK: React shell, `window.DeSciX`, Powch bridge, and the
   `descix serve` dev gateway. That is what an app developer builds a site against; see that
-  package's own README (`DeSciX_Core/descix-app-sdk/README.md` in the platform repo).
+  package's own README (`descix-app-sdk/README.md`).
 - **`@descix/cloud-core`** — the microservice infrastructure layer (config, Firestore, Pub/Sub).
 
 Three packages carry "sdk" or "core" in their names and serve different audiences; check which

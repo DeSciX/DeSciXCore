@@ -1,11 +1,11 @@
 /**
- * @descix/platform-api/mcp-tools — shared MCP tool-definition SSOT (WS-MCP-SSOT-TIER2).
+ * @descix/platform-api/mcp-tools — shared MCP tool-definition SSOT.
  * Dependency-free leaf so the CLI stdio server can import it without GCP infra.
  */
 export {
     NATIVE_MCP_TOOLS,
     // The (model, thinking) precedence chain, in words. ONE owner for the sentence: the served
-    // tool docstrings interpolate it and DeSciX_Cloud's get_model_config serves it back as its
+    // tool docstrings interpolate it and Cloud's get_model_config serves it back as its
     // `chain` field instead of keeping a second hand-typed copy that drifts.
     MODEL_THINKING_CHAIN,
     toMcpToolList,
@@ -43,10 +43,10 @@ export {
     PLATFORM_BASICS_SUMMARY,
     PLATFORM_BASICS_DOC,
 } from './platform-basics.js';
-// eabadir/DeSciXCloud#20 (option B) — the CLI verb list, GENERATED from the live commander tree
+// The CLI verb list, GENERATED from the live commander tree
 // of @descix/cli (descix-cli: npm run generate:cli-verbs). Cloud tell_me_how consumes it.
 export { CLI_VERBS, RUNBOOK_URL } from './cli-verbs.js';
-// ws-chat-multimodal-image-attach — THE canonical media-on-a-chat-turn contract: kinds, MIME
+// THE canonical media-on-a-chat-turn contract: kinds, MIME
 // vocabulary, byte policy, normalize(partial)->bag, and the ONE provider-block encoder. Both
 // the Cloud chat pipeline and the advertised nativeTools schema consume this; nobody
 // re-enumerates a MIME list or re-derives a cap.
@@ -69,7 +69,7 @@ export {
     buildProviderInput,
     mediaParamSchema,
 } from './chatMedia.js';
-// ws-mcp-surface-basics (CEO-D-2026-08-14-MCP-BASICS) — strict fail-loud param validation.
+// strict fail-loud param validation.
 // The schema stopped being advertising-only: unknown/missing params are rejected AT the MCP
 // boundary, naming the offender and suggesting the canonical key. One owner; the Cloud MCP
 // router, the execute_remote_command gateway and the CLI stdio server all consume this.
@@ -92,7 +92,7 @@ export {
     validateToolParams,
     toolAcceptsParam,
 } from './paramValidation.js';
-// ws-evidence-grounding (CEO-D-2026-07-09) — canonical Evidence Contract: FRAME +
+// canonical Evidence Contract: FRAME +
 // per-app SETTLEMENT PROFILES, addressability (getEvidenceContract), the compaction-proof
 // echo, the agent-led install block, and the vendored-copy render/sentinels. One owner;
 // the MCP surface consumes by import.
@@ -109,7 +109,7 @@ export {
     EVIDENCE_CONTRACT_END,
     renderEvidenceContractMarkdown,
 } from './evidence-contract.js';
-// ws-first-contact-voice (CEO-D-2026-07-12, packet V6) — D4 "Set up DeSciX" setup-playbook:
+// D4 "Set up DeSciX" setup-playbook:
 // the structured onboarding return contract + the setup-intent detector consumed as an
 // additive tell_me_how route. Dependency-free leaf; project_instructions is the single-source
 // D3-AI stance text.

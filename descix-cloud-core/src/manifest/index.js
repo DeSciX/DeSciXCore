@@ -141,7 +141,7 @@ export async function buildManifestFromHandlers(config) {
         handlers, handlerDir,
         guestCommands = new Set(),
         visibilityOf,
-        // WS-MCP-SSOT-TIER2: per-command meta from each handler's commandMeta export
+        // per-command meta from each handler's commandMeta export
         // (aggregated by the consuming service). When a command has meta, its
         // description + inputSchema are AUTHORITATIVE over the JSDoc-parsed values, and
         // mcp/mutating are surfaced into the manifest entry. Commands without meta fall
@@ -214,7 +214,7 @@ export async function buildManifestFromHandlers(config) {
                 entry.inputSchema = { type: 'object', properties };
             }
 
-            // WS-MCP-SSOT-TIER2: meta wins over JSDoc where a command self-describes.
+            // meta wins over JSDoc where a command self-describes.
             const meta = metaOverlay[cmd];
             if (meta) {
                 if (meta.description) entry.description = meta.description;

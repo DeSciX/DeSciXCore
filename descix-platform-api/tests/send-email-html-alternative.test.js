@@ -1,5 +1,5 @@
 /**
- * Q15 (CEO word, Unkamon c7bbc15): HTML email templates. The transport half: sendEmail
+ * HTML email templates. The transport half: sendEmail
  * gains an opt-in HTML body — `sendEmail(to, subject, body, fromEmail, { html })` builds
  * multipart/alternative (text part = the plain body, html part = the given html). The
  * plain path is UNCHANGED for every existing caller (same single-part text/plain message).
@@ -20,6 +20,7 @@ mock.module('googleapis', {
             gmail: () => ({
                 users: { messages: { send: async ({ requestBody }) => {
                     sent.push(Buffer.from(requestBody.raw.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8'));
+                    return { data: { id: `fixture-msg-${sent.length}` } }; // Gmail's answer carries the message id
                 } } }
             })
         }

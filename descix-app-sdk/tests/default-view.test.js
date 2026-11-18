@@ -27,7 +27,7 @@ import {
 } from '../src/util/appView.js';
 import { useDeSciXView } from '../src/hooks/useDeSciXView.js';
 import { APP_BINDING_CONTRACT, STANDALONE_MODE, standaloneBinding, fetchAppBinding } from '../src/util/appBinding.js';
-import { resolveServeBinding, servedShareJsonFile, bindableApps } from '../src/dev/serveBinding.js';
+import { resolveServeBinding, servedBinding, servedShareJsonFile, bindableApps } from '../src/dev/serveBinding.js';
 import { withV3Tree } from './support/v3Tree.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -168,6 +168,11 @@ const TREE = {
   },
 };
 
+/** The binding the gateway serves for app `app` to a request on localhost. */
+function served(dir, config, app) {
+  return servedBinding(resolveServeBinding(dir, config, { app, cwd: dir }), { httpVersionMajor: 2, headers: { ':authority': `localhost:${PORT}` } });
+}
+
 function writeShare(dir, obj) {
   fs.mkdirSync(path.join(dir, 'site'), { recursive: true });
   fs.writeFileSync(path.join(dir, 'site', 'share.json'), JSON.stringify(obj));
@@ -176,7 +181,7 @@ function writeShare(dir, obj) {
 test('serveBinding carries defaultView from the served static site share.json', () => {
   withV3Tree(TREE, ({ dir, repos, config }) => {
     writeShare(repos.egpt, { title: 'EGPT', description: 'D', default_view: 'CodeSite' });
-    const b = resolveServeBinding(dir, config, { app: 'egpt', cwd: dir, gatewayPort: PORT });
+    const b = served(dir, config, 'egpt');
     assert.equal(b.defaultView, 'CodeSite');
     assert.equal(initialViewFor(b), 'CodeSite');
   });
@@ -185,16 +190,16 @@ test('serveBinding carries defaultView from the served static site share.json', 
 test('NEGATIVE control: a share.json without default_view, or no share.json, gives a binding without defaultView', () => {
   withV3Tree(TREE, ({ dir, repos, config }) => {
     writeShare(repos.plain, { title: 'P', description: 'D' });
-    assert.ok(!('defaultView' in resolveServeBinding(dir, config, { app: 'plain', cwd: dir, gatewayPort: PORT })));
+    assert.ok(!('defaultView' in served(dir, config, 'plain')));
     fs.rmSync(path.join(repos.plain, 'site', 'share.json'));
-    assert.ok(!('defaultView' in resolveServeBinding(dir, config, { app: 'plain', cwd: dir, gatewayPort: PORT })));
+    assert.ok(!('defaultView' in served(dir, config, 'plain')));
   });
 });
 
 test('NEGATIVE: an invalid served share.json refuses the serve, naming the file and the field', () => {
   withV3Tree(TREE, ({ dir, repos, config }) => {
     writeShare(repos.bad, { title: 'B', description: 'D', default_view: 'FullScreen' });
-    assert.throws(() => resolveServeBinding(dir, config, { app: 'bad', cwd: dir, gatewayPort: PORT }),
+    assert.throws(() => resolveServeBinding(dir, config, { app: 'bad', cwd: dir }),
       (e) => e.message.includes(path.join(repos.bad, 'site', 'share.json')) &&
         /default_view 'FullScreen' is not a view/.test(e.message));
   });
@@ -203,8 +208,7 @@ test('NEGATIVE: an invalid served share.json refuses the serve, naming the file 
 test('a dev-server site is not read: no defaultView, and the banner reason says why', () => {
   withV3Tree(TREE, ({ dir, repos, config }) => {
     writeShare(repos.devsrv, { title: 'X', description: 'D', default_view: 'CodeSite' });
-    const b = resolveServeBinding(dir, config, { app: 'devsrv', cwd: dir, gatewayPort: PORT });
-    assert.ok(!('defaultView' in b));
+    assert.ok(!('defaultView' in served(dir, config, 'devsrv')));
     const where = servedShareJsonFile(bindableApps(dir).find((a) => a.appId === 'devsrv'));
     assert.equal(where.file, null);
     assert.match(where.why, /dev server \(site\.port 5511\)/);

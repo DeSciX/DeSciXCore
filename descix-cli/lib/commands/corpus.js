@@ -264,11 +264,11 @@ export function renderCount(value, unknownText = 'an unreported number of') {
 
 /**
  * Detect the current git branch in the app's repo.
- * Returns the branch name (e.g., "ws-admin-b1") or null if detached / not a repo.
+ * Returns the branch name (e.g., "feature-x") or null if detached / not a repo.
  *
  * Used by `corpus sync` to emit a one-line advisory when the operator is on a
  * non-main branch and --ref was not provided — flags the silent "synced main
- * not your branch" gotcha that surfaced in WS-CLI-MANIFEST-REF-FEATURE-BRANCH.
+ * not your branch" gotcha.
  */
 function getCurrentBranch(repoRoot) {
   // Lazy-require child_process via createRequire — corpus.js is ESM and lacks
@@ -421,8 +421,7 @@ export async function runCorpusSync(apiClient, options) {
     //   - the operator's git HEAD is on a non-main branch.
     // The advisory is informational — it does NOT block the sync. The operator
     // is free to keep going (e.g., they really do want to sync from main while
-    // working on a feature branch). This is the silent gotcha that the
-    // WS-CLI-MANIFEST-REF-FEATURE-BRANCH scope doc surfaced.
+    // working on a feature branch). This is the silent gotcha.
     if (!options.ref) {
       const allManifestsDefault = manifests.every(m =>
         m._resolvedSources.every(s => s.ref === 'main')
@@ -569,7 +568,7 @@ export async function runCorpusSync(apiClient, options) {
 
       // 3b-rebuild: When --rebuild is set, do a FULL metadata-scoped purge of the
       // ENTIRE {community_id, app_id, knowledgebase_name} scope, then re-upsert the
-      // full local walk below. This is the WS-KB-CORPUS-SCOPEPURGE fix: the prior
+      // full local walk below. This is the scope-purge fix: the prior
       // implementation enumerated `corpus:<blob_sha>` file_ids and purged only the
       // ones absent from the current walk — but the BULK of orphan pollution came
       // from the legacy `kb sync` path (chunk_ids, no `corpus:` file_id) which is
@@ -697,7 +696,7 @@ export async function runCorpusSync(apiClient, options) {
       // derivation, read from the store itself — never from local history.
       //
       // It used to be "previously synced blob_shas minus the walk", which is only as good as
-      // the history. Measured 2026-09-18 (GODSWORLD-DEV, PROD): the first origin-keyed sync
+      // the history. Measured 2026-09-18 (a live app, PROD): the first origin-keyed sync
       // had NO history for its origin, so it purged nothing, and a superseded INDEX.md stayed
       // retrievable beside its replacement indefinitely — no later incremental sync could
       // ever name it. Lost state, a repointed origin and a hand edit all fail the same way.

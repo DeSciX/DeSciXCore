@@ -1,7 +1,7 @@
 /**
  * @descix/platform-api/mcp-tools — D4 "Set up DeSciX" FIRST-CONTACT SCRIPT (canonical owner).
  *
- * ws-first-contact-voice (CEO-D-2026-07-12-VOICE-AND-SERVING-DISPATCH, packet V6) upgraded by
+ * (CEO-D-2026-07-12-VOICE-AND-SERVING-DISPATCH, packet V6) upgraded by
  * CEO-D-2026-07-12-METERING-DISPLAY-AND-FIRST-CONTACT-SCRIPT: no longer a static checklist —
  * DESCIX_SETUP_PLAYBOOK is a DOCTOR-STYLE conversational script the consuming assistant follows:
  * greet → ask interest → offer suggested prompts (use-case canon,
@@ -103,7 +103,7 @@ const FIRST_CONTACT_SCRIPT = Object.freeze([
     }),
     Object.freeze({
         step: 'explain_tokenomics',
-        // ws-first-contact-economy (CEO-D-2026-07-15-TWO-FLOORS-POWCH-LISTED-ECONOMY-GO, D8/D10-D11):
+        // 
         // name the TWO distinct free floors truthfully — the ONE-TIME setup welcome credit (a ledgered
         // grant, not earned, not a token) and the SEPARATE recurring free DAILY credit — plus the
         // starting contribution/airdrop-eligibility position finishing setup confers. Dollar figures are
@@ -113,7 +113,7 @@ const FIRST_CONTACT_SCRIPT = Object.freeze([
     }),
     Object.freeze({
         step: 'verify_settlement',
-        // V5 (CEO voice delta 2026-07-15, ws-setup-npm-voice — verify-before-close pass on the
+        // V5 (CEO voice delta 2026-07-15, verify-before-close pass on the
         // first-contact arc): the dev-path voice is honestly scoped to what an npm-capable assistant
         // can do RIGHT NOW against the PUBLISHED packages (COS re-verified today). claude.ai cannot
         // clone a repo or run `lake build` (that belongs in Claude Code / Cowork — refer there), but it
@@ -145,7 +145,7 @@ export const DESCIX_SETUP_PLAYBOOK = Object.freeze({
     project_instructions: D3_AI_PROJECT_INSTRUCTIONS,
     // V4 (voice round 2): the REAL runnable verification the final script step points at. LIVE
     // TODAY — @descix/frqtl-sdk@0.1.2 published + verified against the public registry
-    // (ws-frqtl-node-settlement D-report, 2026-07-12). This is the egpt-dse settlement profile's
+    //. This is the egpt-dse settlement profile's
     // verification command; setup ends with the user having SEEN a claim settle.
     settlement_experience: Object.freeze({
         app_id: 'egpt-dse',
@@ -164,7 +164,7 @@ export const DESCIX_SETUP_PLAYBOOK = Object.freeze({
         }),
         note: 'Runs offline from the published registry in ~1 min; the golden ships in-package. Ask the user before running.',
     }),
-    // V5 (CEO voice delta 2026-07-15, ws-setup-npm-voice): the SECOND live dev-path experience — the
+    // V5: the SECOND live dev-path experience — the
     // constructive-math library is npm-IMPORTABLE now (verified against the published registry: exports
     // EGPTFFT/EGPTMath/EGPTMatrix/EGPTPolynomial/EGPTReal). Distinct from settlement_experience: that one
     // is npx-RUN (a bin), this one is IMPORTED and exercised. `not_in_dist` is the truth guard — the
@@ -188,7 +188,7 @@ export const DESCIX_SETUP_PLAYBOOK = Object.freeze({
         }),
         note: 'Importable from the published registry now. Ask the user before running.',
     }),
-    // ws-drive-contributor-ingest (CEO-D-2026-07-18-PER-USER-APP): the member-open, self-scoped
+    // the member-open, self-scoped
     // contribution path — a claude.ai chat-only contributor (files already sitting in a Drive folder,
     // no code environment) can own a personal doc home and populate it from Drive WITHOUT the gated
     // add_ipdoc. All three are member-open and self-scoped BY CONSTRUCTION (the target namespace is

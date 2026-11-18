@@ -181,7 +181,7 @@ export function composeUserDocServeUrl({ community_id, site_domain, app_id, file
     return `https://${community_id}.${site_domain}/assets/userdocs/${app_id}/${file_id}`;
 }
 
-// ─── Service domain (ws-c4-platform P1) ──────────────────────────────────────
+// ─── Service domain ──────────────────────────────────────
 
 /**
  * Error code carried by every refusal of a manifest that declares its own service domain.

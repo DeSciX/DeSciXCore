@@ -77,15 +77,15 @@ explicitly so you can tell a scope boundary from a typo.
 
 **`asset_ref` is APP-SCOPED, and getting this wrong produces an error that reads like a broken
 platform.** A reference must resolve inside *this* app's own assets prefix
-(`gs://descix-assets-public/{env}/{appId}/assets/`). Two different failures, and telling them
+(the app's public asset space, object prefix `{env}/{appId}/assets/`). Two different failures, and telling them
 apart saves an hour:
 
 ```
 # ref points outside the app's prefix
-Asset reference '...' RESOLVES OUTSIDE app 'egpt-godsworld' assets prefix 'dev/egpt-godsworld/assets/'.
+Asset reference 'dev/other-app/assets/cover.png' resolves outside app 'egpt-godsworld' assets prefix 'dev/egpt-godsworld/assets/'.
 
 # ref is inside the prefix, but the object is not there
-ASSET NOT FOUND at gs://... Upload it first with `descix app media-upload`.
+Asset not found at 'dev/egpt-godsworld/assets/probe.mp4' in app 'egpt-godsworld' public asset space. Upload it first with `descix app media-upload`.
 ```
 
 Both come back as `MEDIA_ASSET_UNREADABLE`. The first means you referenced the wrong app's asset;
@@ -99,7 +99,7 @@ yourself) as `asset_ref` — either form works, see below.
 
 **Who can upload, and how much.** Any app owner, community admin or platform admin may call
 `media-upload` for that app. Storage is capped **200 MB per app today** (pending credit-based
-metering for more) — the cap is enforced server-side by `get_asset_upload_token`, which refuses
+metering for more; the cap counts the public and private spaces together) — the cap is enforced server-side by `get_asset_upload_token`, which refuses
 with its own message when a would-be upload exceeds it; the CLI never pre-checks quota locally,
 so trust that refusal over any local math.
 
@@ -114,6 +114,19 @@ when a call failed. It ends with `N deleted, M not found, <bytes> bytes freed`. 
 nothing and reports what would go and the bytes a real delete would free. A real delete that
 reports `purged: false` prints a warning: the object is deleted, but the edge cache's copy may
 still be served until its cache lifetime ends (the exit code is unaffected).
+
+**Public and private media.** Every media verb (`media-upload`, `media-list`, `media-delete`) sends
+`visibility` to the server explicitly: `"public"` by default, `"private"` with `--private`. A
+private upload (`descix app media-upload -a <app_id> -f <file> --private`) is never served on the
+app's host; the CLI prints each object's `ref` (`asset:<app_id>/<path>`) instead of a `public_url`,
+and `--json` carries it as `ref`. Store the `ref`, not a link. `media-list --private` prints each
+object's `ref`; `media-delete --private` deletes from the private space (the server answers
+`purged: null`, since a private object is never on the edge; no warning is printed). Read a private
+object with `descix app media-link <asset:app_id/path> [--json]`: it prints a read URL and its
+expiry. The link is valid for 300 seconds, is allowed for an app admin or a user the app owner
+granted access to (buying or joining the app does not admit a caller), and is never cached or
+written anywhere by the CLI; ask again when you need it. A private `asset:` ref cannot be used as a chat `asset_ref`: `get_app_asset` reads only the public space. The CLI checks only the `asset:` prefix
+of the argument; the server owns the rest of the reference grammar, access and existence.
 
 **The `gs://` form is accepted.** A `gs://` URI works as an `asset_ref` — it is parsed and
 scope-checked, and the handler then looks the object up by path. What is PROVEN is the form and
@@ -147,7 +160,7 @@ object is not there you get an error that names the exact path it looked at:
 
 ```
 [chatMedia] could not read media asset "probe.mp4" for app "my-app":
-Asset not found at gs://descix-assets-public/dev/my-app/assets/probe.mp4.
+Asset not found at 'dev/my-app/assets/probe.mp4' in app 'my-app' public asset space.
 Upload it first with `descix app media-upload`.
 ```
 
@@ -215,7 +228,7 @@ looks like `corpus:ce66a173…`. You do not have to construct it: every result r
 `file_filter`. **Copy the id the citation gave you** — never type the filename.
 
 ```jsonc
-{ "app_id": "unk-beast", "kb_id": "DevX-Evangelist",
+{ "app_id": "my-app", "kb_id": "Docs",
   "query": "intake and triage", "file_filter": "corpus:ce66a173…" }
 ```
 

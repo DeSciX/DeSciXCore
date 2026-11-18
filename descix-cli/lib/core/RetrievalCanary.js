@@ -15,7 +15,7 @@
  * row whose metadata identifies THIS chunk (blob_sha + chunk_idx — the two fields
  * `corpus.js::chunkCorpusFile` always writes, so this needs no second identity scheme).
  *
- * BOUNDED, NOT A LOOP: `query_knowledge_base` is a real, credit-metered read (WS-HEADLESS-MVP-A3
+ * BOUNDED, NOT A LOOP: `query_knowledge_base` is a real, credit-metered read (a
  * flat debit per call). A canary that polled every few seconds for the full ~20-minute
  * propagation window would multiply that cost by hundreds of calls for a single sync. This
  * canary makes a SMALL, FIXED number of attempts (`DEFAULT_CANARY_DELAYS_MS`, 3 calls across

@@ -6,8 +6,7 @@
  * derivations of one fact, and the copies would disagree the moment app-sdk ships a fix and
  * this package does not. The one-package story is about ONE INSTALL, not one codebase.
  *
- * WHY @descix/app-sdk IS AN OPTIONAL PEER, NOT A DEPENDENCY (contract-ws-c5-0-phase2-app-
- * subpath-and-install-size-gate, I-P2): the app half pulls React, MUI, wagmi/viem, reown and
+ * WHY @descix/app-sdk IS AN OPTIONAL PEER, NOT A DEPENDENCY: the app half pulls React, MUI, wagmi/viem, reown and
  * vite. A community microservice consumes ./microservice and needs none of it. Declaring the
  * app half as a hard dependency would bill every headless service for a UI toolkit it never
  * loads, so it is declared `peerDependencies` + `peerDependenciesMeta { optional: true }` and

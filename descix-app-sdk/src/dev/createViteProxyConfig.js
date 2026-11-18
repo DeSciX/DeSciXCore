@@ -90,14 +90,14 @@ export function createViteProxyConfig(workspacePath, options = {}) {
   proxy['/apifront'] = proxyEntry(apiGatewayUrl);
   proxy['/api'] = proxyEntry(apiGatewayUrl);
   proxy['/mcp'] = proxyEntry(apiGatewayUrl);
-  // OAuth Authorization Server endpoints (WS-MCP-OAUTH) — served by the Core API
+  // OAuth Authorization Server endpoints — served by the Core API
   // backend at the same paths (no rewrite). /oauth is a prefix covering
   // /oauth/register, /oauth/authorize, /oauth/github/callback, /oauth/token.
   proxy['/oauth'] = proxyEntry(apiGatewayUrl);
   // Exact-path .well-known entries only — do NOT blanket-proxy all of /.well-known.
   proxy['/.well-known/oauth-protected-resource'] = proxyEntry(apiGatewayUrl);
   proxy['/.well-known/oauth-authorization-server'] = proxyEntry(apiGatewayUrl);
-  // RFC 8414 / RFC 9728 path-inserted metadata locations (WS-MCP-OAUTH). Because
+  // RFC 8414 / RFC 9728 path-inserted metadata locations. Because
   // the issuer has a path (/oauth) and the resource has a path (/mcp), spec-strict
   // clients (Claude.ai) probe these path-inserted .well-known URLs. Exact paths only.
   proxy['/.well-known/oauth-authorization-server/oauth'] = proxyEntry(apiGatewayUrl);

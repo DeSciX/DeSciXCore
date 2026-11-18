@@ -3,7 +3,7 @@
  *
  * Pure role-based permission checks. No Google Groups dependency.
  * Google Groups-based admin checks (isPlatformAdmin, isCommunityAdmin, isAppAdmin,
- * checkUserPermission) remain in DeSciX_Cloud/microservice/services/permissionService.js
+ * checkUserPermission) remain in Cloud's permissionService.js
  * as they depend on Cloud-specific infrastructure (googleGroupsService.js).
  */
 

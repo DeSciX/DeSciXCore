@@ -13,7 +13,10 @@
  * RULINGS, AMB-1(c)): the gateway answers GET /__descix/app-binding.json on the
  * shell's OWN origin, and the shell reads it before it mounts. The same cloud
  * store bundle then boots as the store on descix.net and as your app standalone
- * on localhost, with no rebuild — which is the whole point of runtime binding.
+ * on the gateway, with no rebuild — which is the whole point of runtime binding.
+ * The binding's appUrl is on whatever origin the shell was opened on
+ * (bindingAppUrl), so the app frame stays same-origin with the shell behind a
+ * tunnel hostname or on another device, as on the deployed host.
  *
  * ── Which app? (AMB-2) ───────────────────────────────────────────────────────
  * cwd-detection is the default, `--app` is the override, and NOTHING is written
@@ -30,7 +33,8 @@
  */
 import fs from 'fs';
 import path from 'path';
-import { gatewayProductUrl } from './workspaceProducts.js';
+import { productUrlOn } from './workspaceProducts.js';
+import { requestOrigin, MalformedAuthorityError } from './requestOrigin.js';
 import { resolveWorkspaceApps } from './workspaceApps.js';
 // ONE owner of the bin name: two bins reach this gateway and a hardcoded one misleads half
 // the readers. See invokedBin.js.
@@ -117,22 +121,28 @@ export function detectAppFromCwd(workspaceRoot, cwd) {
 }
 
 /**
- * Resolve what this serve session is bound to.
+ * Resolve what this serve session is bound to: the facts that hold for every request. The
+ * app's URL is NOT one of them; it depends on the origin each request came in on, and
+ * servedBinding adds it per request.
  *
  * @param {string} workspaceRoot
  * @param {Object} config - parsed workspace.json
  * @param {Object} [options]
  * @param {string} [options.app] - explicit --app override
  * @param {string} [options.cwd] - directory to detect from (default process.cwd())
- * @param {number} options.gatewayPort - the port the gateway is listening on
- * @returns {{mode: 'standalone', appId: string, appUrl: string, source: string, defaultView?: string}}
- *   built by standaloneBinding (util/appBinding.js); defaultView from the served share.json
+ * @returns {{appId: string, source: string, defaultView: string|null}} defaultView from the
+ *   served share.json, null when none is read or none declares it
  * @throws {Error} fail-loud when the app cannot be named, or names nothing real, or its served
  *   share.json is invalid
  */
 export function resolveServeBinding(workspaceRoot, config, options = {}) {
-  const { app, cwd = process.cwd(), gatewayPort } = options;
-  if (!gatewayPort) throw new Error('[serve binding] gatewayPort is required — resolve it with resolveGatewayPort first');
+  const { app, cwd = process.cwd() } = options;
+  if (options.gatewayPort !== undefined) {
+    throw new Error(
+      '[serve binding] resolveServeBinding no longer takes gatewayPort: the app URL depends on the ' +
+      'origin each request came in on. Build the binding per request with servedBinding(session, req).'
+    );
+  }
 
   const apps = bindableApps(workspaceRoot);
   const names = apps.map((a) => a.appId).sort();
@@ -171,13 +181,42 @@ export function resolveServeBinding(workspaceRoot, config, options = {}) {
     source = 'cwd';
   }
 
-  return standaloneBinding({
-    appId,
-    appUrl: gatewayProductUrl(gatewayPort, appId),
-    source,
-    defaultView: servedDefaultView(apps.find((a) => a.appId === appId)),
-  });
+  return { appId, source, defaultView: servedDefaultView(apps.find((a) => a.appId === appId)) };
 }
+
+/**
+ * THE ONE derivation of the binding's appUrl: the app's gateway route on the origin the
+ * request came in on (requestOrigin: `:authority`, else `Host`).
+ * A shell opened as https://localhost:<port>/ gets
+ * https://localhost:<port>/p/<appId>, exactly as before; a shell opened through a tunnel
+ * hostname or from another device gets its own origin, so the frame it loads is same-origin
+ * with it, as on the deployed host. The value stays absolute: deployed shells pass it straight
+ * to the app frame.
+ *
+ * @param {{httpVersionMajor: number, headers: Object}} req - the request being answered
+ * @param {string} appId
+ * @returns {string}
+ * @throws {MalformedAuthorityError} on a malformed request authority
+ */
+export function bindingAppUrl(req, appId) {
+  return productUrlOn(requestOrigin(req), appId);
+}
+
+/**
+ * The binding served for one request.
+ *
+ * @param {{appId: string, source: string, defaultView: string|null}} session - resolveServeBinding
+ * @param {{httpVersionMajor: number, headers: Object}} req - the request being answered
+ * @returns {{mode: 'standalone', appId: string, appUrl: string, source: string, defaultView?: string}}
+ *   built by standaloneBinding (util/appBinding.js)
+ * @throws {MalformedAuthorityError} on a malformed request authority
+ */
+export function servedBinding(session, req) {
+  return standaloneBinding({ ...session, appUrl: bindingAppUrl(req, session.appId) });
+}
+
+/** How many distinct refusal messages the binding route remembers before it forgets them all. */
+const LOGGED_REFUSALS_CAP = 100;
 
 /**
  * Serve the binding at APP_BINDING_PATH.
@@ -186,21 +225,44 @@ export function resolveServeBinding(workspaceRoot, config, options = {}) {
  * '/' proxy to the shell origin — otherwise the request would be forwarded to
  * the cloud, which knows nothing about this developer's machine.
  *
- * @param {{mode: string, appId: string, appUrl: string, source: string}} binding
+ * A malformed request authority is answered 400 naming the problem, never a binding on a
+ * guessed origin, and the same message goes to the serve terminal through Vite's logger
+ * (`logger.error`: the request was refused, so it is an error, not a warning) — the shell
+ * treats any non-OK binding as "no binding" and boots the store, so the browser alone would
+ * not say why. Each distinct message is printed once; the remembered set is cleared past
+ * LOGGED_REFUSALS_CAP so a client sending endless distinct values cannot grow it without bound.
+ *
+ * @param {{appId: string, source: string, defaultView: string|null}} session - resolveServeBinding
  * @returns {import('vite').Plugin}
  */
-export function appBindingPlugin(binding) {
-  const body = JSON.stringify(binding);
+export function appBindingPlugin(session) {
   return {
     name: 'descix-app-binding',
     configureServer(server) {
+      const logged = new Set();
       server.middlewares.use((req, res, next) => {
         const urlPath = (req.url || '').split('?')[0];
         if (urlPath !== APP_BINDING_PATH) return next();
-        res.setHeader('Content-Type', 'application/json; charset=utf-8');
-        // The binding is per-serve-session state, never cacheable: a developer
+        // The binding is per-serve-session and per-origin state, never cacheable: a developer
         // switching apps must not be served the previous session's answer.
         res.setHeader('Cache-Control', 'no-store');
+        res.setHeader('X-Content-Type-Options', 'nosniff');
+        let body;
+        try {
+          body = JSON.stringify(servedBinding(session, req));
+        } catch (e) {
+          if (!(e instanceof MalformedAuthorityError)) return next(e);
+          if (!logged.has(e.message)) {
+            if (logged.size >= LOGGED_REFUSALS_CAP) logged.clear();
+            logged.add(e.message);
+            server.config.logger.error(`${APP_BINDING_PATH} answered 400: ${e.message}`, { timestamp: true });
+          }
+          res.statusCode = e.statusCode;
+          res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+          res.end(`${e.message}\n`);
+          return;
+        }
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
         res.end(body);
       });
     },

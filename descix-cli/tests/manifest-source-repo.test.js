@@ -64,9 +64,9 @@ async function writeManifest(root, kbName, sources) {
 // ─────────────────────── AC#1(i): '../' adjacency is REFUSED ───────────────────────
 
 test('AC1i: a source path beginning with "../" is REFUSED, naming the migration', async () => {
-    const root = await mkRepo('p5-adj-', 'https://github.com/eabadir/Unkamon.git');
+    const root = await mkRepo('p5-adj-', 'https://github.com/owner/host-repo.git');
     const mp = await writeManifest(root, 'Adj', [
-        { path: '../unk/unkamon-beast/README.md', ref: 'main' },
+        { path: '../sibling/docs/README.md', ref: 'main' },
     ]);
 
     await assert.rejects(
@@ -84,15 +84,15 @@ test('AC1i: a source path beginning with "../" is REFUSED, naming the migration'
 
 test('AC1ii: `repo` naming the manifest\'s OWN repository is REFUSED', async () => {
     // Fixture MUST carry a real origin, else the check has nothing to compare against.
-    const root = await mkRepo('p5-self-', 'https://github.com/eabadir/unk.git');
+    const root = await mkRepo('p5-self-', 'https://github.com/owner/repo.git');
     const mp = await writeManifest(root, 'Self', [
-        { path: 'content', ref: 'main', repo: 'eabadir/unk' },
+        { path: 'content', ref: 'main', repo: 'owner/repo' },
     ]);
 
     await assert.rejects(
         () => loadManifest(mp, root),
         (err) => {
-            assert.match(err.message, /eabadir\/unk/, 'error must name the self-named repo');
+            assert.match(err.message, /owner\/repo/, 'error must name the self-named repo');
             assert.match(err.message, /own|here|omit/i, 'error must say omission is the spelling of "here"');
             return true;
         },
@@ -102,20 +102,20 @@ test('AC1ii: `repo` naming the manifest\'s OWN repository is REFUSED', async () 
 
 test('AC1ii negative control: `repo` naming a DIFFERENT repo is NOT refused by the self-check', async () => {
     // Proves the refusal keys on SELF-naming, not merely on `repo` being present.
-    const root = await mkRepo('p5-other-', 'https://github.com/eabadir/unk.git');
+    const root = await mkRepo('p5-other-', 'https://github.com/owner/repo.git');
     const mp = await writeManifest(root, 'Other', [
-        { path: 'unkamon-beast/README.md', ref: 'main', repo: 'eabadir/SomeOtherRepo' },
+        { path: 'docs/README.md', ref: 'main', repo: 'owner/other-repo' },
     ]);
     const m = await loadManifest(mp, root);
-    assert.equal(m._resolvedSources[0].repo, 'eabadir/SomeOtherRepo');
+    assert.equal(m._resolvedSources[0].repo, 'owner/other-repo');
 });
 
 // ───────────────── `repo` must be an owner/name slug, never a URL ─────────────────
 
 test('a `repo` given as a URL is REFUSED (slug, not URL)', async () => {
-    const root = await mkRepo('p5-url-', 'https://github.com/eabadir/Unkamon.git');
+    const root = await mkRepo('p5-url-', 'https://github.com/owner/host-repo.git');
     const mp = await writeManifest(root, 'Url', [
-        { path: 'content', ref: 'main', repo: 'https://github.com/eabadir/unk.git' },
+        { path: 'content', ref: 'main', repo: 'https://github.com/owner/repo.git' },
     ]);
     await assert.rejects(
         () => loadManifest(mp, root),
@@ -127,7 +127,7 @@ test('a `repo` given as a URL is REFUSED (slug, not URL)', async () => {
 });
 
 test('a `path` carrying a glob is REFUSED (path is a literal; syncignore owns exclusion)', async () => {
-    const root = await mkRepo('p5-glob-', 'https://github.com/eabadir/Unkamon.git');
+    const root = await mkRepo('p5-glob-', 'https://github.com/owner/host-repo.git');
     const mp = await writeManifest(root, 'Glob', [{ path: 'content/**/*.md', ref: 'main' }]);
     await assert.rejects(
         () => loadManifest(mp, root),
@@ -141,7 +141,7 @@ test('a `path` carrying a glob is REFUSED (path is a literal; syncignore owns ex
 // ───────── AC#2: the 205-row no-migration guarantee — in-repo, no `repo`, still works ─────────
 
 test('AC2: an in-repo source with NO `repo` validates AND syncs (205-row no-migration guarantee)', async () => {
-    const root = await mkRepo('p5-inrepo-', 'https://github.com/eabadir/Unkamon.git');
+    const root = await mkRepo('p5-inrepo-', 'https://github.com/owner/host-repo.git');
     const mp = await writeManifest(root, 'InRepo', [{ path: 'content', ref: 'main', tier: 2 }]);
 
     // (a) validates, and `repo` stays undefined — omission is preserved, not defaulted.
@@ -159,7 +159,7 @@ test('AC2: an in-repo source with NO `repo` validates AND syncs (205-row no-migr
 // ───────────────── AC#3: sync-state records the RESOLVED COMMIT SHA ─────────────────
 
 test('AC3: an in-repo source resolves to the actual commit sha, never "unknown"', async () => {
-    const root = await mkRepo('p5-prov-', 'https://github.com/eabadir/Unkamon.git');
+    const root = await mkRepo('p5-prov-', 'https://github.com/owner/host-repo.git');
     const head = execSync('git rev-parse HEAD', { cwd: root, encoding: 'utf-8' }).trim();
     const branch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: root, encoding: 'utf-8' }).trim();
 
@@ -175,7 +175,7 @@ test('AC3: an in-repo source resolves to the actual commit sha, never "unknown"'
 });
 
 test('AC3: walkCorpus surfaces per-source provenance carrying the resolved sha', async () => {
-    const root = await mkRepo('p5-provwalk-', 'https://github.com/eabadir/Unkamon.git');
+    const root = await mkRepo('p5-provwalk-', 'https://github.com/owner/host-repo.git');
     const head = execSync('git rev-parse HEAD', { cwd: root, encoding: 'utf-8' }).trim();
     const branch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: root, encoding: 'utf-8' }).trim();
     const mp = await writeManifest(root, 'ProvWalk', [{ path: 'content', ref: branch }]);
@@ -190,7 +190,7 @@ test('AC3: walkCorpus surfaces per-source provenance carrying the resolved sha',
 });
 
 test('AC3: an unresolvable ref FAILS LOUD rather than recording "unknown"', async () => {
-    const root = await mkRepo('p5-badref-', 'https://github.com/eabadir/Unkamon.git');
+    const root = await mkRepo('p5-badref-', 'https://github.com/owner/host-repo.git');
     const mp = await writeManifest(root, 'BadRef', [{ path: 'content', ref: 'no-such-ref-xyz' }]);
     const m = await loadManifest(mp, root);
     await assert.rejects(
@@ -206,9 +206,9 @@ test('AC3: an unresolvable ref FAILS LOUD rather than recording "unknown"', asyn
 // ───────── Cross-repo: never silently falls back to an adjacent working tree ─────────
 
 test('a cross-repo source NEVER falls back to a local read — it resolves or REFUSES, naming the repo', async () => {
-    const root = await mkRepo('p5-xrepo-', 'https://github.com/eabadir/Unkamon.git');
+    const root = await mkRepo('p5-xrepo-', 'https://github.com/owner/host-repo.git');
     const mp = await writeManifest(root, 'XRepo', [
-        { path: 'content', ref: 'main', repo: 'eabadir/definitely-not-a-real-repo-p5' },
+        { path: 'content', ref: 'main', repo: 'owner/definitely-not-a-real-repo-p5' },
     ]);
     const m = await loadManifest(mp, root);
 
@@ -229,7 +229,7 @@ test('a cross-repo source NEVER falls back to a local read — it resolves or RE
         );
     } else {
         assert.match(
-            outcome.message, /eabadir\/definitely-not-a-real-repo-p5/,
+            outcome.message, /owner\/definitely-not-a-real-repo-p5/,
             'the refusal must NAME the repo it could not fetch'
         );
     }
@@ -257,10 +257,27 @@ test('AC4: every field in CANONICAL_SOURCE_FIELDS is accepted with no "unknown f
 
 test('AC4: repoSlugFromRemoteUrl normalizes every remote spelling to one owner/name slug', () => {
     // One owner for "which repo is this" — the tell for mirror drift is two derivations.
-    assert.equal(repoSlugFromRemoteUrl('https://github.com/eabadir/unk.git'), 'eabadir/unk');
-    assert.equal(repoSlugFromRemoteUrl('https://github.com/eabadir/unk'), 'eabadir/unk');
-    assert.equal(repoSlugFromRemoteUrl('git@github.com:eabadir/unk.git'), 'eabadir/unk');
-    assert.equal(repoSlugFromRemoteUrl('ssh://git@github.com/eabadir/unk.git'), 'eabadir/unk');
+    assert.equal(repoSlugFromRemoteUrl('https://github.com/owner/repo.git'), 'owner/repo');
+    assert.equal(repoSlugFromRemoteUrl('https://github.com/owner/repo'), 'owner/repo');
+    assert.equal(repoSlugFromRemoteUrl('git@github.com:owner/repo.git'), 'owner/repo');
+    assert.equal(repoSlugFromRemoteUrl('ssh://git@github.com/owner/repo.git'), 'owner/repo');
     assert.equal(repoSlugFromRemoteUrl(''), null);
     assert.equal(repoSlugFromRemoteUrl(null), null);
+});
+
+test('the `repo` refusals and the shape contract carry a neutral owner/repo example, no real repository', async () => {
+    const root = await mkRepo('p5-example-', 'https://github.com/owner/host-repo.git');
+    const urlManifest = await writeManifest(root, 'UrlEx', [{ path: 'content', ref: 'main', repo: 'https://example.org/x/y.git' }]);
+    await assert.rejects(() => loadManifest(urlManifest, root), (err) => {
+        assert.ok(err.message.includes("(e.g. 'owner/repo')"), err.message);
+        return true;
+    });
+    const adjManifest = await writeManifest(root, 'AdjEx', [{ path: '../other/README.md', ref: 'main' }]);
+    await assert.rejects(() => loadManifest(adjManifest, root), (err) => {
+        assert.ok(err.message.includes('{ "repo": "owner/repo", "path": "docs/README.md", "ref": "main" }'), err.message);
+        return true;
+    });
+    const { SOURCE_SHAPE_CONTRACT } = await import('../lib/core/ManifestLoader.js');
+    assert.ok(SOURCE_SHAPE_CONTRACT.includes("(e.g. 'owner/repo')"));
+    assert.deepEqual([...SOURCE_SHAPE_CONTRACT.matchAll(/\(e\.g\. '([^']+)'\)/g)].map((m) => m[1]), ['owner/repo']);
 });

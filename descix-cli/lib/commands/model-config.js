@@ -1,5 +1,5 @@
 /**
- * Model Config Commands — WS-CONFIG-BOOTSTRAP-FIX item #10
+ * Model Config Commands
  *
  * CLI surface for the four resolver-chain knobs:
  *   - descix app set-default-model -a <app_id> -m <model_name> [--env=dev|demo|prod]

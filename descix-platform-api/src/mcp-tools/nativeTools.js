@@ -1,11 +1,11 @@
 /**
  * @descix/platform-api/mcp-tools — Shared native (core) MCP tool definitions.
  *
- * WS-MCP-SSOT-TIER2 (CEO-D-2026-06-06-SSOT-TIER2-DESIGN-APPROVED, audit §5.B-1):
+ * 
  * THE single source of truth for the curated CORE MCP tools that are advertised over
  * BOTH MCP transports:
  *   - stdio (descix-cli/bin/mcp-server.js — Cursor / Claude Desktop)
- *   - HTTP/Streamable (DeSciX_Cloud apiFront.js tools/list — the Claude.ai connector)
+ *   - HTTP/Streamable (Cloud apiFront.js tools/list — the Claude.ai connector)
  *
  * Before this module these two lists were hand-duplicated in mcp-server.js TOOLS[] and
  * Cloud services/nativeMcpTools.js NATIVE_MCP_TOOLS — they drifted. They now both import
@@ -35,7 +35,7 @@
  * local CLI diagnostics, NOT /apifront commands, so they are concatenated by the stdio
  * server only and never advertised over HTTP. (Audit §2.ii-a.)
  *
- * Every entry MUST be a real command in DeSciX_Cloud commandHandlers/registry.js.
+ * Every entry MUST be a real command in Cloud commandHandlers/registry.js.
  */
 
 import { mediaParamSchema } from './chatMedia.js';
@@ -45,7 +45,7 @@ import { mediaParamSchema } from './chatMedia.js';
 import { filterOperatorClause, SCALAR_FILTER_OPERATORS, ARRAY_FILTER_OPERATORS } from './recordFilter.js';
 // The coordination fabric's vocabulary, from its ONE owner. Every fabric_* enum and every numeric
 // default below is INTERPOLATED from these exports rather than retyped: the enum a caller is shown
-// here and the enum DeSciX_Cloud's fabricStore.js accepts must be the same list, or a caller is
+// here and the enum Cloud's fabricStore.js accepts must be the same list, or a caller is
 // refused against a contract it was never given. `fabric-vocabulary-conformance.test.js` fails CI
 // if any schema enum below stops deep-equalling its source. ../fabric/vocab.js is a pure,
 // zero-import leaf, so this import respects the infrastructure-free rule above.
@@ -157,7 +157,7 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
                 knowledgebase_names: { type: 'array', items: { type: 'string' }, description: 'Optional: draw the answer from several of the app\'s knowledge bases fused together in one call. The FIRST name is the primary KB whose voice and model settings shape the reply. Takes precedence over knowledgebase_name when both are given; a single "*" element means every KB in the app.' },
                 user_input: { type: 'string', description: 'The question to ask' },
                 previous_interaction_id: { type: 'string', description: 'The interaction_id returned by a previous response, to continue that conversation thread with full server-side memory of the earlier turns. Omit for the first message. It is scoped to the authenticated caller and is rejected if it belongs to someone else or has expired — on rejection, start a fresh thread by omitting it.' },
-                // ws-mcp-surface-basics (CEO-D-2026-08-14, FLAG-1 ruling): the schema IS the
+                // the schema IS the
                 // self-describing feed into MCP, so an under-declared contract is the bug — not
                 // the caller who passes a param the command genuinely honors. Every property
                 // below is read by the handler (ragCommands.js ask_question_to_app destructures
@@ -172,7 +172,7 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
                 file_id: { type: 'string', description: 'Scope the answer to ONE source document by its file_id (as returned in a citation). Use it to ask follow-up questions against a specific paper or record.' },
                 ipdoc_file_id: { type: 'string', description: 'Scope to a specific IPDoc by file_id. Takes precedence over file_id when both are given.' },
                 doc_ids: { type: 'array', items: { type: 'string' }, description: 'Additional document ids whose full contents are added to this call\'s context (beyond what vector retrieval selects).' },
-                // ws-chat-multimodal-image-attach: images/video the model actually LOOKS AT.
+                // images/video the model actually LOOKS AT.
                 // The schema fragment is BUILT from the chatMedia contract (kinds, MIME
                 // vocabulary, byte caps) rather than restated here — one owner for the
                 // advertised contract and the enforced policy, so the two cannot drift.
@@ -181,7 +181,7 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
                 // @descix/app-sdk/chat-context, which the Cloud handler runs on every value it
                 // receives; they are deliberately not restated here.
                 page_context: { type: 'object', description: 'The page the reader has open, exactly as @descix/app-sdk/chat-context withChatContext() builds it from an app page\'s DeSciX.setChatContext(). The server checks it with that module and adds it ahead of the question, labelled as data supplied by the app page and not as instructions; a value that breaks the module\'s rules is refused, naming the field. It selects no knowledge base and no document: those travel in knowledgebase_names and doc_ids.' },
-                // ws-c3-librarian: a WORKSTREAM is a conversational room (the Discord room model
+                // a WORKSTREAM is a conversational room (the Discord room model
                 // generalised), so its thread owner is SERVER-derived from the id the caller
                 // names — never from a caller-supplied owner, which apiFront still strips.
                 workstream_id: { type: 'string', description: "The workstream this question belongs to. When present, the answer runs on a thread OWNED BY THAT WORKSTREAM rather than by the calling user: the server derives the thread owner as roomThreadKey({surface:'workstream', room_id:workstream_id, app_id}) - e.g. 'unk-beast:workstream-ws-c3-librarian' - and stores continuity server-side in the InteractionRooms collection. Send the SAME workstream_id every turn and omit previous_interaction_id; the response's interaction_id is an ECHO for observability, not a handle to resend. A workstream thread is SHARED BY DESIGN: every caller naming the same workstream on the same app continues the same conversation. It is NOT a private per-user conversation and carries no per-user privacy property. A client-supplied interaction_owner_id remains stripped at the door and is not a substitute for this param." },
@@ -231,7 +231,7 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
             type: 'object',
             properties: {
                 question: { type: 'string', description: 'What do you want to do? Required for every scope except "bootstrap".' },
-                // WS-MVP-FIRSTCONTACT F3: 'bootstrap' = deterministic first-contact on-ramp
+                // 'bootstrap' = deterministic first-contact on-ramp
                 // (no vector search). question becomes optional for that scope only; the
                 // server still hard-requires it for project/entitlements/discovery.
                 //
@@ -281,7 +281,7 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
         name: 'resolve_invite',
         description: 'Resolve a DeSciX invite token into app configuration. Returns app context, community info, and the agent_hint authored by the app creator (skill level + goals).',
         mutating: false,
-        // WS-MCP-SURFACE-SPLIT-EXEC §6.7 D6: this tool is NOT in the enforced
+        // this tool is NOT in the enforced
         // OAUTH_READONLY_TOOLS allow-list (oauthAsHandlers.js) — the oauthReadonly:true
         // advisory flag had drifted from the enforced policy and was removed to stop
         // implying enforcement that does not exist.
@@ -314,7 +314,7 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
         name: 'app_records_query',
         description: 'Query your app like a database: a STRUCTURED, metadata-filtered scan (NOT ANN/semantic) over the app data plane returning ALL records matching a predicate (e.g. type=episode AND show=X). ' + filterOperatorClause() + ' STRONGLY CONSISTENT (read-after-write). Use ask_question_to_app for fuzzy semantic KB search. RESPONSE COUNTS are three DIFFERENT facts, so count <= matched <= scanned always: `scanned` = how many records the collection holds in total, BEFORE your filter (the denominator); `matched` = how many satisfied your filter, before `limit`; `count` = how many are in `records` (matched, capped by `limit`); `truncated` = boolean, true exactly when `count` < `matched`, i.e. `limit` CUT the match set and this reply does NOT carry every record that matched — raise `limit` (or narrow the filter) to see the rest. This lets you tell the two zero cases apart: matched:0 with scanned:0 means the COLLECTION IS EMPTY, while matched:0 with scanned:40 means YOUR PREDICATE MATCHED NOTHING (check the field name) — do not read a zero as evidence of an empty collection. TIME: returned records carry received_at, stamped by the store\'s own UTC clock when it accepted the write and therefore unforgeable by the record\'s author. Decide STALENESS and ORDERING on received_at. A created_at field, where present, is a claim made by whoever wrote the record — it is never validated, so it may be wrong or even in the future.',
         mutating: false,
-        // WS-MCP-SURFACE-SPLIT-EXEC §6.7 D6: this tool is NOT in the enforced
+        // this tool is NOT in the enforced
         // OAUTH_READONLY_TOOLS allow-list (oauthAsHandlers.js) — the oauthReadonly:true
         // advisory flag had drifted from the enforced policy and was removed to stop
         // implying enforcement that does not exist.
@@ -334,7 +334,7 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
         name: 'app_records_get',
         description: 'Fetch specific records from your app data plane by id (or by file_id grouping key — id == file_id in this store) with an arbitrary metadata projection. Firestore-backed, strongly consistent. Supply at least one of ids/file_ids. TIME: returned records carry received_at, stamped by the store\'s own UTC clock when it accepted the write and therefore unforgeable by the record\'s author — read it for staleness and ordering. A created_at field, where present, is the author\'s own unvalidated claim. Note that a projection via `fields` drops received_at unless you ask for it.',
         mutating: false,
-        // WS-MCP-SURFACE-SPLIT-EXEC §6.7 D6: this tool is NOT in the enforced
+        // this tool is NOT in the enforced
         // OAUTH_READONLY_TOOLS allow-list (oauthAsHandlers.js) — the oauthReadonly:true
         // advisory flag had drifted from the enforced policy and was removed to stop
         // implying enforcement that does not exist.
@@ -441,9 +441,9 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
     // COORDINATION FABRIC — typed verbs over the app-records collection egpt-frqtl/coordination.
     //
     // These exist because every rule that keeps the fabric coherent used to live CLIENT-side in
-    // the unkamon-beast plugin's PreToolUse guard: the CLI bypassed it entirely, and it was a
+    // the coordination plugin's PreToolUse guard: the CLI bypassed it entirely, and it was a
     // second derivation of the store's semantics. The rules are now server-side and hold on every
-    // transport. Server implementation: DeSciX_Cloud microservice/services/fabricStore.js;
+    // transport. Server implementation: Cloud microservice/services/fabricStore.js;
     // vocabulary: descix-platform-api/src/fabric/vocab.js. Contract: docs/design/coordination-fabric-contract-2026-08-24.md.
     //
     // THREE TRAPS EVERY DESCRIPTION BELOW RESTATES, because a caller who does not know them
@@ -799,8 +799,8 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
         inputSchema: { type: 'object', properties: {} },
     },
     {
-        // WS-HEADLESS-MVP-A2 (CEO-D-2026-07-01 D2): platform-wide USD AI-credits balance.
-        // Read-only; the METERED RAG/agent surface (WS-A3) debits this balance per call.
+        // platform-wide USD AI-credits balance.
+        // Read-only; the METERED RAG/agent surface debits this balance per call.
         // NEVER exposes pricing internals — USD balance figures only.
         name: 'get_credit_balance',
         description: 'Get your platform-wide AI-credits balance in USD. Metered AI calls (RAG chat / agents, e.g. ask_question_to_app and query_knowledge_base) debit this balance. At a $0 balance a free daily credit auto-applies to your first metered call each day, so metered tools are usable without buying anything first (the response reports daily_free_credit_usd and daily_free_credit_available_today). Buy more credits in the Powch Buy menu or with the descix CLI (`descix credits buy --usd <amount>`). Programmatic purchase: the Powch command create_checkout_session (through execute_remote_command) with purchase_type "ai_credits" and amount_usd (a listed bundle from purchase_catalogue in this response) returns a Stripe Checkout url.',
@@ -812,16 +812,16 @@ export const NATIVE_MCP_TOOLS = Object.freeze([
         },
     },
     {
-        // WS-MCP-SURFACE-SPLIT-EXEC (CEO-D-2026-07-04 §6.3, D2): the DISCOVERY-CORE invoke gateway.
+        // the DISCOVERY-CORE invoke gateway.
         // tell_me_how surfaces MESH-DISCOVERABLE commands (everything NOT in the handshake core);
         // this is how a client actually calls one without it being advertised at tools/list. It is a
         // thin passthrough into the SAME /apifront CommandHandler.invoke path — so EVERY existing
         // call-time gate (permission, credits, OAuth scope, service-account) applies to the TARGET
         // command exactly as if called directly. Nothing is bypassed.
         // mutating:true — a gateway that CAN reach mutating targets is itself classified mutating.
-        // WS-FREEMIUM-ONRAMP FO-2 (doc c §2.5): it IS now admitted to the read-only OAuth SURFACE
+        // it IS now admitted to the read-only OAuth SURFACE
         // (a read-scoped session may CALL the gateway — see MESH_INVOKE_GATEWAY_TOOLS below), but the
-        // scope-aware dispatch gate in DeSciX_Cloud CommandHandler.invoke enforces that the re-entrant
+        // scope-aware dispatch gate in Cloud CommandHandler.invoke enforces that the re-entrant
         // TARGET command is read-only. The classification is about the tool; the gate is about the call.
         name: 'execute_remote_command',
         description:
@@ -894,11 +894,11 @@ export function recommendedOAuthReadonlyToolNames() {
  * platform's internal service topology at first contact. They are FLAG-FLIPPED off the handshake
  * set here (a flag-flip only; the tell_me_how discovery internals are untouched — item K of the
  * MCP-hardening thread owns the discovery-scope enforcement). list_services is additionally
- * admin-gated in DeSciX_Cloud (COMMAND_PERMISSIONS). That leaves the 7 normal-user tools below.
+ * admin-gated in Cloud (COMMAND_PERMISSIONS). That leaves the 7 normal-user tools below.
  * The prior ratification was CEO-D-2026-07-04-MCP-SURFACE-SPLIT-EXECUTION §3 (9 names); this ruling
  * supersedes the mesh-health row for the STANDARD surface. Membership is ratified — do NOT
  * add/remove without a CEO ruling. (execute_remote_command is advertised via commandMeta mcp:true
- * in DeSciX_Cloud; the other 6 live in NATIVE_MCP_TOOLS above.)
+ * in Cloud; the other 6 live in NATIVE_MCP_TOOLS above.)
  */
 export const DISCOVERY_CORE_TOOL_NAMES = Object.freeze([
     'tell_me_how',
@@ -945,17 +945,17 @@ export function describeDiscoveryCoreFence() {
 }
 
 /**
- * MESH-INVOKE GATEWAY tools (WS-FREEMIUM-ONRAMP FO-2, doc c §2.4/§2.5). These are mutating:true
+ * MESH-INVOKE GATEWAY tools. These are mutating:true
  * tools that dispatch a DISCOVERED target command by re-entering CommandHandler.invoke (currently
  * only execute_remote_command). They are the ONE class admitted to the read-only OAuth surface
  * despite a mutating self-classification, because the scope-aware dispatch gate
- * (DeSciX_Cloud apiFront.js CommandHandler.invoke) fires again on the re-entrant TARGET — so a
+ * (Cloud apiFront.js CommandHandler.invoke) fires again on the re-entrant TARGET — so a
  * read-scoped session can CALL the gateway but cannot dispatch a mutating target through it.
  *
  * SINGLE SOURCE so the two consumers never drift:
- *   - surface admission: DeSciX_Cloud oauthAsHandlers.js isToolAllowedForOAuth (exempts these from
+ *   - surface admission: Cloud oauthAsHandlers.js isToolAllowedForOAuth (exempts these from
  *     the MUTATING_TOOL_NAMES defense-in-depth),
- *   - dispatch exemption: DeSciX_Cloud apiFront.js invoke gate (does NOT treat the gateway call
+ *   - dispatch exemption: Cloud apiFront.js invoke gate (does NOT treat the gateway call
  *     itself as a mutating dispatch; its inner re-entry is gated by construction).
  * Do NOT add a tool here without the matching re-entrant-invoke + inner-gate guarantee.
  */

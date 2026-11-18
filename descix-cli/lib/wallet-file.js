@@ -38,7 +38,7 @@ export class WalletFileManager {
       const data = await fs.readFile(walletPath, 'utf-8');
       const walletData = JSON.parse(data);
 
-      // WS-HEADLESS-MVP-A1 §2.5 (parent plan §10.4) — API_KEY is the vocabulary-aligned
+      // API_KEY is the vocabulary-aligned
       // ALIAS of the wallet signature (the durable headless bearer credential). Alias-only
       // (CEO §7 Q4): `signature` stays canonical on disk; a file authored with only
       // API_KEY is normalized on read.
@@ -77,7 +77,7 @@ export class WalletFileManager {
       throw new Error(`refusing to write ${walletPath}: ${problems.join('; ')}`);
     }
 
-    // WS-HEADLESS-MVP-A1 §2.5 — keep the API_KEY alias mirrored to the canonical
+    // keep the API_KEY alias mirrored to the canonical
     // signature so the on-disk file self-documents the alias (alias-only rename).
     walletData.API_KEY = walletData.signature;
 

@@ -1,7 +1,7 @@
 /**
  * verifyDeployOutcome — the honest answer when a confirm_site_deploy response is LOST.
  *
- * ws-prune-504 (measured on prod 2026-10-10): a large prune held the confirm past the
+ * a large prune held the confirm past the
  * gateway's patience; the client saw "Upload failed: HTTP 504" while the deploy had in fact
  * confirmed and the prune was finishing server-side. A lost RESPONSE is not a failed DEPLOY —
  * and a tool that says "failed" when it does not know is lying in one direction.

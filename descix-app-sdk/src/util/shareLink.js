@@ -1,7 +1,7 @@
 /**
  * shareLink.js — the Core client of the share-link contract: mint a link, capture `?ref=`, claim it.
  *
- * The server owns the contract (DeSciX_Cloud Promotion.mintForShare / process_deep_link):
+ * The server owns the contract (Cloud Promotion.mintForShare / process_deep_link):
  *   - MINT: generate_referral_code { target_type: 'WEB_PAGE', target_identifier: <https page on the
  *     platform domain>, channel, target_community_id? } answers { custom_id, created, share_url, … };
  *     share_url is `<page>?ref=<custom_id>`. Asking twice returns the same custom_id.

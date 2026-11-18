@@ -1,7 +1,7 @@
 /**
  * @descix/platform-api/mcp-tools — THE Evidence Contract (canonical owner module).
  *
- * v2 (ws-evidence-grounding, CEO-D-2026-07-09-PER-APP-EVIDENCE-AND-AGENT-LED-INSTALL):
+ * v2:
  * the contract is now FRAME + PER-APP SETTLEMENT PROFILES. The platform-level FRAME is
  * universal (claims settled by evidence not authority/memory; no-priors rule; citation
  * discipline scoped to an app's OWN evidence domain). HOW a claim is settled is per
@@ -31,7 +31,7 @@
  * ── OWNER-LOCATION JUSTIFICATION (unchanged from v1) ────────────────────────────
  * The MCP surface is the primary consumer and hits this before any repo exists;
  * handshake.js lives in this same dependency-free leaf and consumes SCIENCE_DEX_STORY by
- * IMPORT (zero drift). Downstream repos (great-debate-kit, EGPT-research, public EGPT
+ * IMPORT (zero drift). Downstream repos (great-debate-kit, the private research repo, public EGPT
  * seed) are CONSUMERS: they vendor the rendered markdown between sentinels and
  * scripts/verify-evidence-contract.mjs byte-checks it. Dependency-free leaf — imports
  * nothing. Do NOT hand-mirror the text elsewhere; import EVIDENCE_CONTRACT_FRAME /
@@ -85,14 +85,14 @@ export const EVIDENCE_CONTRACT_FRAME = Object.freeze({
 
 /**
  * The ONE owner of the EGPT public seed repo URL (GitHub transfer 2026-10-09:
- * eabadir/EGPT -> DeSciX/egpt-lean, old URLs 301). Every repo field below consumes it.
+ * the old private location moved to DeSciX/egpt-lean, old URLs 301). Every repo field below consumes it.
  */
 const EGPT_SEED_REPO = 'https://github.com/DeSciX/egpt-lean';
 
 /**
  * PER-APP SETTLEMENT PROFILES, keyed by app_id/community_id. EGPT (the formal-mathematics
  * community) is the first instance — it settles on the Lean 4 kernel. Every field is
- * grounded in EGPT-research (cited inline).
+ * grounded in the private research repo (cited inline).
  */
 export const SETTLEMENT_PROFILES = Object.freeze({
     egpt: Object.freeze({
@@ -102,7 +102,7 @@ export const SETTLEMENT_PROFILES = Object.freeze({
             'The Lean 4 kernel typechecking the proof chains sorry-free, plus an axiom-closure audit on the capstone theorems.',
         // The PUBLIC contributable seed users clone (the Lean/EGPT tree; measured 2026-10-09
         // post-transfer: the EGPTMath tree is NOT in this repo — see egpt_tests below).
-        // The private research remote (egpt_research) is intentionally NOT surfaced here.
+        // The private research remote is intentionally NOT surfaced here.
         repo: EGPT_SEED_REPO,
         burden_of_proof: Object.freeze({
             // R3 (voice round 2): LEAD with the verifiability invitation — you can check this
@@ -124,7 +124,7 @@ export const SETTLEMENT_PROFILES = Object.freeze({
             maxim: "When intuition conflicts with the proof chain, update the intuition, not the proof.",
         }),
         // Enumerated inline (test2 friction #3): the three P=NP capstones the axiom rule
-        // turns on. Source: EGPT-research Lean/PROOF_CHAINS.md:8,125-127,214-216; axiom
+        // turns on. Source: the private research repo, Lean/PROOF_CHAINS.md:8,125-127,214-216; axiom
         // closure {propext, Quot.sound} at Lean/EGPT_PROOFS_VALIDATION.md:197,230,245.
         capstone_theorems: Object.freeze([
             Object.freeze({ name: 'InformationTheory.P_eq_NP', file: 'Lean/EGPT/InformationTheory/Complexity/SetRFL.lean' }),
@@ -163,7 +163,7 @@ export const SETTLEMENT_PROFILES = Object.freeze({
     // egpt-dse — the FRQTL double-slit experiment (DSE), a DISCRETE-PHYSICS render-settlement
     // profile: the second published settlement lane and the first NPM-settled, repo-less domain.
     // A user does NOT clone anything — the check runs from the published registry in ~1 min.
-    // Ratified facts (ws-frqtl-node-settlement D-report, 2026-07-12, CEO-GO'd): package
+    // Ratified facts: package
     // @descix/frqtl-sdk@0.1.2, the golden parameter tuple, and the exact-bin-match χ² criterion.
     // This is the schema's anticipated non-Lean profile: settles_on names an objective numeric
     // criterion; verification_commands run a benchmark whose expected_when_green is that number.

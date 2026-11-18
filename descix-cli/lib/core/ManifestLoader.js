@@ -22,11 +22,11 @@ import { PUBLISHABLE_DOC_CLASSES, DENY_DOC_CLASSES } from './CorpusDenyLint.js';
 // Valid publish tiers (model §1). "I" internal (default), "P" public, "U" user.
 const PUBLISH_TIERS = new Set(['P', 'I', 'U']);
 
-// ============ Canonical Manifest Schema (WS-EVP-DESCIX-KB-CLEANUP item 5) ============
+// ============ Canonical Manifest Schema ============
 //
 // ONE canonical corpus-manifest schema. Historically two families shared
 // `.descix/manifests/*.json` with drifting per-source field names — the DeSciX-family
-// (`tier`/`doc_type`/`syncignore`/`raw_path`) and the EGPT-research family (which also used
+// (`tier`/`doc_type`/`syncignore`/`raw_path`) and the research-repo family (which also used
 // `src_path`). Because every field except `path` was optional, the loader SILENTLY accepted both
 // AND silently ignored any unrecognized/misspelled field (the same fail-loud gap as the KB command
 // params — a typo'd `synchignore` produced an empty syncignore with no signal). This is the single
@@ -42,14 +42,14 @@ export const CANONICAL_SOURCE_FIELDS = new Set([
 ]);
 
 /**
- * The agreed shape of a manifest source (interface-ws-c4-I2-manifest-source), stated ONCE.
+ * The agreed shape of a manifest source, stated ONCE.
  * Refusal messages quote from it, so the contract and its enforcement cannot drift apart.
  */
 export const SOURCE_SHAPE_CONTRACT =
   "A manifest source names WHERE its content comes from, and is synced by fetching that ref - " +
   "never by reading an adjacent working tree. A source is exactly one of two shapes. IN-REPO: " +
   "omit `repo`; `path` is repo-root-relative within the manifest's OWN repository, fetched at " +
-  "`ref`. CROSS-REPO: `repo` is REQUIRED and is an owner/name slug (e.g. 'eabadir/unk'), never a " +
+  "`ref`. CROSS-REPO: `repo` is REQUIRED and is an owner/name slug (e.g. 'owner/repo'), never a " +
   "URL; `path` is repo-root-relative within that repository, fetched at `ref`. Naming your OWN " +
   "repository explicitly in `repo` is REFUSED - omission is the single spelling of 'here', an " +
   "explicit slug the single spelling of 'elsewhere'. A `path` beginning with '../' is REFUSED " +
@@ -115,9 +115,9 @@ export function detectRepoSlug(dir) {
  * THE ONE OWNER OF "WHICH REPOSITORY OWNS THIS FILE".
  *
  * A workspace is NOT one repository. This one crosses three kinds of boundary at once:
- * the superrepo itself; git SUBMODULES (DeSciX/DeSciX_Cloud|Core|Powch are gitlinks —
- * `git ls-tree HEAD DeSciX/` shows mode 160000); and SIBLING repos that are not submodules
- * at all but independent checkouts the superrepo deliberately ignores (EGPT-research via
+ * the superrepo itself; git SUBMODULES (gitlinks —
+ * `git ls-tree HEAD <dir>` shows mode 160000); and SIBLING repos that are not submodules
+ * at all but independent checkouts the superrepo deliberately ignores (the research repo via
  * .gitignore:9, FRAQTL — each with its own `.git` and its own `origin` remote).
  *
  * A REF HAS NO MEANING EXCEPT RELATIVE TO A REPOSITORY. Resolving one against the ambient
@@ -141,7 +141,7 @@ export function resolveOwningRepo(absolutePath) {
   const abs = path.resolve(absolutePath);
   // `--show-toplevel` needs a directory that exists, and a source may name a file. Split
   // off the basename ONLY for a non-directory: for a DIRECTORY source, `path.dirname` would
-  // step over the very boundary being resolved (dirname of `DeSciX/DeSciX_Cloud` is the
+  // step over the very boundary being resolved (dirname of a submodule directory is the
   // superrepo, which is the wrong answer).
   let dir = abs, base = null;
   try {
@@ -198,7 +198,7 @@ function assertSourceShape(src, i, filePath, ownRepoSlug) {
       `source's ref "${src.ref ?? DEFAULT_SOURCE_REF}" is NOT honored and the provenance it claims is false. ` +
       `MIGRATE to the cross-repo shape: set \`repo\` to the owner/name slug of the repository that ` +
       `owns this content and make \`path\` repo-root-relative within it ` +
-      `(e.g. { "repo": "eabadir/unk", "path": "unkamon-beast/README.md", "ref": "main" }).`
+      `(e.g. { "repo": "owner/repo", "path": "docs/README.md", "ref": "main" }).`
     );
   }
   if (GLOB_CHARS.test(String(src.path))) {
@@ -219,7 +219,7 @@ function assertSourceShape(src, i, filePath, ownRepoSlug) {
   if (looksLikeUrl || repo.split('/').filter(Boolean).length !== 2 || repo.startsWith('/') || repo.endsWith('/')) {
     const suggestion = repoSlugFromRemoteUrl(repo);
     throw new Error(
-      `${at}: \`repo\` must be an owner/name slug (e.g. 'eabadir/unk'), never a URL — got "${repo}"` +
+      `${at}: \`repo\` must be an owner/name slug (e.g. 'owner/repo'), never a URL — got "${repo}"` +
       `${suggestion ? `. Did you mean "${suggestion}"?` : '.'}`
     );
   }
@@ -363,7 +363,7 @@ function validateManifest(manifest, filePath, ownRepoSlug = null) {
       throw new Error(`Invalid manifest at ${filePath}: sources[${i}].raw_path must be a string`);
     }
 
-    // Two-shape source contract (interface-ws-c4-I2-manifest-source): adjacency/glob paths and
+    // Two-shape source contract: adjacency/glob paths and
     // self-naming or URL-shaped `repo` values are REFUSED here, loudly, naming the migration.
     assertSourceShape(src, i, filePath, ownRepoSlug);
 
@@ -417,7 +417,7 @@ export async function loadManifest(manifestPath, workspaceRoot, options = {}) {
 
   validateManifest(manifest, manifestPath, ownRepoSlug);
 
-  // Canonical-schema warnings (WS-EVP-DESCIX-KB-CLEANUP item 5): surface deprecated aliases and
+  // Canonical-schema warnings: surface deprecated aliases and
   // unknown/misspelled fields during the deprecation window — warn, never throw, so both legacy
   // formats keep syncing.
   for (const w of collectManifestSchemaWarnings(manifest, manifestPath)) {

@@ -33,7 +33,7 @@ export { buildWorkspaceProducts, resolveAppGatewayUrl } from './workspaceProduct
 export { resolveWorkspaceApps, resolveWorkspaceAppsFrom } from './workspaceApps.js';
 export { SITE_STATIC_RULE, siteStaticViolation, assertSiteStatic } from './siteStatic.js';
 export { workspaceProductsPlugin, WORKSPACE_PRODUCTS_VIRTUAL_ID, WORKSPACE_PRODUCTS_HMR_EVENT } from './workspaceProductsPlugin.js';
-export { resolveServeBinding, appBindingPlugin, bindableApps, detectAppFromCwd, APP_BINDING_PATH } from './serveBinding.js';
+export { resolveServeBinding, servedBinding, bindingAppUrl, appBindingPlugin, bindableApps, detectAppFromCwd, APP_BINDING_PATH } from './serveBinding.js';
 export { resolvePowchUrl, POWCH_APP_ID } from './powchUrl.js';
 export { localUpstreamOrigin, LOCAL_DEFAULT_PROTOCOL } from './localOrigin.js';
 export { findWorkspaceRoot, readWorkspaceConfig } from './workspaceFile.js';

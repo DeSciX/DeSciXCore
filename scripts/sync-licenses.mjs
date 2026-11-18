@@ -2,7 +2,7 @@
 /**
  * sync-licenses.mjs — ONE owner for the licence text shipped in every published package.
  *
- * THE DEFECT THIS CLOSES (measured 2026-08-21, ws-devplane/license-metadata):
+ * THE DEFECT THIS CLOSES (measured 2026-08-21):
  * every publishable package in this repo shipped with NO licence file at all, and three of
  * them were already live on npm — @descix/sdk and @descix/cli declaring a bare path fragment
  * that is neither valid SPDX nor npm's `SEE LICENSE IN <file>` form, and @descix/app-sdk
@@ -14,7 +14,7 @@
  * package. Nobody hand-pastes a licence, so six copies cannot drift into five-plus-one.
  *
  * UPSTREAM SOURCE: the root LICENSE.md is itself generated from the canonical LaTeX the licence
- * is authored in — Unkamon repo DeSciX/DSCL/DeSciX_Community_License_v1.tex. That file lives in a
+ * is authored in — DeSciX_Community_License_v1.tex (the DSCL source). That file lives in a
  * DIFFERENT repo, so it cannot be a build-time dependency here; the root copy is the vendored
  * boundary and its header names the regeneration command. The .tex changing is a deliberate,
  * rare, human act — regenerate the root file then re-run this script.
@@ -36,7 +36,7 @@ const SOURCE = join(REPO_ROOT, 'LICENSE.md');
  * Packages that ship the DeSciX Community License.
  *
  * Vendored third-party code (e.g. the cryptoapis-sdk fork, now at
- * DeSciX_Powch/packages/cryptoapis-sdk) is never listed here: it correctly declares
+ * Powch) is never listed here: it correctly declares
  * UNLICENSED (proprietary). Note UNLICENSED is not the `Unlicense` public-domain licence — that
  * one-keystroke difference had dedicated that vendored code to the public domain until it was
  * corrected in Core 768320d.

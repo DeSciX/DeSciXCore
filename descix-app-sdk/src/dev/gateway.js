@@ -26,13 +26,14 @@ import path from 'path';
 import { createViteProxyConfig } from './createViteProxyConfig.js';
 import { getViteHttpsConfig, resolveCertPaths, checkDevCert } from './getViteHttpsConfig.js';
 import { watchWorkspaceConfig } from './watchWorkspaceConfig.js';
-import { buildWorkspaceProducts, gatewayOrigin } from './workspaceProducts.js';
+import { buildWorkspaceProducts, gatewayOrigin, gatewayProductUrl } from './workspaceProducts.js';
 import { staticSitePlugin } from './staticSitePlugin.js';
 import { resolveGatewayTargets, proxyEntry, isLocalOrigin } from './resolveGatewayTargets.js';
 import { resolveGatewayPort, portInUseMessage } from './gatewayPort.js';
 import { assertVitePin } from './vitePin.js';
 import { resolveServeBinding, appBindingPlugin, APP_BINDING_PATH, bindableApps, servedShareJsonFile } from './serveBinding.js';
 import { initialViewFor } from '../util/appView.js';
+import { STANDALONE_MODE } from '../util/appBinding.js';
 import { resolvePowchUrl } from './powchUrl.js';
 import { resolveDevCertOptions } from './devCerts.js';
 import { localUpstreamOrigin } from './localOrigin.js';
@@ -143,27 +144,22 @@ export async function runGateway(options = {}) {
 
   // Which app is this session serving? cwd by default, --app to override.
   // Fails loud rather than falling back to store chrome (AMB-2, AMB-5).
-  const binding = resolveServeBinding(workspaceRoot, config, {
+  const session = resolveServeBinding(workspaceRoot, config, {
     app: options.app,
     cwd: options.cwd || process.cwd(),
-    gatewayPort: port,
   });
-  // The binding's MODE and the app's ROUTE are two different facts, and one line
-  // that carried both said neither. `standalone` is binding.mode, and the mode is
-  // delivered by the binding this gateway serves at its ROOT (appBindingPlugin
-  // below; read by the shell in SdkInitializer via fetchAppBinding). It is NOT
-  // delivered by binding.appUrl — that is gatewayProductUrl, the app's own route,
-  // which is the SAME value buildWorkspaceProducts hands the shell as an iframe
-  // src. Printing "standalone at <appUrl>" therefore named the mode and the route
-  // as one address, and sent developers to the one URL that cannot answer for the
-  // mode: APP_BINDING_PATH is served at the root and 404s under /p/.
+  // The binding's MODE and the app's ROUTE are two different facts. `standalone` is the mode,
+  // delivered by the binding this gateway serves at its ROOT (appBindingPlugin below; read by the
+  // shell in SdkInitializer via fetchAppBinding). APP_BINDING_PATH is served at the root and 404s
+  // under /p/, so the route line must never read as the place the mode comes from.
   //
-  // Say what each URL IS and let neither stand in for the other. Nothing here
-  // describes what /p/ SHOULD be — that is not this banner's question to answer.
-  log(`  App:       ${binding.appId}   [${binding.source}]   mode: ${binding.mode}`);
-  log(`  Open:      ${gatewayOrigin(port)}/   → App Shell; reads ${APP_BINDING_PATH} and boots ${binding.appId} ${binding.mode}`);
-  log(`  App route: ${binding.appUrl}   → this app's route on the gateway (the URL the shell loads it from)`);
-  log(`  First view: ${initialViewFor(binding)}${binding.defaultView ? '' : ' (shell default; the site declares no default_view)'}   [share.json: ${servedShareJsonFile(bindableApps(workspaceRoot).find((a) => a.appId === binding.appId)).why}]`);
+  // These lines are LOCAL strings for the developer at this machine. The served binding's appUrl
+  // is not printed here: it is built per request on the origin the shell was opened on
+  // (serveBinding.bindingAppUrl), so a shell opened through a tunnel hostname frames that host.
+  log(`  App:       ${session.appId}   [${session.source}]   mode: ${STANDALONE_MODE}`);
+  log(`  Open:      ${gatewayOrigin(port)}/   → App Shell; reads ${APP_BINDING_PATH} and boots ${session.appId} ${STANDALONE_MODE}`);
+  log(`  App route: ${gatewayProductUrl(port, session.appId)}   → this app's route on the gateway (the shell loads it from this route on the origin it was opened on)`);
+  log(`  First view: ${initialViewFor(session)}${session.defaultView ? '' : ' (shell default; the site declares no default_view)'}   [share.json: ${servedShareJsonFile(bindableApps(workspaceRoot).find((a) => a.appId === session.appId)).why}]`);
   log('');
 
   const proxyRules = buildGatewayProxy(workspaceRoot, targets);
@@ -199,7 +195,7 @@ export async function runGateway(options = {}) {
   let server = await createServer({
     root: workspaceRoot,
     configFile: false,
-    plugins: [appBindingPlugin(binding), staticSitePlugin(staticRoutes)],
+    plugins: [appBindingPlugin(session), staticSitePlugin(staticRoutes)],
     server: {
       port,
       strictPort: true,
@@ -229,7 +225,7 @@ export async function runGateway(options = {}) {
   // hint that TLS was the cause.
   log(formatDevCertBanner(checkDevCert({ certPath }), certPath));
 
-  // WS-7: Service discovery — fetch /manifest from all microservices
+  // Service discovery — fetch /manifest from all microservices
   discoverServices(config, log).catch(err => {
     log(`  [Service Discovery] Error: ${err.message}\n`);
   });
@@ -248,10 +244,9 @@ export async function runGateway(options = {}) {
 
     // Re-resolve the binding too: a renamed or moved app must not keep serving
     // the previous answer at APP_BINDING_PATH.
-    const newBinding = resolveServeBinding(workspaceRoot, newConfig, {
+    const newSession = resolveServeBinding(workspaceRoot, newConfig, {
       app: options.app,
       cwd: options.cwd || process.cwd(),
-      gatewayPort: port,
     });
 
     await server.close();
@@ -259,7 +254,7 @@ export async function runGateway(options = {}) {
     server = await createServer({
       root: workspaceRoot,
       configFile: false,
-      plugins: [appBindingPlugin(newBinding), staticSitePlugin(newStaticRoutes)],
+      plugins: [appBindingPlugin(newSession), staticSitePlugin(newStaticRoutes)],
       server: {
         port,
         strictPort: true,
@@ -276,7 +271,7 @@ export async function runGateway(options = {}) {
     });
 
     await listenOrFailLoud(server, port, portSource);
-    log(`\n  Gateway restarted on ${gatewayOrigin(port)}  (app ${newBinding.appId})\n`);
+    log(`\n  Gateway restarted on ${gatewayOrigin(port)}  (app ${newSession.appId})\n`);
   });
 
   process.on('SIGINT', () => { watcher.close(); server.close(); process.exit(0); });
@@ -308,7 +303,7 @@ export async function listenOrFailLoud(server, port, portSource) {
 }
 
 /**
- * WS-7: Service Discovery
+ * Service Discovery
  *
  * After the gateway starts, discover all microservices by fetching their /manifest
  * endpoint. Logs the results for visibility into the service mesh state.

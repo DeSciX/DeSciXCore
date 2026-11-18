@@ -6,7 +6,7 @@
  * This module owns reading, writing, and forgetting that pointer, plus the one rule for when a
  * dead pointer may be self-healed.
  *
- * Extracted out of `bin/descix.js` (ws-cli-stale-thread-selfheal) so the self-heal decision is
+ * Extracted out of `bin/descix.js` so the self-heal decision is
  * unit-testable in isolation — in particular so the 400-heals / 403-never-heals asymmetry can be
  * proven by a test rather than asserted in a comment.
  */
@@ -62,7 +62,7 @@ async function clearSession(communityId, appId) {
 }
 
 /**
- * WS-R7-PREREQS (CEO-D-2026-07-04-R7-PREREQS-RESCOPE ruling 3) session helpers.
+ * (CEO-D-2026-07-04-R7-PREREQS-RESCOPE ruling 3) session helpers.
  *
  * Session files are keyed {community_id}_{app_id}.json where community_id is the
  * SERVER-resolved value (returned by app-scoped commands). Before the server response
@@ -149,7 +149,7 @@ export async function clearAppSessions(communityId, appId) {
 }
 
 /**
- * ── Stale-thread self-heal (ws-cli-stale-thread-selfheal) ────────────────────────────────
+ * ── Stale-thread self-heal ────────────────────────────────
  *
  * Conversation state lives server-side at the model provider; the CLI holds only an opaque
  * DeSciX interaction token in `~/.descix/sessions/{community}_{app}.json`. A stored token can

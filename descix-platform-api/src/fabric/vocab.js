@@ -6,8 +6,8 @@
  * those rules are written against.
  *
  * WHY IT LIVES IN @descix/platform-api AND NOT IN THE CLOUD MICROSERVICE. There are two consumers
- * in two repositories: DeSciX_Cloud's `fabricStore.js` (which enforces the vocabulary) and
- * DeSciX_Core's `mcp-tools/nativeTools.js` (which PUBLISHES it as tool-schema enums and prose). A
+ * in two repositories: Cloud's `fabricStore.js` (which enforces the vocabulary) and
+ * Core's `mcp-tools/nativeTools.js` (which PUBLISHES it as tool-schema enums and prose). A
  * copy in each is the mirror-drift bug class — the enum a caller is SHOWN and the enum the server
  * ACCEPTS would disagree silently, and the caller would be refused against a contract it was never
  * given. One export, two importers, and `fabric-vocabulary-conformance.test.js` fails CI if a tool
@@ -18,7 +18,7 @@
  * imported by a package whose other entry points pull in Firestore.
  *
  * The `fabric_vocabulary` verb returns this module's contents over the wire, so a CLIENT (the
- * unkamon-beast plugin's `hooks/lib/vocab.py`) can GENERATE its copy instead of hand-keeping one.
+ * coordination plugin's `hooks/lib/vocab.py`) can GENERATE its copy instead of hand-keeping one.
  * A hand-kept client mirror was measured writing four statuses the server refuses and defining a
  * `liveness` model the server did not know (2026-08-24).
  */
@@ -27,7 +27,7 @@
 //
 // A record addressed to a seat (`to_agent`) on any OTHER app/kb reaches no sweeper: every sweep
 // reads THIS collection and the store answers success:true either way (measured twice on
-// 2026-08-23 — a CEO ruling addressed to VISION sat unread in unk-beast/Org for three hours). The
+// 2026-08-23 — a CEO ruling addressed to VISION sat unread in another app's KB for three hours). The
 // fabric verbs do not take app_id/kb_id from the caller for exactly that reason.
 export const FABRIC_APP = 'egpt-frqtl';
 export const FABRIC_KB = 'coordination';
@@ -174,7 +174,7 @@ export const LIVENESS_VALUES = Object.freeze([LIVENESS_MODEL, LIVENESS_PROCESS])
 // ── WHICH WRITER MUST CARRY `wake` ───────────────────────────────────────────────────────────
 //
 // ONE OWNER OF THE RULE, consumed by the descriptor that PUBLISHES it (nativeTools.js
-// `fabric_beat`) and by the verb that ENFORCES it (DeSciX_Cloud fabricStore.js). Under
+// `fabric_beat`) and by the verb that ENFORCES it (Cloud fabricStore.js). Under
 // CEO-D-2026-08-22-PROTOCOL-TRUTH-IS-THE-MCP-DESCRIPTOR the served descriptor IS the protocol, so
 // a server enforcing one rule while its descriptor states another has two truths and callers build
 // against the wrong one. Both read this constant; neither restates it.
@@ -205,7 +205,7 @@ export function isWakeRequiredFor(liveness) {
 // ── WHICH WRITER OWNS `status` ───────────────────────────────────────────────────────────────
 //
 // ONE OWNER OF THE RULE, consumed by the descriptor that PUBLISHES it (nativeTools.js
-// `fabric_beat`) and by the verb that ENFORCES it (DeSciX_Cloud fabricStore.js), exactly as
+// `fabric_beat`) and by the verb that ENFORCES it (Cloud fabricStore.js), exactly as
 // WAKE_REQUIRED_LIVENESS is. Under CEO-D-2026-08-22-PROTOCOL-TRUTH-IS-THE-MCP-DESCRIPTOR the
 // served descriptor IS the protocol, so a server enforcing one rule while its descriptor states
 // another has two truths and callers build against the wrong one.
@@ -383,7 +383,7 @@ export const ENVELOPE_SECTIONS = Object.freeze([
 /**
  * WHAT `text` IS — stated ONCE, quoted by every surface that describes or enforces it.
  *
- * THE DEFECT THIS REPLACES (ws-c3-live-leg / D-22, measured on the served DEV surface 2026-08-25):
+ * THE DEFECT THIS REPLACES:
  * `fabric_envelope_put` stated this fact in THREE places — its tool `description`, its
  * `properties.text.description`, and the server's refusal in fabricStore's assertSectionedText —
  * and they had drifted. The tool description said "`text` is a JSON OBJECT whose keys are the
@@ -935,10 +935,10 @@ export const VERDICT = Object.freeze({
 // `liveness` REMAINS, and it still means what it meant: WHO wrote the most recent beat. It is no
 // longer the model's clock and no reader may use it as one.
 //
-// THIS TABLE IS THE CONTRACT. It is exported so the plugin reader (unkamon-beast
-// `hooks/lib/fabric_read.py`), the secretary definition and DeSciX_Cloud's `fabricStore.js` consume
-// ONE description instead of three hand-listed field sets — the schema-mirror-drift rule in
-// Unkamon/CLAUDE.md §Engineering Culture. `projectable: true` is load-bearing: both fields are
+// THIS TABLE IS THE CONTRACT. It is exported so the plugin reader (the coordination plugin's
+// `hooks/lib/fabric_read.py`), the secretary definition and Cloud's `fabricStore.js` consume
+// ONE description instead of three hand-listed field sets — the schema-mirror-drift rule (one exported owner,
+// no hand-listed mirrors). `projectable: true` is load-bearing: both fields are
 // FLAT top-level record fields, so a raw reader may name them in a `fields` projection. A nested
 // clock block would be unprojectable AND unfilterable, and the raw reader would have to fetch the
 // whole record to answer one question.
@@ -1033,7 +1033,7 @@ export function normalizeBeatClocks(record) {
  * `normalizeBeatClocks(record)` into it (`{...clocks, now, threshold_s}`) rather than pick
  * `model_beat_at` out and re-label it. Extra keys from the bag are ignored. That is not cosmetic:
  * a call site that names the field is a second place the string lives, which is the drift this
- * whole contract exists to close — DeSciX_Cloud's conformance gate refuses a hand-typed clock name
+ * whole contract exists to close — Cloud's conformance gate refuses a hand-typed clock name
  * in `fabricStore.js` on exactly that ground.
  *
  * @param {{model_beat_at: ?string, now: string, threshold_s: number}} args

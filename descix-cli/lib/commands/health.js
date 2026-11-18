@@ -1,7 +1,7 @@
 /**
  * Health Command — environment-aware platform health checker.
  *
- * WS-CLI-HEALTH-ENV-PIVOT (2026-05-26):
+ * 
  *   `descix health --env <env>` pivots the probe surface based on env:
  *     - dev  (default): BOUND (lsof) AND SERVES (a route probe) per service, plus a gateway
  *             row from env.gateway.port. A bound port is not a health check: measured

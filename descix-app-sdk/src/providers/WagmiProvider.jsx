@@ -1,4 +1,3 @@
-// ---------- [./DeSciX_PWA/src/providers/WagmiProvider.jsx] ----------
 /**
  * WagmiProvider - Web3 wallet connection provider
  * 

@@ -145,7 +145,7 @@ export class DeSciXApiClient {
   }
 
   /**
-   * WS-HEADLESS-MVP-A1 (mcp-oauth-longlived-tokens design §2.4, Option 4A) — attach the
+   * attach the
    * cached OAuth access token as the standard `Authorization: Bearer` header when the
    * credential cache holds a FRESH one.
    *
@@ -170,7 +170,7 @@ export class DeSciXApiClient {
   }
 
   /**
-   * WS-HEADLESS-MVP-A1 (design §2.2/§4.1) — OAuth silent refresh, the gcloud-ADC analogue.
+   * OAuth silent refresh, the gcloud-ADC analogue.
    *
    * When the cached OAuth access token is expired (or within the 60s skew window), POST
    * grant_type=refresh_token to /oauth/token. The AS ROTATES the refresh token on use, so
@@ -257,7 +257,7 @@ export class DeSciXApiClient {
    * @returns {Promise<void>}
    */
   async ensureSession() {
-    // WS-HEADLESS-MVP-A1 OAuth branch: keep the cached OAuth access token fresh (silent
+    // OAuth branch: keep the cached OAuth access token fresh (silent
     // refresh against /oauth/token). Runs ONLY when an `oauth` credential block exists in
     // wallet.json (written by `descix login`) — the wallet-sig session path below is
     // untouched and remains the headless/API_KEY credential (design §2.6).
@@ -343,7 +343,7 @@ export class DeSciXApiClient {
       });
     }
 
-    // WS-A1: OAuth bearer rides the standard Authorization header (no-op without a cache).
+    // OAuth bearer rides the standard Authorization header (no-op without a cache).
     this._applyOAuthBearerIfAvailable(axiosConfig);
 
     try {
@@ -355,7 +355,7 @@ export class DeSciXApiClient {
         const error = new Error(data.message || 'API request failed');
         error.status = data.status;
         error.response = data;
-        // WS-HEADLESS-MVP-A3: surface structured error fields (e.g. CREDITS_REQUIRED
+        // surface structured error fields (e.g. CREDITS_REQUIRED
         // code + purchasable-action data) to CLI/MCP consumers.
         if (data.code) error.code = data.code;
         if (data.data) error.data = data.data;
@@ -370,7 +370,7 @@ export class DeSciXApiClient {
   }
 
   /**
-   * WS-MCP-SURFACE-SPLIT §10.2 — fetch the PERMISSION-FILTERED MCP tool catalog for THIS caller.
+   * fetch the PERMISSION-FILTERED MCP tool catalog for THIS caller.
    *
    * Calls the backend `list_mcp_tools` command over the standard /apifront session/wallet path
    * (the proven CLI auth: device-flow session token, with automatic reconnect-by-wallet refresh).
@@ -443,7 +443,7 @@ export class DeSciXApiClient {
         });
       }
 
-      // WS-A1: OAuth bearer rides the standard Authorization header (no-op without a cache).
+      // OAuth bearer rides the standard Authorization header (no-op without a cache).
       this._applyOAuthBearerIfAvailable(axiosConfig);
 
       const response = await axios.post(url, requestBody, axiosConfig);
@@ -454,7 +454,7 @@ export class DeSciXApiClient {
         const error = new Error(data.message || 'API request failed');
         error.status = data.status;
         error.response = data;
-        // WS-HEADLESS-MVP-A3: surface structured error fields (e.g. CREDITS_REQUIRED
+        // surface structured error fields (e.g. CREDITS_REQUIRED
         // code + purchasable-action data) to CLI/MCP consumers.
         if (data.code) error.code = data.code;
         if (data.data) error.data = data.data;
@@ -517,7 +517,7 @@ export class DeSciXApiClient {
         const apiError = new Error(errorData.message || `HTTP ${error.response.status}`);
         apiError.status = error.response.status;
         apiError.response = errorData;
-        // WS-HEADLESS-MVP-A3: ferry structured error fields (code + purchasable-action
+        // ferry structured error fields (code + purchasable-action
         // data, e.g. CREDITS_REQUIRED/402) through the axios error path.
         if (errorData.code) apiError.code = errorData.code;
         if (errorData.data) apiError.data = errorData.data;
@@ -592,7 +592,7 @@ export class DeSciXApiClient {
         signature: walletData.signature || null,
         communityId: walletData.communityId || null,
         tokenSymbol: walletData.tokenSymbol || null,
-        // WS-A1: OAuth credential block (gcloud-ADC analogue) — null when never logged in
+        // OAuth credential block (gcloud-ADC analogue) — null when never logged in
         // via the device→OAuth bridge; the wallet-sig path is then the sole credential.
         oauth: walletData.oauth || null
       };

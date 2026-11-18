@@ -1,9 +1,9 @@
 /**
  * `descix airdrop execute-queue` IS DELETED, AND REFUSED BY NAME.
  *
- * Lane B (the pending_migrations queue) is struck (CEO word Unkamon 1530eb6, daita-sam#4:
- * "Delete all of it, fail loud at every door, no compat fence (super-DRY)."). The verb was a
- * dry-run preview of that queue. Distributions run through the offers rail on daita-sam.
+ * Lane B (the pending_migrations queue) is struck: delete all of it, fail loud at every door, no
+ * compat fence (super-DRY). The verb was a
+ * dry-run preview of that queue. Distributions are operator-only and run through the offers rail of a local operator app.
  *
  * Runs the REAL binary in a temp dir with no credentials. Run:
  *   node --test tests/airdrop-execute-queue-removed.test.js
@@ -34,7 +34,7 @@ function cli(args) {
   }
 }
 
-test('airdrop execute-queue exits non-zero naming the offers rail on daita-sam', () => {
+test('airdrop execute-queue exits non-zero naming the offers rail and that it is operator-only', () => {
   for (const args of [
     ['airdrop', 'execute-queue'],
     ['airdrop', 'execute-queue', '--dry-run', '--community', 'smile'],
@@ -44,7 +44,7 @@ test('airdrop execute-queue exits non-zero naming the offers rail on daita-sam',
     const r = cli(args);
     assert.notEqual(r.code, 0, `${args.join(' ')}: a removed verb must not exit 0`);
     assert.match(r.out, /airdrop execute-queue/, `${args.join(' ')}: refusal must name what was typed`);
-    assert.match(r.out, /daita-sam/, `${args.join(' ')}: refusal must name the replacement`);
+    assert.match(r.out, /operator-only/, `${args.join(' ')}: refusal must say the operation is operator-only`);
     assert.match(r.out, /offers/i, `${args.join(' ')}: refusal must name the offers rail`);
   }
 });

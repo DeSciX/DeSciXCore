@@ -1,4 +1,3 @@
-// ---------- [./DeSciX_PWA/src/AppContext.jsx] ----------
 import React, { createContext, useState, useContext, useCallback, useEffect, useMemo } from 'react';
 import {
   AppContextEvent, AppContextState, AppContextView, AppContextInAppActivity, ProductTypes, RewardTypes, AppData, LoginStatus, AppEventViewData,
@@ -11,8 +10,8 @@ import {
   registerSessionExpiryCallback,
 } from './util/AppData';
 import { Api } from './util/api';
+import { createSetAppEvent } from './util/appEvent.js';
 import { useDeSciXBridge } from './hooks/useDeSciXBridge';
-import { isSession } from './powch/authEvent.js';
 import { seedView } from './util/appView.js';
 import { peek as peekPendingIntent, createIntentResumer, PENDING_INTENT_STATUS } from './util/pendingIntent.js';
 import { captureShellIntentFromLocation, SHELL_INTENT_HANDLERS } from './util/shellIntents.js';
@@ -96,8 +95,6 @@ export const AppProvider = ({ children }) => {
   // --- REMOVED: TOS Modal State (bridge-based auth; makeCommandRequestJSON hydrates session) ---
   // --- End TOS Modal State ---
 
-  const isDebugWallet = (import.meta.env.VITE_DEBUG_KEY && !isEmbedded);
-
   // --- Derived State ---
   const walletAddress = sessionInfo?.wallet_address || null; // Non-custodial address from sessionInfo
   const isNonCustodialWalletConnected = !!walletAddress; // Check if non-custodial wallet is linked
@@ -105,20 +102,8 @@ export const AppProvider = ({ children }) => {
 
   // --- Helper to set app events ---
   // Supports: setAppEvent('EVENT_NAME') or setAppEvent('EVENT_NAME', payload) or setAppEvent({ type: 'EVENT_NAME', payload })
-  const setAppEvent = useCallback((newEvent, payloadArg) => {
-    if (typeof newEvent === 'string') {
-      // Support two-argument syntax: setAppEvent('EVENT_NAME', payload)
-      newEvent = { type: newEvent, payload: payloadArg };
-    } else if (typeof newEvent !== 'object' || !newEvent?.type) {
-      console.error('AppContext: ERROR setAppEvent called with invalid event:', JSON.stringify(newEvent));
-      return;
-    }
-    _setAppEvent(prev => ({
-      type: newEvent.type,
-      id: (prev?.id ?? 0) + 1,
-      payload: newEvent.payload // Pass payload
-    }));
-  }, []); // Removed appEvent from dependencies
+  // A SESSION_EXPIRED ends the session's send tickets when dispatched (util/appEvent.js).
+  const setAppEvent = useMemo(() => createSetAppEvent(_setAppEvent), []);
 
   // --- In-App Activity View Setter ---
   const setInAppActivityView = useCallback((newView) => {
@@ -161,23 +146,19 @@ export const AppProvider = ({ children }) => {
     }
   }, []);
 
-  const verifyAuthenticationStatus = async (walletAddress, signature) => {
-    //wraps the Api.checkAuthenticationStatus function and sets the loginStatus
-    if (!walletAddress || !signature) {
-      console.error("AppContext: ERROR verifyAuthenticationStatus called with undefined walletAddress or signature");
-      return;
-    }
-    const status = await Api.checkAuthenticationStatus(walletAddress, signature);
-    console.log("AppContext: Handling verifyAuthenticationStatus event", (AppData.sdk) ? "SDK PRESENT" : "SDK MISSING", status);
-    setLoginStatus(status);
-    return status;
+  // The session status the shell already holds. Sign-in is Powch's (loginWithSessionToken writes
+  // AppData.sessionInfo / loginStatus); there is no server re-check here.
+  const currentSessionStatus = () => {
+    if (AppData.sessionInfo?.id) return AppData.loginStatus || LoginStatus.GUEST;
+    AppData.loginStatus = LoginStatus.GUEST;
+    return LoginStatus.GUEST;
   };
 
   const refreshSession = useCallback(async () => {
     // Re-fetch session info from backend and update React state
     try {
-      const status = await Api.checkAuthenticationStatus();
-      console.log("AppContext: refreshSession - updated status:", status);
+      const status = currentSessionStatus();
+      console.log("AppContext: refreshSession - status:", status);
       
       // Update React state with fresh sessionInfo from AppData
       _setSessionInfo(AppData.sessionInfo || null);
@@ -192,7 +173,7 @@ export const AppProvider = ({ children }) => {
     }
   }, []);
 
-  // viewRouter logic has been moved to PlatformViewProvider (DeSciX_Cloud/site/src/PlatformViewContext.jsx).
+  // viewRouter logic has been moved to PlatformViewProvider (Cloud's PlatformViewContext.jsx).
   // SDK now fires lifecycle events; app-level view providers handle view routing.
 
   // --- Refresh User Roles Function ---
@@ -211,7 +192,7 @@ export const AppProvider = ({ children }) => {
     setAppEvent({ type: AppContextEvent.CHANGE_VIEW, payload: { view: newView, viewEventData: newViewEventData } });
   };
 
-  // handleLaunchApp has been moved to PlatformViewProvider (DeSciX_Cloud/site/src/PlatformViewContext.jsx).
+  // handleLaunchApp has been moved to PlatformViewProvider (Cloud's PlatformViewContext.jsx).
 
   async function refreshMyCommunitiesAndApps() {
     try {
@@ -275,36 +256,6 @@ export const AppProvider = ({ children }) => {
       return;
     }
     try {
-      // Skip re-auth check for auth-related events that already handled authentication
-      const authEvents = [
-        AppContextEvent.LOGIN_SUCCESS,
-        AppContextEvent.LOGIN_FAILURE,
-        AppContextEvent.SDK_CHECKED,
-        AppContextEvent.SDK_READY,
-        AppContextEvent.SDK_FAILED
-      ];
-      const isAuthEvent = authEvents.includes(event);
-      
-      // Use AppData.loginStatus (source of truth) instead of stale React state
-      const currentAuthStatus = AppData.loginStatus || LoginStatus.GUEST;
-      const isAuthenticated = currentAuthStatus === LoginStatus.AUTHENTICATED || 
-                              currentAuthStatus === LoginStatus.CONNECTED;
-      
-      // Only do re-auth check if:
-      // 1. App is READY
-      // 2. Not an auth event (which already handled auth)
-      // 3. Not currently authenticated according to AppData
-      // 4. SDK is available (skip Discord auth in native mode)
-      if (appState === AppContextState.READY && !isAuthEvent && !isAuthenticated && AppData.sdk) {
-        console.log('AppContext: stateMachine called with READY state but loginStatus is not authenticated, checking auth');
-        const status = await Api.checkAuthenticationStatus();
-        console.log("AppContext: Re-auth check result", (AppData.sdk) ? "SDK PRESENT" : "SDK MISSING", status);
-        setLoginStatus(status);
-        if (status === LoginStatus.CONNECTED) {
-          setAppEvent(AppContextEvent.LOGIN_SUCCESS);
-        }
-        // AUTHENTICATED/other: status already updated — Platform handles view routing
-      }
       let status, data;
 
       switch (event) {
@@ -379,9 +330,9 @@ export const AppProvider = ({ children }) => {
             console.log('AppContext: URL params stripped, redirected to:', cleanUrl);
           }
 
-          // 2. NORMAL AUTH FLOW (Native or Discord)
-          status = await Api.checkAuthenticationStatus();
-          console.log("AppContext: Handling SDK_CHECKED auth check", (AppData.sdk) ? "SDK PRESENT" : "SDK MISSING", status);
+          // 2. THE SESSION THE SHELL HOLDS (sign-in is Powch's, in Discord too)
+          status = currentSessionStatus();
+          console.log("AppContext: SDK_CHECKED session status", status);
           
           // Handle Auth Status
           if (!status || status === LoginStatus.AUTH_FAILED) {
@@ -590,17 +541,18 @@ export const AppProvider = ({ children }) => {
         },
         // Direct API access helper
         call: Api.call,
-        /** Standard app-sdk API: update session from Powch bridge result. Call after bridge.login() resolves. */
+        /**
+         * Standard app-sdk API: update session from Powch bridge result. Call after bridge.login() resolves.
+         * Returns whether the shell now holds the session: a Powch answer sent before the last
+         * sign-out or account change is refused (AppData.adoptHandedSession).
+         */
         loginWithSessionToken: (sessionData) => {
-          const info = sessionData?.sessionInfo ?? sessionData;
-          if (!isSession(info)) return;
-          const status = sessionData?.auth_status ?? LoginStatus.CONNECTED;
-          AppData.sessionInfo = info;
-          AppData.loginStatus = status;
-          if (info?.custodial_balance !== undefined) AppData.custodialBalance = info.custodial_balance;
-          if (info?.roles !== undefined) AppData.userRoles = new Map(Object.entries(info.roles));
-          setSessionInfo(info);
-          setLoginStatus(status);
+          const adopted = AppData.adoptHandedSession(sessionData);
+          if (!adopted) return false;
+          _setSessionInfo(adopted.info);
+          _setLoginStatus(adopted.status);
+          if (adopted.info.custodial_balance !== undefined) _setCustodialBalance(adopted.info.custodial_balance);
+          return true;
         }
       };
       console.log('[App Shell] DeSciX helpers exposed on window object');
@@ -758,13 +710,6 @@ export const AppProvider = ({ children }) => {
   const fetchCurrentChannel = async () => {
     console.log('Fetching current channel...');
     if (AppData.sdk) {
-      if (!isEmbedded) {
-        const mockchannel = { id: 'mock-channel-id', name: 'DESCIX', guild_id: 'mock-guild-id' }; // Mock structure
-        setCurrentChannel(mockchannel);
-        // Fetch mock/default community?
-        // await fetchCommunity("DESCIX");
-        return;
-      }
       try {
         const channel = await AppData.sdk.commands.getChannel({ channel_id: AppData.sdk.channelId });
         console.log('Current Channel:', channel);
@@ -820,7 +765,6 @@ export const AppProvider = ({ children }) => {
         myApps,
 
         // Core Functions
-        verifyAuthenticationStatus,
         refreshSession,
         refreshMyCommunitiesAndApps,
         makeCustomDeepLink,
@@ -833,7 +777,6 @@ export const AppProvider = ({ children }) => {
 
         // Utilities & Constants
         isEmbedded,
-        isDebugWallet,
         apiUrlPrefix: apiProxyUrlPrefix,
         clearStoreCache,
         MEMBER_ROLE_ID, // Export constant

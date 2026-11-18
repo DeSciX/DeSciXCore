@@ -12,7 +12,7 @@ import { requirePowchUrl } from '../powch/powchOrigin.js';
  * - Uses PWA-owned PowchBridgeProvider for visibility and iframe registration.
  * - Subscribes to ui_open/ui_close for reliable visibility updates.
  *
- * WS-HEADLESS-MVP-A4 `standalone` prop: a STANDALONE-ORIGIN AppShell app (own
+ * `standalone` prop: a STANDALONE-ORIGIN AppShell app (own
  * top-level window — e.g. frqtl.com or the splitview harness; NOT embedded inside the
  * platform PWA) has no host shell to provide the Powch iframe, so the shell bridge's
  * login() dead-ends with "Powch PWA not ready". Passing standalone={true} mounts +

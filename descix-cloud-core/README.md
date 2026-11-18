@@ -92,6 +92,11 @@ already answers.
 (Deliberately not a relative link: this README ships inside the published package, where any
 `../` path escapes the tarball and resolves to nothing.)
 
+`config.envDefaultsLayer()` answers the per-environment layer as loaded at boot,
+`{ env, file, values }` from `defaults-config-<DEPLOY_ENV>.json` (null when none was loaded), before any
+override. A caller that must know what the environment itself names (e.g. the Firestore database an
+operator run must target) reads it there, never from the merged config an override can redirect.
+
 **A missing required value is a boot failure, not a default.** `CloudConfigFatalError` is the
 intended behaviour: a null surfaces a misconfiguration immediately instead of letting a service
 run against the wrong thing. Do not add `|| 'some-default'` to recover from it.

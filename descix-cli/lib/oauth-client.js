@@ -1,6 +1,5 @@
 /**
- * DeSciX CLI OAuth client — WS-HEADLESS-MVP-A1
- * (mcp-oauth-longlived-tokens-design-2026-06-30.md §2.1/§2.2)
+ * DeSciX CLI OAuth client
  *
  * The gcloud-ADC-style long-lived credential layer for the CLI/MCP:
  *   - PKCE S256 pair generation (binds code redemption to THIS process)

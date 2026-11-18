@@ -2,7 +2,7 @@
 /**
  * `descix-app` — the app half's bin. TWO VERBS AND NO MORE: `init` and `serve`.
  *
- * WHY IT IS THIS SMALL (contract-ws-c5-platform-godsworld-on-the-sdk rev 5, I-P1): every
+ * WHY IT IS THIS SMALL: every
  * platform-side verb — create an app, sync a KB, register a service, publish — stays a SERVED
  * MCP verb, so that the platform's contract is discovered from the mesh rather than frozen
  * into whatever version of a CLI a developer happens to have installed. The only things that

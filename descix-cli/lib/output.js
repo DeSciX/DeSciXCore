@@ -1,7 +1,7 @@
 /**
  * CLI output — ONE OWNER of the "human progress vs. --json data channel" split.
  *
- * Relocated from bin/descix.js (WS-MEDIA-QUOTA) so lib/commands/* modules can share it
+ * Relocated from bin/descix.js so lib/commands/* modules can share it
  * without bin/ -> lib/ layering going backwards. This is a move, not a duplication: bin/descix.js
  * imports `progress` from here instead of defining its own copy.
  */
