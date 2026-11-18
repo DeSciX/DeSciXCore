@@ -10,8 +10,19 @@
 import { requirePowchUrl } from '../powch/powchOrigin.js';
 import { PowchReadyGate, POWCH_READY } from '../powch/readyGate.js';
 import { createAuthEvent, isSession } from '../powch/authEvent.js';
+import { powchRequestError } from '../powch/requestError.js';
+import { settleSubmitAnswer } from '../powch/submitAnswer.js';
+import {
+  takeSendTicket,
+  endSession,
+  isTicketBeforeSessionEnd,
+  stampAnswerTicket,
+  refusedTicket,
+} from './sessionGeneration.js';
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 120000;
+/** The most send tickets a bridge keeps; past it the oldest is dropped (see _pruneRequestTickets). */
+export const MAX_REQUEST_TICKETS = 256;
 
 const TAB_IDS = {
   CARDS: 'cards',
@@ -35,6 +46,11 @@ export class PowchBridgeClient {
 
     this.iframe = null;
     this.pendingRequests = new Map();
+    // requestId -> the send ticket of every request this bridge posted (util/sessionGeneration.js).
+    // Kept past a timeout and past the answer (Powch posts a sign-in's POWCH_STATE_UPDATE after its
+    // POWCH_RESPONSE, and both are judged by the request's ticket) until a session end makes the
+    // ticket moot, or the map passes MAX_REQUEST_TICKETS (_pruneRequestTickets).
+    this._requestTickets = new Map();
     this.requestIdCounter = 0;
 
     // Readiness is Powch's POWCH_READY and nothing else (see ../powch/readyGate.js).
@@ -52,23 +68,42 @@ export class PowchBridgeClient {
   }
 
   /**
-   * Sync session from Powch to host when payload contains sessionInfo.
-   * Ensures DeSciX session state updates whether login came via bridge.login() or internal unlock.
+   * Hand the session a Powch answer carries to the host shell, which judges it by the send ticket the
+   * payload is stamped with (AppData.adoptHandedSession). Returns false only when the shell refused it.
    */
   _syncSessionToHost(payload) {
     const info = payload?.sessionInfo ?? payload;
-    if (!isSession(info)) return;
+    if (!isSession(info)) return true;
     try {
       const shell = typeof window !== 'undefined' ? window.DeSciX : null;
-      if (shell?.loginWithSessionToken) {
-        shell.loginWithSessionToken(payload);
-      }
-      if (shell?.AppContext?.setAppEvent) {
+      if (!shell?.loginWithSessionToken) return true;
+      if (shell.loginWithSessionToken(payload) !== true) return false;
+      if (shell.AppContext?.setAppEvent) {
         shell.AppContext.setAppEvent('LOGIN_SUCCESS');
       }
     } catch (e) {
       console.warn('[PowchBridgeClient] _syncSessionToHost failed:', e);
     }
+    return true;
+  }
+
+  /**
+   * A sign-out, wherever it started (Powch's POWCH_SIGNED_OUT; bridge.logout() ends the tickets
+   * before it asks): every answer sent before it is over (util/sessionGeneration.js), and the host
+   * shell drops the session it holds through its one session-end path, SESSION_EXPIRED
+   * (util/sessionExpiry.js) — the event Powch's own document gets on the same sign-out.
+   */
+  _signedOut() {
+    endSession();
+    this._pruneRequestTickets();
+    const shell = typeof window !== 'undefined' ? window.DeSciX : null;
+    if (!shell?.AppData || typeof shell.AppContext?.setAppEvent !== 'function') {
+      console.error('[PowchBridge] Powch signed out, but this host has no App Shell (window.DeSciX.AppData and AppContext.setAppEvent): its DeSciX session was not cleared.');
+      return;
+    }
+    // A host already signed out has nothing to clear (SESSION_EXPIRED would reload a top-level shell).
+    if (!isSession(shell.AppData.sessionInfo)) return;
+    shell.AppContext.setAppEvent('SESSION_EXPIRED');
   }
 
   /**
@@ -124,21 +159,29 @@ export class PowchBridgeClient {
       return;
     }
 
-    const { requestId, success, payload, error: errorMsg } = data;
+    const { requestId, success, payload } = data;
 
     if (type === 'POWCH_RESPONSE') {
-      // Always sync session for successful responses — even if the pending request
-      // was removed (e.g. timeout fired during a long auth flow). The auth succeeded
-      // on the Powch side; the Shell must learn about it.
-      if (success) {
+      // A successful answer's session reaches the shell even when the pending request was removed
+      // (a timeout fired during a long auth flow) — judged by the ticket its request was sent with.
+      // An answer to a request this bridge never sent has no ticket and is not adopted.
+      // One whose ticket was pruned is stamped refused, so the host page cannot adopt it later either.
+      const ticket = this._requestTickets.get(requestId);
+      if (success && ticket !== undefined) {
+        stampAnswerTicket(payload, ticket);
         this._syncSessionToHost(payload);
+      } else if (success) {
+        stampAnswerTicket(payload, refusedTicket());
+        if (isSession(payload?.sessionInfo ?? payload)) {
+          console.warn(`[PowchBridge] POWCH_RESPONSE ${requestId} answers no request this bridge holds a ticket for (never sent, or pruned after a sign-out or past the cap); its session is not adopted.`);
+        }
       }
       if (requestId && this.pendingRequests.has(requestId)) {
         const { resolve, reject, timer } = this.pendingRequests.get(requestId);
         clearTimeout(timer);
         this.pendingRequests.delete(requestId);
         if (success) resolve(payload);
-        else reject(new Error(errorMsg || 'Request failed'));
+        else reject(powchRequestError(data));
       }
       return;
     }
@@ -171,9 +214,38 @@ export class PowchBridgeClient {
 
     if (!type) return;
 
-    if (type === 'POWCH_STATE_UPDATE' && payload) {
+    // Powch posts it on every sign-out (its UI, or this host's POWCH_LOGOUT), never for a vault lock
+    // or a session expiry. Origin- and source-checked above like every message that changes the session.
+    if (type === 'POWCH_SIGNED_OUT') {
+      this._signedOut();
+      return;
+    }
+
+    if (type === 'POWCH_STATE_UPDATE') {
+      // Powch posts it only to the host whose own request started the sign-in, echoing that request's
+      // id; it is judged by that request's send ticket. One with no requestId, one naming a request
+      // this bridge never sent, or one whose request was sent before the last sign-out is dropped whole:
+      // no session, no released address, no event. So is one whose session the shell refuses (a sign-in
+      // sent before the one it holds).
+      if (!payload) {
+        console.warn(`[PowchBridge] POWCH_STATE_UPDATE for ${requestId} carries no payload; it was dropped.`);
+        return;
+      }
+      const ticket = this._requestTickets.get(requestId);
+      if (ticket === undefined) {
+        console.warn(`[PowchBridge] POWCH_STATE_UPDATE ${requestId === undefined ? 'names no request' : `names ${JSON.stringify(requestId)}, a request this bridge holds no ticket for (never sent, or pruned after a sign-out or past the cap)`}; it was dropped.`);
+        return;
+      }
+      if (isTicketBeforeSessionEnd(ticket)) {
+        console.warn(`[PowchBridge] POWCH_STATE_UPDATE for ${requestId}, a request sent before the last sign-out; it was dropped.`);
+        return;
+      }
+      stampAnswerTicket(payload, ticket);
+      if (!this._syncSessionToHost(payload)) {
+        console.warn(`[PowchBridge] POWCH_STATE_UPDATE for ${requestId}: the shell refused its session (a later sign-in or another account holds it); it was dropped.`);
+        return;
+      }
       if (payload.displayAddress !== undefined) this.auth.setReleasedAddress(payload.displayAddress);
-      this._syncSessionToHost(payload);
       this._emit('state_update', payload);
       return;
     }
@@ -183,7 +255,7 @@ export class PowchBridgeClient {
       clearTimeout(timer);
       this.pendingRequests.delete(requestId);
       if (success) resolve(payload);
-      else reject(new Error(errorMsg || 'Request failed'));
+      else reject(powchRequestError(data));
     }
   }
 
@@ -192,6 +264,8 @@ export class PowchBridgeClient {
    * `timeout` runs from the actual post.
    */
   _sendRequest(type, payload = {}, timeout = this.requestTimeoutMs) {
+    // The session this request belongs to: its ticket is taken when the caller asks (util/sessionGeneration.js).
+    const ticket = takeSendTicket();
     return new Promise((resolve, reject) => {
       if (!this.iframe?.contentWindow) {
         reject(new Error(
@@ -213,6 +287,8 @@ export class PowchBridgeClient {
           }
         }, timeout);
         this.pendingRequests.set(requestId, { resolve, reject, timer });
+        this._requestTickets.set(requestId, ticket);
+        this._pruneRequestTickets();
 
         const enrichedPayload = { ...payload, brand: this.brand };
         this.iframe.contentWindow.postMessage(
@@ -228,6 +304,23 @@ export class PowchBridgeClient {
         reject
       );
     });
+  }
+
+  /**
+   * Bound the ticket map. A ticket taken before the last session end is moot (every answer to it is
+   * refused) and is deleted: here on this bridge's own sign-outs, and on the next send for an end that
+   * happened elsewhere (AppData.reset, a 401). Past MAX_REQUEST_TICKETS the OLDEST ticket is dropped
+   * even if its request is still waiting: its answer then resolves its caller but is never adopted.
+   */
+  _pruneRequestTickets() {
+    for (const [requestId, ticket] of this._requestTickets) {
+      if (isTicketBeforeSessionEnd(ticket)) this._requestTickets.delete(requestId);
+    }
+    while (this._requestTickets.size > MAX_REQUEST_TICKETS) {
+      const [oldest] = this._requestTickets.keys();
+      this._requestTickets.delete(oldest);
+      console.warn(`[PowchBridge] More than ${MAX_REQUEST_TICKETS} Powch requests are tracked in one session: the ticket of ${oldest}, the oldest, was dropped; an answer to it still resolves its caller, but its session and state update are no longer adopted.`);
+    }
   }
 
   _emit(event, data) {
@@ -254,6 +347,7 @@ export class PowchBridgeClient {
       clearTimeout(timer);
     }
     this.pendingRequests.clear();
+    this._requestTickets.clear();
     this._readyGate.cancel(`PowchBridgeClient destroyed before Powch sent ${POWCH_READY}`);
   }
 
@@ -300,7 +394,11 @@ export class PowchBridgeClient {
   }
 
   logout() {
-    // WS-HEADLESS-MVP-R7 (defect #4): was a hard no-op — shell logout never reached
+    // A sign-out: no answer to a request sent before it may sign the shell back in. The host shell's
+    // session is cleared when Powch answers with POWCH_SIGNED_OUT (_signedOut).
+    endSession();
+    this._pruneRequestTickets();
+    // was a hard no-op — shell logout never reached
     // Powch. Fits the existing generic request/response plumbing untouched: Powch
     // whitelists POWCH_LOGOUT and routes it to its internal full-logout handler,
     // responding via the standard POWCH_RESPONSE requestId echo (contract agreed with
@@ -366,12 +464,17 @@ export class PowchBridgeClient {
     return { bridgeUrl: this.bridgeUrl, brand: this.brand };
   }
 
+  /**
+   * Broadcast a user-signed transaction through Powch. Resolves ONLY for a confirmed transaction;
+   * `failed` and `pending` reject with `err.code` TX_FAILED / TX_PENDING and `err.data.tx_hash`
+   * (see ../powch/submitAnswer.js). A 4xx/5xx rejects as the shell's `Api.call` does.
+   */
   get networkAPI() {
     if (!this.getApi) return null;
     const Api = this.getApi();
     return {
-      submitMetaTransaction: (params) => Api.call('submit_meta_transaction', params),
-      submitTransaction: (params) => Api.call('submit_transaction', params),
+      submitMetaTransaction: (params) => Api.call('submit_meta_transaction', params).then(settleSubmitAnswer),
+      submitTransaction: (params) => Api.call('submit_transaction', params).then(settleSubmitAnswer),
     };
   }
 }

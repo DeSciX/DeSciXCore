@@ -6,7 +6,7 @@
  * - Support multiple chunking strategies (semantic, sliding window)
  * - Generate chunk records with proper metadata for Pinecone
  * 
- * Ported from: DeSciX_Cloud/services/chunkingUtils.js
+ * Ported from: Cloud's chunkingUtils.js
  * 
  * Architecture:
  * - All chunking happens locally in the SDK

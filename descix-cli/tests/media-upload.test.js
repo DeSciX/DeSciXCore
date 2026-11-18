@@ -74,6 +74,7 @@ function makeTokenResponse({ files, publicBase = 'https://myapp.dev.descix.net/a
     });
   }
   return {
+    visibility: 'public',
     token_id: 'tok-123',
     expires_at: new Date(Date.now() + 60000).toISOString(),
     bucket: 'descix-assets-public',
@@ -262,4 +263,56 @@ test('the storage line reports the total AFTER this upload (projected_bytes), no
   const line = stdout.find((l) => l.includes('Storage:'));
   assert.ok(line, 'a storage line is printed');
   assert.match(line, /30\.0 MB \/ 200\.0 MB/);
+});
+
+test('upload sends visibility "public" explicitly by default and prints public_url', async (t) => {
+  const filePath = await makeTempFile(t, 'a.txt', 'abc');
+  const apiClient = new StubApiClient({ tokenResponse: makeTokenResponse({ files: [{ path: 'a.txt', size: 3 }] }) });
+  stubFetch(t);
+  const { stdout } = silenceConsole(t);
+  await runMediaUpload(apiClient, { app: 'myapp', file: [filePath] });
+  assert.equal(apiClient.calls[0].payload.visibility, 'public');
+  assert.equal(apiClient.calls[0].payload.app_id, 'myapp');
+  assert.ok(stdout.join('\n').includes('public_url: https://myapp.dev.descix.net/assets/a.txt'));
+});
+
+test('--private sends visibility "private" and prints each object\'s ref, never a public_url', async (t) => {
+  const filePath = await makeTempFile(t, 'a.txt', 'abc');
+  const token = makeTokenResponse({ files: [{ path: 'a.txt', size: 3 }] });
+  token.visibility = 'private';
+  token.objects = [{ path: 'a.txt', gcs_path: 'dev/myapp/assets/a.txt', ref: 'asset:myapp/a.txt' }];
+  token.public_base = null;
+  const apiClient = new StubApiClient({ tokenResponse: token });
+  stubFetch(t);
+  const { stdout } = silenceConsole(t);
+  const result = await runMediaUpload(apiClient, { app: 'myapp', file: [filePath], private: true });
+  assert.equal(apiClient.calls[0].payload.visibility, 'private');
+  const out = stdout.join('\n');
+  assert.ok(out.includes('ref: asset:myapp/a.txt'), `ref printed:\n${out}`);
+  assert.ok(!out.includes('public_url'), 'no public_url for a private upload');
+  assert.equal(result.assets[0].ref, 'asset:myapp/a.txt');
+});
+
+test('a --private upload whose answer lacks a ref fails loud before any PUT, never printing ref: null', async (t) => {
+  const filePath = await makeTempFile(t, 'a.txt', 'abc');
+  const token = makeTokenResponse({ files: [{ path: 'a.txt', size: 3 }] });
+  token.visibility = 'private';
+  token.objects = [{ path: 'a.txt', gcs_path: 'dev/myapp/assets/a.txt' }];
+  const apiClient = new StubApiClient({ tokenResponse: token });
+  const puts = stubFetch(t);
+  const { stdout } = silenceConsole(t);
+  await assert.rejects(() => runMediaUpload(apiClient, { app: 'myapp', file: [filePath], private: true }),
+    /returned no ref for private object\(s\): a\.txt; nothing was uploaded/);
+  assert.equal(puts.length, 0, 'no PUT was made');
+  assert.ok(!stdout.join('\n').includes('ref: null'));
+});
+
+test('an upload answered for a different visibility than asked fails loud before any PUT', async (t) => {
+  const filePath = await makeTempFile(t, 'a.txt', 'abc');
+  const apiClient = new StubApiClient({ tokenResponse: makeTokenResponse({ files: [{ path: 'a.txt', size: 3 }] }) });
+  const puts = stubFetch(t);
+  silenceConsole(t);
+  await assert.rejects(() => runMediaUpload(apiClient, { app: 'myapp', file: [filePath], private: true }),
+    /get_asset_upload_token answered for visibility "public", but "private" was asked for/);
+  assert.equal(puts.length, 0);
 });

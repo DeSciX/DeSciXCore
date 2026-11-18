@@ -160,3 +160,32 @@ test('(c2) base defaults-config.json still supplies values when no per-env file 
     const cfg = createCloudConfig({ rootPath: dir });
     assert.equal(cfg.CORE_API_URL, 'https://localhost:4000/apifront');
 });
+
+test('(d) envDefaultsLayer() is the per-env file AS LOADED, never the merged value an override redirects', async (t) => {
+    const base = { FIRESTORE_DATABASE_ID: null };
+    const envFiles = { dev: { FIRESTORE_DATABASE_ID: 'descix-dev' } };
+    process.env.DEPLOY_ENV = 'dev';
+    const prevPort = process.env.PORT;
+    process.env.PORT = '4999';
+    t.after(() => { if (prevPort === undefined) delete process.env.PORT; else process.env.PORT = prevPort; });
+    const dir = await mkConfigDir(t, base, envFiles);
+
+    _resetCloudConfigForTests();
+    const cfg = createCloudConfig({ rootPath: dir });
+    const layer = cfg.envDefaultsLayer();
+    assert.equal(layer.env, 'dev');
+    assert.equal(layer.file, path.join(dir, 'defaults-config-dev.json'));
+    assert.equal(layer.values.FIRESTORE_DATABASE_ID, 'descix-dev');
+    assert.ok(Object.isFrozen(layer) && Object.isFrozen(layer.values));
+    // An override (here: a direct assignment standing in for process.env / dev-overrides.json) moves the merged
+    // value; the layer keeps what the environment's own file names.
+    cfg.FIRESTORE_DATABASE_ID = 'descix-prod';
+    assert.equal(cfg.envDefaultsLayer().values.FIRESTORE_DATABASE_ID, 'descix-dev');
+});
+
+test('(d2) envDefaultsLayer() is null when no per-env file was loaded (no guess)', async (t) => {
+    process.env.DEPLOY_ENV = 'prod';
+    const dir = await mkConfigDir(t, { CORE_API_URL: 'https://localhost:4000/apifront' }, {});
+    _resetCloudConfigForTests();
+    assert.equal(createCloudConfig({ rootPath: dir }).envDefaultsLayer(), null);
+});

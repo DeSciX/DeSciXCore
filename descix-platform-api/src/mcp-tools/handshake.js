@@ -1,19 +1,18 @@
 /**
  * @descix/platform-api/mcp-tools — external-consumer handshake + bootstrap SSOT
- * (WS-MVP-FIRSTCONTACT F1/F3, CEO-D-2026-07-06-MVP-FIRSTCONTACT-INSERTION).
  *
  * THE single source for the operating manual an EXTERNAL MCP consumer receives at
  * `initialize` (F1) and for the deterministic platform summary `tell_me_how
  * scope:"bootstrap"` returns (F3). Dependency-free leaf (same contract as
  * nativeTools.js) so BOTH transports consume it without re-authoring the text:
- *   - DeSciX_Cloud apiFront.js `initialize` (HTTP /mcp — Claude.ai connector)
+ *   - Cloud apiFront.js `initialize` (HTTP /mcp — Claude.ai connector)
  *   - descix-cli/bin/mcp-server.js (stdio transport)
  *
  * Content contract: aligned with `unk-cos/MustKnow` (platform-must-know-briefer).
  * Three-audience rule: this text is for the EXTERNAL consumer — no org/agent internals,
  * no platform plumbing beyond what the consumer must operate.
  *
- * ws-evidence-grounding (CEO-D-2026-07-09): the science-DEX one-liner is consumed from
+ * the science-DEX one-liner is consumed from
  * evidence-contract.js SCIENCE_DEX_STORY (one owner, no hand-mirror). The Evidence
  * Contract PAYLOAD itself rides on the bootstrap response (tellMeHowBootstrap serves the
  * frame + caller-relevant settlement profiles via getEvidenceContract) and is addressable

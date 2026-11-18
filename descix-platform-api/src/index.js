@@ -31,9 +31,72 @@ export {
     count_tokens,
     matrix_to_bigquery,
     sanitizeCredentialId,
+    PASSKEY_FIELDS,
+    PasskeyState,
+    PasskeySource,
+    PasskeyRecordError,
+    PasskeyRecordRefusal,
+    normalizePasskey,
+    recoveredPasskeyDifferences,
+    userAccountOwner,
     get_default_community,
     getUserEntitlements
 } from './models/index.js';
+
+// Operator guards: THE operator email rule, the operator envs and the Firestore target check
+// (also at @descix/platform-api/operator).
+export {
+    OPERATOR_ENVS,
+    OperatorGuardRefusal,
+    OperatorGuardError,
+    normalizeOperatorEmailRule,
+    operatorEmailAllowed,
+    operatorEmailRuleForAddress,
+    operatorEmailRulePrefixes,
+    assertOperatorTarget
+} from './operator/index.js';
+// The database an operator run on an env must target, measured from the booted cloud-core config.
+export { bootedEnvDatabaseId } from './operator/booted-database.js';
+
+// Operator account admin: delete and merge, in-process only (also at @descix/platform-api/account-admin).
+export {
+    createAccountAdmin,
+    ACCOUNT_PLAN_TTL_SECONDS,
+    AccountAdminRefusal,
+    AccountAdminError,
+    accountAdminBlocker,
+    DELETE_OUTCOME,
+    MERGE_OUTCOME,
+    MERGE_ROLLBACK_OUTCOME,
+    RESTORE_OUTCOME,
+    ACCOUNT_READ_LIMIT,
+    STORE_OWNER_METHODS,
+    STORE_OWNER_MERGE_METHODS,
+    STORE_OWNER_RESTORE_METHOD,
+    USER_OWNER_METHODS,
+    deletePlanHash,
+    mergePlanHash,
+    REDACTED,
+    redactCredentials,
+    encodeStoreValue,
+    decodeStoreTimestamp,
+    receiptData,
+    canonicalJson,
+    accountAdminHash,
+    nonJsonValuePath,
+    unredactedCredentialPaths,
+    footprintViolation,
+    moveKey,
+    credentialValues,
+    secretPath,
+    isSecretPath,
+    entryDataHash,
+    deleteExpectations,
+    assertDeletePlanCurrent,
+    assertDocumentAsPlanned,
+    assertAccountStoreOwnerConforms,
+    AccountStoreOwnerNonConformance
+} from './account-admin/index.js';
 
 // Auth
 export {
@@ -48,6 +111,7 @@ export {
 // Email
 export {
     sendEmail,
+    EMAIL_EXTRA_HEADERS,
     sendVerificationEmail,
     renderMigrationQueuedEmail,
     sendMigrationQueued,

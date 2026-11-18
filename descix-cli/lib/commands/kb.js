@@ -261,7 +261,7 @@ export async function runKbPush(apiClient, options) {
  * The first version compared Pinecone's vectorCount with the sync-state's total_chunks. But the
  * sync writes total_chunks FROM the reconciled live count, so the comparison was the store
  * against a copy of itself: drift 0 by construction, "HEALTHY" over a superseded document that
- * was still live and retrievable (measured 2026-09-18, GODSWORLD-DEV, PROD). vectorCount also
+ * was still live and retrievable (measured 2026-09-18, a live app, PROD). vectorCount also
  * lags deletes. What matters is WHICH files are live, so that is what this checks.
  *
  * BEHAVIOUR
@@ -356,7 +356,7 @@ export async function runKbDoctor(apiClient, options) {
   // (c) IDENTITY, not count. Which corpus files are LIVE, against which files the last sync
   // WALKED. The count comparison this replaced read the store against `total_chunks`, which the
   // sync itself writes FROM the reconciled live count — so drift was zero by construction and
-  // the check could not fail (measured 2026-09-18, GODSWORLD-DEV: "HEALTHY" printed over a
+  // the check could not fail (measured 2026-09-18, a live app: "HEALTHY" printed over a
   // superseded INDEX.md that was still live and retrievable). Identity catches exactly that.
   if (!Array.isArray(syncStateRaw.synced_blob_shas)) {
     console.log(chalk.yellow(`  ⚠ sync-state records no synced_blob_shas at ${statePathForOrigin} — the walked set is UNKNOWN.`));

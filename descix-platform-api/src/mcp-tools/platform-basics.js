@@ -4,7 +4,7 @@
  *
  * THE single owner of the app-lane-safe "platform basics": the canonical identity model,
  * naming rules, environments, and the developer entry path. Two consumers, zero mirrors:
- *   - DeSciX_Cloud communityCommands.tellMeHowBootstrap serves PLATFORM_BASICS_SUMMARY as
+ *   - Cloud communityCommands.tellMeHowBootstrap serves PLATFORM_BASICS_SUMMARY as
  *     the `platform_basics` section of the tell_me_how scope:'bootstrap' payload;
  *   - DeSciX/scripts/generate-platform-basics.mjs renders PLATFORM_BASICS_DOC into
  *     V2_docs/architecture/platform-basics.md (GENERATED), which the daita General corpus

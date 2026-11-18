@@ -35,13 +35,25 @@ export function gatewayOrigin(gatewayPort) {
 }
 
 /**
- * Where the shell loads a PRODUCT app from — always the gateway origin.
+ * A PRODUCT app's route on a given gateway origin. ONE owner of the `/p/{appId}` shape: the
+ * local map below (gatewayProductUrl) and the served binding (serveBinding.bindingAppUrl, on
+ * the origin the request came in on) both compose through it.
+ * @param {string} origin - an origin with no trailing slash, e.g. `https://localhost:5599`
+ * @param {string} appId
+ * @returns {string}
+ */
+export function productUrlOn(origin, appId) {
+  return `${origin}/p/${appId}`;
+}
+
+/**
+ * Where the shell loads a PRODUCT app from on the LOCAL gateway origin.
  * @param {number} gatewayPort
  * @param {string} appId
  * @returns {string}
  */
 export function gatewayProductUrl(gatewayPort, appId) {
-  return `${gatewayOrigin(gatewayPort)}/p/${appId}`;
+  return productUrlOn(gatewayOrigin(gatewayPort), appId);
 }
 
 export function buildWorkspaceProducts(workspaceRoot) {

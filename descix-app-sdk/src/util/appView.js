@@ -27,7 +27,7 @@
  *
  * NoChrome: the shell renders NO chrome (no TopNavBar, no Main padding, no chat)
  * and the app iframe fills the shell's viewport. The shell is the consumer of
- * this value (DeSciX_Cloud site/src/App.jsx and AppSurfaceWidget.jsx). NoChrome
+ * this value (Cloud site/src/App.jsx and AppSurfaceWidget.jsx). NoChrome
  * is a shell view: the shell drops its chrome inside the browser tab. Browser full
  * screen is the separate Fullscreen API, which the CodeSite iframe delegates
  * (`allow="fullscreen"`) and which the app may call on top of any view.

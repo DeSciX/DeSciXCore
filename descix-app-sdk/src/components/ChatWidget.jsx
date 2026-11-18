@@ -515,7 +515,7 @@ const ChatWidget = (props = {}) => {
     preloadedThread,
     documentId,           // IPDoc file ID for document mode
     layoutMode: initialLayoutMode = 'chat',  // chat, document, split
-    // WS-HEADLESS-MVP-A4: embeddability override. The isAppOwned input gate is a
+    // embeddability override. The isAppOwned input gate is a
     // store-UX affordance driven by the REACTIVE `myApps` mirror in AppContext.jsx
     // (isAppEntitled(selectedApp, myApps) — updated the instant a fetch changes it,
     // never a stale AppData.myApps read at render), which only the platform store
@@ -524,15 +524,15 @@ const ChatWidget = (props = {}) => {
     // (verify_subscription + credits gate on every ask_question_to_app); this only
     // unlocks the input UI.
     entitled,             // undefined => legacy reactive-myApps check
-    // WS-HEADLESS-MVP-A4: host-supplied login trigger for STANDALONE embeds (e.g. a
+    // host-supplied login trigger for STANDALONE embeds (e.g. a
     // PowchClient-based host like the splitview harness / frqtl.com). When absent, the
     // widget falls back to the in-shell Powch bridge (usePowchBridge().login — the
     // PWA/SignInButton pattern, which requires a registered Powch iframe).
     onRequestLogin,
-    // WS-B8: the host's handle on THE chat ingress. A React ref object; this
+    // the host's handle on THE chat ingress. A React ref object; this
     // widget assigns { contribute } onto it. The host (CodeSiteWidget) calls
     // ingressRef.current.contribute(bag) to put an action result — and, once
-    // ws-chat-multimodal-image-attach lands, an image — into the conversation.
+    // image attachments land, an image — into the conversation.
     // Absent for chats with no external contributors.
     ingressRef,
   } = props;
@@ -560,7 +560,7 @@ const ChatWidget = (props = {}) => {
 
   // Chat state
   const [message, setMessage] = useState('');
-  // WS-B8: external contributions staged on the composer, waiting to ride into the
+  // external contributions staged on the composer, waiting to ride into the
   // next submitted turn. See util/chatIngress.js for the contract.
   // Rendered mirror only: the list itself is owned synchronously by contributionStage, so a
   // stage and a send issued in the same task share one turn (see createContributionStage).
@@ -612,7 +612,7 @@ const ChatWidget = (props = {}) => {
     return subscribeChatContext(() => setPageContext(getChatContextFor(appId)));
   }, [appId]);
 
-  // ── WS-HEADLESS-MVP-A4: AI-credits awareness ─────────────────────────────────
+  // ── AI-credits awareness ─────────────────────────────────
   // Chat is METERED (USD AI credits, one balance per user — CEO-D-2026-07-01 D2).
   // The widget shows the balance, refreshes it after every metered call (debit
   // feedback), and renders the CREDITS_REQUIRED purchasable action (buy CTA) when the
@@ -631,7 +631,7 @@ const ChatWidget = (props = {}) => {
   // reading it here would freeze the widget in its pre-login state after Powch login).
   const isAuthenticated = !!(sessionInfo?.id || sessionInfo?.user_id);
 
-  // WS-HEADLESS-MVP-A4: the widget is "auth'd via Powch bridge" — when unauthenticated
+  // the widget is "auth'd via Powch bridge" — when unauthenticated
   // it OFFERS the login instead of dead-ending on "User not authenticated".
   const handleSignIn = async () => {
     setSigningIn(true);
@@ -1146,7 +1146,7 @@ const ChatWidget = (props = {}) => {
   const submitTurn = async ({ typedText = '', contributions = [] } = {}) => {
     if (!selectedApp || !activeThread) return;
     const composedInput = composeTurnInput(contributions, typedText);
-    // ws-chat-multimodal-image-attach: media staged on the composer rides THIS turn.
+    // media staged on the composer rides THIS turn.
     // Pooled by the ingress owner (collectTurnMedia) rather than dug out of the
     // contribution bags here — the transport ferries, it does not re-shape.
     const turnMedia = collectTurnMedia(contributions);
@@ -1179,7 +1179,7 @@ const ChatWidget = (props = {}) => {
       const newMessage = {
         id: turnMessageId,
         // The transcript shows exactly what the model was given, so an action
-        // result is VISIBLE to the user (WS-B8: Maxi must SEE his results).
+        // result is VISIBLE to the user.
         question: composedInput,
         answer: '',
         sources: [],
@@ -1273,12 +1273,12 @@ const ChatWidget = (props = {}) => {
           };
         });
       }
-      // WS-HEADLESS-MVP-A4: debit feedback — the metered call just debited actual usage;
+      // debit feedback — the metered call just debited actual usage;
       // refresh the balance and record the delta for the credits bar.
       refreshCredits({ recordDebit: true });
     } catch (error) {
       console.error('Chat Error:', error);
-      // WS-HEADLESS-MVP-A4: never swallow a chat failure silently (pre-A4 this catch
+      // never swallow a chat failure silently (pre-A4 this catch
       // only logged). Render the error into the thread, and if it is the structured
       // CREDITS_REQUIRED purchasable-action error, surface the buy CTA.
       const isCreditsRequired = error?.code === 'CREDITS_REQUIRED' || /CREDITS_REQUIRED/.test(error?.message || '');
@@ -1333,11 +1333,11 @@ const ChatWidget = (props = {}) => {
   };
 
   /**
-   * contribute — THE chat ingress (WS-B8).
+   * contribute — THE chat ingress.
    *
    * The ONLY way content enters this conversation from outside the composer.
-   * CodeSite action results use it today; ws-chat-multimodal-image-attach plugs
-   * image attachments into this same handle with disposition 'stage'. Do not add
+   * CodeSite action results use it today; image attachments plug
+   * into this same handle with disposition 'stage'. Do not add
    * a second path.
    *
    * @param {object} partial - an external-contribution bag (see util/chatIngress.js).
@@ -1590,7 +1590,7 @@ const ChatWidget = (props = {}) => {
         </Box>
       )}
 
-      {/* WS-HEADLESS-MVP-A4: Powch sign-in affordance — chat is auth'd via Powch */}
+      {/* Powch sign-in affordance — chat is auth'd via Powch */}
       {!isAuthenticated && (
         <Alert
           severity="info"
@@ -1612,7 +1612,7 @@ const ChatWidget = (props = {}) => {
         </Alert>
       )}
 
-      {/* WS-HEADLESS-MVP-A4: AI-credits bar — balance, debit feedback, buy CTA */}
+      {/* AI-credits bar — balance, debit feedback, buy CTA */}
       {creditsRequired !== null && (
         <Alert
           severity="warning"
@@ -1705,9 +1705,9 @@ const ChatWidget = (props = {}) => {
 
       {/* Input area */}
       <Box component="form" onSubmit={handleSubmit} sx={{ padding: 2, borderTop: '1px solid #ccc' }}>
-        {/* WS-B8: external contributions staged on the composer (CodeSite action
+        {/* external contributions staged on the composer (CodeSite action
             results with disposition 'stage'; image attachments once
-            ws-chat-multimodal-image-attach lands). They ride into the next turn. */}
+            they land). They ride into the next turn. */}
         {/* Page context: the one line saying what rides each turn, the page script's controls,
             and any error the script raised (util/chatContext.js). */}
         {pageContext && (

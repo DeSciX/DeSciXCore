@@ -3,7 +3,7 @@
  * for every host-side client (PowchClient standalone mode, PowchBridgeClient).
  *
  * Powch posts POWCH_READY to its parent once initialization is done
- * (DeSciX_Powch packages/react/src/PowchAppProvider.jsx, INITIALIZE handler). A request
+ * (Powch packages/react/src/PowchAppProvider.jsx, INITIALIZE handler). A request
  * posted before that is lost: the iframe is not listening yet, and the loss surfaces
  * only as the request's own (120 s) timeout. So readiness is set by that message and
  * nothing else — not by the iframe element existing, not by a timer.

@@ -4,10 +4,10 @@
  * (Published on the SHELL's own window. An app never names that window: the app-side
  * SDK resolves the frame level for it — see `util/bridgeResolver.js`.)
  *
- * ── The defect this closes (ws-c3-bridge-media-handle) ───────────────────────
+ * ── The defect this closes ───────────────────────
  * Every piece of the media lane already existed and was already canonical:
  *   chatIngress.mediaContribution()  builds a `media_attachment` contribution
- *   ChatWidget.contribute()          THE ingress (WS-B8's one-owner rule)
+ *   ChatWidget.contribute()          THE ingress
  *   collectTurnMedia()               pools it into the turn
  *   ask_question_to_app `media`      carries it to the provider, server-validated
  *

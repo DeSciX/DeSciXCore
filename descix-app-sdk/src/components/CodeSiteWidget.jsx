@@ -44,7 +44,7 @@ const PLATFORM_APP_MESSAGES = {
 };
 
 /**
- * CodeSiteWidget — the Chat + CodeSite SPLIT-VIEW container (WS-HEADLESS-MVP-A4).
+ * CodeSiteWidget — the Chat + CodeSite SPLIT-VIEW container.
  *
  * Two panel modes:
  *  - iframe mode (default): pass `url` — the app's CodeSite renders in a sandboxed
@@ -85,7 +85,7 @@ const CodeSiteWidget = ({
   title = 'Code Site',
   chatEntitled,
   onRequestLogin,
-  // WS-B8: what happens to an executed action's result.
+  // what happens to an executed action's result.
   //  'send'  (default) — the result is posted as its own turn and the model reacts
   //          to it. This is the live loop: Maxi runs a counterfactual, the AI reads
   //          the outcome and continues. Costs one metered turn per Run click, which
@@ -145,7 +145,7 @@ const CodeSiteWidget = ({
 
   /**
    * Hand a contribution to THE chat ingress. FAIL LOUD if the chat pane is not
-   * mounted: silently dropping a result is exactly the bug WS-B8 exists to kill.
+   * mounted: silently dropping a result is exactly the bug the ingress exists to kill.
    */
   const deliverToChat = (contribution) => {
     const ingress = chatIngressRef.current;
@@ -160,7 +160,7 @@ const CodeSiteWidget = ({
   };
 
   /**
-   * ws-c3-bridge-media-handle: publish that same reach to the EMBEDDED APP.
+   * publish that same reach to the EMBEDDED APP.
    *
    * `deliverToChat` above is the only door into THE chat ingress, and until now it
    * was reachable from the shell alone — the shell could push an action result in,
@@ -246,7 +246,7 @@ const CodeSiteWidget = ({
     }
 
     if (!targetFunction) {
-      // WS-B8: a missing function used to vanish into console.warn. The user
+      // a missing function used to vanish into console.warn. The user
       // clicked Run and deserves to know nothing happened — and so does the model,
       // which otherwise waits forever for a result it will never see.
       return deliverToChat(
@@ -262,7 +262,7 @@ const CodeSiteWidget = ({
 
     console.log(`[CodeSiteWidget] Executing ${functionName} with args:`, args);
     // Await sync AND async returns uniformly, then route the outcome into THE chat
-    // ingress. This is the WS-B8 return path: results no longer die in console.log.
+    // ingress. This is the return path: results no longer die in console.log.
     return (async () => {
       try {
         const result = await targetFunction(args);
@@ -309,7 +309,7 @@ const CodeSiteWidget = ({
   const sandboxPermissions = 'allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads allow-same-origin';
 
   // Layout: chatWidth is ALWAYS the chat pane's fraction; chatPosition picks the side
-  // (row-reverse puts the chat pane first visually for 'left' — WS-HEADLESS-MVP-A4 fix:
+  // (row-reverse puts the chat pane first visually for 'left'; the fix:
   // previously 'left' swapped the WIDTHS but the chat still rendered on the right).
   // ONE derivation of "is the chat on screen" and the widths that follow from it — see
   // util/chatLayout.js, which owns the rule and the defect it closes.

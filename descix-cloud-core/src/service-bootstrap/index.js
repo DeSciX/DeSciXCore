@@ -23,7 +23,7 @@
  * AUTHORIZATION. Registration authorizes as a platform-runtime SERVICE ACCOUNT: an OIDC ID-token
  * minted from ADC (audience = the exact apifront URL being called), which Cloud verifies against
  * the per-env `PLATFORM_RUNTIME_SERVICE_ACCOUNTS` allow-list
- * (DeSciX_Cloud/microservice/services/serviceAccountAuth.js::verifyPlatformServiceAccountOidc,
+ * (Cloud's serviceAccountAuth.js::verifyPlatformServiceAccountOidc,
  * reached via apiFront.js's PLATFORM_SA_ACCEPTED_COMMANDS gate). There is no provisioned secret
  * and there is NO session-token fallback path here: one surface, one credential. A host that
  * cannot mint an ID-token (local developer ADC) sets the named opt-out below.

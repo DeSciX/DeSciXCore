@@ -34,6 +34,7 @@ mock.module('googleapis', {
             auth: { JWT: class { constructor(opts) { this.opts = opts; } } },
             gmail: () => ({ users: { messages: { send: async ({ requestBody }) => {
                 sent.push(Buffer.from(requestBody.raw.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8'));
+                return { data: { id: `fixture-msg-${sent.length}` } }; // Gmail's answer carries the message id
             } } } })
         }
     }

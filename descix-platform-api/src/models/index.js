@@ -5,7 +5,7 @@
  *
  * NOTE: KnowledgeBase, IPDocMetadata, and ChunkMetadata are intentionally NOT extracted here
  * because they contain dynamic imports to Cloud-specific services (pineconeService,
- * googleStorageService, geminiAPI). Those classes remain in DeSciX_Cloud/microservice/services/ipStorageUtils.js.
+ * googleStorageService, geminiAPI). Those classes remain in Cloud's ipStorageUtils.js.
  *
  * All config values are loaded lazily via getCloudConfig() from @descix/cloud-core.
  * The bootstrap must complete before any model methods are called.
@@ -23,8 +23,23 @@ import {
     Timestamp,
     ProductTypes,
     getCloudConfig,
+    Firestore,
 } from '@descix/cloud-core';
 import { normalizeEmail } from '../email/index.js';
+import {
+    AccountAdminRefusal,
+    AccountAdminError,
+    ACCOUNT_READ_LIMIT,
+    accountAdminBlocker,
+    receiptData,
+    encodeStoreValue,
+    canonicalJson,
+    moveKey,
+    secretPath,
+    entryDataHash,
+    assertDeletePlanCurrent,
+    assertDocumentAsPlanned,
+} from '../account-admin/contract.js';
 
 /**
  * Why an email could not be attached to an account (one email, one account). Every refusal is
@@ -84,6 +99,140 @@ export function matrix_to_bigquery(rows, projectId, datasetId, tableId, append) 
 export function sanitizeCredentialId(credentialId) {
     if (!credentialId || typeof credentialId !== 'string') return '';
     return credentialId.replace(/\//g, '_').replace(/\+/g, '-');
+}
+
+/**
+ * The passkey a Powch account was registered with: the `passkey` field of the USERS doc keyed by
+ * sanitizeCredentialId(credential_id). Written once, by User.createForPasskey from a VERIFIED
+ * registration; read at every sign-in by User.passkeyOf, whose public key is the only thing an
+ * assertion signature is checked against. Public material only: no private key, no PRF output.
+ */
+export const PASSKEY_FIELDS = Object.freeze({
+    credential_id: 'the credential id, base64url (sanitizeCredentialId of it is the account id)',
+    public_key: 'the credential public key (COSE), base64url, from the verified registration',
+    counter: 'the signature counter last verified (a passkey that does not count stays 0)',
+    transports: 'the transports the browser reported at registration (array of strings, may be empty)',
+    rp_id: 'the WebAuthn rpID the passkey was created for',
+    registered_at: 'when the registration was verified (ISO string)',
+    source: 'which owner write stored the record (a PasskeySource value); written by the owner, never by a caller',
+});
+
+/** Which owner write stored a passkey record: the `source` of every stored PASSKEY_FIELDS bag. */
+export const PasskeySource = Object.freeze({
+    /** User.createForPasskey, from a verified registration. */
+    REGISTERED: 'registered',
+    /** User.attachRecoveredPasskey, the operator upgrade of a key-less account; the only kind removeRecoveredPasskey deletes. */
+    RECOVERED: 'recovered',
+});
+
+/** Where a credential id stands with respect to its account (User.passkeyOf). */
+export const PasskeyState = Object.freeze({
+    /** No USERS doc for this credential: no account was ever registered with it. */
+    NOT_REGISTERED: 'NOT_REGISTERED',
+    /** The account exists but holds no passkey public key: registered before keys were stored. */
+    NO_PUBLIC_KEY: 'NO_PUBLIC_KEY',
+    /** The account holds the passkey's public key. */
+    REGISTERED: 'REGISTERED',
+});
+
+/** Why the owner refused a passkey record: the `code` of every PasskeyRecordError. */
+export const PasskeyRecordRefusal = Object.freeze({
+    INVALID: 'PASSKEY_RECORD_INVALID',
+    ALREADY_REGISTERED: 'PASSKEY_ALREADY_REGISTERED',
+    /** attach/remove: no USERS doc exists for the credential. */
+    ACCOUNT_NOT_FOUND: 'PASSKEY_ACCOUNT_NOT_FOUND',
+    /** attach: the account already holds a passkey public key; only a key-less account is upgraded. */
+    KEY_ALREADY_ON_FILE: 'PASSKEY_KEY_ALREADY_ON_FILE',
+    /** remove: the account does not hold exactly the key the operator wrote; nothing is removed. */
+    ROLLBACK_MISMATCH: 'PASSKEY_ROLLBACK_MISMATCH',
+    /** attach: the account is not a Powch passkey account of this credential (user_info.credentialId and the powch auth provider, as User._newDocData wrote them). */
+    NOT_LEGACY_POWCH_ACCOUNT: 'PASSKEY_NOT_LEGACY_POWCH_ACCOUNT',
+    /** remove: the stored record was not written by attachRecoveredPasskey (or carries no source); nothing is removed. */
+    NOT_RECOVERED: 'PASSKEY_NOT_RECOVERED',
+});
+
+/** The fields that identify one written passkey record for a rollback: every PASSKEY_FIELDS key except
+ * `counter`, which each verified sign-in advances after the write. */
+const PASSKEY_IDENTITY_FIELDS = Object.freeze(Object.keys(PASSKEY_FIELDS).filter((k) => k !== 'counter'));
+
+/** A passkey record refused by its owner. `code` is a PasskeyRecordRefusal value. */
+export class PasskeyRecordError extends Error {
+    constructor(code, message) {
+        super(message);
+        this.name = 'PasskeyRecordError';
+        this.code = code;
+    }
+}
+
+const BASE64URL = /^[A-Za-z0-9_-]+$/;
+/** An operator range-read prefix: a lowercase local part ending in '@' or '+' (operatorEmailRulePrefixes). */
+const EMAIL_PREFIX = /^[a-z0-9._%+-]+[@+]$/;
+
+/**
+ * The full passkey bag (every PASSKEY_FIELDS key) from a partial one, or a PasskeyRecordError naming the
+ * first bad field. Nothing is defaulted except `transports` (absent = none reported); `source` must be a
+ * PasskeySource value (a record without one is invalid).
+ * @param {Object} partial
+ * @returns {{ credential_id: string, public_key: string, counter: number, transports: string[], rp_id: string, registered_at: string, source: string }}
+ */
+export function normalizePasskey(partial) {
+    const p = partial || {};
+    const bad = (field, why) => new PasskeyRecordError(PasskeyRecordRefusal.INVALID, `passkey.${field} ${why}`);
+    if (typeof p.credential_id !== 'string' || !BASE64URL.test(p.credential_id)) throw bad('credential_id', 'must be a base64url string');
+    if (typeof p.public_key !== 'string' || !BASE64URL.test(p.public_key)) throw bad('public_key', 'must be a base64url string');
+    if (!Number.isInteger(p.counter) || p.counter < 0) throw bad('counter', 'must be a non-negative integer');
+    const transports = p.transports ?? [];
+    if (!Array.isArray(transports) || transports.some((t) => typeof t !== 'string')) throw bad('transports', 'must be an array of strings');
+    if (typeof p.rp_id !== 'string' || p.rp_id.length === 0) throw bad('rp_id', 'must be a non-empty string');
+    if (typeof p.registered_at !== 'string' || Number.isNaN(Date.parse(p.registered_at))) throw bad('registered_at', 'must be an ISO time string');
+    if (!Object.values(PasskeySource).includes(p.source)) throw bad('source', `must be one of ${Object.values(PasskeySource).join(', ')}`);
+    const out = {};
+    for (const key of Object.keys(PASSKEY_FIELDS)) out[key] = key === 'transports' ? [...transports] : p[key];
+    return out;
+}
+
+/**
+ * A caller's passkey bag normalized as the record the owner write `source` stores. The owner writes
+ * `source`: a caller bag naming another source is refused (PASSKEY_RECORD_INVALID).
+ * @param {Object} partial
+ * @param {string} source - a PasskeySource value
+ */
+function passkeyWrittenAs(partial, source) {
+    const p = partial || {};
+    if (p.source !== undefined && p.source !== source) {
+        throw new PasskeyRecordError(PasskeyRecordRefusal.INVALID, `passkey.source is written by the owner (${source} here); the bag names ${JSON.stringify(p.source)}`);
+    }
+    return normalizePasskey({ ...p, source });
+}
+
+/**
+ * The USERS account id of a credential id, or PASSKEY_RECORD_INVALID when the id is not base64url.
+ * @param {string} credential_id
+ * @param {string} caller - the owner method, named in the refusal
+ */
+function passkeyAccountId(credential_id, caller) {
+    const user_id = sanitizeCredentialId(credential_id);
+    if (!user_id || !BASE64URL.test(credential_id)) {
+        throw new PasskeyRecordError(PasskeyRecordRefusal.INVALID, `${caller}: the credential id must be a base64url string`);
+    }
+    return user_id;
+}
+
+/**
+ * The fields in which a stored passkey record differs from the record an operator receipt names: every
+ * PASSKEY_FIELDS key except `counter` (sign-ins move it). [] means the account holds exactly the record
+ * that attachRecoveredPasskey wrote from this receipt. The one comparison: removeRecoveredPasskey removes
+ * only on [], and the operator re-key owner decides "this run's key" with it. Pure; reads nothing.
+ * @param {Object|null} stored - the USERS doc's `passkey` field as read (null/undefined: none on file)
+ * @param {Object} receiptPasskey - the bag the operator re-key recovered (its receipt's `passkey`)
+ * @returns {string[]} the differing field names
+ */
+export function recoveredPasskeyDifferences(stored, receiptPasskey) {
+    const bag = passkeyWrittenAs(receiptPasskey, PasskeySource.RECOVERED);
+    if (stored == null) return [...PASSKEY_IDENTITY_FIELDS];
+    if (stored.source !== PasskeySource.RECOVERED) return ['source'];
+    const held = normalizePasskey(stored);
+    return PASSKEY_IDENTITY_FIELDS.filter((k) => JSON.stringify(held[k]) !== JSON.stringify(bag[k]));
 }
 
 export async function get_default_community() {
@@ -471,6 +620,13 @@ export class App {
 // --- User Class ---
 
 export class User {
+    /**
+     * The USERS fields only the operator stamps write, each transactionally: the merge stamp (markMigrated /
+     * unmarkMigrated) and the delete stamp `admin_delete` (userAccountOwner.stampDelete / clearDeleteStamp).
+     * to_dict never carries them, so no whole-document writer undoes or forges one.
+     */
+    static OPERATOR_STAMP_FIELDS = Object.freeze(['migrated_to', 'migrated_at', 'admin_delete']);
+
     constructor(
         id, email = null, user_info = null,
         wallet_address = null, signature = null,
@@ -527,6 +683,9 @@ export class User {
     to_dict() {
         const copy = { ...this };
         delete copy.db;
+        // The operator stamps are written ONLY by their transactional writers: a whole-document write of an
+        // instance hydrated before a merge, a delete's start or their undoing must never undo or forge one.
+        for (const k of User.OPERATOR_STAMP_FIELDS) delete copy[k];
         copy.roles = copy.roles instanceof Map ? Object.fromEntries(copy.roles) : (copy.roles || {});
         copy.provider_links = copy.provider_links instanceof Map ? Object.fromEntries(copy.provider_links) : (copy.provider_links || {});
         copy.nfts = copy.nfts instanceof Map ? Object.fromEntries(copy.nfts) : (copy.nfts || {});
@@ -596,12 +755,12 @@ export class User {
             user_doc.api_signatures || []
         );
 
-        // ws-user-domain-owners: hydrate owner-method-backed fields that are NOT
+        // hydrate owner-method-backed fields that are NOT
         // constructor params. commitTosAndConnect/stampBaseEntitlements/markMigrated/
         // setPendingReferral write these via db.update_doc_fields (targeted field
         // writes onto FirestoreCollections.USERS()), so they exist on the Firestore
         // doc but were previously dropped on every from_firestore() load. Mirrors
-        // Cloud ipStorageUtils.js User.from_firestore (commit 105a152).
+        // Cloud ipStorageUtils.js User.from_firestore.
         user.tos_accepted_at = user_doc.tos_accepted_at || null;
         user.tos_version = user_doc.tos_version || null;
         user.gate_passed_at = user_doc.gate_passed_at || null;
@@ -616,32 +775,14 @@ export class User {
         return user;
     }
 
-    static async to_firestore(user_id, user_info, auth_provider = 'discord') {
-        const db = new CacheFirestore();
-        const user = await db.get_doc(FirestoreCollections.USERS(), user_id);
-        const email = user_info?.email || null;
-
-        let discord_user_id = null;
-        let google_user_id = null;
-        let auth_providers = [auth_provider];
-
-        if (auth_provider === 'discord') {
-            discord_user_id = user_id;
-        } else if (auth_provider === 'google') {
-            if (user_id.startsWith('google_')) {
-                google_user_id = user_id.substring(7);
-            } else {
-                google_user_id = user_id;
-                user_id = `google_${user_id}`;
-            }
-        }
-
-        const dataToStore = {
+    /** The USERS doc a new account starts with (to_firestore and createForPasskey). */
+    static _newDocData(user_id, user_info, auth_provider, discord_user_id, google_user_id) {
+        return {
             id: user_id,
-            email: email,
+            email: user_info?.email || null,
             discord_user_id: discord_user_id,
             google_user_id: google_user_id,
-            auth_providers: auth_providers,
+            auth_providers: [auth_provider],
             user_info: user_info,
             wallet_address: null,
             signature: null,
@@ -656,6 +797,272 @@ export class User {
             accumulated_rep_commission: 0,
             accumulated_dip_commission: 0
         };
+    }
+
+    /**
+     * The one check that an account may receive a recovered passkey (attachRecoveredPasskey and
+     * _passkeyRecoveryStatusOf both run it): the USERS doc exists (PASSKEY_ACCOUNT_NOT_FOUND), is the Powch
+     * passkey account of `credential_id` as _newDocData writes one (`user_info.credentialId` equal to it and
+     * AuthProvider.POWCH in `auth_providers`; a missing field refuses, PASSKEY_NOT_LEGACY_POWCH_ACCOUNT),
+     * and holds no passkey key (PASSKEY_KEY_ALREADY_ON_FILE).
+     * @param {{ exists: boolean, data: () => Object }} snap - the USERS doc snapshot
+     * @param {string} credential_id
+     * @param {string} user_id
+     */
+    static _refuseUnlessPasskeyRecoverable(snap, credential_id, user_id) {
+        if (!snap.exists) {
+            throw new PasskeyRecordError(PasskeyRecordRefusal.ACCOUNT_NOT_FOUND, `no account ${user_id}; no recovered passkey can be attached`);
+        }
+        const doc = snap.data();
+        const powch = doc?.user_info?.credentialId === credential_id
+            && Array.isArray(doc?.auth_providers) && doc.auth_providers.includes(AuthProvider.POWCH);
+        if (!powch) {
+            throw new PasskeyRecordError(PasskeyRecordRefusal.NOT_LEGACY_POWCH_ACCOUNT, `account ${user_id} is not a Powch passkey account of credential ${credential_id} (user_info.credentialId and the ${AuthProvider.POWCH} auth provider); no recovered passkey can be attached`);
+        }
+        if (doc.passkey != null) {
+            throw new PasskeyRecordError(PasskeyRecordRefusal.KEY_ALREADY_ON_FILE, `account ${user_id} already holds a passkey public key; no recovered passkey can be attached`);
+        }
+    }
+
+    /**
+     * Create the account for a newly registered passkey, holding its public key (PASSKEY_FIELDS), in ONE
+     * create: the write fails when a USERS doc already exists for the credential, so a registration can
+     * never overwrite another account's passkey, wallet or anything else (PASSKEY_ALREADY_REGISTERED).
+     * Any other write failure throws. Returns the account id.
+     * @param {Object} passkey - a PASSKEY_FIELDS bag (normalizePasskey)
+     * @returns {Promise<string>}
+     */
+    static async createForPasskey(passkey) {
+        const bag = passkeyWrittenAs(passkey, PasskeySource.REGISTERED);
+        const user_id = sanitizeCredentialId(bag.credential_id);
+        const data = {
+            ...User._newDocData(user_id, { credentialId: bag.credential_id }, AuthProvider.POWCH, null, null),
+            passkey: bag,
+        };
+        const ref = new CacheFirestore().db.collection(FirestoreCollections.USERS()).doc(user_id);
+        try {
+            await ref.create(data);
+        } catch (e) {
+            // gRPC ALREADY_EXISTS: Firestore's create() refuses an existing document.
+            if (e?.code === 6) {
+                throw new PasskeyRecordError(PasskeyRecordRefusal.ALREADY_REGISTERED, `An account is already registered for credential ${bag.credential_id}; nothing was written`);
+            }
+            throw new Error(`User.createForPasskey: the USERS create for ${user_id} failed (${e?.message || e}); no account was created`);
+        }
+        return user_id;
+    }
+
+    /**
+     * Where a credential stands (PasskeyState) and, when REGISTERED, its normalized passkey bag. A failed
+     * read throws: an unanswerable question is never read as "not registered".
+     * @param {string} credential_id
+     * @returns {Promise<{ state: string, user_id: string, passkey: Object|null }>}
+     */
+    static async passkeyOf(credential_id) {
+        const user_id = passkeyAccountId(credential_id, 'User.passkeyOf');
+        const snap = await new CacheFirestore().db.collection(FirestoreCollections.USERS()).doc(user_id).get();
+        if (!snap.exists) return { state: PasskeyState.NOT_REGISTERED, user_id, passkey: null };
+        const stored = snap.data()?.passkey;
+        if (stored == null) return { state: PasskeyState.NO_PUBLIC_KEY, user_id, passkey: null };
+        const passkey = normalizePasskey(stored);
+        if (passkey.credential_id !== credential_id) {
+            throw new PasskeyRecordError(PasskeyRecordRefusal.INVALID, `User.passkeyOf: the account ${user_id} holds the passkey of another credential`);
+        }
+        return { state: PasskeyState.REGISTERED, user_id, passkey };
+    }
+
+    /**
+     * Store the signature counter a verified sign-in reported, in one transaction that never lowers it:
+     * two concurrent sign-ins (counters n+1 and n+2) leave n+2 whichever commits last. Throws when the
+     * account holds no passkey or the write fails; refuses (PASSKEY_RECORD_INVALID) a stored record that is
+     * not a valid PASSKEY_FIELDS bag (e.g. a non-integer counter) or belongs to another credential.
+     * @param {string} credential_id
+     * @param {number} counter
+     */
+    static async recordPasskeyCounter(credential_id, counter) {
+        if (!Number.isInteger(counter) || counter < 0) {
+            throw new PasskeyRecordError(PasskeyRecordRefusal.INVALID, 'passkey.counter must be a non-negative integer');
+        }
+        const user_id = sanitizeCredentialId(credential_id);
+        const db = new CacheFirestore().db;
+        const ref = db.collection(FirestoreCollections.USERS()).doc(user_id);
+        try {
+            await db.runTransaction(async (tx) => {
+                const snap = await tx.get(ref);
+                const stored = snap.exists ? snap.data()?.passkey : null;
+                if (stored == null) throw new Error(`account ${user_id} holds no passkey`);
+                const held = normalizePasskey(stored);
+                if (held.credential_id !== credential_id) {
+                    throw new PasskeyRecordError(PasskeyRecordRefusal.INVALID, `User.recordPasskeyCounter: the account ${user_id} holds the passkey of another credential; the counter was not stored`);
+                }
+                if (held.counter >= counter) return;
+                tx.update(ref, { 'passkey.counter': counter });
+            });
+        } catch (e) {
+            if (e instanceof PasskeyRecordError) throw e;
+            throw new Error(`User.recordPasskeyCounter: the USERS write for ${user_id} failed (${e?.message || e}); the counter was not stored`);
+        }
+    }
+
+    /**
+     * The one-time operator upgrade of an account registered before passkey public keys were stored
+     * (PasskeyState.NO_PUBLIC_KEY): writes `passkey` (a PASSKEY_FIELDS bag the operator re-key recovered
+     * and verified) in ONE transaction that refuses when the account does not exist
+     * (PASSKEY_ACCOUNT_NOT_FOUND), is not the Powch passkey account of this credential
+     * (PASSKEY_NOT_LEGACY_POWCH_ACCOUNT) or already holds a key (PASSKEY_KEY_ALREADY_ON_FILE), the check
+     * passkeyRecoveryStatus reads ahead (_refuseUnlessPasskeyRecoverable). No other field is
+     * touched. Reached only by the operator re-key owner (the Powch operator passkey re-key module);
+     * no command, route or tool calls it.
+     * @param {Object} passkey - a PASSKEY_FIELDS bag (normalizePasskey)
+     * @returns {Promise<string>} the account id
+     */
+    static async attachRecoveredPasskey(passkey) {
+        const bag = passkeyWrittenAs(passkey, PasskeySource.RECOVERED);
+        const user_id = sanitizeCredentialId(bag.credential_id);
+        const db = new CacheFirestore().db;
+        const ref = db.collection(FirestoreCollections.USERS()).doc(user_id);
+        await db.runTransaction(async (tx) => {
+            User._refuseUnlessPasskeyRecoverable(await tx.get(ref), bag.credential_id, user_id);
+            tx.update(ref, { passkey: bag });
+        });
+        return user_id;
+    }
+
+    /**
+     * One USERS doc as the operator upgrade sees it (passkeyRecoveryStatus and passkeyRecoveryCandidates):
+     * its account id, the credential id it is the Powch account of (user_info.credentialId when that is a
+     * base64url id whose account id is this doc's, else null), its normalized `verified_email` (the one address
+     * the upgrade judges an account by; the unverified `email` is not part of it),
+     * when the doc was created (the snapshot's createTime as an ISO string; null when the read carries none),
+     * and `refusal`: null when attachRecoveredPasskey would accept a key for it now, else the
+     * PasskeyRecordRefusal code its check (_refuseUnlessPasskeyRecoverable) answers.
+     * @param {{ exists: boolean, data: () => Object, createTime?: { toDate: () => Date } }} snap
+     * @param {string} user_id
+     */
+    static _passkeyRecoveryStatusOf(snap, user_id) {
+        const doc = snap.exists ? (snap.data() || {}) : null;
+        const cid = doc?.user_info?.credentialId;
+        const credential_id = typeof cid === 'string' && BASE64URL.test(cid) && sanitizeCredentialId(cid) === user_id ? cid : null;
+        let refusal = null;
+        if (!snap.exists) {
+            refusal = PasskeyRecordRefusal.ACCOUNT_NOT_FOUND;
+        } else if (credential_id === null) {
+            refusal = PasskeyRecordRefusal.NOT_LEGACY_POWCH_ACCOUNT;
+        } else {
+            try {
+                User._refuseUnlessPasskeyRecoverable(snap, credential_id, user_id);
+            } catch (e) {
+                if (!(e instanceof PasskeyRecordError)) throw e;
+                refusal = e.code;
+            }
+        }
+        return {
+            user_id,
+            credential_id,
+            verified_email: typeof doc?.verified_email === 'string' ? normalizeEmail(doc.verified_email) : null,
+            created_at: snap.createTime ? snap.createTime.toDate().toISOString() : null,
+            refusal,
+        };
+    }
+
+    /**
+     * Read-only: where the account of `credential_id` stands for the operator upgrade, by the check
+     * attachRecoveredPasskey runs in its transaction (see _passkeyRecoveryStatusOf for the shape; `refusal`
+     * is null, PASSKEY_ACCOUNT_NOT_FOUND, PASSKEY_NOT_LEGACY_POWCH_ACCOUNT or PASSKEY_KEY_ALREADY_ON_FILE).
+     * Throws PASSKEY_RECORD_INVALID for a credential id that is not base64url, and when the read fails.
+     * Writes nothing. Reached only by the operator re-key owner (the Powch operator passkey re-key module).
+     * @param {string} credential_id
+     * @returns {Promise<{ user_id: string, credential_id: string|null, verified_email: string|null, created_at: string|null, refusal: string|null }>}
+     */
+    static async passkeyRecoveryStatus(credential_id) {
+        const user_id = passkeyAccountId(credential_id, 'User.passkeyRecoveryStatus');
+        const snap = await new CacheFirestore().db.collection(FirestoreCollections.USERS()).doc(user_id).get();
+        return User._passkeyRecoveryStatusOf(snap, user_id);
+    }
+
+    /**
+     * Read-only: every USERS doc whose `verified_email` starts with one of `emailPrefixes`, each as
+     * _passkeyRecoveryStatusOf describes it (eligible or not), sorted by account id. A prefix is a lowercase
+     * local part ending in '@' or '+' (e.g. 'operator@', 'operator+'): there is no unfiltered listing, and an empty or
+     * malformed prefix list is refused (PASSKEY_RECORD_INVALID). The range reads compare the stored value as
+     * written, case-sensitively: a verified_email stored with uppercase letters or surrounding spaces is not reached.
+     * A failed read throws. Writes nothing. Reached only by the operator re-key owner.
+     * @param {{ emailPrefixes: string[] }} args
+     * @returns {Promise<Array<ReturnType<typeof User._passkeyRecoveryStatusOf>>>}
+     */
+    static async passkeyRecoveryCandidates({ emailPrefixes } = {}) {
+        if (!Array.isArray(emailPrefixes) || emailPrefixes.length === 0 || emailPrefixes.some((p) => typeof p !== 'string' || !EMAIL_PREFIX.test(p))) {
+            throw new PasskeyRecordError(PasskeyRecordRefusal.INVALID, `User.passkeyRecoveryCandidates: emailPrefixes must be a non-empty array of lowercase local parts ending in '@' or '+' (got ${JSON.stringify(emailPrefixes)}); there is no unfiltered listing`);
+        }
+        const users = new CacheFirestore().db.collection(FirestoreCollections.USERS());
+        const byId = new Map();
+        for (const prefix of new Set(emailPrefixes)) {
+            let snap;
+            try {
+                snap = await users.where('verified_email', '>=', prefix).where('verified_email', '<', `${prefix}`).get();
+            } catch (e) {
+                throw new Error(`User.passkeyRecoveryCandidates: the USERS read on verified_email for '${prefix}' failed (${e?.message || e}); no listing`);
+            }
+            for (const doc of snap.docs) byId.set(doc.id, doc);
+        }
+        return [...byId.keys()].sort().map((id) => User._passkeyRecoveryStatusOf(byId.get(id), id));
+    }
+
+    /**
+     * The rollback of attachRecoveredPasskey: deletes `passkey` ONLY when the stored record's source is
+     * PasskeySource.RECOVERED and it is exactly the record the operator wrote (every PASSKEY_FIELDS key
+     * except `counter`), returning the account to PasskeyState.NO_PUBLIC_KEY. Anything else is refused
+     * (PASSKEY_ACCOUNT_NOT_FOUND, PASSKEY_NOT_RECOVERED, PASSKEY_ROLLBACK_MISMATCH) and nothing is written.
+     * Reached only by the operator re-key owner (the Powch operator passkey re-key module).
+     * @param {Object} passkey - the bag attachRecoveredPasskey wrote (the script's receipt)
+     * @returns {Promise<string>} the account id
+     */
+    static async removeRecoveredPasskey(passkey) {
+        const bag = passkeyWrittenAs(passkey, PasskeySource.RECOVERED);
+        const user_id = sanitizeCredentialId(bag.credential_id);
+        const db = new CacheFirestore().db;
+        const ref = db.collection(FirestoreCollections.USERS()).doc(user_id);
+        await db.runTransaction(async (tx) => {
+            const snap = await tx.get(ref);
+            if (!snap.exists) {
+                throw new PasskeyRecordError(PasskeyRecordRefusal.ACCOUNT_NOT_FOUND, `User.removeRecoveredPasskey: no account ${user_id}; nothing was written`);
+            }
+            const stored = snap.data()?.passkey;
+            if (stored == null) {
+                throw new PasskeyRecordError(PasskeyRecordRefusal.ROLLBACK_MISMATCH, `User.removeRecoveredPasskey: account ${user_id} holds no passkey key; nothing was written`);
+            }
+            if (stored.source !== PasskeySource.RECOVERED) {
+                throw new PasskeyRecordError(PasskeyRecordRefusal.NOT_RECOVERED, `User.removeRecoveredPasskey: account ${user_id} holds a passkey record whose source is ${JSON.stringify(stored.source)}, not ${PasskeySource.RECOVERED}; only a record attachRecoveredPasskey wrote is removed; nothing was written`);
+            }
+            const differing = recoveredPasskeyDifferences(stored, bag);
+            if (differing.length > 0) {
+                throw new PasskeyRecordError(PasskeyRecordRefusal.ROLLBACK_MISMATCH, `User.removeRecoveredPasskey: account ${user_id} holds another passkey record (differs in ${differing.join(', ')}); nothing was written`);
+            }
+            tx.update(ref, { passkey: FieldValue.delete() });
+        });
+        return user_id;
+    }
+
+    static async to_firestore(user_id, user_info, auth_provider = 'discord') {
+        const db = new CacheFirestore();
+        const user = await db.get_doc(FirestoreCollections.USERS(), user_id);
+        const email = user_info?.email || null;
+
+        let discord_user_id = null;
+        let google_user_id = null;
+
+        if (auth_provider === 'discord') {
+            discord_user_id = user_id;
+        } else if (auth_provider === 'google') {
+            if (user_id.startsWith('google_')) {
+                google_user_id = user_id.substring(7);
+            } else {
+                google_user_id = user_id;
+                user_id = `google_${user_id}`;
+            }
+        }
+
+        const dataToStore = User._newDocData(user_id, user_info, auth_provider, discord_user_id, google_user_id);
 
         if (!user) {
             return await db.put_doc(FirestoreCollections.USERS(), user_id, dataToStore);
@@ -702,7 +1109,8 @@ export class User {
      * account other than `uid` holds `email`. "Holds" = the email ProviderIndex row points at
      * another account, another USERS doc carries the email as `email` or `verified_email`
      * (accounts that pre-date the index row), or a USERS doc is keyed by the email itself (the
-     * legacy email-keyed form, which has no passkey). Throws EmailIdentityError
+     * legacy email-keyed form, which has no passkey). A USERS doc migrated into `uid` (migrated_to, the
+     * operator merge) is not another holder. Throws EmailIdentityError
      * ALREADY_REGISTERED_LEGACY when every other holder is that legacy form, else
      * ALREADY_REGISTERED. A failed read throws: an unanswerable question is never read as "free".
      */
@@ -713,14 +1121,17 @@ export class User {
         const db = new CacheFirestore();
         const index = await db.get_doc(FirestoreCollections.PROVIDER_INDEX(), User.emailIndexKey(normalized));
         const holders = new Set();
+        // A record migrated INTO uid (markMigrated) is uid's own past, not another holder.
+        const migratedIntoUid = (doc) => doc?.migrated_to === uid;
         if (index?.descix_user_id) holders.add(index.descix_user_id);
-        if (await db.get_doc(FirestoreCollections.USERS(), normalized)) holders.add(normalized);
+        const keyed = await db.get_doc(FirestoreCollections.USERS(), normalized);
+        if (keyed && !migratedIntoUid(keyed)) holders.add(normalized);
         for (const field of ['email', 'verified_email']) {
             const docs = await db.get_docs_with_ids(FirestoreCollections.USERS(), null, [[field, '==', normalized]]);
             if (!Array.isArray(docs)) {
                 throw new Error(`User.assertEmailFreeFor: the USERS query on ${field} failed; cannot tell whether the email is free`);
             }
-            for (const d of docs) holders.add(d._id);
+            for (const d of docs) if (!migratedIntoUid(d)) holders.add(d._id);
         }
         holders.delete(uid);
         if (holders.size === 0) return;
@@ -1050,7 +1461,7 @@ export class User {
         return await this.db.update_doc_fields(FirestoreCollections.USERS(), this.id, updates);
     }
 
-    // --- User-Domain Owner Methods (ws-user-domain-owners) ---
+    // --- User-Domain Owner Methods ---
     async commitTosAndConnect({ tos_version, gate_source, verified_email } = {}) {
         const updates = {
             tos_accepted_at: Timestamp.now(),
@@ -1140,7 +1551,7 @@ export class User {
 
     async clearPendingReferral() {
         // Symmetric with setPendingReferral(code, guild_id): clears BOTH fields it can set.
-        // Mirrors Cloud ipStorageUtils.js User.clearPendingReferral (commit 111318e).
+        // Mirrors Cloud ipStorageUtils.js User.clearPendingReferral.
         const updates = { pending_referral_code: null, pending_referral_guild_id: null };
         this.pending_referral_code = null;
         this.pending_referral_guild_id = null;
@@ -1153,11 +1564,55 @@ export class User {
         return await this.db.update_doc_fields(FirestoreCollections.USERS(), this.id, updates);
     }
 
+    /**
+     * Mark this record as migrated into account `to` (the merge of a legacy record into its passkey
+     * account): writes `migrated_to` and `migrated_at`, in ONE transaction that refuses when this USERS doc
+     * does not exist (ACCOUNT_NOT_FOUND) or is already migrated (ACCOUNT_MERGE_ALREADY_MIGRATED). Any other
+     * failure throws ACCOUNT_STORE_WRITE_FAILED. Reached by the operator account admin (userAccountOwner).
+     * @param {string} to - the surviving account id
+     * @returns {Promise<true>}
+     */
     async markMigrated(to) {
-        const updates = { migrated_to: to, migrated_at: Timestamp.now() };
-        this.migrated_to = updates.migrated_to;
-        this.migrated_at = updates.migrated_at;
-        return await this.db.update_doc_fields(FirestoreCollections.USERS(), this.id, updates);
+        if (typeof to !== 'string' || !to || to === this.id) {
+            throw new AccountAdminError(AccountAdminRefusal.ACCOUNT_MERGE_SAME_RECORD, `User.markMigrated: ${this.id} can only be migrated into another account id (got ${JSON.stringify(to)}); nothing was written`);
+        }
+        const USERS = FirestoreCollections.USERS();
+        const db = new CacheFirestore().db;
+        const ref = db.collection(USERS).doc(this.id);
+        const migrated_at = Timestamp.now();
+        await userStoreWrite(USERS, `${this.id} migrated_to`, () => db.runTransaction(async (tx) => {
+            const snap = await tx.get(ref);
+            if (!snap.exists) throw new AccountAdminError(AccountAdminRefusal.ACCOUNT_NOT_FOUND, `User.markMigrated: no USERS doc ${this.id}; nothing was written`);
+            const current = snap.data()?.migrated_to ?? null;
+            if (current !== null) throw new AccountAdminError(AccountAdminRefusal.ACCOUNT_MERGE_ALREADY_MIGRATED, `User.markMigrated: ${this.id} is already migrated to ${current}; nothing was written`);
+            tx.update(ref, { migrated_to: to, migrated_at });
+        }));
+        this.migrated_to = to;
+        this.migrated_at = migrated_at;
+        return true;
+    }
+
+    /**
+     * The rollback of markMigrated: deletes `migrated_to` and `migrated_at` ONLY when this record is migrated
+     * into exactly `to`, in one transaction; anything else refuses (ACCOUNT_NOT_FOUND, ACCOUNT_PLAN_STALE)
+     * and writes nothing. Reached by the operator account admin (userAccountOwner).
+     * @param {string} to - the account id the merge receipt says this record was migrated into
+     * @returns {Promise<true>}
+     */
+    async unmarkMigrated(to) {
+        const USERS = FirestoreCollections.USERS();
+        const db = new CacheFirestore().db;
+        const ref = db.collection(USERS).doc(this.id);
+        await userStoreWrite(USERS, `${this.id} migrated_to`, () => db.runTransaction(async (tx) => {
+            const snap = await tx.get(ref);
+            if (!snap.exists) throw new AccountAdminError(AccountAdminRefusal.ACCOUNT_NOT_FOUND, `User.unmarkMigrated: no USERS doc ${this.id}; nothing was written`);
+            const current = snap.data()?.migrated_to ?? null;
+            if (current !== to) throw new AccountAdminError(AccountAdminRefusal.ACCOUNT_PLAN_STALE, `User.unmarkMigrated: ${this.id} is migrated to ${JSON.stringify(current)}, not ${to}; nothing was written`);
+            tx.update(ref, { migrated_to: FieldValue.delete(), migrated_at: FieldValue.delete() });
+        }));
+        this.migrated_to = null;
+        this.migrated_at = null;
+        return true;
     }
     // --- End User-Domain Owner Methods ---
 
@@ -1402,6 +1857,749 @@ export class User {
         return { success: purchase_success, isNewPurchase: true };
     }
 }
+
+// --- The User account owner (operator account admin: delete and merge) ---
+//
+// The User-owned store of the operator account admin (src/account-admin): the USERS doc, its Sessions
+// subcollection, the ProviderIndex / WalletIndex / SignatureIndex rows that point at the account, and the
+// merge of a legacy record into its passkey account. Every read and write of those collections the
+// account admin makes is here; the orchestrator holds no Firestore client. Reached only by the operator
+// account admin (no command, route or tool).
+
+/** A read that failed, as ACCOUNT_STORE_READ_FAILED naming the collection. Coded errors pass through. */
+async function userStoreRead(collection, what, fn) {
+    try {
+        return await fn();
+    } catch (e) {
+        if (e instanceof AccountAdminError) throw e;
+        throw new AccountAdminError(AccountAdminRefusal.ACCOUNT_STORE_READ_FAILED, `the ${collection} read (${what}) failed (${e?.message || e}); nothing was decided from it`, { cause: e });
+    }
+}
+
+/** A write that failed, as ACCOUNT_STORE_WRITE_FAILED naming the collection. Coded errors pass through. */
+async function userStoreWrite(collection, what, fn) {
+    try {
+        return await fn();
+    } catch (e) {
+        if (e instanceof AccountAdminError) throw e;
+        throw new AccountAdminError(AccountAdminRefusal.ACCOUNT_STORE_WRITE_FAILED, `the ${collection} write (${what}) failed (${e?.message || e})`, { cause: e });
+    }
+}
+
+const USER_SESSIONS_COLLECTION_ID = 'Sessions';
+
+/**
+ * A session's footprint path. Its document id IS the live access token, so the path a plan, receipt or
+ * hand-back shows names it by the contract's digest (secretPath): `UserCache/<id>/Sessions/redacted-<16 hex>`.
+ */
+function sessionEntryPath(user_id, token) {
+    return secretPath(FirestoreCollections.USER_SESSIONS(user_id), String(token));
+}
+
+/** The USERS doc's operator delete stamp: written and cleared only by stampDelete / clearDeleteStamp. */
+const ADMIN_DELETE_FIELD = 'admin_delete';
+
+/**
+ * The USERS doc as a delete plan records it: its data without the delete stamp this tool writes itself (so the
+ * stamp never makes its own plan stale, and a re-plan of a stamped account plans the same data).
+ */
+function usersEntryData(doc) {
+    const { [ADMIN_DELETE_FIELD]: _stamp, ...rest } = doc || {};
+    return receiptData(rest);
+}
+
+const PLAN_HASH = /^[0-9a-f]{64}$/;
+
+/** The delete stamp on a USERS doc, or null: { planHash, startedAt }. */
+function adminDeleteOf(doc) {
+    const s = doc?.[ADMIN_DELETE_FIELD];
+    return s && typeof s === 'object' && typeof s.planHash === 'string' ? Object.freeze({ planHash: s.planHash, startedAt: typeof s.startedAt === 'string' ? s.startedAt : null }) : null;
+}
+
+function requireUserId(user, what) {
+    const id = user?.user_id;
+    if (typeof id !== 'string' || !id || id.includes('/')) {
+        throw new AccountAdminError(AccountAdminRefusal.ACCOUNT_NOT_FOUND, `${what}: a user { user_id } naming one USERS doc is required (got ${JSON.stringify(id)})`);
+    }
+    return id;
+}
+
+/** One USERS doc as the account admin lists and judges it. */
+function accountViewOf(id, snap) {
+    const doc = snap.exists ? (snap.data() || {}) : null;
+    if (!doc) return Object.freeze({ accountId: id, exists: false });
+    const providers = Array.isArray(doc.auth_providers) ? [...doc.auth_providers] : [];
+    const cid = doc.user_info?.credentialId;
+    const verifiedEmail = typeof doc.verified_email === 'string' && doc.verified_email ? normalizeEmail(doc.verified_email) : null;
+    const emailKeyed = id.includes('@');
+    return Object.freeze({
+        accountId: id,
+        exists: true,
+        email: verifiedEmail ?? (emailKeyed ? normalizeEmail(id) : null),
+        verifiedEmail,
+        emailKeyed,
+        createdAt: snap.createTime ? snap.createTime.toDate().toISOString() : null,
+        providers,
+        hasPasskeyCredential: typeof cid === 'string' && BASE64URL.test(cid) && sanitizeCredentialId(cid) === id && providers.includes(AuthProvider.POWCH),
+        hasPasskeyKey: doc.passkey != null,
+        walletAddress: typeof doc.wallet_address === 'string' && doc.wallet_address ? doc.wallet_address.toLowerCase() : null,
+        roles: Object.keys(doc.roles && typeof doc.roles === 'object' ? doc.roles : {}).sort(),
+        migratedTo: doc.migrated_to || null,
+        adminDelete: adminDeleteOf(doc),
+    });
+}
+
+/** Unique, sorted. */
+const sortedUnique = (xs) => [...new Set(xs)].sort();
+
+/** Refuse (ACCOUNT_PLAN_STALE, before any write) unless the owner's current paths are exactly the plan's. */
+function assertExpectedPaths(current, expectPaths, what) {
+    if (!Array.isArray(expectPaths) || expectPaths.some((p) => typeof p !== 'string')) {
+        throw new AccountAdminError(AccountAdminRefusal.ACCOUNT_PLAN_STALE, `${what}: expectPaths (the plan's paths) is required; nothing was written`);
+    }
+    const want = sortedUnique(expectPaths);
+    const have = sortedUnique(current);
+    const added = have.filter((p) => !want.includes(p));
+    const gone = want.filter((p) => !have.includes(p));
+    if (added.length || gone.length) {
+        throw new AccountAdminError(AccountAdminRefusal.ACCOUNT_PLAN_STALE, `${what}: the store changed since the plan (${added.length} new path(s), ${gone.length} gone: ${[...added, ...gone].slice(0, 5).join(', ')}); nothing was written`);
+    }
+}
+
+/**
+ * Every document under the USERS doc outside its Sessions subcollection (Purchases, CommunityStats,
+ * RoomConversation/..., any other), at any depth: the user owner never deletes them, and the USERS doc is
+ * not deleted while one remains (a deleted doc does not delete its subcollections). Bounded: past
+ * ACCOUNT_READ_LIMIT documents the walk stops with an ACCOUNT_FOOTPRINT_UNBOUNDED blocker.
+ */
+async function nestedDocumentPaths(userRef, blockers) {
+    const out = [];
+    let visited = 0;
+    async function walk(ref, top) {
+        const collections = await userStoreRead(ref.path, 'listCollections', () => ref.listCollections());
+        for (const c of collections) {
+            if (top && c.id === USER_SESSIONS_COLLECTION_ID) continue;
+            const refs = await userStoreRead(c.path, 'listDocuments', () => c.listDocuments());
+            for (const d of refs) {
+                visited += 1;
+                if (visited > ACCOUNT_READ_LIMIT) {
+                    blockers.push(accountAdminBlocker(AccountAdminRefusal.ACCOUNT_FOOTPRINT_UNBOUNDED, `more than ${ACCOUNT_READ_LIMIT} documents under ${userRef.path}`));
+                    return false;
+                }
+                const snap = await userStoreRead(c.path, d.id, () => d.get());
+                if (snap.exists) out.push(d.path);
+                if ((await walk(d, false)) === false) return false;
+            }
+        }
+        return true;
+    }
+    await walk(userRef, true);
+    return out.sort();
+}
+
+/** One bounded query's documents; reaching the limit adds an ACCOUNT_FOOTPRINT_UNBOUNDED blocker. */
+async function boundedDocs(query, collection, what, blockers) {
+    const snap = await userStoreRead(collection, what, () => query.limit(ACCOUNT_READ_LIMIT).get());
+    if (snap.docs.length >= ACCOUNT_READ_LIMIT) {
+        blockers.push(accountAdminBlocker(AccountAdminRefusal.ACCOUNT_FOOTPRINT_UNBOUNDED, `${collection} (${what}) reached ${ACCOUNT_READ_LIMIT} documents`));
+    }
+    return snap.docs;
+}
+
+/**
+ * The index rows the User owner deletes, with the field that names their account. A row is deleted only in a
+ * transaction that re-reads it and finds that field still naming the account (S3).
+ */
+const USER_INDEX_ROWS = Object.freeze([
+    { kind: 'provider-index', collection: () => FirestoreCollections.PROVIDER_INDEX(), field: 'descix_user_id' },
+    { kind: 'wallet-index', collection: () => FirestoreCollections.WALLET_INDEX(), field: 'descix_user_id', walletMaterial: true },
+    { kind: 'signature-index', collection: () => FirestoreCollections.SIGNATURE_INDEX(), field: 'user_id' },
+]);
+
+/**
+ * Top-level collections that hold rows about an account by something other than its USERS doc, that the
+ * User owner never deletes and ACCOUNT_STORE_UNOWNED (which sees only documents UNDER the USERS doc) cannot
+ * see. Every delete plan lists them as leftovers.
+ */
+const USER_STATIC_LEFTOVERS = Object.freeze([
+    { what: 'EmailVerifications/<the account\'s email>', why: 'keyed by the email address, not the account (another account may hold the same verified email); owned by the email-verification module; never removed' },
+]);
+
+/** The user owner's sessions, read bounded: [{ path (by digest), ref, data }]. */
+async function userSessions(db, id, blockers) {
+    const sessionsPath = FirestoreCollections.USER_SESSIONS(id);
+    return (await boundedDocs(db.collection(sessionsPath), sessionsPath, 'sessions', blockers))
+        .map((d) => ({ path: sessionEntryPath(id, d.id), ref: d.ref, data: d.data() || {} }));
+}
+
+const isSessionPath = (id, p) => p.startsWith(`${FirestoreCollections.USER_SESSIONS(id)}/`);
+
+/** The user owner's delete footprint, with the refs it deletes through (never handed out). */
+async function userDeleteFootprint(user) {
+    const id = requireUserId(user, 'userAccountOwner.footprintForUser');
+    const db = new CacheFirestore().db;
+    const USERS = FirestoreCollections.USERS();
+    const WALLET_INDEX = FirestoreCollections.WALLET_INDEX();
+    const entries = [];
+    const leftovers = USER_STATIC_LEFTOVERS.map((l) => ({ ...l }));
+    const blockers = [];
+    const refs = new Map();
+    const rows = new Map(); // index-row path -> the USER_INDEX_ROWS spec it was found by
+    const add = (path, ref, kind, summary, raw, flags = {}, data = receiptData(raw)) => {
+        entries.push({ path, kind, summary, data, ...flags });
+        refs.set(path, ref);
+    };
+
+    const userRef = db.collection(USERS).doc(id);
+    const snap = await userStoreRead(USERS, id, () => userRef.get());
+    const doc = snap.exists ? (snap.data() || {}) : null;
+    const walletAddress = typeof doc?.wallet_address === 'string' && doc.wallet_address ? doc.wallet_address.toLowerCase() : null;
+    if (!doc) {
+        blockers.push(accountAdminBlocker(AccountAdminRefusal.ACCOUNT_NOT_FOUND, `no USERS doc ${id}`));
+    } else {
+        const providers = Array.isArray(doc.auth_providers) ? doc.auth_providers.join(', ') : 'no providers';
+        add(`${USERS}/${id}`, userRef, 'user', `the USERS doc (${providers})`, doc, {}, usersEntryData(doc));
+        if (id.includes('@')) {
+            blockers.push(accountAdminBlocker(AccountAdminRefusal.ACCOUNT_EMAIL_KEYED_LEGACY, `${id} is a legacy email-keyed record; merge it into its passkey account instead of deleting it`));
+        }
+        const roles = Object.keys(doc.roles && typeof doc.roles === 'object' ? doc.roles : {}).sort();
+        if (roles.length) blockers.push(accountAdminBlocker(AccountAdminRefusal.ACCOUNT_HOLDS_ROLES, `holds role(s) ${roles.join(', ')}`));
+        if (walletAddress) {
+            const row = await userStoreRead(WALLET_INDEX, walletAddress, () => db.collection(WALLET_INDEX).doc(walletAddress).get());
+            const holder = row.exists ? row.data()?.descix_user_id : null;
+            if (holder && holder !== id) {
+                leftovers.push({ what: `${WALLET_INDEX}/${walletAddress}`, why: `points at account ${holder}, not this one; never removed` });
+            }
+        }
+    }
+
+    for (const s of await userSessions(db, id, blockers)) {
+        add(s.path, s.ref, 'session', `a ${s.data.provider || 'unknown-provider'} session (deleted by query at delete time)`, s.data, { volatile: true, pathIsSecret: true });
+    }
+    for (const spec of USER_INDEX_ROWS) {
+        const collection = spec.collection();
+        for (const d of await boundedDocs(db.collection(collection).where(spec.field, '==', id), collection, `${spec.field} == ${id}`, blockers)) {
+            const data = d.data() || {};
+            const path = `${collection}/${d.id}`;
+            add(path, d.ref, spec.kind, `${spec.kind} row${data.provider_type ? ` (${data.provider_type})` : ''}`, data, spec.walletMaterial ? { walletMaterial: true } : {});
+            rows.set(path, spec);
+            // A wallet indexed to this account that is not its wallet_address: nobody measures its value.
+            if (collection === WALLET_INDEX && d.id.toLowerCase() !== walletAddress) {
+                blockers.push(accountAdminBlocker(AccountAdminRefusal.ACCOUNT_WALLET_VALUE_UNMEASURED, `wallet ${d.id} is indexed to this account but is not its wallet_address; its value is not measured`));
+            }
+        }
+    }
+    const nested = await nestedDocumentPaths(userRef, blockers);
+    return { entries, leftovers, blockers, nested, refs, rows, userRef };
+}
+
+/** Refuse (the first blocker's code, all in details) before any write while the footprint has a blocker. */
+function refuseUserBlockers(blockers, what) {
+    if (!blockers.length) return;
+    throw new AccountAdminError(blockers[0].code, `${what}: ${blockers.map((b) => `${b.code} (${b.detail})`).join('; ')}; nothing was written`, { details: blockers });
+}
+
+/**
+ * The User owner's own re-check of a delete plan, writing nothing: its blockers, its non-volatile paths and
+ * their data exactly the plan's (`expectPaths`, `expectData`; sessions are volatile: deleted by query), and no
+ * document under the USERS doc outside `coveredNested` (the dependents' planned paths).
+ */
+function assertUserDeletePlan(fp, { expectPaths, expectData, coveredNested }, what) {
+    refuseUserBlockers(fp.blockers, what);
+    assertDeletePlanCurrent(what, fp.entries, { expectPaths, expectData });
+    const covered = new Set(coveredNested ?? []);
+    const orphaned = fp.nested.filter((p) => !covered.has(p));
+    if (orphaned.length) {
+        throw new AccountAdminError(AccountAdminRefusal.ACCOUNT_STORE_UNOWNED, `${what}: ${orphaned.length} document(s) under ${fp.userRef.path} that no planned delete covers (${orphaned.slice(0, 5).join(', ')}); the USERS doc is not deleted while they would be orphaned; nothing was written`);
+    }
+}
+
+/** Why the from-record keeps its sign-in rows on a merge (merge v1 revokes nothing). */
+const MERGE_SIGN_IN_STAYS = 'the legacy wallet remains a sign-in identity until its services are re-keyed';
+
+/** The user owner's merge footprint: the moves, and what stays on the from-record. */
+async function userMergeFootprint({ from, into } = {}) {
+    const fromId = requireUserId(from, 'userAccountOwner.footprintForMerge (from)');
+    const intoId = requireUserId(into, 'userAccountOwner.footprintForMerge (into)');
+    const db = new CacheFirestore().db;
+    const USERS = FirestoreCollections.USERS();
+    const PROVIDER_INDEX = FirestoreCollections.PROVIDER_INDEX();
+    const entries = [];
+    const leftovers = [];
+    const blockers = [];
+    const raw = new Map();
+
+    const fromSnap = await userStoreRead(USERS, fromId, () => db.collection(USERS).doc(fromId).get());
+    const intoSnap = await userStoreRead(USERS, intoId, () => db.collection(USERS).doc(intoId).get());
+    const fromDoc = fromSnap.exists ? (fromSnap.data() || {}) : null;
+    const intoDoc = intoSnap.exists ? (intoSnap.data() || {}) : null;
+    if (!fromDoc) blockers.push(accountAdminBlocker(AccountAdminRefusal.ACCOUNT_NOT_FOUND, `no USERS doc ${fromId} (the record to merge)`));
+    if (!intoDoc) blockers.push(accountAdminBlocker(AccountAdminRefusal.ACCOUNT_NOT_FOUND, `no USERS doc ${intoId} (the surviving account)`));
+    if (fromId === intoId) blockers.push(accountAdminBlocker(AccountAdminRefusal.ACCOUNT_MERGE_SAME_RECORD, `${fromId} cannot be merged into itself`));
+
+    if (fromDoc) {
+        const fromView = accountViewOf(fromId, fromSnap);
+        if (fromView.hasPasskeyCredential || fromView.providers.includes(AuthProvider.POWCH)) {
+            blockers.push(accountAdminBlocker(AccountAdminRefusal.ACCOUNT_MERGE_SOURCE_NOT_LEGACY, `${fromId} is not a legacy record (${fromView.hasPasskeyCredential ? 'it has a passkey credential' : 'it has the powch provider'}); only a legacy record is merged into a passkey account`));
+        }
+    }
+
+    if (fromDoc && intoDoc && fromId !== intoId) {
+        const fromRoles = fromDoc.roles && typeof fromDoc.roles === 'object' ? fromDoc.roles : {};
+        const intoRoles = intoDoc.roles && typeof intoDoc.roles === 'object' ? intoDoc.roles : {};
+        for (const key of Object.keys(fromRoles).sort()) {
+            if (Object.prototype.hasOwnProperty.call(intoRoles, key)) {
+                leftovers.push({ what: `role ${key}`, why: 'the surviving account already holds it; its own grant is kept and the record\'s stays on the record' });
+                continue;
+            }
+            const entry = { path: `${USERS}/${intoId}`, field: 'roles', key, from: null, to: encodeStoreValue(fromRoles[key]), summary: `role ${key} added to the surviving account` };
+            raw.set(entry, fromRoles[key]);
+            entries.push(entry);
+        }
+
+        const email = typeof intoDoc.verified_email === 'string' && intoDoc.verified_email ? normalizeEmail(intoDoc.verified_email) : null;
+        if (email) {
+            const key = User.emailIndexKey(email);
+            const row = await userStoreRead(PROVIDER_INDEX, key, () => db.collection(PROVIDER_INDEX).doc(key).get());
+            const holder = row.exists ? (row.data()?.descix_user_id ?? null) : null;
+            if (holder === null || holder === fromId) {
+                const entry = { path: `${PROVIDER_INDEX}/${key}`, field: 'descix_user_id', from: holder, to: intoId, summary: `the email row for ${email} ${holder ? `moves from ${fromId}` : 'is created'} to the surviving account` };
+                raw.set(entry, { email });
+                entries.push(entry);
+            } else if (holder !== intoId) {
+                blockers.push(accountAdminBlocker(AccountAdminRefusal.ACCOUNT_MERGE_EMAIL_MISMATCH, `the email row ${key} points at a third account ${holder}`));
+            }
+        }
+
+        // A migrated record is a done merge: a blocker, never a pending migrated_to move.
+        if (fromDoc.migrated_to) {
+            blockers.push(accountAdminBlocker(AccountAdminRefusal.ACCOUNT_MERGE_ALREADY_MIGRATED, `${fromId} is already migrated to ${fromDoc.migrated_to}`));
+        } else {
+            entries.push({ path: `${USERS}/${fromId}`, field: 'migrated_to', from: null, to: intoId, summary: `${fromId} is marked migrated to ${intoId} (with migrated_at)` });
+        }
+
+        // What stays: the record's sign-in identity (sessions, wallet, its wallet and signature rows) and its other provider rows.
+        if (typeof fromDoc.wallet_address === 'string' && fromDoc.wallet_address) {
+            leftovers.push({ what: `wallet_address ${fromDoc.wallet_address.toLowerCase()}`, why: MERGE_SIGN_IN_STAYS });
+        }
+        const sessionsPath = FirestoreCollections.USER_SESSIONS(fromId);
+        for (const d of await boundedDocs(db.collection(sessionsPath), sessionsPath, 'sessions', blockers)) {
+            leftovers.push({ what: sessionEntryPath(fromId, d.id), why: MERGE_SIGN_IN_STAYS });
+        }
+        for (const [collection, field, why] of [
+            [FirestoreCollections.WALLET_INDEX(), 'descix_user_id', MERGE_SIGN_IN_STAYS],
+            [FirestoreCollections.SIGNATURE_INDEX(), 'user_id', MERGE_SIGN_IN_STAYS],
+            [PROVIDER_INDEX, 'descix_user_id', 'stays on the migrated record'],
+        ]) {
+            for (const d of await boundedDocs(db.collection(collection).where(field, '==', fromId), collection, `${field} == ${fromId}`, blockers)) {
+                if (entries.some((e) => e.path === `${collection}/${d.id}`)) continue;
+                leftovers.push({ what: `${collection}/${d.id}`, why });
+            }
+        }
+    }
+    return { entries, leftovers, blockers, raw };
+}
+
+/** The value stored at a move's path/field(/key), encoded; null when the document or field is absent. */
+async function readMoveValue(db, move) {
+    const i = move.path.lastIndexOf('/');
+    const collection = move.path.slice(0, i);
+    const snap = await userStoreRead(collection, `re-read ${move.path}`, () => db.collection(collection).doc(move.path.slice(i + 1)).get());
+    if (!snap.exists) return null;
+    const doc = snap.data() || {};
+    const value = move.key === undefined ? doc[move.field] : doc[move.field]?.[move.key];
+    return encodeStoreValue(value ?? null);
+}
+
+const sameValue = (a, b) => canonicalJson(a ?? null) === canonicalJson(b ?? null);
+const moveRef = (m) => (m.key === undefined ? { path: m.path, field: m.field } : { path: m.path, field: m.field, key: m.key });
+const publicMove = (m) => ({ ...moveRef(m), from: m.from, to: m.to });
+
+/**
+ * THE User owner of the operator account admin (`name: 'user'`): the store-owner contract
+ * (src/account-admin/contract.js) for the User-owned collections, plus the account reads the orchestrator
+ * judges by. Every method fails loud with an AccountAdminError code.
+ */
+export const userAccountOwner = Object.freeze({
+    name: 'user',
+    /** A session's document id is its access token: every Sessions entry is a secretPath (pathIsSecret). */
+    credentialIdCollections: Object.freeze([USER_SESSIONS_COLLECTION_ID]),
+
+    /**
+     * Read-only: one account as the admin judges it ({ accountId, exists:false } when there is no USERS doc).
+     * @param {string} accountId
+     */
+    async account(accountId) {
+        if (typeof accountId !== 'string' || !accountId || accountId.includes('/')) {
+            throw new AccountAdminError(AccountAdminRefusal.ACCOUNT_NOT_FOUND, `an account id is required (got ${JSON.stringify(accountId)})`);
+        }
+        const USERS = FirestoreCollections.USERS();
+        const snap = await userStoreRead(USERS, accountId, () => new CacheFirestore().db.collection(USERS).doc(accountId).get());
+        return accountViewOf(accountId, snap);
+    },
+
+    /**
+     * Read-only: every USERS doc whose `verified_email`, or whose document id (the legacy email-keyed form),
+     * starts with one of `emailPrefixes` (lowercase local parts ending in '@' or '+'), sorted by id. The caller
+     * filters by its rule. No unfiltered listing; a read reaching ACCOUNT_READ_LIMIT refuses (no partial list).
+     * @param {string[]} emailPrefixes
+     */
+    async accountsByEmailPrefixes(emailPrefixes) {
+        if (!Array.isArray(emailPrefixes) || emailPrefixes.length === 0 || emailPrefixes.some((p) => typeof p !== 'string' || !EMAIL_PREFIX.test(p))) {
+            throw new AccountAdminError(AccountAdminRefusal.ACCOUNT_RULE_INVALID, `emailPrefixes must be a non-empty array of lowercase local parts ending in '@' or '+' (got ${JSON.stringify(emailPrefixes)}); there is no unfiltered listing`);
+        }
+        const USERS = FirestoreCollections.USERS();
+        const users = new CacheFirestore().db.collection(USERS);
+        const byId = new Map();
+        for (const prefix of new Set(emailPrefixes)) {
+            for (const [field, label] of [['verified_email', 'verified_email'], [Firestore.FieldPath.documentId(), 'document id']]) {
+                const snap = await userStoreRead(USERS, `${label} range '${prefix}'`, () => users.where(field, '>=', prefix).where(field, '<', `${prefix}`).limit(ACCOUNT_READ_LIMIT).get());
+                if (snap.docs.length >= ACCOUNT_READ_LIMIT) {
+                    throw new AccountAdminError(AccountAdminRefusal.ACCOUNT_FOOTPRINT_UNBOUNDED, `the ${USERS} ${label} range '${prefix}' reached ${ACCOUNT_READ_LIMIT} documents; no partial listing`);
+                }
+                for (const d of snap.docs) byId.set(d.id, d);
+            }
+        }
+        return [...byId.keys()].sort().map((id) => accountViewOf(id, byId.get(id)));
+    },
+
+    /**
+     * The database of the Firestore client every User-owner read and write goes through (CacheFirestore's
+     * client of the @descix/cloud-core this package resolves), read from the client itself.
+     * @returns {{ databaseId: string, projectId?: string }}
+     */
+    storeTarget() {
+        const db = new CacheFirestore().db;
+        let projectId;
+        try {
+            projectId = db.projectId;
+        } catch {
+            projectId = undefined; // not known before the client's first request; databaseId is
+        }
+        return { databaseId: db.databaseId, ...(typeof projectId === 'string' && projectId ? { projectId } : {}) };
+    },
+
+    /**
+     * Read-only delete footprint: the USERS doc, its Sessions (paths name each by a digest, never the
+     * token; `volatile`: deleted by query at delete time), the ProviderIndex / WalletIndex rows whose
+     * descix_user_id is this id (WalletIndex rows `walletMaterial`), the SignatureIndex rows whose user_id is
+     * this id. A WalletIndex row for an address other than the account's wallet_address is an
+     * ACCOUNT_WALLET_VALUE_UNMEASURED blocker. `leftovers` include USER_STATIC_LEFTOVERS. `nested` lists
+     * every other document under the USERS doc (another owner's; the orchestrator refuses unless another
+     * owner's footprint covers each one).
+     * @param {{ user_id: string }} user
+     */
+    async footprintForUser(user) {
+        const { entries, leftovers, blockers, nested } = await userDeleteFootprint(user);
+        return { entries, leftovers, blockers, nested };
+    },
+
+    /**
+     * Read-only: the User owner's own re-check of a delete plan before the orchestrator's FIRST dependent
+     * write (and again before an irrecoverable owner). Throws, writing nothing: the first blocker's code
+     * (roles, email-keyed, not found, an unmeasured wallet), ACCOUNT_PLAN_STALE when its non-session paths
+     * are not exactly `expectPaths`, ACCOUNT_STORE_UNOWNED when a document under the USERS doc is not in
+     * `coveredNested` (the paths the dependents will delete).
+     * @param {{ user_id: string }} user
+     * @param {{ expectPaths: string[], coveredNested: string[] }} opts
+     * @returns {Promise<true>}
+     */
+    async preflightDelete(user, { expectPaths, expectData, coveredNested } = {}) {
+        assertUserDeletePlan(await userDeleteFootprint(user), { expectPaths, expectData, coveredNested }, 'userAccountOwner.preflightDelete');
+        return true;
+    },
+
+    /**
+     * Stamp the USERS doc `admin_delete: { planHash, startedAt }` (the operator account admin's commitDelete,
+     * before its first dependent write), in ONE transaction that reads the doc and refuses, writing nothing:
+     * no doc (ACCOUNT_NOT_FOUND), data other than the plan's (ACCOUNT_PLAN_STALE; the stamp itself is not part
+     * of a plan's data, so a re-commit over an earlier stamp proceeds and replaces it). restoreDelete honours a
+     * receipt only while the stamp names that receipt's plan. No reader branches on the stamp: the account
+     * stays usable by its owner.
+     * @param {{ user_id: string }} user
+     * @param {{ planHash: string, startedAt: string, expectData: Object<string, string> }} opts
+     * @returns {Promise<true>}
+     */
+    async stampDelete(user, { planHash, startedAt, expectData } = {}) {
+        const id = requireUserId(user, 'userAccountOwner.stampDelete');
+        const what = 'userAccountOwner.stampDelete';
+        if (typeof planHash !== 'string' || !PLAN_HASH.test(planHash)) throw new AccountAdminError(AccountAdminRefusal.ACCOUNT_PLAN_STALE, `${what}: planHash (the plan's sha256) is required; nothing was written`);
+        if (typeof startedAt !== 'string' || Number.isNaN(Date.parse(startedAt))) throw new AccountAdminError(AccountAdminRefusal.ACCOUNT_PLAN_STALE, `${what}: startedAt (an ISO time) is required; nothing was written`);
+        const USERS = FirestoreCollections.USERS();
+        const db = new CacheFirestore().db;
+        const ref = db.collection(USERS).doc(id);
+        await userStoreWrite(USERS, `${id} ${ADMIN_DELETE_FIELD}`, () => db.runTransaction(async (tx) => {
+            const snap = await tx.get(ref);
+            if (!snap.exists) throw new AccountAdminError(AccountAdminRefusal.ACCOUNT_NOT_FOUND, `${what}: no USERS doc ${id}; nothing was written`);
+            assertDocumentAsPlanned(what, `${USERS}/${id}`, usersEntryData(snap.data()), expectData);
+            tx.update(ref, { [ADMIN_DELETE_FIELD]: { planHash, startedAt } });
+        }));
+        return true;
+    },
+
+    /**
+     * Remove the USERS doc's `admin_delete` stamp (restoreDelete, once every restorable entry is back), in ONE
+     * transaction, only while it names `planHash`. Returns true when removed, false when the doc carries no
+     * stamp or another plan's (left in place). ACCOUNT_NOT_FOUND when there is no USERS doc.
+     * @param {{ user_id: string }} user
+     * @param {{ planHash: string }} opts
+     * @returns {Promise<boolean>}
+     */
+    async clearDeleteStamp(user, { planHash } = {}) {
+        const id = requireUserId(user, 'userAccountOwner.clearDeleteStamp');
+        const USERS = FirestoreCollections.USERS();
+        const db = new CacheFirestore().db;
+        const ref = db.collection(USERS).doc(id);
+        return userStoreWrite(USERS, `${id} ${ADMIN_DELETE_FIELD}`, () => db.runTransaction(async (tx) => {
+            const snap = await tx.get(ref);
+            if (!snap.exists) throw new AccountAdminError(AccountAdminRefusal.ACCOUNT_NOT_FOUND, `userAccountOwner.clearDeleteStamp: no USERS doc ${id}; nothing was written`);
+            if (adminDeleteOf(snap.data())?.planHash !== planHash) return false;
+            tx.update(ref, { [ADMIN_DELETE_FIELD]: FieldValue.delete() });
+            return true;
+        }));
+    },
+
+    /**
+     * Delete the account's User-owned documents. Refused before any write: a blocker (re-checked at this
+     * turn), non-session paths other than `expectPaths` (ACCOUNT_PLAN_STALE), any document left under the
+     * USERS doc (ACCOUNT_STORE_UNOWNED). Sessions are deleted BY QUERY (every session of this id, bounded),
+     * so a sign-in or an expiry since the plan does not make it stale; `alsoDeleted` names sessions the plan
+     * did not know. Each index row is deleted in a transaction that re-reads it and deletes it only while it
+     * still names this account; otherwise it is left, reported in `remaining` and `reasons`. The USERS doc
+     * goes LAST. Then every expected path is re-read.
+     * @param {{ user_id: string }} user
+     * @param {{ expectPaths: string[] }} opts
+     * @returns {Promise<{ deleted: string[], remaining: string[], alsoDeleted: string[], reasons: Array<{ path: string, reason: string }> }>}
+     */
+    async deleteForUser(user, { expectPaths, expectData } = {}) {
+        const fp = await userDeleteFootprint(user);
+        const what = 'userAccountOwner.deleteForUser';
+        assertUserDeletePlan(fp, { expectPaths, expectData, coveredNested: [] }, what);
+        const id = fp.userRef.id;
+        const db = new CacheFirestore().db;
+        const reasons = [];
+        const planned = new Set(expectPaths);
+        const sessions = fp.entries.filter((e) => e.kind === 'session');
+        for (const e of sessions) await userStoreWrite(FirestoreCollections.USER_SESSIONS(id), `delete ${e.path}`, () => fp.refs.get(e.path).delete());
+        for (const e of fp.entries.filter((x) => fp.rows.has(x.path))) {
+            const { field } = fp.rows.get(e.path);
+            const ref = fp.refs.get(e.path);
+            const left = await userStoreWrite(e.path.split('/')[0], `delete ${e.path}`, () => db.runTransaction(async (tx) => {
+                const snap = await tx.get(ref);
+                if (!snap.exists) return null;
+                const holder = snap.data()?.[field] ?? null;
+                if (holder !== id) return `its ${field} now names ${JSON.stringify(holder)}, not ${id}; left in place`;
+                // Read, compare and delete in one transaction: a row changed since the plan stops the delete here.
+                assertDocumentAsPlanned(what, e.path, receiptData(snap.data()), expectData);
+                tx.delete(ref);
+                return null;
+            }));
+            if (left) reasons.push({ path: e.path, reason: left });
+        }
+        const userEntry = fp.entries.find((e) => e.kind === 'user');
+        if (userEntry) {
+            const ref = fp.refs.get(userEntry.path);
+            // The USERS doc goes in one transaction that re-reads it: a save since the plan leaves it (ACCOUNT_PLAN_STALE).
+            await userStoreWrite(FirestoreCollections.USERS(), `delete ${userEntry.path}`, () => db.runTransaction(async (tx) => {
+                const snap = await tx.get(ref);
+                if (!snap.exists) return;
+                assertDocumentAsPlanned(what, userEntry.path, usersEntryData(snap.data()), expectData);
+                tx.delete(ref);
+            }));
+        }
+
+        const sessionsNow = new Set((await userSessions(db, id, [])).map((s) => s.path));
+        const deleted = [];
+        const remaining = [];
+        for (const p of expectPaths) {
+            let present;
+            if (isSessionPath(id, p)) present = sessionsNow.has(p);
+            else present = (await userStoreRead(p.split('/')[0], `re-read ${p}`, () => fp.refs.get(p).get())).exists;
+            (present ? remaining : deleted).push(p);
+        }
+        const alsoDeleted = sessions.map((e) => e.path).filter((p) => !planned.has(p) && !sessionsNow.has(p));
+        return { deleted, remaining, alsoDeleted, reasons };
+    },
+
+    /**
+     * Read-only merge footprint. `entries` are the moves: { path, field, key?, from, to, summary } (`from`
+     * null = absent; `key` names a map entry of `field`, e.g. one role). `leftovers` stay on the from-record:
+     * its sessions (by digest), wallet_address, WalletIndex and SignatureIndex rows (the legacy wallet
+     * remains a sign-in identity until its services are re-keyed), its other ProviderIndex rows, and roles
+     * the surviving account already holds. A record already migrated is a blocker, not a move.
+     * @param {{ from: { user_id: string }, into: { user_id: string } }} pair
+     */
+    async footprintForMerge(pair) {
+        const { entries, leftovers, blockers } = await userMergeFootprint(pair);
+        return { entries: entries.map((e) => ({ ...publicMove(e), summary: e.summary })), leftovers, blockers };
+    },
+
+    /**
+     * Merge: roles the surviving account lacks are added to it (one transaction, only keys still absent);
+     * the email ProviderIndex row is pointed at it (only while it still names the plan's holder; created
+     * when absent); the from-record is marked migrated LAST (User.markMigrated). Nothing else is written:
+     * the from-record's sessions, wallet and index rows stay (it remains a sign-in identity). Refuses before
+     * any write on a blocker or ACCOUNT_PLAN_STALE. Then re-reads.
+     * @param {{ from: { user_id: string }, into: { user_id: string } }} pair
+     * @param {{ expectPaths: string[] }} opts - the plan's move paths
+     * @returns {Promise<{ moved: Array<{path, field, key?, from, to}>, remaining: Array<{path, field, key?}> }>}
+     */
+    async mergeForUser(pair, { expectPaths } = {}) {
+        const fp = await userMergeFootprint(pair);
+        if (fp.blockers.length) {
+            throw new AccountAdminError(fp.blockers[0].code, `userAccountOwner.mergeForUser: ${fp.blockers.map((b) => `${b.code} (${b.detail})`).join('; ')}; nothing was written`, { details: fp.blockers });
+        }
+        assertExpectedPaths(fp.entries.map((e) => e.path), expectPaths, 'userAccountOwner.mergeForUser');
+        const fromId = pair.from.user_id;
+        const intoId = pair.into.user_id;
+        const db = new CacheFirestore().db;
+        const USERS = FirestoreCollections.USERS();
+        const PROVIDER_INDEX = FirestoreCollections.PROVIDER_INDEX();
+
+        const roleMoves = fp.entries.filter((e) => e.field === 'roles');
+        if (roleMoves.length) {
+            const ref = db.collection(USERS).doc(intoId);
+            await userStoreWrite(USERS, `${intoId} roles`, () => db.runTransaction(async (tx) => {
+                const snap = await tx.get(ref);
+                if (!snap.exists) throw new AccountAdminError(AccountAdminRefusal.ACCOUNT_NOT_FOUND, `no USERS doc ${intoId}; nothing was written`);
+                const roles = { ...(snap.data()?.roles || {}) };
+                let added = 0;
+                for (const m of roleMoves) {
+                    if (Object.prototype.hasOwnProperty.call(roles, m.key)) continue;
+                    roles[m.key] = fp.raw.get(m);
+                    added += 1;
+                }
+                if (added) tx.update(ref, { roles });
+            }));
+        }
+        const reasons = new Map();
+        for (const m of fp.entries.filter((e) => e.path.startsWith(`${PROVIDER_INDEX}/`))) {
+            const ref = db.collection(PROVIDER_INDEX).doc(m.path.slice(PROVIDER_INDEX.length + 1));
+            const { email } = fp.raw.get(m);
+            const left = await userStoreWrite(PROVIDER_INDEX, m.path, () => db.runTransaction(async (tx) => {
+                const snap = await tx.get(ref);
+                const holder = snap.exists ? (snap.data()?.descix_user_id ?? null) : null;
+                // Moved only while it still names the plan's holder (the record, or nobody): never a third account's row.
+                if (holder !== m.from) return `the email row now names ${JSON.stringify(holder)}, not ${JSON.stringify(m.from)}; left in place`;
+                if (snap.exists) tx.update(ref, { descix_user_id: intoId });
+                else tx.set(ref, { descix_user_id: intoId, provider_type: 'email', provider_id: email, linked_at: Timestamp.now() });
+                return null;
+            }));
+            if (left) reasons.set(moveKey(m), left);
+        }
+        // markMigrated reads the doc in its own transaction (never CacheFirestore.get_doc, which answers a failed read as null).
+        await new User(fromId).markMigrated(intoId);
+
+        const moved = [];
+        const remaining = [];
+        for (const m of fp.entries) {
+            (sameValue(await readMoveValue(db, m), m.to) ? moved : remaining).push(m);
+        }
+        return { moved: moved.map(publicMove), remaining: remaining.map((m) => ({ ...moveRef(m), ...(reasons.has(moveKey(m)) ? { reason: reasons.get(moveKey(m)) } : {}) })) };
+    },
+
+    /**
+     * Throws ACCOUNT_RECEIPT_INVALID, writing nothing, unless every move is one mergeForUser makes for
+     * `pair`: the migration mark on USERS/<from> (from null, to <into>), a role added to USERS/<into> (from
+     * null, a key), or the email row of the surviving account's verified email (field descix_user_id, from
+     * null or <from>, to <into>).
+     * @param {Array<{ path: string, field: string, key?: string, from: unknown, to: unknown }>} moves
+     * @param {{ from: { user_id: string }, into: { user_id: string, verified_email?: string|null } }} pair
+     */
+    validateRollbackMoves(moves, pair) {
+        const fromId = requireUserId(pair?.from, 'userAccountOwner.validateRollbackMoves (from)');
+        const intoId = requireUserId(pair?.into, 'userAccountOwner.validateRollbackMoves (into)');
+        const USERS = FirestoreCollections.USERS();
+        const email = typeof pair.into.verified_email === 'string' && pair.into.verified_email ? normalizeEmail(pair.into.verified_email) : null;
+        const emailRow = email ? `${FirestoreCollections.PROVIDER_INDEX()}/${User.emailIndexKey(email)}` : null;
+        if (!Array.isArray(moves)) throw new AccountAdminError(AccountAdminRefusal.ACCOUNT_RECEIPT_INVALID, 'userAccountOwner: the receipt\'s user moves are required; nothing was written');
+        for (const m of moves) {
+            const why = (() => {
+                if (typeof m?.path !== 'string' || typeof m?.field !== 'string') return 'it names no path/field';
+                if (m.path === `${USERS}/${fromId}`) {
+                    return m.field === 'migrated_to' && m.key === undefined && m.from === null && m.to === intoId ? null : `the only move on ${m.path} is its migrated_to mark to ${intoId}`;
+                }
+                if (m.path === `${USERS}/${intoId}`) {
+                    return m.field === 'roles' && typeof m.key === 'string' && m.key && m.from === null ? null : `the only move on ${m.path} is a role it lacked`;
+                }
+                if (emailRow && m.path === emailRow) {
+                    return m.field === 'descix_user_id' && m.key === undefined && (m.from === null || m.from === fromId) && m.to === intoId ? null : `the email row moves from ${fromId} (or nobody) to ${intoId}`;
+                }
+                return `${m.path} is not USERS/${fromId}, USERS/${intoId} or the surviving account's email row`;
+            })();
+            if (why) throw new AccountAdminError(AccountAdminRefusal.ACCOUNT_RECEIPT_INVALID, `userAccountOwner: receipt move ${JSON.stringify(m)?.slice(0, 200)} is not one a merge of ${fromId} into ${intoId} makes (${why}); nothing was written`);
+        }
+    },
+
+    /**
+     * The rollback of mergeForUser from its receipt's user moves. In reverse order: the migration mark (User.unmarkMigrated, only while it names
+     * the receipt's account), the email row (only while it names the surviving account: back to the record,
+     * or deleted when the merge created it), the roles the merge added (only while each still equals what
+     * was added). A move whose current value is not the receipt's `to` is left and reported remaining.
+     * Every move is validated (validateRollbackMoves) before the first write.
+     * @param {Array<{ path: string, field: string, key?: string, from: unknown, to: unknown }>} moves
+     * @param {{ from: { user_id: string }, into: { user_id: string, verified_email?: string|null } }} pair
+     * @returns {Promise<{ restored: Array<{path, field, key?}>, remaining: Array<{path, field, key?}> }>}
+     */
+    async rollbackMergeForUser(moves, pair) {
+        userAccountOwner.validateRollbackMoves(moves, pair);
+        const db = new CacheFirestore().db;
+        const USERS = FirestoreCollections.USERS();
+        const PROVIDER_INDEX = FirestoreCollections.PROVIDER_INDEX();
+        const errors = [];
+        const attempt = async (fn) => { try { await fn(); } catch (e) { errors.push(e); } };
+
+        for (const m of moves.filter((x) => x.field === 'migrated_to')) {
+            const id = m.path.slice(USERS.length + 1);
+            await attempt(() => new User(id).unmarkMigrated(m.to));
+        }
+        for (const m of moves.filter((x) => x.path.startsWith(`${PROVIDER_INDEX}/`))) {
+            const ref = db.collection(PROVIDER_INDEX).doc(m.path.slice(PROVIDER_INDEX.length + 1));
+            await attempt(() => userStoreWrite(PROVIDER_INDEX, m.path, () => db.runTransaction(async (tx) => {
+                const snap = await tx.get(ref);
+                if (!snap.exists || snap.data()?.descix_user_id !== m.to) return;
+                if (m.from === null) tx.delete(ref);
+                else tx.update(ref, { descix_user_id: m.from });
+            })));
+        }
+        const roleMoves = moves.filter((x) => x.field === 'roles');
+        for (const path of sortedUnique(roleMoves.map((m) => m.path))) {
+            const ref = db.collection(USERS).doc(path.slice(USERS.length + 1));
+            await attempt(() => userStoreWrite(USERS, `${path} roles`, () => db.runTransaction(async (tx) => {
+                const snap = await tx.get(ref);
+                if (!snap.exists) return;
+                const roles = { ...(snap.data()?.roles || {}) };
+                let removed = 0;
+                for (const m of roleMoves.filter((x) => x.path === path)) {
+                    if (Object.prototype.hasOwnProperty.call(roles, m.key) && sameValue(encodeStoreValue(roles[m.key]), m.to)) {
+                        delete roles[m.key];
+                        removed += 1;
+                    }
+                }
+                if (removed) tx.update(ref, { roles });
+            })));
+        }
+
+        const restored = [];
+        const remaining = [];
+        for (const m of moves) {
+            (sameValue(await readMoveValue(db, m), m.from) ? restored : remaining).push(moveRef(m));
+        }
+        return { restored, remaining, errors: errors.map((e) => ({ code: e.code ?? null, message: e.message })) };
+    },
+
+    /**
+     * Read-only: the current value at each move's path/field(/key), encoded (null when absent).
+     * @param {Array<{ path: string, field: string, key?: string }>} moves
+     * @returns {Promise<Array<{ path: string, field: string, key?: string, value: unknown }>>}
+     */
+    async readMergeFields(moves) {
+        const db = new CacheFirestore().db;
+        const out = [];
+        for (const m of moves) out.push({ ...moveRef(m), value: await readMoveValue(db, m) });
+        return out;
+    },
+});
 
 // --- Community Class ---
 

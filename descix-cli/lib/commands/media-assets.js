@@ -3,10 +3,15 @@
  * media (the objects `descix app media-upload` puts under the app's GCS assets/ prefix), over the
  * same API surface media-upload uses: `apiClient.invoke` → POST /apifront, user-session authed.
  *
- * Backend contract (owned by DeSciX_Cloud; the CLI only ferries and renders it):
- *   list_app_assets  { app_id, prefix? }        → { objects: [{ path, size, content_type, updated, public_url }],
- *                                                    total_bytes, quota_bytes }
- *   delete_app_asset { app_id, path, dry_run? } → { path, existed, deleted, freed_bytes, purged }
+ * Backend contract (owned by Cloud; the CLI only ferries and renders it):
+ *   list_app_assets  { app_id, visibility, prefix? }
+ *       → { visibility, objects: [{ path, size, content_type, updated, public_url | ref }], total_bytes, quota_bytes }
+ *         (a public object carries public_url, a private one carries ref = `asset:<app_id>/<path>`)
+ *   delete_app_asset { app_id, visibility, path, dry_run? }
+ *       → { path, visibility, existed, deleted, freed_bytes, purged }   (purged is null for a private object)
+ *
+ * `visibility` ("public" default, "private" with `--private`) is ALWAYS sent explicitly; the one
+ * owner of that and of the app_id/visibility params is mediaParams() in media-upload.js.
  *
  * SERVER IS THE SOLE AUTHORITY (same rule as media-upload.js): permission, path validity, the
  * prefix's meaning and the quota are the server's. `--prefix` and each path go through UNCHANGED,
@@ -28,7 +33,7 @@
 
 import chalk from 'chalk';
 import { progress } from '../output.js';
-import { formatMb } from './media-upload.js';
+import { formatMb, mediaParams, mediaVisibility, assertAnsweredVisibility } from './media-upload.js';
 
 /**
  * If the backend refused because it does not register the command at all, return an error that
@@ -42,7 +47,7 @@ import { formatMb } from './media-upload.js';
  * @param {string} verb - e.g. "media-list"
  * @returns {Error}
  */
-function missingCommandOr(err, apiClient, verb) {
+export function missingCommandOr(err, apiClient, verb) {
   const m = /\b(?:invalid|unknown) command:?\s*['"`]?([A-Za-z0-9_]+)/i.exec(String(err?.message || ''));
   if (!m) return err;
   const command = m[1];
@@ -59,13 +64,13 @@ function missingCommandOr(err, apiClient, verb) {
  * Run `app media-list`.
  *
  * @param {import('../api-client.js').DeSciXApiClient} apiClient
- * @param {{app:string, prefix?:string, json?:boolean}} options
+ * @param {{app:string, prefix?:string, private?:boolean, json?:boolean}} options
  * @returns {Promise<object>} the backend object, unchanged
  */
 export async function runMediaList(apiClient, options) {
-  const params = { app_id: options.app };
-  if (options.prefix !== undefined) params.prefix = options.prefix;
+  const params = mediaParams(options, options.prefix !== undefined ? { prefix: options.prefix } : {});
 
+  const visibility = mediaVisibility(options);
   let listing;
   try {
     listing = (await apiClient.invoke('list_app_assets', params))?.message;
@@ -77,19 +82,24 @@ export async function runMediaList(apiClient, options) {
     throw new Error(`list_app_assets returned an unexpected shape: ${JSON.stringify(listing)}`);
   }
 
+  // The server echoes the space it listed; a different one means the answer is not for this ask.
+  assertAnsweredVisibility('list_app_assets', listing, visibility);
+
   if (options.json) {
     console.log(JSON.stringify(listing, null, 2));
     return listing;
   }
+  const isPrivate = visibility === 'private';
 
+  const space = isPrivate ? 'private ' : '';
   const where = options.prefix !== undefined ? `assets/${options.prefix}` : 'assets/';
-  progress(options, chalk.cyan(`\n  Media: ${options.app} → ${where}\n`));
+  progress(options, chalk.cyan(`\n  Media (${space}space): ${options.app} → ${where}\n`));
   if (listing.objects.length === 0) {
     console.log(chalk.gray('  (no objects)'));
   }
   for (const o of listing.objects) {
     console.log(`  ${chalk.white(o.path)}  ${formatMb(o.size)} MB (${o.size} B)  ${o.content_type}  ${o.updated}`);
-    console.log(chalk.gray(`    public_url: ${o.public_url}`));
+    console.log(chalk.gray(isPrivate ? `    ref: ${o.ref}` : `    public_url: ${o.public_url}`));
   }
   if (options.prefix !== undefined) {
     // With a prefix the server's total_bytes sums ONLY the listed objects while quota_bytes is
@@ -111,7 +121,7 @@ export async function runMediaList(apiClient, options) {
  *
  * @param {import('../api-client.js').DeSciXApiClient} apiClient
  * @param {string[]} paths - object paths relative to the app's assets/ prefix, one call each
- * @param {{app:string, dryRun?:boolean, json?:boolean}} options
+ * @param {{app:string, dryRun?:boolean, private?:boolean, json?:boolean}} options
  * @returns {Promise<{app_id:string, dry_run:boolean, results:object[], summary:object}>}
  */
 export async function runMediaDelete(apiClient, paths, options) {
@@ -127,7 +137,7 @@ export async function runMediaDelete(apiClient, paths, options) {
   progress(options, chalk.cyan(`\n  Media ${dryRun ? 'delete (dry run)' : 'delete'}: ${options.app} → assets/\n`));
 
   for (const p of paths) {
-    const params = { app_id: options.app, path: p };
+    const params = mediaParams(options, { path: p });
     if (dryRun) params.dry_run = true;
     let r;
     try {
@@ -148,6 +158,14 @@ export async function runMediaDelete(apiClient, paths, options) {
       progress(options, chalk.red(`  x ${p}  ${msg}`));
       continue;
     }
+    try {
+      assertAnsweredVisibility('delete_app_asset', r, mediaVisibility(options));
+    } catch (e) {
+      results.push({ path: p, error: e.message, response: r });
+      failures.push(`${p}: ${e.message}`);
+      progress(options, chalk.red(`  x ${p}  ${e.message}`));
+      continue;
+    }
     // Contract violations the server owns: a dry run that deleted, or a real run that found the
     // object and did not delete it. Either is a failure for that path, never a quiet success.
     const violation = dryRun && r.deleted ? 'delete_app_asset reported deleted:true on a dry run'
@@ -166,7 +184,9 @@ export async function runMediaDelete(apiClient, paths, options) {
     } else if (r.deleted) {
       deleted++;
       freedBytes += r.freed_bytes;
-      progress(options, chalk.green(`  - ${p}  freed ${r.freed_bytes} B  purged: ${r.purged}`));
+      // A private object is never on the edge: the server answers purged:null, which is not a miss.
+      progress(options, chalk.green(`  - ${p}  freed ${r.freed_bytes} B` +
+        (mediaVisibility(options) === 'private' ? '  (private: no edge purge)' : `  purged: ${r.purged}`)));
       if (r.purged === false) {
         // The delete stands (exit code unchanged); only the edge cache copy survived the purge.
         progress(options, chalk.yellow(

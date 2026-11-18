@@ -5,7 +5,7 @@
  * Uses rootPath to resolve .env, defaults-config-{env}.json, defaults-config.json,
  * dev-overrides.json. Loads from Secret Manager via config-schema.json key definitions.
  *
- * Bootstrap precedence (highest → lowest), WS-CONFIG-ARCH Phase 1:
+ * Bootstrap precedence (highest → lowest):
  *   1. process.env                    — bootstrap keys (_loadBootstrapKeys)
  *   2. defaults-config-{env}.json     — per-env NON-SECRET config (_loadEnvDefaults)
  *   3. defaults-config.json           — env-invariant NON-SECRET base (_loadDefaults)
@@ -21,8 +21,8 @@
  * CONFIG-ARCHITECTURE-DEFAULTS-PER-ENV). No hardcoded fallbacks: a missing required
  * key raises CloudConfigFatalError at boot (_assertRequiredKeys).
  *
- * WS-CONFIG-BOOTSTRAP-FIX item #2: required_keys enforcement at end of initialize().
- * WS-CONFIG-BOOTSTRAP-FIX item #11: dev file-watcher + boot-time SHA drift check.
+ * required_keys enforcement at end of initialize().
+ * dev file-watcher + boot-time SHA drift check.
  *
  * Mesh posture (_assertMeshPosture): the ONE place that decides whether this process verifies
  * the signed mesh context on /api. A mesh SERVICE on a managed cloud runtime must run
@@ -172,9 +172,8 @@ const GUEST_ALLOWED_COMMANDS = [
     // Pre-account claim transfer: the claim_code is the bearer credential and the emailed
     // verification code proves control of the claim's current address — no session exists yet.
     'claim_transfer_request', 'claim_transfer_confirm',
-    'auth_discord', 'auth_google', 'get_google_config', 'get_discord_config',
-    'get_wallet_config', 'send_email_verification', 'verify_email_code', 'register_email_tos',
-    'register_native_user', 'reconnect_by_wallet', 'login_wallet_session', 'device_request_login',
+    'get_wallet_config', 'send_email_verification', 'verify_email_code',
+    'reconnect_by_wallet', 'device_request_login',
     'device_check_status', 'device_validate', 'device_complete', 'get_platform_holdings',
     'get_market_overview', 'get_user_nfts', 'get_pool_state', 'get_pool_liquidity',
     // submit_transaction is NOT here: Powch 2.2.0 requires an authenticated caller (both measured
@@ -183,19 +182,18 @@ const GUEST_ALLOWED_COMMANDS = [
     'submit_meta_transaction',
     'get_pool_market_overview', 'get_price_history', 'get_pool_token_info', 'get_migration_status',
     'list_services', 'get_service', 'service_health_check', 'platform_health',
-    'admin_bootstrap_login',
     // Internal platform command dispatched by Pub/Sub subscriber (discord-events-{env}).
     // The command is invoked only by trusted Pub/Sub messages published by
     // authCommands.unlink_auth_provider. Authorization is enforced at the transport
     // layer (Pub/Sub IAM) and, on the bot callback, by DESCIX_DISCORD_BOT_TOKEN.
     'revoke_discord_role',
-    // WS-ADMIN-B1 §3.1 — Signature-gated any-token gate. Internally verifies EIP-191
+    // Signature-gated any-token gate. Internally verifies EIP-191
     // signature against supplied wallet_address before consulting holdings. Adding to
     // guest allowlist so Powch's server-to-server loopback (from descix_accept_tos
     // airdrop-PK path) can reach it without propagating the user's session token back
     // across the Powch→Cloud boundary. Safe because the signature IS the authN; the
     // optional user_id param only extends the check to pending_migrations and does not
-    // grant impersonation. See docs/design/ws-admin-b1-ceo-walkthrough.md bug fix.
+    // grant impersonation.
     'confirm_wallet_any_registered_token'
     // T-FLOW-PASSKEY-FIRST Chunk 6 — airdrop_check_pending + airdrop_enqueue_migration
     // REMOVED from guest allowlist. See AppData.jsx comment + Powch manifest flip.
@@ -206,7 +204,7 @@ function networkResponse(netStatus, authStatus, message) {
     const finalAuthStatus = validAuthStatuses.includes(authStatus) ? authStatus : LoginStatus.CONNECTED;
     if (typeof message === 'object' && message !== null && message.status) {
         if (message.status === NetworkStatus.ERROR) {
-            // WS-HEADLESS-MVP-A3: ferry structured error fields (code + data) end-to-end —
+            // ferry structured error fields (code + data) end-to-end —
             // e.g. the CREDITS_REQUIRED purchasable-action payload. undefined fields are
             // dropped by JSON serialization, so legacy string-only errors are unchanged.
             return { status: NetworkStatus.ERROR, auth_status: finalAuthStatus, message: message.message, code: message.code, data: message.data };
@@ -361,9 +359,11 @@ class CloudConfig {
         // etc.). The composition pattern keeps the public surface intact.
         this.__emitter = new EventEmitter();
 
-        // Drift-detection state (item #11 / option 2.B.3).
+        // Drift-detection state.
         this.__defaults_config_sha = null;
         this.__defaults_config_path = null;
+        // The per-env layer exactly as _loadEnvDefaults read it (envDefaultsLayer()); null until loaded.
+        this.__env_defaults_layer = null;
         this.__drift_check_counter = 0;
         // Sampling N: every Nth request triggers checkDefaultsDrift(). N=100 chosen so
         // a 1-rps service detects drift within ~100s, a 100-rps service within ~1s.
@@ -371,7 +371,7 @@ class CloudConfig {
         // (or, in dev, rely on the file-watcher in option 2.B.1).
         this.__drift_sample_n = 100;
 
-        // Watcher state (item #11 / option 2.B.1).
+        // Watcher state.
         this.__watcher = null;
         // 250ms stability window. chokidar's awaitWriteFinish coalesces the
         // rename+change burst from editor atomic-saves into a single callback,
@@ -390,7 +390,7 @@ class CloudConfig {
         this.__googleApplicationCredentials = null;
         this.DAITA_ABI = null;
 
-        // WS-CONFIG-ARCH Phase 1 — per-env config layer.
+        // per-env config layer.
         // Loads defaults-config-{DEPLOY_ENV}.json BEFORE the env-invariant
         // defaults-config.json. Because _mergeConfig is first-write-wins, the
         // env-specific layer WINS over the base file. Both still load in the
@@ -456,6 +456,16 @@ class CloudConfig {
     }
 
     get appDir() { return this.__appDir; }
+
+    /**
+     * The per-environment defaults layer AS LOADED at boot: `{ env, file, values }` (frozen) from
+     * defaults-config-<DEPLOY_ENV>.json, or null when no such file was loaded. `values` is the file's
+     * own content, before any override (process.env, dev-overrides.json, Secret Manager): a caller that
+     * must know what the environment names (e.g. the Firestore database an operator run must target)
+     * reads it here, never from the merged config, which an override can redirect.
+     * @returns {Readonly<{ env: string, file: string, values: Readonly<Record<string, unknown>> }>|null}
+     */
+    envDefaultsLayer() { return this.__env_defaults_layer; }
     get servicesDir() { return this.__servicesDir; }
     servicesFilePath(filename) { return path.resolve(this.__servicesDir, filename); }
     get HTTP_WORKER() { return this.servicesFilePath('httpWorker.js'); }
@@ -657,8 +667,7 @@ class CloudConfig {
             `is no longer sourced from config — it has its own per-environment secret, ` +
             `${target}. Remove the WALLET_PK key from ${sourceLabel} and populate ${target} with ` +
             `this environment's own key. Each environment has a DISTINCT key: do not copy one ` +
-            `environment's key into another. Runbook: ` +
-            `DeSciX_Cloud/microservice/admin/scripts/deploy/wallet-pk-per-env-runbook.md`
+            `environment's key into another.`
         );
     }
 
@@ -763,8 +772,7 @@ class CloudConfig {
                 `[CloudConfig] FATAL: this service declares WALLET_PK required but could not read ` +
                 `its dedicated secret '${secretName}': ${error.message}. Create and populate ` +
                 `'${secretName}' with THIS environment's own signer key and grant the runtime service ` +
-                `account secretAccessor on it. Runbook: ` +
-                `DeSciX_Cloud/microservice/admin/scripts/deploy/wallet-pk-per-env-runbook.md`
+                `account secretAccessor on it.`
             );
         }
     }
@@ -801,7 +809,7 @@ class CloudConfig {
     }
 
     /**
-     * WS-CONFIG-ARCH Phase 1 — load the per-environment defaults layer.
+     * load the per-environment defaults layer.
      *
      * Reads `defaults-config-{DEPLOY_ENV}.json` from the service root and merges
      * it via the same first-write-wins _mergeConfig path used by _loadDefaults().
@@ -842,6 +850,7 @@ class CloudConfig {
             this._refuseMeshTrustFrom(parsed, `defaults-config-${this.DEPLOY_ENV}.json`);
             this._refuseLocalOnlyFrom(parsed, `defaults-config-${this.DEPLOY_ENV}.json`);
             this._mergeConfig(parsed);
+            this.__env_defaults_layer = Object.freeze({ env: this.DEPLOY_ENV, file: envDefaultsPath, values: Object.freeze({ ...parsed }) });
             const sha = crypto.createHash('sha256').update(raw).digest('hex');
             console.log(`[Config] Loaded defaults-config-${this.DEPLOY_ENV}.json (sha256=${sha.slice(0, 12)}…) — env layer wins over base defaults.`);
         } catch (e) {
@@ -882,7 +891,7 @@ class CloudConfig {
     }
 
     /**
-     * Boot-time SHA + sampled drift check (item #11 / option 2.B.3).
+     * Boot-time SHA + sampled drift check.
      * Re-reads defaults-config.json, computes SHA, compares to the SHA captured at
      * boot. If different, log a warning. Does NOT auto-reload — that is the dev
      * file-watcher's job (option 2.B.1). On cloud/Cloud-Functions deploys, the
@@ -918,7 +927,7 @@ class CloudConfig {
     }
 
     /**
-     * Dev-only file watcher (item #11 / option 2.B.1). Watches defaults-config.json
+     * Dev-only file watcher. Watches defaults-config.json
      * and hot-reloads changed top-level keys into the singleton. Emits 'config:reloaded'.
      *
      * Uses chokidar (not fs.watch) because macOS's fs.watch detaches when the
@@ -1366,12 +1375,12 @@ class CloudConfig {
         // Mesh posture: a mesh service on a managed runtime enforces, or does not boot.
         this._assertMeshPosture();
 
-        // WS-CONFIG-BOOTSTRAP-FIX item #2: enforce required_keys at end of bootstrap.
+        // enforce required_keys at end of bootstrap.
         // Must be the last action — runs AFTER Secret Manager + dev-overrides so any
         // source can satisfy a required key.
         this._assertRequiredKeys();
 
-        // WS-CONFIG-BOOTSTRAP-FIX item #11 (2.B.1): arm dev file-watcher AFTER required_keys
+        // arm dev file-watcher AFTER required_keys
         // passes. If the service fails to boot, no watcher is left running.
         this._startConfigWatcher();
     }

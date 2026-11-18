@@ -6,7 +6,7 @@
  * would be a second owner for as long as the companion repoint takes; a pointer is the same
  * owner reached by an older name.
  *
- * It exists only until DeSciX_Cloud's imports are repointed at `@descix/cloud-core/manifest`,
+ * It exists only until Cloud's imports are repointed at `@descix/cloud-core/manifest`,
  * after which this file and its subpath export are DELETED. That repoint is a companion row
  * and is deliberately NOT part of this change.
  */

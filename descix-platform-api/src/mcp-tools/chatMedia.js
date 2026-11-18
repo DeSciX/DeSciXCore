@@ -1,7 +1,7 @@
 /**
  * chatMedia — THE canonical contract for MEDIA entering a chat turn.
  *
- * ONE OWNER RULE (ws-chat-multimodal-image-attach, extending WS-B8's chatIngress):
+ * ONE OWNER RULE:
  * text contributions enter a turn through `chatIngress` (descix-app-sdk); MEDIA
  * contributions carry bytes, and bytes need a wire shape, a MIME vocabulary, a size
  * policy and a provider-block encoder. All four live HERE, once. No consumer

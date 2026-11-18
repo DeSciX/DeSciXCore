@@ -82,7 +82,7 @@ one and exits 0, which reads as an answer about all of them.
 *Not published, deliberately:* `descix-vscode`, which ships to the VS Code Marketplace
 instead. The workflow refuses it by name.
 
-The vendored cryptoapis-sdk fork lives at DeSciX_Powch/packages/cryptoapis-sdk, outside this
+The vendored cryptoapis-sdk fork lives in a separate repository, outside this
 repo, and is likewise never published.
 
 **CI-PUBLISHED IS NOT THE PUBLIC STORY, and the two were conflated until 2026-08-30.** The

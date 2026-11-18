@@ -1,6 +1,6 @@
 /**
  * Name the stale corpus files a sync would delete, so an operator sees WHICH documents go
- * before a real run — not just how many. (GODSWORLD-DEV, 2026-09-18: a dry run reported
+ * before a real run — not just how many. (measured 2026-09-18: a dry run reported
  * "Would delete (stale-file): 3" on a KB where the three might matter, with no way to tell
  * which three.)
  *

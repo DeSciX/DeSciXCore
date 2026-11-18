@@ -1,5 +1,5 @@
 /**
- * @descix/cloud-core — Signed `_descix` Mesh Context (WS-MESH-SIGNED-CTX)
+ * @descix/cloud-core — Signed `_descix` Mesh Context
  *
  * THE CANONICAL OWNER of the signed mesh contract. Core (apifront) imports the
  * signer; every downstream microservice imports the verifier middleware. No

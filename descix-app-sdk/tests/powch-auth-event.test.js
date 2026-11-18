@@ -19,6 +19,10 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 import { PowchBridgeClient } from '../src/util/PowchBridgeClient.js';
+import { registerHeldIdentityReader } from '../src/util/sessionGeneration.js';
+
+// The shell's session owner (util/AppData.jsx registers this reader in the app); here: no session held.
+registerHeldIdentityReader(() => null);
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC = join(HERE, '..', 'src');
@@ -83,20 +87,37 @@ test('subscribe: called once at once with the current state', () => {
   assert.deepEqual(late.calls, [{ signedIn: true, address: null }], 'a late subscriber hears the current state at once');
 });
 
-test('a sign-in this host requested: STATE_UPDATE releases the address, the session signs in', () => {
+test('a sign-in this host requested: STATE_UPDATE releases the address, the session signs in', async () => {
+  globalThis.requestAnimationFrame = (cb) => setTimeout(cb, 0);
   const bridge = newBridge();
+  fromPowch({ type: 'POWCH_READY' });
   const synced = [];
-  window.DeSciX = { loginWithSessionToken: (p) => synced.push(p) };
+  window.DeSciX = { loginWithSessionToken: (p) => { synced.push(p); return true; } };
+  const posted = [];
+  iframe.contentWindow.postMessage = (m) => posted.push(m);
   const r = recorder();
   bridge.auth.on('auth', r.cb);
+  // The host's own sign-in request: Powch posts the state update only to the host that asked,
+  // echoing that request's id.
+  bridge.login().catch(() => {});
+  // Posted after two animation frames; poll for it (a fixed wait flakes under a loaded full run).
+  let login;
+  for (let i = 0; i < 200 && !login; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    login = posted.find((m) => m.type === 'POWCH_LOGIN');
+  }
+  if (!login) bridge.destroy();
+  assert.ok(login, 'POWCH_LOGIN was posted');
+  const { requestId } = login;
 
-  fromPowch({ type: 'POWCH_STATE_UPDATE', payload: { isAuthenticated: true, displayAddress: ADDR, sessionInfo: SESSION } });
+  fromPowch({ type: 'POWCH_STATE_UPDATE', requestId, payload: { isAuthenticated: true, displayAddress: ADDR, sessionInfo: SESSION } });
   assert.equal(synced.length, 1, 'the bridge still lands the session in the shell');
   assert.deepEqual(r.calls, [{ signedIn: false, address: null }], 'an address alone is not a sign-in');
 
   bridge.auth.setSession(SESSION); // the shell's session state changed (the hook's feed)
   assert.deepEqual(r.calls.at(-1), { signedIn: true, address: ADDR });
   assert.equal(r.calls.length, 2);
+  bridge.destroy();
 });
 
 test('a sign-in Powch never reported to this host (sidebar sign-in, restored session) still fires', () => {

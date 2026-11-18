@@ -1,23 +1,5 @@
 [
   {
-    "verbPath": "admin-login",
-    "description": "Bootstrap CLI credentials for platform admins (requires admin group membership)",
-    "arguments": [],
-    "options": [
-      {
-        "flags": "-e, --email <email>",
-        "description": "Admin email (must be in platform admin Google Group)",
-        "required": true
-      },
-      {
-        "flags": "-u, --url <url>",
-        "description": "API URL override",
-        "required": false
-      }
-    ],
-    "runbookAnchor": null
-  },
-  {
     "verbPath": "app delete",
     "description": "Delete an app with full cascade cleanup (Pinecone, GCS, Firestore, Products)",
     "arguments": [],
@@ -141,6 +123,11 @@
         "required": false
       },
       {
+        "flags": "--private",
+        "description": "Use the app's PRIVATE media space instead of the public one (visibility is always sent to the server explicitly)",
+        "required": false
+      },
+      {
         "flags": "--json",
         "description": "Print every per-path server result and the summary as JSON (for scripting)",
         "required": false
@@ -149,8 +136,28 @@
     "runbookAnchor": null
   },
   {
+    "verbPath": "app media-link",
+    "description": "Print a read link valid for 300 seconds for a private media object by its asset:<app_id>/<path> ref; for an app admin or a user the app owner granted access to; never stored",
+    "arguments": [
+      {
+        "name": "ref",
+        "required": true,
+        "variadic": false,
+        "description": "The private object reference, as `media-upload --private` / `media-list --private` print it (asset:<app_id>/<path>)"
+      }
+    ],
+    "options": [
+      {
+        "flags": "--json",
+        "description": "Print the server's { ref, url, expires_at } object unchanged (for scripting)",
+        "required": false
+      }
+    ],
+    "runbookAnchor": null
+  },
+  {
     "verbPath": "app media-list",
-    "description": "List an app's uploaded media (path, size, content type, updated, public_url) and its storage total against the quota",
+    "description": "List an app's uploaded media (path, size, content type, updated, public_url, or ref with --private) and its storage total against the quota",
     "arguments": [],
     "options": [
       {
@@ -164,6 +171,11 @@
         "required": false
       },
       {
+        "flags": "--private",
+        "description": "Use the app's PRIVATE media space instead of the public one (visibility is always sent to the server explicitly)",
+        "required": false
+      },
+      {
         "flags": "--json",
         "description": "Print the server's listing object unchanged (for scripting)",
         "required": false
@@ -173,7 +185,7 @@
   },
   {
     "verbPath": "app media-upload",
-    "description": "Upload media/asset files to an app's GCS assets prefix (200 MB per app today; app owners, community admins and platform admins may upload — returns asset references)",
+    "description": "Upload media/asset files to an app's GCS assets prefix (200 MB per app today across both spaces; app owners, community admins and platform admins may upload — returns public_url, or ref with --private)",
     "arguments": [],
     "options": [
       {
@@ -189,6 +201,11 @@
       {
         "flags": "--prefix <relPath>",
         "description": "Optional sub-path under the app assets/ prefix (e.g. \"shows/myshow\")",
+        "required": false
+      },
+      {
+        "flags": "--private",
+        "description": "Use the app's PRIVATE media space instead of the public one (visibility is always sent to the server explicitly)",
         "required": false
       },
       {
@@ -831,7 +848,7 @@
         "name": "old_community_id",
         "required": true,
         "variadic": false,
-        "description": "Current community_id (e.g. unkamon)"
+        "description": "Current community_id (e.g. my-community)"
       },
       {
         "name": "new_community_id",
