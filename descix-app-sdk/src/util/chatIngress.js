@@ -2,8 +2,8 @@
  * chatIngress — THE canonical contract for content entering a chat conversation
  * from OUTSIDE the composer textarea.
  *
- * ONE OWNER RULE (WS-B8): a human types into the composer; everything else —
- * CodeSite action results, image/file attachments (ws-chat-multimodal-image-attach),
+ * ONE OWNER RULE: a human types into the composer; everything else —
+ * CodeSite action results, image/file attachments,
  * future telemetry or sensor feeds — is an "external contribution" and enters the
  * conversation through ChatWidget's ingress handle and NOWHERE ELSE. There is no
  * second path that appends to a thread or mutates user_input. If you are about to
@@ -30,7 +30,7 @@ export const CHAT_INGRESS_DISPOSITIONS = Object.freeze(['stage', 'send']);
 export const CHAT_CONTRIBUTION_KINDS = Object.freeze([
   'action_result',
   'action_error',
-  // ws-chat-multimodal-image-attach: an image/video the model should LOOK AT. It is a
+  // an image/video the model should LOOK AT. It is a
   // contribution like any other — same ingress, same dispositions, same transcript — but
   // it carries `media` (bytes or an app-asset reference) ALONGSIDE its text, because
   // pixels cannot be stringified into the turn text.
@@ -38,7 +38,7 @@ export const CHAT_CONTRIBUTION_KINDS = Object.freeze([
 ]);
 
 /**
- * SIZE POLICY (WS-B8 AC: "oversized results must not blow the turn").
+ * SIZE POLICY.
  *
  * A CodeSite action can return anything — a scalar, or a 200k-element simulation
  * dump. That text is (a) rendered into the transcript and (b) billed as input
@@ -260,7 +260,7 @@ export function composeTurnInput(contributions, typedText) {
  * send must clear exactly what it flushed. React state cannot own that: a staged append is
  * only QUEUED until the next render, so a send that reads state (or a ref refreshed on render)
  * in the same task misses the bag, and a blanket clear queued after the append wipes it
- * (measured 2026-09-17, GODSWORLD-DEV verifier: DeSciX.chat.sendMedia then an action_result
+ * (measured 2026-09-17, a live-app verifier: DeSciX.chat.sendMedia then an action_result
  * 'send' with no await submitted the result alone and left nothing staged). This owner holds
  * the list synchronously; the widget mirrors it into state only to render the chips.
  *

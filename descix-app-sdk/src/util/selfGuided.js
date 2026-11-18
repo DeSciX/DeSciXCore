@@ -9,7 +9,7 @@
  * synthesis, no second command pipe. A declared op takes the SAME onExecuteAction path a human
  * click would have taken.
  *
- * THE CONTRACT IS THE PAGE'S, NOT OURS (VIEWER, authoritative, already merged at Unkamon 4dde0a0
+ * THE CONTRACT IS THE PAGE'S, NOT OURS (VIEWER, authoritative, already merged
  * and DEPLOYED — this describes served bytes, not a plan):
  *
  *   window.DeSciX_SelfGuided = {

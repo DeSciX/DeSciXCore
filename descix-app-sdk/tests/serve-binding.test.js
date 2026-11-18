@@ -24,6 +24,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   resolveServeBinding,
+  servedBinding,
   detectAppFromCwd,
   bindableApps,
   appBindingPlugin,
@@ -58,7 +59,7 @@ const withWorkspace = (fn) => withV3Tree(TREE, fn);
 
 test('standing in an app directory binds THAT app — zero config', () => {
   withWorkspace(({ dir, repos, config }) => {
-    const b = resolveServeBinding(dir, config, { cwd: repos.godsworld, gatewayPort: PORT });
+    const b = resolveServeBinding(dir, config, { cwd: repos.godsworld });
     assert.equal(b.appId, 'egpt-godsworld');
     assert.equal(b.source, 'cwd');
   });
@@ -68,7 +69,7 @@ test('a subdirectory deep inside the app still binds the app', () => {
   withWorkspace(({ dir, repos, config }) => {
     const deep = path.join(repos.godsworld, 'a', 'b', 'c');
     fs.mkdirSync(deep, { recursive: true });
-    assert.equal(resolveServeBinding(dir, config, { cwd: deep, gatewayPort: PORT }).appId, 'egpt-godsworld');
+    assert.equal(resolveServeBinding(dir, config, { cwd: deep }).appId, 'egpt-godsworld');
   });
 });
 
@@ -84,7 +85,7 @@ test('a product nested inside another product resolves to the INNER one', () => 
 test('--app overrides cwd', () => {
   withWorkspace(({ dir, repos, config }) => {
     const b = resolveServeBinding(dir, config, {
-      cwd: repos.godsworld, app: 'egpt-frqtl', gatewayPort: PORT,
+      cwd: repos.godsworld, app: 'egpt-frqtl',
     });
     assert.equal(b.appId, 'egpt-frqtl');
     assert.equal(b.source, '--app');
@@ -95,8 +96,8 @@ test('resolving the binding NEVER writes to workspace.json — no "current app" 
   withWorkspace(({ dir, repos, config }) => {
     const wsPath = path.join(dir, '.descix', 'workspace.json');
     const before = fs.readFileSync(wsPath, 'utf8');
-    resolveServeBinding(dir, config, { cwd: repos.godsworld, gatewayPort: PORT });
-    resolveServeBinding(dir, config, { app: 'egpt-frqtl', cwd: dir, gatewayPort: PORT });
+    resolveServeBinding(dir, config, { cwd: repos.godsworld });
+    resolveServeBinding(dir, config, { app: 'egpt-frqtl', cwd: dir });
     assert.equal(fs.readFileSync(wsPath, 'utf8'), before);
   });
 });
@@ -106,7 +107,7 @@ test('resolving the binding NEVER writes to workspace.json — no "current app" 
 test('from a directory that is no app, it FAILS LOUD naming BOTH fixes — never store chrome', () => {
   withWorkspace(({ dir, repos, config }) => {
     assert.throws(
-      () => resolveServeBinding(dir, config, { cwd: dir, gatewayPort: PORT }),
+      () => resolveServeBinding(dir, config, { cwd: dir }),
       (e) => {
         assert.match(e.message, /cannot tell which app to serve/);
         assert.match(e.message, /cd into your app/);
@@ -122,7 +123,7 @@ test('from a directory that is no app, it FAILS LOUD naming BOTH fixes — never
 test('--app with an unknown id fails loud and lists what exists', () => {
   withWorkspace(({ dir, repos, config }) => {
     assert.throws(
-      () => resolveServeBinding(dir, config, { app: 'nope', cwd: dir, gatewayPort: PORT }),
+      () => resolveServeBinding(dir, config, { app: 'nope', cwd: dir }),
       /not in this workspace[\s\S]*egpt-godsworld[\s\S]*descix app init/,
     );
   });
@@ -131,30 +132,33 @@ test('--app with an unknown id fails loud and lists what exists', () => {
 test('the platform shell cannot be served as its own standalone app', () => {
   withWorkspace(({ dir, repos, config }) => {
     assert.throws(
-      () => resolveServeBinding(dir, config, { app: 'daita', cwd: dir, gatewayPort: PORT }),
+      () => resolveServeBinding(dir, config, { app: 'daita', cwd: dir }),
       /PLATFORM shell itself/,
     );
     // and standing in the platform directory is the same refusal, not a silent store boot
     assert.throws(
-      () => resolveServeBinding(dir, config, { cwd: repos['DeSciX/DeSciX_Cloud/site'], gatewayPort: PORT }),
+      () => resolveServeBinding(dir, config, { cwd: repos['DeSciX/DeSciX_Cloud/site'] }),
       /cannot tell which app to serve/,
     );
   });
 });
 
-test('a missing gatewayPort is a programming error, not a guess', () => {
+test('the deleted gatewayPort option fails loud, naming servedBinding as the replacement', () => {
   withWorkspace(({ dir, repos, config }) => {
-    assert.throws(() => resolveServeBinding(dir, config, { app: 'egpt-frqtl', cwd: dir }), /gatewayPort is required/);
+    assert.throws(() => resolveServeBinding(dir, config, { app: 'egpt-frqtl', cwd: dir, gatewayPort: PORT }),
+      /no longer takes gatewayPort[\s\S]*servedBinding\(session, req\)/);
   });
 });
 
 // ------------------------------------------------------- the payload + AMB-1c
 
-test('the binding names the app and its GATEWAY url — same owner as the product map', () => {
+test('the session names the app; the served binding adds its route on the request origin', () => {
   withWorkspace(({ dir, repos, config }) => {
-    const b = resolveServeBinding(dir, config, { app: 'egpt-frqtl', cwd: dir, gatewayPort: PORT });
+    const session = resolveServeBinding(dir, config, { app: 'egpt-frqtl', cwd: dir });
+    assert.ok(!('appUrl' in session), 'the app URL depends on the request, so the session cannot carry one');
+    const b = servedBinding(session, { httpVersionMajor: 2, headers: { ':authority': `localhost:${PORT}` } });
     assert.equal(b.mode, 'standalone');
-    assert.equal(b.appUrl, gatewayProductUrl(PORT, 'egpt-frqtl'));
+    assert.equal(b.appUrl, gatewayProductUrl(PORT, 'egpt-frqtl'), 'localhost answers exactly what it always answered');
     assert.equal(b.appUrl, `https://localhost:${PORT}/p/egpt-frqtl`);
   });
 });
@@ -182,18 +186,19 @@ test('gateway and browser agree on ONE spelling of the binding path', () => {
 
 // --------------------------------------------------------------- the plugin
 
-function runMiddleware(plugin, url) {
+function runMiddleware(plugin, url, host = 'localhost:5599') {
   let mw;
-  plugin.configureServer({ middlewares: { use: (fn) => { mw = fn; } } });
+  plugin.configureServer({ middlewares: { use: (fn) => { mw = fn; } }, config: { logger: { error: () => {} } } });
   const headers = {};
   let ended = null, nexted = false;
-  mw({ url }, { setHeader: (k, v) => { headers[k] = v; }, end: (b) => { ended = b; } }, () => { nexted = true; });
+  mw({ url, httpVersionMajor: 1, headers: { host } }, { setHeader: (k, v) => { headers[k] = v; }, end: (b) => { ended = b; } }, () => { nexted = true; });
   return { headers, ended, nexted };
 }
 
 test('the plugin answers the binding path and passes everything else through', () => {
+  const session = { appId: 'egpt-frqtl', source: 'cwd', defaultView: null };
   const binding = { mode: 'standalone', appId: 'egpt-frqtl', appUrl: 'https://localhost:5599/p/egpt-frqtl', source: 'cwd' };
-  const plugin = appBindingPlugin(binding);
+  const plugin = appBindingPlugin(session);
 
   const hit = runMiddleware(plugin, APP_BINDING_PATH);
   assert.equal(hit.nexted, false);

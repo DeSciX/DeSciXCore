@@ -116,7 +116,7 @@ function diagnoseUntracked(repoRelativePath, ref, repoRoot, repoLabel) {
  *
  * THE WORKING TREE IS NEVER CONSULTED. Reading a sha from disk when the ref lookup failed
  * is the measured defect: it served content git was explicitly told to exclude as a
- * citable KB source (corpus:04406066... = `.claude/agent-memory/evp-descix/qa-pairs.jsonl`,
+ * citable KB source (corpus:04406066... = an agent-memory file under `.claude/`,
  * excluded by .gitignore, chunked and served anyway). That path is deleted, not fenced
  * behind a flag, and there is nothing that restores it — SUPER-DRY, CEO-D-2026-07-26.
  *
@@ -150,7 +150,7 @@ export function resolveTrackedBlobSha(absoluteFilePath, ref, workspaceRoot = nul
   }
   const { repoRoot, repoRelativePath } = owner;
   // How the owning repo is named in messages: relative to the workspace when we have one,
-  // so the operator reads "DeSciX/DeSciX_Cloud" rather than an absolute machine path.
+  // so the operator reads "<dir>/<repo>" rather than an absolute machine path.
   // `repoRoot` is a REAL path (git resolves symlinks), so the workspace root must be one
   // too or the subtraction escapes upward into `../../..`.
   let workspaceReal = workspaceRoot;
@@ -374,12 +374,12 @@ export async function walkCorpus(manifest, workspaceRoot) {
   const refused = [];
   let commitSha = 'unknown';
 
-  // Nested-source dedup (WS-EVP-DESCIX-KB-CLEANUP item 4): a manifest may list both a directory
+  // Nested-source dedup: a manifest may list both a directory
   // source AND a more-specific source nested inside it (e.g. `.../services` at tier 3 AND
   // `.../services/commandHandlers` at tier 2 to override the tier for that subtree). Without dedup
   // the walker collects the nested files TWICE — once under each source — producing duplicate
   // content-addressed chunk IDs and a deterministic upsert-vs-live dedup delta every full sync
-  // (the observed −175 on unk-beast/Corpus). Fix at the walker level so the class is killed for
+  // (the observed −175 on a production corpus). Fix at the walker level so the class is killed for
   // every manifest: each physical file belongs to EXACTLY ONE source — the DEEPEST (most-specific)
   // source root that contains it. Walking an ancestor source skips a file owned by a descendant
   // source, preserving the author's override intent (the nested source's tier/doc_type/syncignore
@@ -410,7 +410,7 @@ export async function walkCorpus(manifest, workspaceRoot) {
     // CROSS-REPO SOURCES ARE DELIBERATELY EXEMPT. Their `absolutePath` is a fiction — the
     // content lives in another repository — so "is it in a repo here" is the wrong question
     // and answering it would MASK the accurate refusal resolveSourceProvenance already owns.
-    // Measured: EVP-BEAST's four `repo: eabadir/unk` sources were being reported as "not
+    // Measured: four `repo: <owner>/<name>` sources were being reported as "not
     // inside any git repository" instead of "cross-repo content fetch is not implemented".
     if (source.repo === undefined) {
       const exists = await fs.access(absolutePath).then(() => true, () => false);

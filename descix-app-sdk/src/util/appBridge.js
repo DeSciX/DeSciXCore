@@ -3,7 +3,7 @@
  *
  * ── Why this module exists ───────────────────────────────────────────────────
  * The shell publishes several app-facing members onto one global object: `.powch`,
- * `.config`, `.view`, and (ws-c3-bridge-media-handle) `.chat`. Before this module,
+ * `.config`, `.view`, and `.chat`. Before this module,
  * each publisher wrote `window.DeSciX = window.DeSciX || {}` for itself. That is two
  * derivations of one fact — the general form of mirror drift (engineering-culture
  * mandate): the copies disagree the moment one of them learns something the other

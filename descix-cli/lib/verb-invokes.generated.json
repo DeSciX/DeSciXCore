@@ -1,7 +1,4 @@
 {
-  "admin-login": [
-    "admin_bootstrap_login"
-  ],
   "app delete": [
     "delete_app"
   ],
@@ -20,6 +17,9 @@
   ],
   "app media-delete": [
     "delete_app_asset"
+  ],
+  "app media-link": [
+    "get_private_asset_link"
   ],
   "app media-list": [
     "list_app_assets"

@@ -17,7 +17,7 @@ npm install @descix/app-sdk
 | Export | Description |
 |--------|-------------|
 | `.` | AppShell, AppContext, AppProvider, useAppContext, Api, ErrorBoundary, LoadingWidget, DebugWidget, CodeSiteWidget, ChatWidget, PowchSideBarWidget, PowchBridgeProvider, usePowchBridge, PowchClient, toSignableTypedData, TypedDataError, useDeSciXView, VIEW_MODES, initialViewFor, seedView, viewAvailable, requestView, VIEW_OUTCOMES, SHARE_CONTRACT, parseShareJson, validateShareJson, SHARE_JSON_FILE, publishChatApi, retractChatApi, CHAT_CONTEXT, CHAT_CONTEXT_DATA, CHAT_SCRIPT_API, CHAT_CONTEXT_OUTCOMES, normalizeChatContext, setChatContext, clearChatContext, publishBridgeMember, retractBridgeMember, getBridge, BRIDGE_READY_EVENT, pendingIntent (namespace), shareLink (namespace), PENDING_INTENT_KINDS, PENDING_INTENT_STATUS, createIntentResumer |
-| `./dev` | createViteProxyConfig, createViteServerConfig, getViteHttpsConfig, resolveGatewayPort, resolveServeBinding, resolvePowchUrl, resolveDevCertOptions, buildWorkspaceProducts |
+| `./dev` | createViteProxyConfig, createViteServerConfig, getViteHttpsConfig, resolveGatewayPort, resolveServeBinding, servedBinding, bindingAppUrl, resolvePowchUrl, resolveDevCertOptions, buildWorkspaceProducts |
 | `./share` | SHARE_JSON_FILE, SHARE_CONTRACT, parseShareJson, validateShareJson (no DOM, no Node-only import; imports the view list from appView.js) |
 | `./chat-context` | the page-context contract and its server half: CHAT_CONTEXT, CHAT_CONTEXT_DATA, normalizeChatContext, renderPageContextBlock (no DOM at load, no Node-only import) |
 | `./pending-intent` | a deep link that waits across sign-in: PENDING_INTENT_KINDS (device-login, mcp-connect, powch-offer), capture, peek, consume, createIntentResumer, PENDING_INTENT_STATUS, PENDING_INTENT_MAX_AGE_MS. sessionStorage, per tab and origin; resumed once when signed in (no React, no network) |
@@ -131,6 +131,23 @@ Signing methods: `signTransaction({ tx, address? })`, `signMessage({ message, ad
 `types.EIP712Domain` (ethers v6 rejects it) and sends `{ domain, types, value }`. A missing field or a
 `primaryType` that is not a key of `types` throws `TypedDataError` before anything is sent.
 
+### Submitting a signed transaction (`bridge.networkAPI`)
+
+`bridge.networkAPI.submitTransaction(params)` and `submitMetaTransaction(params)` broadcast a user-signed
+transaction through Powch. The promise resolves ONLY when the transaction is confirmed (mined, receipt
+status 1), with `{ status: 'OK', message: { status: 'confirmed', txHash, gasUsed, blockNumber } }`.
+
+| Outcome | Rejection | The hash |
+|---------|-----------|----------|
+| mined and reverted | `err.code === 'TX_FAILED'` | `err.data.tx_hash` |
+| accepted, not mined before Powch answered | `err.code === 'TX_PENDING'`: poll the hash with `get_transaction_receipt` | `err.data.tx_hash` |
+| any other status in Powch's answer | `err.code === 'TX_ANSWER_UNRECOGNIZED'` | `err.data.tx_hash` |
+| 500, outcome unknown or replaced | `err.status === 500`, `err.code === 'UPSTREAM_SERVICE_ERROR'`, `err.data` is Powch's body | `err.data.data.tx_hash` |
+| 422 "nonce too low" | `err.status === 422`, as above | `err.data.data.tx_hash` |
+| other 4xx: nothing was sent | `err.status`, `err.code`, `err.data` | none |
+
+Look a hash up before signing again; never re-sign a transaction whose outcome is unknown.
+
 ## Dependencies
 
 The app-sdk is **self-contained**. It bundles:
@@ -164,7 +181,7 @@ descix serve                                  # the app is detected from the dir
   Port:      5173                     [built-in default (5173)]
   App:       <app-id>                 [cwd]   mode: standalone
   Open:      https://localhost:5173/   → App Shell; reads /__descix/app-binding.json and boots <app-id> standalone
-  App route: https://localhost:5173/p/<app-id>   → this app's route on the gateway (the URL the shell loads it from)
+  App route: https://localhost:5173/p/<app-id>   → this app's route on the gateway (the shell loads it from this route on the origin it was opened on)
 
     /                                  → https://descix.net   (App Shell — sign in here)
     /apifront                          → https://descix.net
@@ -198,6 +215,13 @@ The gateway answers `GET /__descix/app-binding.json` on the shell's own origin w
 so the same pre-built cloud shell boots as the store on `descix.net` and as your app on
 localhost, with **no rebuild**. No binding served (or a timeout, or a malformed one) means the
 store — the safe degradation.
+
+`appUrl` is the app's `/p/<app-id>` route on the origin the shell was opened on, read from the
+request's authority (`:authority`, else `Host`):
+`https://localhost:5173/` gets `https://localhost:5173/p/<app-id>`, and a shell opened through a
+tunnel hostname gets that hostname, so the app frame is same-origin with the shell there too. A
+malformed authority is answered `400` naming the problem, and the same message is printed in
+the `descix serve` terminal.
 
 There is no `__STANDALONE_APP_ID__` define; it is deleted. An app that builds *itself*
 standalone declares it at its own mount: `<AppShell appId="my-app" standalone>`.
@@ -352,5 +376,3 @@ a build-time global.
 ## References
 
 - [The App Shell API](./APP_SHELL_API.md) — what the shell publishes to your app, and what it calls back
-- [App Shell Core Design](../../design/architecture/app-shell-core-design.md)
-- [DeSciX Powch Integration Guide](../../DeSciX_Powch/docs/integration-guide.md)

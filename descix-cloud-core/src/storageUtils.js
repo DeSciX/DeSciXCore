@@ -151,7 +151,7 @@ class FirestoreCollections {
     static REP_VOTES() { return new BaseStoragePath("RepVotes", "dict").getPath(); }
     static MICRO_REP_VIEWS_CAP() { return new BaseStoragePath("MicroRepViewsCap", "dict").getPath(); }
 
-    // WS-ADMIN-B1 §5 Firestore schema additions (env-local DB, not descix-chain).
+    // Firestore schema additions (env-local DB, not descix-chain).
     // AirdropVerifications: EIP-191 challenge records (extended in B1 to carry email +
     // tokens_snapshot + batched/enqueued status — see stub-plan §5.2).
     static AIRDROP_VERIFICATIONS() { return new BaseStoragePath("AirdropVerifications", "dict").getPath(); }
@@ -161,21 +161,21 @@ class FirestoreCollections {
     // emitted by the platform (stub-plan §5.3).
     static ON_CHAIN_LOG() { return new BaseStoragePath("on_chain_log", "dict").getPath(); }
 
-    // WS-HEADLESS-MVP-A2 (CEO-D-2026-07-01 D2/D4): platform-wide USD AI-credits ledger.
+    // platform-wide USD AI-credits ledger.
     // Credits/balance is the ONE balance doc per user (integer micro-USD fields);
     // CreditLedger holds append-only rows — debit rows are the D4 pro-rata attribution
     // signal, consumed by the buyback worker via collectionGroup('CreditLedger').
     // See V2_docs/services/ai-credits.md.
     static USER_CREDITS(user_id) { return new BaseStoragePath("UserCache/{user_id}/Credits", "dict").getPath({ user_id }); }
     static USER_CREDIT_LEDGER(user_id) { return new BaseStoragePath("UserCache/{user_id}/CreditLedger", "dict").getPath({ user_id }); }
-    // WS-FREEMIUM-ONRAMP (CEO-D-2026-07-06-FREEMIUM-ONRAMP): per-UTC-day sponsored-grant
+    // per-UTC-day sponsored-grant
     // burn counters {granted_micro_total, grants_count, updated_at}, doc id 'YYYY-MM-DD'.
     // In practice only the sponsor-pool principal (creditsService.SPONSOR_POOL_USER_ID)
     // carries this subcollection — it enforces the POOL daily cap independently of pool
     // balance. See V2_docs/services/ai-credits.md §5a.
     static USER_SPONSORED_DAYS(user_id) { return new BaseStoragePath("UserCache/{user_id}/SponsoredDays", "dict").getPath({ user_id }); }
     // Per-caller MCP tool-visibility grant (one doc, id 'grant'). Owner module:
-    // DeSciX_Cloud microservice services/toolVisibilityService.js — no other module reads or
+    // Cloud microservice services/toolVisibilityService.js — no other module reads or
     // writes this subtree (CEO-D-2026-07-09-USER-DOMAIN-OWNER-MODULES). The grant is a
     // SNAPSHOT {subject, commands[], expires_at} that widens which already-permitted tools
     // tools/list ADVERTISES; it is never an authorization grant.
@@ -192,7 +192,7 @@ class FirestoreDocumentPath {
     static USER_SESSION(user_id, access_token) { return `${FirestoreCollections.USER_SESSIONS(user_id)}/${access_token}`; }
     static USER_OAUTH_SESSION(user_id, access_token) { return FirestoreDocumentPath.USER_SESSION(user_id, access_token); }
     static USER_PURCHASE(user_id, purchase_id) { return `${FirestoreCollections.USER_PURCHASES(user_id)}/${purchase_id}`; }
-    // WS-HEADLESS-MVP-A2: the one credits balance doc per user (doc id is fixed: 'balance').
+    // the one credits balance doc per user (doc id is fixed: 'balance').
     static USER_CREDIT_BALANCE(user_id) { return `${FirestoreCollections.USER_CREDITS(user_id)}/balance`; }
     static USER_CREDIT_LEDGER_ENTRY(user_id, entry_id) { return `${FirestoreCollections.USER_CREDIT_LEDGER(user_id)}/${entry_id}`; }
     static USER_COMMUNITY_STAT(user_id, community_id) { return `${FirestoreCollections.USER_COMMUNITY_STATS(user_id)}/${community_id}`; }

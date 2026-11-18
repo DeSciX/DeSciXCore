@@ -1,7 +1,17 @@
-// ---------- [./DeSciX_PWA/src/util/AppData.jsx] ----------
 
 
 import { resolveAgainstCurrentOrigin, assertProductPresent, hasStoredSitePath } from './productUrl.js';
+import {
+  registerHeldIdentityReader,
+  takeSendTicket,
+  endSession,
+  sessionReplacedNow,
+  isTicketSessionCurrent,
+  mayAdoptAnswerSession,
+  noteAnswerSessionAdopted,
+  answerSendTicket,
+} from './sessionGeneration.js';
+import { isSession } from '../powch/authEvent.js';
 
 const queryParams = new URLSearchParams(window.location.search);
 // isEmbedded is strictly for Discord embedded apps (where .proxy/ prefix is needed)
@@ -14,6 +24,11 @@ export class ProductTypes {
   static APP = 'APP';
   static KNOWLEDGEBASE = 'KNOWLEDGEBASE';
   static ROLE = 'ROLE'; // <-- Added ROLE type
+}
+
+/** Whose session this is: the account id, or the token of a session that carries no id yet. */
+function sessionIdentityOf(info) {
+  return info?.id ?? info?.user_id ?? info?.access_token ?? null;
 }
 
 const SHARE_LINK_CARRIER_DELETED = (name) =>
@@ -34,7 +49,6 @@ export class AppData {
   static _loginStatus = null;
   static _selectedCommunityToken = null; // NEW: Store community token symbol from URL (e.g., "EGPT")
   static sdk = null;
-  static sdkCode = null;
   static source_guild_id = null;
   static _appModeConfig = null; // standalone app mode: { appId, url, defaultView } (AppContext, SDK_READY)
   static _platformHomeAppId = null; // The store bundle's platform_home_app_id (util/frontPage.js reads this)
@@ -88,6 +102,8 @@ export class AppData {
   }
 
   static reset() {
+    // The session is over: every answer in flight was sent under it (util/sessionGeneration.js).
+    endSession();
     AppData._sessionInfo = null;
     AppData._custodialBalance = 0;
     AppData._userRoles = null;
@@ -100,7 +116,6 @@ export class AppData {
     AppData._loginStatus = null;
     AppData._selectedCommunityToken = null;
     AppData.sdk = null;
-    AppData.sdkCode = null;
     AppData.source_guild_id = null;
     AppData._appModeConfig = null;
     AppData._platformHomeAppId = null;
@@ -151,8 +166,60 @@ export class AppData {
     }
   }
   static set sessionInfo(value) {
+    // A sign-out (null) ends every answer in flight; another account's session set directly is the
+    // latest sign-in. A refreshed session for the same account is neither (util/sessionGeneration.js).
+    if (!value) endSession();
+    else if (sessionIdentityOf(value) !== sessionIdentityOf(AppData.sessionInfo)) sessionReplacedNow();
+    AppData._storeSessionInfo(value);
+  }
+
+  /** The raw write of the session (memory and storage). Only the setter above and adoptSession call it. */
+  static _storeSessionInfo(value) {
     AppData._sessionInfo = value;
     localStorage.setItem('sessionInfo', JSON.stringify(value));
+  }
+
+  /**
+   * THE one adoption of a session carried by an answer, judged by the `ticket` its request took when
+   * it was SENT (util/sessionGeneration.js): an answer sent before the last sign-out, a refresh of an
+   * account no longer held, a refresh sent before one already adopted for that account, or a sign-in
+   * sent before the last adopted one is refused (nothing is written, it returns false) unless it
+   * carries the very session the shell already holds.
+   * @param {object} sessionInfo
+   * @param {{ ticket: object, authStatus?: string }} opts
+   * @returns {boolean} whether the shell now holds this session
+   */
+  static adoptSession(sessionInfo, { ticket, authStatus } = {}) {
+    const identity = sessionIdentityOf(sessionInfo);
+    if (!mayAdoptAnswerSession(ticket, identity)) {
+      // The very session the shell holds (one sign-in answered twice: Powch's response, then its
+      // state update): nothing to adopt, nothing written.
+      const held = AppData.sessionInfo;
+      if (sessionInfo?.access_token && held?.access_token === sessionInfo.access_token) return true;
+      console.warn('[AppData] An answer sent before the last sign-out, account change, later sign-in or later refresh carried a session; it was not adopted.');
+      return false;
+    }
+    AppData._storeSessionInfo(sessionInfo);
+    noteAnswerSessionAdopted(ticket, identity);
+    if (authStatus) AppData.loginStatus = authStatus;
+    if (sessionInfo.custodial_balance !== undefined) AppData.custodialBalance = sessionInfo.custodial_balance;
+    if (sessionInfo.roles !== undefined) AppData.userRoles = new Map(Object.entries(sessionInfo.roles));
+    return true;
+  }
+
+  /**
+   * A session handed to the shell (window.DeSciX.loginWithSessionToken): a Powch bridge answer
+   * (stamped with its request's send ticket by PowchBridgeClient) or a session handed over first-hand
+   * (unstamped: a sign-in sent now). The host page adopting an adopted answer again is idempotent.
+   * @returns {{ info: object, status: string } | null} null when not adopted
+   */
+  static adoptHandedSession(sessionData) {
+    const info = sessionData?.sessionInfo ?? sessionData;
+    if (!isSession(info)) return null;
+    const ticket = answerSendTicket(sessionData) ?? takeSendTicket();
+    const status = sessionData?.auth_status ?? LoginStatus.CONNECTED;
+    if (!AppData.adoptSession(info, { ticket, authStatus: status })) return null;
+    return { info, status };
   }
 
 
@@ -400,6 +467,9 @@ export class AppData {
 
 }
 
+// Send tickets read whose session the shell holds from its one owner (util/sessionGeneration.js).
+registerHeldIdentityReader(() => sessionIdentityOf(AppData.sessionInfo));
+
 // State Machine States ... managed by dispatch
 export const AppContextState = {
   INITIALIZING: 'INITIALIZING', // App startup, SDK, wallet checks
@@ -431,7 +501,7 @@ export const AppContextView = {
   WALLET: 'WALLET',
   DEVELOPER_TOOLS: 'DEVELOPER_TOOLS',
   DEVICE_LOGIN: 'DEVICE_LOGIN', // CLI/MCP device login flow
-  CONNECT_CEREMONY: 'CONNECT_CEREMONY', // WS-FREEMIUM-ONRAMP: browser OAuth connect ceremony (claude.ai) — sibling of DEVICE_LOGIN
+  CONNECT_CEREMONY: 'CONNECT_CEREMONY', // browser OAuth connect ceremony (claude.ai) — sibling of DEVICE_LOGIN
   STANDALONE_APP: 'STANDALONE_APP', // Isolated Standalone App mode
   ERROR: 'ERROR',
   // Content Management Views
@@ -598,7 +668,7 @@ export const ResponseStatus = {
  * 
  * Note: Backend entitlement checks remain authoritative. This list is for frontend UI gating only.
  * 
- * @see DeSciX_Cloud/services/utils.js for backend definition and full command inventory
+ * @see Cloud's utils.js for backend definition and full command inventory
  */
 export const GUEST_ALLOWED_COMMANDS = [
     'find_communities',              // Browse promoted communities
@@ -658,6 +728,9 @@ export function registerSessionExpiryCallback(fn) {
 }
 
 export async function clearSessionAndDispatchExpiry() {
+  // The session this expiry is about. If it is replaced or ended while the reconnect runs, the
+  // session now in place is newer than this expiry and is left alone.
+  const ticket = takeSendTicket();
   // Check if we have stored PWA wallet signature for auto-reconnect
   const storedSignature = localStorage.getItem('pwa_wallet_signature');
   
@@ -667,15 +740,11 @@ export async function clearSessionAndDispatchExpiry() {
       const { authenticateBySignature } = await import('./api/ApiAuth.js');
       const result = await authenticateBySignature(storedSignature);
       
-      if (result.status === 'OK' && result.message?.sessionInfo) {
-        // Reconnect successful - update session and return without clearing
-        AppData.sessionInfo = result.message.sessionInfo;
-        AppData.loginStatus = result.auth_status || LoginStatus.CONNECTED;
-        AppData.custodialBalance = result.message.sessionInfo.custodial_balance || 0;
-        AppData.userRoles = result.message.sessionInfo.roles 
-          ? new Map(Object.entries(result.message.sessionInfo.roles)) 
-          : null;
-        
+      const answered = result.status === 'OK' ? result.message?.sessionInfo : null;
+      if (answered && AppData.sessionInfo?.access_token === answered.access_token) {
+        // Reconnect successful: makeCommandRequestJSON adopted the answer (AppData.adoptSession).
+        if (!result.auth_status) AppData.loginStatus = LoginStatus.CONNECTED;
+
         // Dispatch LOGIN_SUCCESS to update UI
         if (appEventDispatcher) {
           appEventDispatcher({ type: AppContextEvent.LOGIN_SUCCESS });
@@ -690,6 +759,11 @@ export async function clearSessionAndDispatchExpiry() {
     }
   }
   
+  if (!isTicketSessionCurrent(ticket)) {
+    console.warn('[AppData] The session changed while its expiry was handled; the newer session is kept.');
+    return;
+  }
+
   // Only clear if reconnect failed or no wallet credentials
   localStorage.removeItem('sessionInfo');
   localStorage.removeItem('custodialBalance');
@@ -746,7 +820,7 @@ async function makeCommandRequestInternal(command, params, isGuestAllowed, sendC
 
   // --- Streaming Response Handling ---
   if (params.streaming) {
-    // WS-HEADLESS-MVP-A3: a non-2xx on a streaming request is NOT a stream — it is a
+    // a non-2xx on a streaming request is NOT a stream — it is a
     // JSON error envelope (e.g. 402 CREDITS_REQUIRED thrown by the pre-generation
     // credits gate). Pre-A3 this body was fed to the stream parser and yielded a chunk
     // with no `reply`, silently swallowing the failure. Fail loud with the structured
@@ -802,7 +876,11 @@ export const makeCommandRequestJSON = async (command, params = {}, allowGuest = 
     throw new Error("User not authenticated.");
   }
 
+  // The session this request is sent under (util/sessionGeneration.js): its answer may act on that
+  // session only, never on one adopted or ended while it was in flight.
+  const ticket = takeSendTicket();
   let result = await makeCommandRequestInternal(command, params, isGuestAllowed, hasCredentials);
+  const answerIsCurrent = isTicketSessionCurrent(ticket);
 
   // Handle streaming response
   if (result.streaming) {
@@ -825,7 +903,9 @@ export const makeCommandRequestJSON = async (command, params = {}, allowGuest = 
   // The server handles guest-allowed commands internally, so if we get a 401 here,
   // it means even guest access failed (unlikely) or we tried an auth-only command with a bad token.
   
-  if (data.status !== ResponseStatus.OK && isSessionExpired) {
+  if (data.status !== ResponseStatus.OK && isSessionExpired && !answerIsCurrent) {
+    console.warn(`[AppData] '${command}' answered 401 for a session that has since ended or been replaced; the current session is kept.`);
+  } else if (data.status !== ResponseStatus.OK && isSessionExpired) {
     console.log(`[AppData] Server reported session expired for command '${command}'. Clearing local session.`);
     
     // Clear session data
@@ -849,19 +929,11 @@ export const makeCommandRequestJSON = async (command, params = {}, allowGuest = 
   if (finalData && finalData.status === ResponseStatus.OK) {
     // Hydrate session from response - single source of truth for shell
     // Backend may return sessionInfo in message (apiFront) or at top level (some handlers)
+    // An answer from before a sign-out or account change still resolves its caller, but writes nothing.
     const sessionInfoFromResponse = finalData.message?.sessionInfo ?? finalData.sessionInfo;
     if (sessionInfoFromResponse) {
-      AppData.sessionInfo = sessionInfoFromResponse;
-      if (finalData.auth_status) {
-        AppData.loginStatus = finalData.auth_status;
-      }
-      if (sessionInfoFromResponse.custodial_balance !== undefined) {
-        AppData.custodialBalance = sessionInfoFromResponse.custodial_balance;
-      }
-      if (sessionInfoFromResponse.roles !== undefined) {
-        AppData.userRoles = new Map(Object.entries(sessionInfoFromResponse.roles));
-      }
-    } else if (finalData.auth_status) {
+      AppData.adoptSession(sessionInfoFromResponse, { ticket, authStatus: finalData.auth_status });
+    } else if (finalData.auth_status && answerIsCurrent) {
       const statusOrder = [LoginStatus.GUEST, LoginStatus.AUTH_FAILED, LoginStatus.AUTHENTICATED, LoginStatus.CONNECTED];
       const currentStatus = AppData.loginStatus || LoginStatus.GUEST;
       const currentIdx = statusOrder.indexOf(currentStatus);
@@ -883,7 +955,7 @@ export const makeCommandRequestJSON = async (command, params = {}, allowGuest = 
     // We should NOT clear the session here. The server knows best.
     // If the server wanted to expire the session, it would have returned 401.
 
-    // WS-HEADLESS-MVP-A3: ferry structured error fields (code + data, e.g. the
+    // ferry structured error fields (code + data, e.g. the
     // CREDITS_REQUIRED purchasable action) so components can render actions, not prose.
     const err = new Error(finalErrorMessage);
     err.status = status;

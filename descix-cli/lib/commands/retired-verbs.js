@@ -27,7 +27,7 @@ const KB_SYNC_DESCRIPTION = `REMOVED — use \`${CANONICAL_KB_SYNC}\``;
 const AIRDROP_QUEUE_REFUSAL = (invocation) =>
   `❌ \`${invocation}\` has been REMOVED: the pending_migrations queue it previewed (lane B) no longer ` +
   `exists, and neither does the server command behind it.\n\n` +
-  `Distributions run through the offers rail on daita-sam (act plan + the role holder's own wallet signs).`;
+  `Distributions are operator-only: they run through the offers rail of a local operator app (act plan + the role holder's own wallet signs), not through this CLI.`;
 
 const CRYPTO_QUOTE_REFUSAL = (invocation) =>
   `❌ \`${invocation}\` has been REMOVED: the platform no longer sells through crypto payment quotes, ` +
@@ -63,19 +63,27 @@ export const RETIRED_VERBS = Object.freeze([
     refusal: () =>
       '"descix microservice register-delegate" has been removed: there is no per-app microservice ' +
       'delegate key.\n' + MICROSERVICE_AUTH_MODEL },
-  // Lane B (the pending_migrations queue) is struck (CEO word Unkamon 1530eb6, daita-sam#4).
+  // Lane B (the pending_migrations queue) is struck.
   { id: 'airdrop', parent: 'program', name: 'airdrop', invocation: 'descix airdrop',
     description: 'removed — see error text', refusal: (invocation) => AIRDROP_QUEUE_REFUSAL(invocation) },
   { id: 'airdrop.execute-queue', parent: 'airdrop', name: 'execute-queue',
     invocation: 'descix airdrop execute-queue', description: 'removed — see error text',
     refusal: (invocation) => AIRDROP_QUEUE_REFUSAL(invocation) },
-  // Cloud's crypto-purchase rail is deleted (CEO "cloud rails: A", eabadir/DeSciXCloud#39).
+  // Cloud's crypto-purchase rail is deleted.
   { id: 'buy', parent: 'program', name: 'buy', invocation: 'descix buy',
     description: 'removed — see error text', refusal: CRYPTO_QUOTE_REFUSAL },
   ...['quote', 'status', 'poll', 'chains'].map((name) => ({
     id: `buy.${name}`, parent: 'buy', name, invocation: `descix buy ${name}`,
     description: 'removed — see error text', refusal: CRYPTO_QUOTE_REFUSAL,
   })),
+  // No API command issues admin credentials; admins are created only by the operator's local script.
+  { id: 'admin-login', parent: 'program', name: 'admin-login', invocation: 'descix admin-login',
+    description: 'removed — see error text',
+    refusal: (invocation) =>
+      `❌ \`${invocation}\` has been REMOVED, and so has the server command behind it. No API command ` +
+      `issues admin credentials.\n\n` +
+      `Sign in with \`descix login\` (the Powch device flow). A platform admin is created only by a ` +
+      `platform operator's local bootstrap, never over the API.` },
 ]);
 
 /** Implementations deleted with the KB sync surfaces. No exported symbol survives without a caller. */

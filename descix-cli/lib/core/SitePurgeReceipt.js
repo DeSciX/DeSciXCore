@@ -2,7 +2,7 @@
  * SitePurgeReceipt — the one owner of what `descix site upload` says about the edge purge, and of
  * whether that purge lets the command succeed: an incomplete purge is a failed upload.
  *
- * confirm_site_deploy (DeSciX_Cloud appCommands) returns, on every non-preview deploy,
+ * confirm_site_deploy (Cloud appCommands) returns, on every non-preview deploy,
  *   purge: { status: 'ok'|'failed', attempted, purged, failed?: string[] }
  * `attempted`/`purged` count Cloudflare purge ENTRIES — cache keys, each stale path purged plain and
  * once per page Origin (cloudflarePurge.js) — so the line says "cache keys", not paths. `failed`

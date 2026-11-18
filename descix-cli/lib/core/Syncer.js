@@ -317,8 +317,8 @@ export async function deleteStaleChunksByFileId(apiClient, communityId, appId, k
  * pollution before a `--rebuild` re-upsert.
  *
  * Server-side it routes to kb_delete_chunks(purge_scope: true), which delegates
- * to the canonical KnowledgeBase.deleteRAG(). As of WS-KB-CORPUS-SCOPEPURGE-SCALE
- * that purge is ROBUST AT SCALE: it enumerates the KB's vectors by their canonical
+ * to the canonical KnowledgeBase.deleteRAG(). The
+ * purge is ROBUST AT SCALE: it enumerates the KB's vectors by their canonical
  * id-prefix `${app_id}:${kb_id}:` (deterministic listPaginated) and deletes them in
  * bounded batches of 1000, so an arbitrarily large scope (~20k+ vectors) is cleared
  * without exceeding the Pinecone client's max-retries ceiling (the prior single

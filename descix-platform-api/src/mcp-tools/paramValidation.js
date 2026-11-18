@@ -1,13 +1,12 @@
 /**
  * paramValidation.js — strict, fail-loud parameter validation for the MCP surface
- * (ws-mcp-surface-basics, CEO-D-2026-08-14-MCP-BASICS).
  *
  * THE PROBLEM this closes: a tool's `inputSchema` was used ONLY to ADVERTISE at tools/list.
  * At tools/call the arguments object was spread verbatim into the handler, which destructured
  * the keys it knew and silently dropped the rest. So a well-formed-looking call carrying a
  * WRONG-BUT-PLAUSIBLE param name executed against the DEFAULT instead of failing:
  *
- *     ask_question_to_app({ app_id:'unk-beast', kb_id:'Org', user_input:'...' })
+ *     ask_question_to_app({ app_id:'my-app', kb_id:'Org', user_input:'...' })
  *       -> kb_id is not in ask_question_to_app's schema (it is query_knowledge_base's name for
  *          the same concept), so it was dropped, the default KB was used, and the caller got
  *          "KnowledgeBase 'General' not found" — an error naming a KB it never asked for.
@@ -82,7 +81,7 @@ export const PARAM_ALIASES = Object.freeze({
  * interactionSession.stripClientRoomOwner precisely so the boundary can refuse it by name) is
  * likewise excluded — allow-listing it would pre-empt that refusal.
  *
- * THE 24 -> 21 NARROWING. The superseded second derivation (DeSciX_Cloud commandParamGuard's
+ * THE 24 -> 21 NARROWING. The superseded second derivation (Cloud commandParamGuard's
  * deleted RESERVED_PARAM_KEYS) carried 24 names. Three of them are NOT platform writes and are
  * dropped here: `target_community_id`, `target_user_id` and `reactor_id` are CALLER-SENT fallback
  * READS on the Discord bot's own bag (apiFront.js:1150 `params.user_id || params.target_user_id ||
@@ -90,7 +89,7 @@ export const PARAM_ALIASES = Object.freeze({
  * platform reads them, it never writes them, so listing them would wave three caller-authored keys
  * past every command's contract. The remaining 21 each have a named injector site below.
  *
- * THE GROUPS, and why each exists. Injector sites are DeSciX_Cloud/microservice/services/.
+ * THE GROUPS, and why each exists. Injector sites are the Cloud microservice's service modules.
  */
 
 /**
@@ -250,7 +249,7 @@ export function requireValidationPhase(phase, opts = {}) {
 
 /**
  * Resolve a phase word to its waiver predicate. Consumers that do their own unknown-key loop
- * (DeSciX_Cloud `assertKnownParams`) ask HERE rather than branching on the phase themselves —
+ * (Cloud `assertKnownParams`) ask HERE rather than branching on the phase themselves —
  * a hand-written `phase === 'post-injection' ? isPlatformInjectedParam : ...` at a consumer is the
  * second derivation this whole module exists to prevent.
  *

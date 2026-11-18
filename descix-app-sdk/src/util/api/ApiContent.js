@@ -6,8 +6,7 @@
  * path for browser-originated events (DeSciX/CLAUDE.md "Analytics & Event Tracking";
  * ga4EventService.js documents that client-side events go through the GTM dataLayer
  * while the server module handles backend-originated events). The deprecated
- * sharded-counter `log_content_event` server command was removed (WS-V1-PURGE Phase 2,
- * audit #14).
+ * sharded-counter `log_content_event` server command was removed.
  *
  * Architectural rule: `app_id` is the sole product identifier. `community_id` is
  * NEVER an event parameter — it is derivable from Products/{app_id} and belongs in

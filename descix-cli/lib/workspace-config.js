@@ -486,7 +486,7 @@ export class WorkspaceConfig {
 
     while (currentDir !== root) {
       // Workspace root requires .descix/workspace.json — marker dirs alone are not enough
-      // (sub-projects like DeSciX_Cloud have .descix/ for wallet.json but are not workspace roots)
+      // (sub-projects have .descix/ for wallet.json but are not workspace roots)
       const wsConfigPath = path.join(currentDir, '.descix', 'workspace.json');
       try {
         const stat = await fs.stat(wsConfigPath);
@@ -956,8 +956,8 @@ export class WorkspaceConfig {
    *
    * Operates on the entry's microservice.{} slot.
    * This is the canonical write path for the microservice port that `descix microservice init`
-   * reads (and hard-fails on if missing). Backs the `descix app set-port` command, closing
-   * WS-CLI-MESH-ROUTING-GAP without hand-editing workspace.json.
+   * reads (and hard-fails on if missing). Backs the `descix app set-port` command, closing the
+   * mesh-routing gap without hand-editing workspace.json.
    *
    * Pass `null` to remove microservice.port; if microservice.{} becomes empty, it is also deleted.
    * Persists via save() at the end — same auto-save pattern as setEnvironment().
@@ -1090,7 +1090,7 @@ export class WorkspaceConfig {
 
   /**
    * THE ONE WRITER of a gateway workspace's repo list: env.gateway.shell and env.gateway.appRepos[]
-   * (DeSciXCore#9). Backs `descix config gateway set-shell | add-repo | remove-repo`, so a gateway
+   * Backs `descix config gateway set-shell | add-repo | remove-repo`, so a gateway
    * workspace.json is never hand-edited.
    *
    * Paths are relative to THIS workspace's root (sibling checkouts: "../<repo>") and are stored in

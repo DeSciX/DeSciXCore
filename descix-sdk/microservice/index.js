@@ -21,8 +21,7 @@
  *   resolveServiceDomain / requireServiceOrigin /                — the platform's naming rules
  *     communityIdFromTokenSymbol / composeAppId
  *
- * NOT here, DEFERRED BY RULING
- * (contract-ws-c5-platform-godsworld-on-the-sdk rev 5, I-C5-1):
+ * NOT here, DEFERRED BY RULING:
  *   createServiceApiClient — the OUTBOUND developer-wallet path. Its authorising ruling
  *     CEO-D-2026-06-02-APP-MICROSERVICE-IS-CLI-CLIENT-WALLET-SIG was knowingly superseded on
  *     2026-08-18 ("D1 accepted, D2 all apps"), which made client_credentials on the platform's

@@ -10,6 +10,7 @@ import { requirePowchUrl } from './powchOrigin.js';
 import { resolveBridge } from '../util/bridgeResolver.js';
 import { toSignableTypedData } from './typedData.js';
 import { PowchReadyGate, POWCH_READY } from './readyGate.js';
+import { powchRequestError } from './requestError.js';
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 120000;
 
@@ -117,7 +118,7 @@ export class PowchClient {
       if (event.source !== this.iframe.contentWindow) return;
 
       const data = event.data || {};
-      const { type, requestId, success, payload, error } = data;
+      const { type, requestId, success, payload } = data;
 
       // Handle internal protocol events
       if (type === POWCH_READY) {
@@ -139,7 +140,7 @@ export class PowchClient {
         if (success) {
           resolve(payload);
         } else {
-          reject(new Error(error || 'Request failed'));
+          reject(powchRequestError(data));
         }
       }
     });

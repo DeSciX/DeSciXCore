@@ -1,6 +1,6 @@
 {
   "name": "@descix/platform-api",
-  "version": "5.2.0",
+  "version": "5.3.0",
   "description": "Shared platform infrastructure: Firestore models, auth/session, permissions, entitlements, email",
   "repository": {
     "type": "git",
@@ -12,7 +12,8 @@
   "scripts": {
     "test:migration-receipt-email": "node --test --experimental-test-module-mocks tests/migration-receipt-email.test.js",
     "test:email-identity": "node --test --experimental-test-module-mocks tests/email-identity-owner.test.js",
-    "test:user-recovery": "node --test --experimental-test-module-mocks tests/user-recovery-confirmed-owner.test.js"
+    "test:user-recovery": "node --test --experimental-test-module-mocks tests/user-recovery-confirmed-owner.test.js",
+    "test:account-admin": "node --test --experimental-test-module-mocks tests/account-admin.test.js tests/operator-guards.test.js"
   },
   "exports": {
     ".": "./src/index.js",
@@ -25,7 +26,9 @@
     "./manifest": "./src/manifest/index.js",
     "./mcp-tools": "./src/mcp-tools/index.js",
     "./naming": "./src/naming/index.js",
-    "./service-bootstrap": "./src/service-bootstrap/index.js"
+    "./service-bootstrap": "./src/service-bootstrap/index.js",
+    "./operator": "./src/operator/index.js",
+    "./account-admin": "./src/account-admin/index.js"
   },
   "files": [
     "src"
@@ -42,7 +45,7 @@
     "node": ">=24.0.0"
   },
   "dependencies": {
-    "@descix/cloud-core": "^2.0.4",
+    "@descix/cloud-core": "^2.1.0",
     "google-auth-library": "^10.5.0",
     "googleapis": "^169.0.0"
   }

@@ -1,5 +1,5 @@
 /**
- * Credits Commands — platform-wide USD AI credits (WS-HEADLESS-MVP-A2, CEO-D-2026-07-01 D2).
+ * Credits Commands — platform-wide USD AI credits.
  *
  * `descix credits balance | history | buy | grant | refund` over get_credit_balance /
  * get_credit_history / create_checkout_session / grant_credits / refund_credits.

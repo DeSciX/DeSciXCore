@@ -10,7 +10,7 @@
  *   `node app.js` (e.g. the daita Core :4000 backend). When the service's own
  *   identity/port cannot be determined, it FAILS SAFE — kills nothing — rather
  *   than failing broad. Port-based scoping is the canonical mechanism because it
- *   is robust to ANY repo layout (DeSciX_Cloud, DeSciX_Powch, apps/{app}/microservice).
+ *   is robust to ANY repo layout (Cloud, Powch, apps/{app}/microservice).
  */
 
 import { execSync } from 'child_process';

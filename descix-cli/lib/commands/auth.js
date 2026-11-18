@@ -55,7 +55,7 @@ async function openBrowser(url) {
 
 /**
  * Request device login via HTTP.
- * WS-HEADLESS-MVP-A1: optionally carries the device→OAuth bridge context so the server
+ * optionally carries the device→OAuth bridge context so the server
  * issues an OAuth authorization code alongside the session on completion (design §2.1).
  * @param {DeSciXApiClient} apiClient - The API client
  * @param {Object|null} oauthCtx - { client_id, code_challenge, redirect_uri, scope }
@@ -67,7 +67,7 @@ async function requestDeviceLogin(apiClient, oauthCtx = null) {
 }
 
 /**
- * WS-HEADLESS-MVP-A1 — prepare the OAuth leg of `descix login`:
+ * prepare the OAuth leg of `descix login`:
  * PKCE pair + a registered CLI public client (DCR, reusing a cached client_id when the
  * wallet file already has one). Returns null (with a loud warning) when the server does
  * not expose the OAuth AS — the wallet-sig login proceeds untouched (design §4.1:
@@ -126,7 +126,7 @@ export async function pollDeviceLogin(apiClient, deviceCode, onStatus = null) {
           signature: response.message.signature,
           community_id: response.message.community_id,
           token_symbol: response.message.token_symbol,
-          // WS-A1 device→OAuth bridge: single-use authorization code (present exactly once
+          // device→OAuth bridge: single-use authorization code (present exactly once
           // when the request carried an oauth ctx) — redeemed at /oauth/token immediately.
           oauth_code: response.message.oauth_code || null,
           oauth_scope: response.message.oauth_scope || null
@@ -183,7 +183,7 @@ export async function loginDevice(options = {}) {
       workspaceRoot = foundRoot || startDir;
     }
 
-    // WS-HEADLESS-MVP-A1: OAuth leg (default ON, `--no-oauth` disables). Additive: any
+    // OAuth leg (default ON, `--no-oauth` disables). Additive: any
     // failure here warns loudly and the wallet-sig device login proceeds untouched.
     let oauthLeg = null;
     if (options.oauth !== false) {
@@ -258,7 +258,7 @@ export async function loginDevice(options = {}) {
       ...walletEnvironmentStamp(apiClient.baseUrl)
     };
 
-    // WS-HEADLESS-MVP-A1: redeem the device-bridge authorization code for the long-lived
+    // redeem the device-bridge authorization code for the long-lived
     // OAuth pair (design §3) and cache it gcloud-ADC-style in wallet.json. The AS's auth
     // codes are single-use with a ≤60s TTL — redeem BEFORE anything else.
     if (oauthLeg && credentials.oauth_code) {
@@ -542,7 +542,7 @@ export async function whoami() {
 
 /**
  * Logout - revoke server-side OAuth credentials (RFC 7009), then clear the local cache.
- * WS-HEADLESS-MVP-A1 (design §4.6): revocation kills the whole refresh-token chain so a
+ * revocation kills the whole refresh-token chain so a
  * copied wallet.json cannot keep refreshing after logout. Revocation failure is reported
  * but never blocks the local credential wipe.
  */
@@ -584,71 +584,5 @@ export async function logout() {
     spinner.fail(chalk.red('Logout failed'));
     console.error(chalk.red(error.message));
     throw error;
-  }
-}
-
-/**
- * Admin bootstrap login — generates CLI credentials for platform admins
- * without requiring the PWA device login / Powch flow.
- * Requires email to be in the DESCIX_ADMIN_GROUP Google Group.
- */
-export async function adminLogin(options = {}) {
-  const email = options.email;
-  if (!email) {
-    console.error(chalk.red('--email is required'));
-    process.exit(1);
-  }
-
-  const spinner = ora('Authenticating as admin...').start();
-
-  try {
-    const apiClient = new DeSciXApiClient();
-    await apiClient.ensureBaseUrl();
-
-    // admin_bootstrap_login is a bootstrap command: it must be sent guest-like,
-    // never carrying a previously-stored access_token. Targeting a DIFFERENT env
-    // than the one that minted the stored token (e.g. CLI configured for dev but
-    // logging into prod via --env prod) would otherwise send a token prod's auth
-    // middleware rejects with HTTP 401 BEFORE admin_bootstrap_login runs. Force
-    // guest by skipping the session token, same as device_request_login.
-    const result = await apiClient.invokeRaw('admin_bootstrap_login', { email }, null, { skipSessionCheck: true });
-    const data = result.data || result;
-
-    if (data.status === 'ERROR') {
-      spinner.fail(data.message || 'Admin login failed');
-      process.exit(1);
-    }
-
-    const info = data.message;
-    if (!info || !info.session_token) {
-      spinner.fail('Unexpected response from server');
-      process.exit(1);
-    }
-
-    const walletData = {
-      walletAddress: info.wallet_address,
-      signature: info.signature,
-      sessionToken: info.session_token,
-      userId: info.user_id,
-      email: info.email,
-      communityId: info.community_id,
-      tokenSymbol: info.token_symbol || 'DAITA',
-      expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
-      // Record WHERE this credential was obtained. Write-only: nothing refuses on it yet.
-      ...walletEnvironmentStamp(apiClient.baseUrl),
-    };
-
-    // Save wallet.json
-    const workspaceRoot = await WorkspaceConfig.findWorkspaceRoot(process.cwd()) || process.cwd();
-    const walletPath = WalletFileManager.getProjectWalletPath(workspaceRoot);
-    await WalletFileManager.saveWalletFile(walletPath, walletData);
-
-    spinner.succeed(chalk.green(`Logged in as admin: ${email}`));
-    diag(chalk.dim(`  Wallet: ${walletData.walletAddress}`));
-    diag(chalk.dim(`  Session expires: ${walletData.expiresAt}`));
-    diag(chalk.dim(`  Credentials saved to: ${walletPath}`));
-  } catch (error) {
-    spinner.fail(error.message || 'Admin login failed');
-    process.exit(1);
   }
 }

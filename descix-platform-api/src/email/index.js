@@ -2,7 +2,7 @@
  * @descix/platform-api - Email Infrastructure
  *
  * Gmail API email sending using service account with domain-wide delegation.
- * Used by both DeSciX_Cloud and DeSciX_Powch microservices.
+ * Used by both Cloud and Powch microservices.
  *
  * Config values are loaded at call time via getCloudConfig() from @descix/cloud-core.
  * All config must be bootstrapped before calling any function here.
@@ -59,6 +59,36 @@ export function isValidEmail(email) {
 }
 
 /**
+ * The extra headers sendEmail accepts, by exact name (RFC 2369 / RFC 8058 one-click unsubscribe).
+ * The ONE allow-list; a caller passing any other header name is refused by name.
+ */
+export const EMAIL_EXTRA_HEADERS = Object.freeze(['List-Unsubscribe', 'List-Unsubscribe-Post']);
+
+function emailError(code, message) {
+    const err = new Error(`${code}: ${message}`);
+    err.code = code;
+    return err;
+}
+
+/** Validate the `headers` option into header lines; [] when absent. Throws before anything is sent. */
+function emailExtraHeaderLines(headers) {
+    if (headers === null || headers === undefined) return [];
+    if (typeof headers !== 'object' || Array.isArray(headers)) {
+        throw emailError('EMAIL_HEADERS_INVALID', 'headers must be an object of { name: value }.');
+    }
+    return Object.entries(headers).map(([name, value]) => {
+        if (!EMAIL_EXTRA_HEADERS.includes(name)) {
+            throw emailError('EMAIL_HEADER_NOT_ALLOWED',
+                `header '${name}' is not allowed; sendEmail accepts only ${EMAIL_EXTRA_HEADERS.join(', ')}.`);
+        }
+        if (typeof value !== 'string' || value.trim() === '' || /[\r\n]/.test(value)) {
+            throw emailError('EMAIL_HEADER_VALUE_INVALID', `header '${name}' must be a non-empty single-line string.`);
+        }
+        return `${name}: ${value}`;
+    });
+}
+
+/**
  * Core Gmail email sending function using service account with domain-wide delegation.
  *
  * Uses DESCIX_ROUTER_COMMUNITY_MANAGER as the impersonated user (sender).
@@ -69,13 +99,20 @@ export function isValidEmail(email) {
  * @param {string} body - Email body (plain text)
  * @param {string} [fromEmail] - Optional sender email (defaults to DESCIX_ROUTER_COMMUNITY_MANAGER)
  * @param {Object} [options]
- * @param {string} [options.html] - Optional HTML body (Q15, CEO word Unkamon c7bbc15). When
+ * @param {string} [options.html] - Optional HTML body When
  *   present the message is multipart/alternative: the plain `body` is the text part, `html`
  *   the html part (last = preferred). Absent, the message is the same single-part text/plain
  *   it has always been — no existing caller changes.
- * @returns {Promise<void>}
+ * @param {Object<string,string>} [options.headers] - Optional extra headers, by name. Only the
+ *   names in EMAIL_EXTRA_HEADERS are accepted (any other is refused by name, code
+ *   EMAIL_HEADER_NOT_ALLOWED); a value must be a non-empty single-line string
+ *   (EMAIL_HEADER_VALUE_INVALID). They are written after Subject. Absent, the message is
+ *   byte-for-byte what it was before this option existed.
+ * @returns {Promise<{message_id: string}>} the provider's message id; a provider answer without
+ *   one is thrown (EMAIL_PROVIDER_NO_MESSAGE_ID), never returned as undefined
  */
-export async function sendEmail(toEmail, subject, body, fromEmail = null, { html = null } = {}) {
+export async function sendEmail(toEmail, subject, body, fromEmail = null, { html = null, headers: extraHeaders = null } = {}) {
+    const extraHeaderLines = emailExtraHeaderLines(extraHeaders);
     const utils = getCloudConfig();
 
     // The sender/impersonated user - must be a real user in the domain with Gmail access
@@ -111,6 +148,7 @@ export async function sendEmail(toEmail, subject, body, fromEmail = null, { html
         `To: ${toEmail}`,
         `Reply-To: ${replyToEmail}`,
         `Subject: ${subject}`,
+        ...extraHeaderLines,
     ];
     let message;
     if (html) {
@@ -142,8 +180,9 @@ export async function sendEmail(toEmail, subject, body, fromEmail = null, { html
     const raw = base64UrlEncode(message);
 
     // Use impersonated user's email as userId
+    let response;
     try {
-        await gmail.users.messages.send({
+        response = await gmail.users.messages.send({
             userId: impersonatedUser,
             requestBody: { raw }
         });
@@ -160,6 +199,12 @@ export async function sendEmail(toEmail, subject, body, fromEmail = null, { html
         }
         throw error;
     }
+    const message_id = response?.data?.id;
+    if (typeof message_id !== 'string' || message_id === '') {
+        throw emailError('EMAIL_PROVIDER_NO_MESSAGE_ID',
+            `Gmail accepted the message to ${toEmail} but answered without a message id; the send cannot be recorded as sent.`);
+    }
+    return { message_id };
 }
 
 /**

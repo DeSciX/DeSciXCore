@@ -11,8 +11,8 @@
 # now a credential-equivalent: whoever can edit this path can publish. CODEOWNERS guards it.
 #
 # WHAT STARTS A PUBLISH (CEO, 2026-08-28, verbatim: "(A) align with FRQTL"): a GitHub RELEASE,
-# published with a tag of the form `<package-directory>-v<version>` — the same shape eabadir/fraqtl
-# publishes on. Publishing is domain authority under a signed contract, so the release IS the
+# published with a tag of the form `<package-directory>-v<version>` — the same shape the FRQTL packages
+# publish on. Publishing is domain authority under a signed contract, so the release IS the
 # authorisation and no separate human approval stands in front of the publish step.
 #
 # The tag is the ONLY per-package signal a release event carries: `release:` supports no `paths:`
@@ -89,7 +89,7 @@ on:
           #   · and the CEO's own act, 2026-08-30: trusted publishers BOUND on npmjs.com for
           #     @descix/platform-api AND @descix/cli. A binding is what makes CI able to
           #     publish them at all; binding both was the decision in deed.
-          # (VISION rev 4, contract-ws-devplane-cli-must-not-misreport-itself. The CEO is
+          # (The CEO is
           # informed with this verbatim basis and his strike reverts it.)
           - descix-sdk
           - descix-cloud-core

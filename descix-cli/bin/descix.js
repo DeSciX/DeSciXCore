@@ -50,6 +50,7 @@ import { isHelpInvocation, getCommandSurface, applyVisibility } from '../lib/com
 import { progress } from '../lib/output.js';
 import { runMediaUpload } from '../lib/commands/media-upload.js';
 import { runMediaList, runMediaDelete } from '../lib/commands/media-assets.js';
+import { runMediaLink } from '../lib/commands/media-link.js';
 import { runPluginCheck } from '../lib/commands/plugin-check.js';
 import fs from 'fs/promises';
 import path from 'path';
@@ -189,19 +190,6 @@ program
     }
   });
 
-program
-  .command('admin-login')
-  .description('Bootstrap CLI credentials for platform admins (requires admin group membership)')
-  .requiredOption('-e, --email <email>', 'Admin email (must be in platform admin Google Group)')
-  .option('-u, --url <url>', 'API URL override')
-  .action(async (options) => {
-    try {
-      await authCommands.adminLogin(options);
-    } catch (error) {
-      fail(error);
-    }
-  });
-
 // ============ Init Command (Git-aware workspace setup) ============
 
 program
@@ -307,7 +295,7 @@ program
   });
 
 
-// ============ AI Credits Commands (WS-HEADLESS-MVP-A2, CEO-D-2026-07-01 D2) ============
+// ============ AI Credits Commands ============
 // Platform-wide USD AI-credits: metered RAG/agent calls debit this balance. NOT community tokens.
 
 const creditsCommand = program
@@ -679,7 +667,7 @@ communityCommand
 communityCommand
   .command('rename')
   .description('Rename a community_id across all surfaces (Firestore, Products, Pinecone metadata, ServiceManifests, descix-chain registry). On-chain contract + token symbol are UNTOUCHED. Dry-run first.')
-  .argument('<old_community_id>', 'Current community_id (e.g. unkamon)')
+  .argument('<old_community_id>', 'Current community_id (e.g. my-community)')
   .argument('<new_community_id>', 'New canonical community_id (e.g. unk)')
   .option('--dry-run', 'Preview the full cascade plan without executing')
   .option('--yes', 'Skip confirmation prompt')
@@ -1017,15 +1005,16 @@ appCommand
 
 
 // descix app media-upload — upload media/asset files to an app's GCS assets prefix via the
-// API surface (WS-V1-PURGE Phase 1, item 2; media-via-API-surface PLATFORM half). Command body
+// API surface. Command body
 // lives in lib/commands/media-upload.js (runMediaUpload) — see that module for the full
 // contract (server-owned quota/path/permission checks, verbatim upload_headers ferrying).
 appCommand
   .command('media-upload')
-  .description('Upload media/asset files to an app\'s GCS assets prefix (200 MB per app today; app owners, community admins and platform admins may upload — returns asset references)')
+  .description('Upload media/asset files to an app\'s GCS assets prefix (200 MB per app today across both spaces; app owners, community admins and platform admins may upload — returns public_url, or ref with --private)')
   .requiredOption('-a, --app <id>', 'App ID (community is resolved server-side from Products)')
   .requiredOption('-f, --file <path...>', 'One or more local file paths to upload')
   .option('--prefix <relPath>', 'Optional sub-path under the app assets/ prefix (e.g. "shows/myshow")', '')
+  .option('--private', 'Use the app\'s PRIVATE media space instead of the public one (visibility is always sent to the server explicitly)')
   .option('--json', 'Print the asset references as JSON (for scripting)')
   .action(async (options) => {
     try {
@@ -1043,9 +1032,10 @@ appCommand
 // lib/commands/media-assets.js.
 appCommand
   .command('media-list')
-  .description('List an app\'s uploaded media (path, size, content type, updated, public_url) and its storage total against the quota')
+  .description('List an app\'s uploaded media (path, size, content type, updated, public_url, or ref with --private) and its storage total against the quota')
   .requiredOption('-a, --app <id>', 'App ID (community is resolved server-side from Products)')
   .option('--prefix <relPath>', 'Only objects under this sub-path of the app assets/ prefix (e.g. "shows/myshow")')
+  .option('--private', 'Use the app\'s PRIVATE media space instead of the public one (visibility is always sent to the server explicitly)')
   .option('--json', 'Print the server\'s listing object unchanged (for scripting)')
   .action(async (options) => {
     try {
@@ -1064,12 +1054,31 @@ appCommand
   .requiredOption('-a, --app <id>', 'App ID (community is resolved server-side from Products)')
   .argument('<path...>', 'One or more object paths relative to the app assets/ prefix, as media-list prints them')
   .option('--dry-run', 'Ask the server what would be deleted; nothing is deleted')
+  .option('--private', 'Use the app\'s PRIVATE media space instead of the public one (visibility is always sent to the server explicitly)')
   .option('--json', 'Print every per-path server result and the summary as JSON (for scripting)')
   .action(async (paths, options) => {
     try {
       const apiClient = new DeSciXApiClient();
       await requireAuth(apiClient);
       await runMediaDelete(apiClient, paths, options);
+    } catch (error) {
+      console.error(chalk.red(`\n❌ ${error.message}\n`));
+      process.exit(1);
+    }
+  });
+
+// descix app media-link — a short-lived read link for one private object (backend
+// get_private_asset_link). Body and contract: lib/commands/media-link.js.
+appCommand
+  .command('media-link')
+  .description('Print a read link valid for 300 seconds for a private media object by its asset:<app_id>/<path> ref; for an app admin or a user the app owner granted access to; never stored')
+  .argument('<ref>', 'The private object reference, as `media-upload --private` / `media-list --private` print it (asset:<app_id>/<path>)')
+  .option('--json', 'Print the server\'s { ref, url, expires_at } object unchanged (for scripting)')
+  .action(async (ref, options) => {
+    try {
+      const apiClient = new DeSciXApiClient();
+      await requireAuth(apiClient);
+      await runMediaLink(apiClient, ref, options);
     } catch (error) {
       console.error(chalk.red(`\n❌ ${error.message}\n`));
       process.exit(1);
@@ -1373,8 +1382,8 @@ appCommand
 
 appCommand
   .command('sync-assets')
-  // Canonical asset-sync surface. The legacy Drive-mode `sync assets` DUPLICATE was removed in
-  // WS-MCP-SURFACE-SPLIT Step 3 §5.5; this is now the sole path.
+  // Canonical asset-sync surface. The legacy Drive-mode `sync assets` DUPLICATE was removed; this is now the
+  // sole path.
   .description('Sync local assets (system_instructions.md, app_description.md, icon.png) to platform.')
   .requiredOption('-a, --app <app_id>', 'App ID')
   .option('-k, --kb <name>', 'Target KB for system_instructions', 'General')
@@ -1461,7 +1470,7 @@ appCommand
     }
   });
 
-// ============ App: set-port (WS-CLI-MESH-ROUTING-GAP) ============
+// ============ App: set-port ============
 //
 // Canonical write path for an app's microservice.port in workspace.json.
 // `descix microservice init` READS env.app.microservice.port and hard-fails
@@ -1504,7 +1513,7 @@ appCommand
     }
   });
 
-// ============ App: set-site (WS-SSGPOD — site.static workspace gap) ============
+// ============ App: set-site ============
 //
 // Canonical write path for an app's site.{} slot in workspace.json. TWO MODES, one active
 // per write:
@@ -1593,7 +1602,7 @@ appCommand
   });
 
 
-// ============ App: open (WS-SSGPOD — dev URL resolver) ============
+// ============ App: open ============
 //
 // Resolves an app's LOCAL GATEWAY URL (the URL served by `descix serve`, which mirrors
 // the production LB) and prints it; with --open, launches the default browser.
@@ -1645,7 +1654,7 @@ appCommand
   });
 
 
-// ============ App: set-default-model (WS-CONFIG-BOOTSTRAP-FIX item #10) ============
+// ============ App: set-default-model ============
 //
 // Updates Community/{c}/Apps/{a}.default_app_model. Per CEO inheritance chain:
 //   request intelligence_level > kb.kb_model_override > app.default_app_model > the level's model
@@ -1817,7 +1826,7 @@ the registry doc is removed, so a removed doc never strands orphan vectors.`)
   });
 
 
-// ============ KB: set-/clear-override-model (WS-CONFIG-BOOTSTRAP-FIX item #10) ============
+// ============ KB: set-/clear-override-model ============
 //
 // Updates Community/{c}/Apps/{a}/KnowledgeBases/{k}.kb_model_override.
 // Per CEO practice, KB overrides should be MINIMIZED — only use when a specific KB needs
@@ -2210,7 +2219,7 @@ siteCommand
     try {
       const apiClient = new DeSciXApiClient();
 
-      // WS-DEPLOY-HARDENING item 7: `site upload` must never target a local backend by
+      // `site upload` must never target a local backend by
       // inheritance. detectApiUrl() checks process.env.DESCIX_API_URL first, then
       // WorkspaceConfig.getApiUrl() (env.apiUrl, else the shipped PROD default), then
       // GlobalConfig. `--env` and `--api-url` are folded into DESCIX_API_URL by the
@@ -2274,7 +2283,7 @@ siteCommand
       // manifest names the sources, else the -p directory — never the caller's cwd. Reading cwd
       // recorded the WRONG repository's commit on every deploy made from outside the app repo
       // (measured 2026-09-18: daita-docs, whose files live in DeSciX/daita, was stamped with the
-      // Unkamon commit it happened to be run from).
+      // superrepo commit it happened to be run from).
       const provenanceDir = siteManifest ? appRoot : uploadDir;
       const gitUtils = new GitUtils(provenanceDir);
       const gitStatus = await gitUtils.getStatus();
@@ -2447,7 +2456,7 @@ siteCommand
         try {
           const content = await fs.readFile(file._absolutePath);
 
-          // Canonical contract (WS-DEPLOY-HARDENING item 4): the server binds Cache-Control
+          // Canonical contract: the server binds Cache-Control
           // into the v4 signed URL signature (generateSiteUploadUrls/siteAssetCacheControl).
           // Ferry the exact header bag the server minted — never re-derive the policy
           // client-side. A mismatched header (including a client-side --no-cache override)
@@ -2502,7 +2511,7 @@ siteCommand
         } : null,
         preview: options.preview || false
       }).catch(async (confirmErr) => {
-        // ws-prune-504: a lost confirm RESPONSE is not a failed DEPLOY. Re-read the served
+        // a lost confirm RESPONSE is not a failed DEPLOY. Re-read the served
         // manifest keyed on THIS upload's token and say which it actually is — never "failed"
         // when the truth is knowable.
         console.log(chalk.yellow(`\n  Confirm response lost (${confirmErr.message}) — reading the deploy record back...`));
@@ -3421,7 +3430,7 @@ program
         process.exit(1);
       }
 
-      // Multi-app mode: --apps daita,unk-beast
+      // Multi-app mode: --apps daita,my-app
       if (options.apps) {
         const appIds = options.apps.split(',').map(s => s.trim());
         const apps = appIds.map(id => {
@@ -3472,7 +3481,7 @@ program
       }
 
       // Single-app mode.
-      // WS-R7-PREREQS (CEO-D-2026-07-04-R7-PREREQS-RESCOPE ruling 3): the hardcoded
+      // the hardcoded
       // communityId||'descix' / appId||'agent' fallbacks are REMOVED. app_id must be
       // resolvable (flag or workspace context) — FAIL LOUD otherwise. community_id is
       // server-authoritative: the response carries the Products-resolved value and the
@@ -3522,7 +3531,7 @@ program
 
       // Resolve KB param — single or multi.
       //
-      // ws-mcp-surface-basics — ONE NORMALIZATION OWNER. `descix chat` and the
+      // ONE NORMALIZATION OWNER. `descix chat` and the
       // ask_question_to_app MCP tool are not two backends: both invoke the SAME
       // ask_question_to_app command over /apifront/. The only thing that had diverged was the
       // CLIENT-SIDE default — the CLI substituted a hardcoded 'General' while MCP callers sent
@@ -3644,7 +3653,7 @@ program
   .option('-a, --app <id>', 'App ID (required)')
   .action(async (options) => {
     try {
-      // WS-R7-PREREQS: hardcoded descix/agent fallbacks REMOVED — an app id is required.
+      // hardcoded descix/agent fallbacks REMOVED — an app id is required.
       const appId = options.app || null;
       if (!appId) {
         console.error(chalk.red('Error: -a/--app <app_id> is required (the legacy hardcoded descix/agent fallback was removed).'));

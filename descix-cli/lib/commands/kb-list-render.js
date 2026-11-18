@@ -1,6 +1,6 @@
 /**
  * Pure render helpers for `descix kb list` — kept out of bin/descix.js so the
- * count-truth display contract is unit-testable (WS-KB-OBSERVABILITY-LIES).
+ * count-truth display contract is unit-testable.
  *
  * The server (`list_knowledge_bases`) tags every row with `count_source`:
  *   'live'    — the TRUE Pinecone count (authoritative)

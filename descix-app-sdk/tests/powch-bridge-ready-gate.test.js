@@ -21,6 +21,10 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 import { PowchBridgeClient } from '../src/util/PowchBridgeClient.js';
+import { registerHeldIdentityReader } from '../src/util/sessionGeneration.js';
+
+// The shell's session owner (util/AppData.jsx registers this reader in the app); here: no session held.
+registerHeldIdentityReader(() => null);
 
 const ORIGIN = 'https://powch.test';
 let listeners;

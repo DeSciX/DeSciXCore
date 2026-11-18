@@ -1,8 +1,7 @@
 /**
  * `descix app media-upload` — upload media/asset files to an app's GCS assets prefix via the
- * API surface (WS-V1-PURGE Phase 1, item 2; media-via-API-surface PLATFORM half; storage-cap
- * ferrying added WS-MEDIA-QUOTA per CEO ruling 2026-09-16: "Yes you can build with a 200MB
- * size limit for now until we get credit based metering for more storage.").
+ * API surface (storage-cap ferrying: a 200MB size limit for now, until credit-based metering
+ * for more storage).
  *
  * This is the canonical, filesystem-free way to get app media (podcast audio, cover art, etc.)
  * into the platform: request a short-lived signed PUT token from the API surface
@@ -25,6 +24,9 @@
  *   `x-goog-content-length-range` into the v4 signed-URL signature, so a re-derived header
  *   403s). Size is still read from `fs.stat`, since GCS itself rejects a body whose length
  *   disagrees with the declared range.
+ * - `--private` uploads into the app's private media space: the server returns each object's
+ *   `ref` (`asset:<app_id>/<path>`) instead of a `public_url`, and the CLI prints the `ref`.
+ *   `visibility` ("public" by default, "private" with `--private`) is ALWAYS sent explicitly.
  * - `public_url` and `storage` are printed exactly as the server returned them — never
  *   reconstructed from `bucket` + `gcs_path` (that WAS a client-side re-derivation of a server
  *   fact; removed here rather than perpetuated).
@@ -45,10 +47,47 @@ export function formatMb(bytes) {
 }
 
 /**
+ * ONE OWNER of which media space a media verb addresses. `--private` selects the private space;
+ * otherwise the public one. The result is always sent EXPLICITLY (the server refuses an absent
+ * `visibility`), never left for the server to default.
+ * @param {{private?:boolean}} options
+ * @returns {'public'|'private'}
+ */
+export function mediaVisibility(options) {
+  return options.private ? 'private' : 'public';
+}
+
+/**
+ * ONE OWNER of the request params every media verb (upload, list, delete) sends: the app and the
+ * explicit visibility, plus the verb's own params.
+ * @param {{app:string, private?:boolean}} options
+ * @param {object} [extra]
+ * @returns {object}
+ */
+export function mediaParams(options, extra = {}) {
+  return { app_id: options.app, visibility: mediaVisibility(options), ...extra };
+}
+
+/**
+ * ONE OWNER of the check that a media command answered for the media space that was asked.
+ * Throws naming the command when the server's echoed `visibility` differs or is absent.
+ * @param {string} command - e.g. "list_app_assets"
+ * @param {{visibility?:string}} answer - the server's answer (or one per-path row)
+ * @param {'public'|'private'} asked
+ */
+export function assertAnsweredVisibility(command, answer, asked) {
+  if (answer?.visibility !== asked) {
+    throw new Error(
+      `${command} answered for visibility ${JSON.stringify(answer?.visibility)}, ` +
+      `but ${JSON.stringify(asked)} was asked for.`);
+  }
+}
+
+/**
  * Run `app media-upload`.
  *
  * @param {import('../api-client.js').DeSciXApiClient} apiClient
- * @param {{app:string, file:string|string[], prefix?:string, json?:boolean}} options
+ * @param {{app:string, file:string|string[], prefix?:string, private?:boolean, json?:boolean}} options
  * @returns {Promise<{app_id:string, assets:Array<object>, storage:object|null}>}
  */
 export async function runMediaUpload(apiClient, options) {
@@ -90,12 +129,21 @@ export async function runMediaUpload(apiClient, options) {
   // 1. Request a signed-PUT upload token over the API surface. The server owns quota, path
   // validity and caller permission — a refusal here throws with the server's message verbatim
   // and this function does not catch it.
-  const tokenResponse = await apiClient.invoke('get_asset_upload_token', {
-    app_id: appId,
+  const tokenResponse = await apiClient.invoke('get_asset_upload_token', mediaParams(options, {
     files: fileDescriptors.map(f => ({ path: f.path, content_type: f.content_type, size: f.size }))
-  });
+  }));
   const token = tokenResponse.message || tokenResponse;
   const { signed_urls, upload_headers, objects, storage } = token;
+  assertAnsweredVisibility('get_asset_upload_token', token, mediaVisibility(options));
+  if (mediaVisibility(options) === 'private') {
+    // A private object is addressed ONLY by its ref: refuse before any byte is PUT rather than
+    // upload a file the caller then cannot name.
+    const noRef = fileDescriptors.filter(f => !(objects || []).find(o => o.path === f.path)?.ref);
+    if (noRef.length > 0) {
+      throw new Error(
+        `get_asset_upload_token returned no ref for private object(s): ${noRef.map(f => f.path).join(', ')}; nothing was uploaded.`);
+    }
+  }
 
   // 2. PUT each file directly to GCS using its signed URL and the server's exact header bag.
   progress(options, chalk.gray(`\n  Uploading ${fileDescriptors.length} file(s)...`));
@@ -136,6 +184,7 @@ export async function runMediaUpload(apiClient, options) {
           path: f.path,
           gcs_path: obj.gcs_path || null,
           public_url: obj.public_url || null,
+          ref: obj.ref || null,
           content_type: f.content_type,
           size: f.size
         });
@@ -161,16 +210,21 @@ export async function runMediaUpload(apiClient, options) {
     throw new Error(`${errors.length} of ${fileDescriptors.length} file(s) failed to upload:\n  - ${errors.join('\n  - ')}`);
   }
 
+  const isPrivate = mediaVisibility(options) === 'private';
   const result = { app_id: appId, assets: uploaded, storage: storage || null };
 
   if (options.json) {
     console.log('\n' + JSON.stringify(result, null, 2) + '\n');
   } else {
     console.log(chalk.green(`\n  ✅ Uploaded ${uploaded.length} asset(s).\n`));
-    console.log(chalk.cyan('  Asset references (pass the path to your app handler; the service fetches via get_app_asset):'));
+    console.log(chalk.cyan(isPrivate
+      ? '  Private asset references (store the ref; read an object with `descix app media-link <ref>`):'
+      : '  Asset references (pass the path to your app handler; the service fetches via get_app_asset):'));
     uploaded.forEach(u => {
       console.log(chalk.white(`    ${u.path}`));
-      console.log(chalk.gray(`      public_url: ${u.public_url}`));
+      // The server returns `ref` for a private object and `public_url` for a public one; print
+      // exactly the one the server gave for the space that was asked for.
+      console.log(chalk.gray(isPrivate ? `      ref: ${u.ref}` : `      public_url: ${u.public_url}`));
     });
     if (result.storage) {
       // projected_bytes is the app's total INCLUDING this upload; used_bytes is the total before it.

@@ -26,7 +26,7 @@ import { resolveGatewayCertContext } from '../lib/dev-cert-resolver.js';
 import { originStampFor, stampToolResult } from '../lib/mcp-origin-stamp.js';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-// WS-MCP-SSOT-TIER2 (audit §5.B-1): the curated HTTP-valid core tools are the SINGLE SOURCE
+// the curated HTTP-valid core tools are the SINGLE SOURCE
 // in @descix/platform-api/mcp-tools — shared with the Cloud HTTP MCP path (apiFront.js).
 // This stdio server imports them and CONCATENATES its CLI-LOCAL diagnostics (descix_doctor,
 // platform_health) which are NOT /apifront commands and are intentionally stdio-only.
@@ -94,7 +94,7 @@ const FALLBACK_ADVERTISED_TOOLS = [
 // Live tool surface as last returned by tools/list (permission-filtered by the backend).
 // Seeded with the static curated SSOT so the very first tools/call is schema-aware even if
 // no tools/list preceded it. Consumed by tools/call for schema-aware context injection and
-// local param pre-validation (ws-mcp-surface-basics).
+// local param pre-validation.
 let knownTools = TOOLS;
 
 // ---------------------------------------------------------------------------
@@ -391,13 +391,13 @@ try {
   // Create MCP server
   const server = new Server(
     { name: 'DeSciX MCP Server', version: CLI_VERSION },
-    // WS-MVP-FIRSTCONTACT F1: the external-consumer operating manual rides the MCP
+    // the external-consumer operating manual rides the MCP
     // `initialize` result on BOTH transports. SSOT: @descix/platform-api/mcp-tools
     // handshake.js — do not hand-author a second copy here.
     { capabilities: { tools: {} }, instructions: MCP_HANDSHAKE_INSTRUCTIONS },
   );
 
-  // tools/list — PERMISSION-FILTERED surface (WS-MCP-SURFACE-SPLIT §10.2).
+  // tools/list — PERMISSION-FILTERED surface.
   //
   // The describe IS the permission gate. Rather than advertise a static curated list, the
   // stdio server asks the BACKEND's /mcp tools/list (authenticated with this operator's
@@ -465,7 +465,7 @@ try {
       // Merge default context for convenience (caller can override). Only auto-fill when the
       // workspace is configured — prevents silently targeting the wrong app/community.
       //
-      // ws-mcp-surface-basics — SCHEMA-AWARE injection. This block used to inject blindly into
+      // SCHEMA-AWARE injection. This block used to inject blindly into
       // EVERY tool, which had two failure modes: it pushed app_id into tools that declare no
       // app_id (find_communities), and it MANUFACTURED `kb_id: 'General'` — a param
       // ask_question_to_app does not accept — so the stdio path itself created the
@@ -509,7 +509,7 @@ try {
       });
     } catch (error) {
       console.error(`[MCP] Tool error: ${error.message}`);
-      // WS-HEADLESS-MVP-A3: when the backend attached structured error fields (code +
+      // when the backend attached structured error fields (code +
       // data — e.g. CREDITS_REQUIRED with its machine-readable purchasable action), ferry
       // them as JSON after the prose so an MCP client can render the action (balance
       // check via `get_credit_balance`, buy via `descix credits buy` / Powch's

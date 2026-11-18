@@ -10,6 +10,11 @@
  * This test statically parses BOTH source files for owner-method definitions and asserts
  * set-equality against the pinned owner-method list. Drift between the mirrors (a method
  * added/renamed in one file but not the other) fails this test — that is the point.
+ * The merge-stamp writers (markMigrated / unmarkMigrated) are CORE-ONLY: Core must define them,
+ * Cloud must not, and Cloud's User.OPERATOR_STAMP_FIELDS must equal Core's.
+ *
+ * The Cloud tree is DESCIX_CLOUD_ROOT when set (e.g. a Cloud worktree under review), else the
+ * sibling checkout resolved below.
  *
  * Static parsing (not dual import) is deliberate: the two files live in separate npm
  * packages with separate dependency graphs, so importing both into one test process is not
@@ -43,6 +48,10 @@ const CLOUD_USER_RELATIVE_PATH = path.join('microservice', 'services', 'ipStorag
  * actually contains the Cloud User mirror file.
  */
 function resolveCloudUserFile() {
+    // An explicit Cloud checkout (a worktree pinned to a branch under review) wins, and is never second-guessed:
+    // a DESCIX_CLOUD_ROOT without the mirror file fails the first test naming the path, it does not fall back.
+    if (process.env.DESCIX_CLOUD_ROOT) return path.join(path.resolve(process.env.DESCIX_CLOUD_ROOT), CLOUD_USER_RELATIVE_PATH);
+
     const parentDir = path.dirname(CORE_REPO_ROOT);
     const coreDirName = path.basename(CORE_REPO_ROOT);
 
@@ -77,7 +86,7 @@ function resolveCloudUserFile() {
 
 const CLOUD_USER_FILE = resolveCloudUserFile();
 
-// The pinned owner-method set for the User model (ws-user-domain-owners).
+// The pinned owner-method set for the User model (ws-user-domain-owners): BOTH mirrors define each.
 // Any change to this list is a deliberate design decision, not a drive-by edit.
 const OWNER_METHODS = [
     'commitTosAndConnect',
@@ -87,28 +96,62 @@ const OWNER_METHODS = [
     'setPendingReferral',
     'clearPendingReferral',
     'setBaseFolderId',
-    'markMigrated',
     'set_wallet_address_and_signature',
 ];
+
+// The merge stamp (in User.OPERATOR_STAMP_FIELDS) has ONE writer: Core's transactional markMigrated / unmarkMigrated,
+// which refuse a missing or already-migrated record. A Cloud mirror defining either is a second, unguarded
+// writer of the stamp: the test fails on it, whatever the body says.
+const CORE_ONLY_METHODS = ['markMigrated', 'unmarkMigrated'];
 
 function readSource(filePath) {
     return readFileSync(filePath, 'utf8');
 }
 
+/** The source with block comments and whole-line `//` comments removed (a comment naming a method is not a definition). */
+function codeOnly(source) {
+    return source
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .split('\n')
+        .filter((line) => !/^\s*\/\//.test(line))
+        .join('\n');
+}
+
 /**
- * Returns the subset of OWNER_METHODS that are defined as instance methods
- * (i.e. `methodName(` or `async methodName(` at the start of a line, inside the User class)
- * in the given source text.
+ * Whether `source` DEFINES a method `name` in any form a class or object can carry it: a method
+ * (`name(`, `async name(`, `static name(`, `*name(`), a property holding a function (`name = async (`,
+ * `name: function`), or a prototype assignment (`.prototype.name =`).
  */
+function definesMethod(source, name) {
+    const code = codeOnly(source);
+    const forms = [
+        new RegExp(`^\\s*(?:static\\s+)?(?:async\\s+)?\\*?\\s*${name}\\s*\\(`, 'm'),
+        new RegExp(`^\\s*(?:static\\s+)?${name}\\s*[:=]\\s*(?:async\\b|function\\b|\\(|[A-Za-z_$][\\w$]*\\s*=>)`, 'm'),
+        new RegExp(`\\.prototype\\.${name}\\s*=`),
+        new RegExp(`\\.prototype\\s*,\\s*['"]${name}['"]`),
+    ];
+    return forms.some((re) => re.test(code));
+}
+
+/** The pinned owner methods `source` defines. */
 function definedOwnerMethods(source) {
-    const found = new Set();
-    for (const name of OWNER_METHODS) {
-        const defPattern = new RegExp(`^\\s*(async\\s+)?${name}\\s*\\(`, 'm');
-        if (defPattern.test(source)) {
-            found.add(name);
-        }
-    }
-    return found;
+    return new Set(OWNER_METHODS.filter((name) => definesMethod(source, name)));
+}
+
+/**
+ * The string list of `static OPERATOR_STAMP_FIELDS = Object.freeze([...])` in `source` (the USERS fields only
+ * Core's transactional operator writers write; to_dict never carries them); throws when the declaration is
+ * absent or holds anything but string literals (the list is read, never guessed).
+ */
+function stampFieldsOf(source, label) {
+    const m = codeOnly(source).match(/static\s+OPERATOR_STAMP_FIELDS\s*=\s*Object\.freeze\(\s*\[([^\]]*)\]\s*\)/);
+    if (!m) throw new Error(`${label}: no \`static OPERATOR_STAMP_FIELDS = Object.freeze([...])\` on its User`);
+    const items = m[1].split(',').map((x) => x.trim()).filter(Boolean);
+    return items.map((x) => {
+        const lit = x.match(/^(['"])([^'"]*)\1$/);
+        if (!lit) throw new Error(`${label}: OPERATOR_STAMP_FIELDS holds ${x}, not a string literal`);
+        return lit[2];
+    });
 }
 
 test('User mirrors: both source files exist and are readable', () => {
@@ -137,4 +180,53 @@ test('User mirrors: owner-method sets are identical across Core and Cloud (drift
 
     assert.deepEqual(onlyInCore, [], `Owner methods present in Core but missing from Cloud: ${onlyInCore.join(', ')}`);
     assert.deepEqual(onlyInCloud, [], `Owner methods present in Cloud but missing from Core: ${onlyInCloud.join(', ')}`);
+});
+
+test('User mirrors: Core defines the core-only merge-stamp writers (markMigrated, unmarkMigrated)', () => {
+    const src = readSource(CORE_USER_FILE);
+    const missing = CORE_ONLY_METHODS.filter((m) => !definesMethod(src, m));
+    assert.deepEqual(missing, [], `Core User is missing its core-only methods: ${missing.join(', ')}`);
+});
+
+test('User mirrors: Cloud defines NO core-only merge-stamp writer (a second, unguarded writer of the stamp)', () => {
+    const present = CORE_ONLY_METHODS.filter((m) => definesMethod(readSource(CLOUD_USER_FILE), m));
+    assert.deepEqual(present, [], `Cloud User mirror (${CLOUD_USER_FILE}) defines core-only method(s) ${present.join(', ')}: the merge stamp is written only by Core's transactional User.markMigrated / unmarkMigrated; delete Cloud's`);
+});
+
+test('User mirrors: Cloud\'s User.OPERATOR_STAMP_FIELDS equals Core\'s (one list, pinned)', () => {
+    const core = stampFieldsOf(readSource(CORE_USER_FILE), `Core ${CORE_USER_FILE}`);
+    const cloud = stampFieldsOf(readSource(CLOUD_USER_FILE), `Cloud ${CLOUD_USER_FILE}`);
+    assert.ok(core.length > 0, 'Core\'s OPERATOR_STAMP_FIELDS is empty');
+    assert.deepEqual(cloud, core, `Cloud's User.OPERATOR_STAMP_FIELDS ${JSON.stringify(cloud)} is not Core's ${JSON.stringify(core)}`);
+});
+
+// The detectors above are the gate; these fixtures show each one FAILS on what it must reject.
+test('gate fixtures: a Cloud mirror defining a core-only method in any form is caught; a comment is not', () => {
+    const caught = [
+        'class User {\n    async markMigrated(to) {\n        return this.db.update_doc_fields(U, this.id, { migrated_to: to });\n    }\n}',
+        'class User {\n    markMigrated(to) { }\n}',
+        'class User {\n    unmarkMigrated = async (to) => { };\n}',
+        'User.prototype.markMigrated = function (to) { };',
+        'Object.defineProperty(User.prototype, \'unmarkMigrated\', { value() {} });',
+    ];
+    for (const src of caught) {
+        assert.ok(CORE_ONLY_METHODS.some((m) => definesMethod(src, m)), `not caught: ${src}`);
+    }
+    const notDefinitions = [
+        '// the merge stamp is written by Core\'s markMigrated(to)\nclass User {}',
+        '/** Core\'s User.markMigrated / unmarkMigrated write it. */\nclass User {}',
+        'class User {\n    foo() { return core.markMigrated(x); }\n}',
+    ];
+    for (const src of notDefinitions) {
+        assert.equal(CORE_ONLY_METHODS.some((m) => definesMethod(src, m)), false, `a non-definition counted as one: ${src}`);
+    }
+});
+
+test('gate fixtures: OPERATOR_STAMP_FIELDS is read exactly; a different, missing or old-named list is caught', () => {
+    const src = (list, name = 'OPERATOR_STAMP_FIELDS') => `class User {\n    static ${name} = Object.freeze([${list}]);\n}`;
+    assert.deepEqual(stampFieldsOf(src(`'migrated_to', 'migrated_at', 'admin_delete'`), 'f'), ['migrated_to', 'migrated_at', 'admin_delete']);
+    assert.notDeepEqual(stampFieldsOf(src(`'migrated_to', 'migrated_at'`), 'f'), ['migrated_to', 'migrated_at', 'admin_delete']);
+    assert.throws(() => stampFieldsOf('class User {}', 'f'), /no `static OPERATOR_STAMP_FIELDS/);
+    assert.throws(() => stampFieldsOf(src(`'migrated_to', 'migrated_at'`, 'MIGRATION_FIELDS'), 'f'), /no `static OPERATOR_STAMP_FIELDS/, 'the old name is not read');
+    assert.throws(() => stampFieldsOf(src(`'migrated_to', FIELD`), 'f'), /not a string literal/);
 });
