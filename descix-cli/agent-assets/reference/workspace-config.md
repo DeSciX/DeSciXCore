@@ -56,7 +56,7 @@ workspace that already holds a different app refuses a second one — that app g
 |---|---|---|
 | `appId` | the platform app id (`<community>-<short>`) | `descix app init` |
 | `communityId` | the app's community; stored so context detection can name it | `descix app init` |
-| `kbId` | the default knowledge base (default `General`) | `descix app init --kb` |
+| `kbId` | the knowledge base this repo syncs: the `--kb` named at init, else an existing app's only KB, else `General` for an app created by that init | `descix app init` |
 | `site.static` | a directory relative to the workspace root (the repo root) served from disk at `/p/<appId>/` — `site`, `site/dist`, `.` (the root itself) or `../scratch`; an absolute path is refused at the write and on read | `descix app set-site --static <dir>` |
 | `site.port` | a framework dev server the gateway proxies `/p/<appId>` to (no path rewrite) | `descix app set-site --port <n>` |
 | `site.protocol` | `http` or `https` — the dev server's scheme (dev-server mode only; default `https`) | `descix app set-site --port <n> --protocol <scheme>` |

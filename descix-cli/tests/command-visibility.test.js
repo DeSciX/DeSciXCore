@@ -6,7 +6,6 @@
  *   - a verb with NO recorded invokes (local-only)               -> visible
  *   - `descix drive pull` / `drive push`                         -> hidden (CEO ruling, not server-derived)
  *   - a GROUP whose every child ends up hidden                   -> the group itself hidden
- *   - isHelpInvocation() recognizes --help / help / bare / bare-group, and NOT a real leaf call
  *
  * Run: `node --test tests/command-visibility.test.js` from descix-cli/.
  */
@@ -16,7 +15,6 @@ import { Command } from 'commander';
 import {
   shouldHideLeaf,
   applyVisibility,
-  isHelpInvocation,
   INFRA_ADMIN_HIDDEN_PATHS,
   getVerbInvokeMap,
 } from '../lib/command-visibility.js';
@@ -120,8 +118,8 @@ test('applyVisibility: hides an all-admin leaf, keeps a public leaf visible, gro
 });
 
 test('applyVisibility: a group is hidden when every one of its children is hidden (using drive as the real fixture)', async () => {
-  // Rebuild the REAL bin/descix.js command tree is out of scope for a unit test (it performs
-  // network-bound auth on import); instead we build a small tree shaped exactly like
+  // Rebuilding the REAL bin/descix.js command tree is out of scope for a unit test (importing it
+  // parses process.argv); instead we build a small tree shaped exactly like
   // `drive` -> {pull, push} and drive the SAME rule the real drive group is subject to: both
   // children are in INFRA_ADMIN_HIDDEN_PATHS, so both are hidden, and the group must collapse.
   const program = new Command().name('descix').exitOverride();
@@ -160,65 +158,4 @@ test('applyVisibility: a group with at least one visible child stays visible', (
   applyVisibility(program, {});
   const groupCmd = program.commands.find((c) => c.name() === 'mixedgroup');
   assert.equal(groupCmd._hidden, false, 'verb path "mixedgroup pull" is not the hidden "drive pull" — must not collapse');
-});
-
-// ── isHelpInvocation ──────────────────────────────────────────────────────────────────────────
-
-function buildRealShapedProgram() {
-  const program = new Command().name('descix').exitOverride();
-  const app = program.command('app');
-  app.command('list').action(() => {});
-  app.command('init').action(() => {});
-  program.command('login').action(() => {});
-  return program;
-}
-
-test('isHelpInvocation: recognizes -h/--help anywhere', () => {
-  const program = buildRealShapedProgram();
-  assert.equal(isHelpInvocation(program, ['--help']), true);
-  assert.equal(isHelpInvocation(program, ['app', '--help']), true);
-  assert.equal(isHelpInvocation(program, ['app', 'list', '-h']), true);
-});
-
-test('isHelpInvocation: recognizes the bare invocation and the "help" command', () => {
-  const program = buildRealShapedProgram();
-  assert.equal(isHelpInvocation(program, []), true);
-  assert.equal(isHelpInvocation(program, ['help']), true);
-});
-
-test('isHelpInvocation: recognizes a BARE GROUP invocation (a command with children and no action of its own)', () => {
-  const program = buildRealShapedProgram();
-  assert.equal(isHelpInvocation(program, ['app']), true);
-});
-
-test('isHelpInvocation: a real leaf invocation is NOT a help trigger (must stay fast/offline)', () => {
-  const program = buildRealShapedProgram();
-  assert.equal(isHelpInvocation(program, ['app', 'list']), false);
-  assert.equal(isHelpInvocation(program, ['login']), false);
-});
-
-test('isHelpInvocation: --admin is recognized as a global boolean flag and does not itself force help', () => {
-  const program = buildRealShapedProgram();
-  const globalFlags = { valueFlags: ['--env', '--api-url'], booleanFlags: ['--admin'] };
-  assert.equal(isHelpInvocation(program, ['--admin', 'app', 'list'], globalFlags), false);
-  assert.equal(isHelpInvocation(program, ['--admin'], globalFlags), true, 'no positional left after stripping --admin -> bare invocation -> help');
-});
-
-test('isHelpInvocation: --env <value> is stripped as a value flag, not mistaken for a positional', () => {
-  const program = buildRealShapedProgram();
-  const globalFlags = { valueFlags: ['--env', '--api-url'], booleanFlags: ['--admin'] };
-  assert.equal(isHelpInvocation(program, ['--env', 'dev', 'app', 'list'], globalFlags), false);
-});
-
-test('isHelpInvocation: --version / -V is NOT a help trigger (it prints a version and exits, no listing)', () => {
-  const program = buildRealShapedProgram();
-  const globalFlags = { valueFlags: ['--env', '--api-url'], booleanFlags: ['--admin'] };
-  assert.equal(isHelpInvocation(program, ['--version'], globalFlags), false);
-  assert.equal(isHelpInvocation(program, ['-V'], globalFlags), false);
-});
-
-test('isHelpInvocation: the word "help" as a leaf verb\'s ARGUMENT is not a help trigger; as a subcommand it is', () => {
-  const program = buildRealShapedProgram();
-  assert.equal(isHelpInvocation(program, ['app', 'list', 'help']), false, '"help" after a leaf is that leaf\'s argument');
-  assert.equal(isHelpInvocation(program, ['app', 'help']), true, '"help" in subcommand position of a group renders help');
 });

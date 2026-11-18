@@ -275,6 +275,19 @@ test('listAccounts: every account the rule names (verified_email, or a legacy em
     assert.equal(fake.log.length, 0);
 });
 
+test('a MALFORMED stamp never aborts the listing: that account is listed flagged stampMalformed; planning, restoring and clearing on it refuse ACCOUNT_STAMP_MALFORMED naming the account', async () => {
+    fake.put(U(PASSKEY), { ...fake.get(U(PASSKEY)), admin_delete: true });
+    const listed = await admin().listAccounts();
+    const flagged = listed.filter((a) => a.stampMalformed === true).map((a) => a.accountId);
+    assert.deepEqual(flagged, [PASSKEY]);
+    assert.ok(listed.length > 1, 'the other accounts are still listed');
+    await assert.rejects(admin().planDelete({ accountId: PASSKEY }), (e) => e.code === R().ACCOUNT_STAMP_MALFORMED && e.message.includes(PASSKEY));
+    await assert.rejects(P.userAccountOwner.clearDeleteStamp({ user_id: PASSKEY }, { planHash: 'a'.repeat(64) }), (e) => e.code === R().ACCOUNT_STAMP_MALFORMED && e.message.includes(PASSKEY));
+    assert.throws(() => P.accountLifecycleOf(fake.get(U(PASSKEY))), (e) => e.code === R().ACCOUNT_STAMP_MALFORMED && e.message.includes(PASSKEY));
+    seed();
+    assert.ok(!(await admin().listAccounts()).some((a) => 'stampMalformed' in a), 'negative control: no flag without a malformed stamp');
+});
+
 test('listAccounts: a one-address rule lists only that address', async () => {
     const listed = await admin({ rule: { localPart: 'operator+test', plusAddressing: false, domains: ['example.org'] } }).listAccounts();
     assert.deepEqual(listed.map((a) => a.accountId), [PASSKEY]);
@@ -809,6 +822,24 @@ test('B2d PARTIAL names the two ways on, with the restorable entries; restoreDel
     assert.equal(fake.get(U(PASSKEY)).admin_delete, undefined, 'everything restorable is back: the stamp is cleared');
 });
 
+test('a MALFORMED stamp refuses commitDelete (set between plan and commit) and restoreDelete (set after a PARTIAL) with ACCOUNT_STAMP_MALFORMED naming the account; nothing is written', async () => {
+    const a = admin();
+    const plan = await a.planDelete({ accountId: PASSKEY });
+    fake.put(U(PASSKEY), { ...fake.get(U(PASSKEY)), admin_delete: { planHash: 7 } });
+    const before = fake.snapshot();
+    const logged = fake.log.length;
+    await assert.rejects(a.commitDelete({ planId: plan.planId, confirmAccountId: PASSKEY, receipt: keeper() }), (e) => e.code === R().ACCOUNT_STAMP_MALFORMED && e.message.includes(PASSKEY));
+    assert.deepEqual(fake.snapshot(), before, 'commitDelete wrote nothing');
+    assert.equal(fake.log.length, logged, 'not even a receipt');
+    seed();
+    const { receipt, owners } = await partialDelete();
+    fake.put(U(PASSKEY), { ...fake.get(U(PASSKEY)), admin_delete: 'x' });
+    const mid = fake.snapshot();
+    await assert.rejects(admin({ storeOwners: owners() }).restoreDelete({ receipt, confirmAccountId: PASSKEY }), (e) => e.code === R().ACCOUNT_STAMP_MALFORMED && e.message.includes(PASSKEY));
+    assert.deepEqual(fake.snapshot(), mid, 'restoreDelete wrote nothing');
+    assert.equal(fake.get(`Vaults/${PASSKEY}`), undefined, 'the vault was not re-created');
+});
+
 test('B2d restoreDelete: entries of an owner without restoreForUser stay absent and are reported (NOT_RESTORED, with the reason)', async () => {
     const { receipt, owners } = await partialDelete({ restore: false });
     const r = await admin({ storeOwners: owners() }).restoreDelete({ receipt, confirmAccountId: PASSKEY });
@@ -1326,6 +1357,21 @@ test('merge preconditions are coded: same record, email mismatch, target not pas
     assert.deepEqual(await codes(LEGACY, SURVIVOR), [R().ACCOUNT_MERGE_EMAIL_MISMATCH]);
     seed();
     assert.deepEqual(await codes(LEGACY, SURVIVOR), [], 'positive control: the genuine pair has no blocker');
+});
+
+test('a merge whose record or surviving account carries the delete stamp is ACCOUNT_MERGE_DELETE_IN_PROGRESS; a malformed stamp refuses the plan ACCOUNT_STAMP_MALFORMED', async () => {
+    const codes = async () => (await mergeAdmin().planMerge({ fromAccountId: LEGACY, intoAccountId: SURVIVOR })).blockers.map((b) => b.code);
+    const stamp = { planHash: 'c'.repeat(64), startedAt: '2026-11-18T00:00:00.000Z' };
+    fake.put(U(LEGACY), { ...fake.get(U(LEGACY)), admin_delete: stamp });
+    assert.deepEqual(await codes(), [R().ACCOUNT_MERGE_DELETE_IN_PROGRESS], 'the record to merge is being deleted');
+    seed();
+    fake.put(U(SURVIVOR), { ...fake.get(U(SURVIVOR)), admin_delete: stamp });
+    assert.deepEqual(await codes(), [R().ACCOUNT_MERGE_DELETE_IN_PROGRESS], 'the surviving account is being deleted');
+    seed();
+    fake.put(U(SURVIVOR), { ...fake.get(U(SURVIVOR)), admin_delete: true });
+    await assert.rejects(mergeAdmin().planMerge({ fromAccountId: LEGACY, intoAccountId: SURVIVOR }), refusedWith(R().ACCOUNT_STAMP_MALFORMED));
+    seed();
+    assert.deepEqual(await codes(), [], 'negative control: no stamp, no blocker');
 });
 
 test('S1 merge source must be LEGACY: a record with the powch provider or a passkey credential is ACCOUNT_MERGE_SOURCE_NOT_LEGACY, at plan and at the User owner\'s own turn', async () => {

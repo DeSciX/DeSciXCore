@@ -213,8 +213,14 @@ descix config set-gateway-port 5599
 The gateway answers `GET /__descix/app-binding.json` on the shell's own origin with
 `{mode:'standalone', appId, appUrl, source}`. The shell asks its own origin before it mounts,
 so the same pre-built cloud shell boots as the store on `descix.net` and as your app on
-localhost, with **no rebuild**. No binding served (or a timeout, or a malformed one) means the
-store — the safe degradation.
+localhost, with **no rebuild**. Only a `404` there means "no binding" and boots the store. The
+request is hedged: if nothing has answered by 2000 ms, or the first request fails transiently (a
+network error or a `502`/`503`/`504`), a second request starts alongside the first, and the
+first definite answer from either wins (a binding, a `404`, or any other error), with the loading
+screen up throughout; at most two requests, 10000 ms in all. If both fail transiently, nothing
+answers within 10000 ms, or the answer is an error status or a body that is not a binding, the
+shell shows an error with **Try again** and logs one `console.error` naming the cause (a timeout
+that followed a transient failure names that failure too) — never the store in its place.
 
 `appUrl` is the app's `/p/<app-id>` route on the origin the shell was opened on, read from the
 request's authority (`:authority`, else `Host`):

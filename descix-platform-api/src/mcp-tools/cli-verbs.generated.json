@@ -564,7 +564,7 @@
       },
       {
         "flags": "-k, --kb <name>",
-        "description": "Target KB for system_instructions",
+        "description": "Target KB for system_instructions (default: the app's default KB, resolved by the server)",
         "required": false
       },
       {

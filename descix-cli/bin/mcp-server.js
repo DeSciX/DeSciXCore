@@ -210,7 +210,7 @@ try {
         report.app_context = {
           app_id: freshContext.appId,
           community_id: freshContext.communityId,
-          kb_id: freshContext.kbId || 'General',
+          kb_id: freshContext.kbId,
           // ONE OWNER: `freshConfig.apiUrl` is a legacy top-level key WorkspaceConfig never
           // populates (the real value lives at `env.apiUrl`, read via `resolveOrigin()`) — the
           // `||` here was always falling through to `apiClient.baseUrl`. Read the resolved

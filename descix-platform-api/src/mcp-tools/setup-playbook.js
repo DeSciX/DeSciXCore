@@ -260,12 +260,30 @@ export const DESCIX_SETUP_PLAYBOOK = Object.freeze({
  * THE CONNECTOR DOES NOT BUILD APPS. It is how an assistant ASKS the platform things. Creating an
  * app, syncing a knowledge base and publishing a site are CLI acts, on the same account.
  *
- * NO VERSIONS ARE PINNED and no command is invented: every verb below exists in the published CLI,
- * and `descix tell-me-how` finds the rest.
+ * ONE PINNED CLI VERSION: every invocation is built by playbookCli() from
+ * DEVELOPER_PLAYBOOK_CLI_VERSION, the published @descix/cli release whose verbs and flags the text
+ * below was checked against. `descix tell-me-how` finds the rest.
+ *
+ * On a CLI release:
+ *   1. Move DEVELOPER_PLAYBOOK_CLI_VERSION to the new version.
+ *   2. Re-check every step's verbs and flags against descix-cli/bin/descix.js at the new tag.
+ *   3. Re-measure first the publish_site sentence that a missing manifest source path is skipped
+ *      without a warning and its server files removed: it describes a defect, and it becomes false
+ *      when that defect is fixed. The fix is @descix/cli 5.1.0: from that pin on, site upload
+ *      refuses, naming each with a non-zero exit, a missing source path, a literal include entry
+ *      (no glob magic) that matches no file, a source path that is a symbolic link, any symbolic
+ *      link inside a source that no exclude matches, and a manifest that supplies no file at all; an empty source and a glob include that matches nothing are each
+ *      printed; --dry-run skips the build, so a build-output source is refused there until built.
+ *   4. Bump `version` below.
  */
+export const DEVELOPER_PLAYBOOK_CLI_VERSION = '5.0.0';
+
+/** `npx -y -p @descix/cli@<pinned> descix <args>` — the only place the playbook spells the CLI. */
+const playbookCli = (args) => `npx -y -p @descix/cli@${DEVELOPER_PLAYBOOK_CLI_VERSION} descix ${args}`;
+
 export const DESCIX_DEVELOPER_PLAYBOOK = Object.freeze({
     kind: 'descix_developer_playbook',
-    version: '2026-09-19.1',
+    version: '2026-11-18.1',
     audience: 'A developer who wants to BUILD on DeSciX. For a researcher who wants to read and ask, use the setup playbook instead.',
     surface_note: 'Written for Claude Code, the supported preview surface. The CLI is identical everywhere; only the connector registration differs by client.',
     script: Object.freeze([
@@ -275,31 +293,36 @@ export const DESCIX_DEVELOPER_PLAYBOOK = Object.freeze({
         }),
         Object.freeze({
             step: 'pin_environment',
-            do: "Pin the environment for their project BEFORE they sign in on the CLI, or the CLI signs them into production by default: `npx -y -p @descix/cli descix --env prod config init`. --env is a GLOBAL flag and goes BEFORE the subcommand; there is no default. 'dev' is a separate world with separate accounts and credits.",
+            do: `Pin the environment for their project BEFORE they sign in on the CLI: \`${playbookCli('config init --env prod')}\`. Production is already the CLI's default; pin it anyway, so the workspace names its target. --env is a GLOBAL flag; config init takes no default and refuses to run without it. 'dev' is a separate world with separate accounts and credits.`,
         }),
         Object.freeze({
             step: 'cli_login',
-            do: 'Sign the CLI in with `npx -y -p @descix/cli descix login`. It is the same account as the connector, and it creates one if they have none.',
+            do: `Sign the CLI in with \`${playbookCli('login')}\`. It is the same account as the connector, and it creates one if they have none.`,
         }),
         Object.freeze({
             step: 'create_app',
-            do: "Create the app: `npx -y -p @descix/cli descix app init -a <name> -c <community>`. With -c the -a value is a NAME and the PLATFORM issues the id (<community>-<name>); the command prints it. Tell the user plainly that the issued id, not the name they typed, is what every later -a takes. app init also creates site/, microservice/ and assets/, and writes the instruction files their coding assistant reads.",
+            do: `Create the app: \`${playbookCli('app init -a <name> -c <community>')}\`. With -c the -a value is a NAME and the PLATFORM issues the id (<community>-<name>); the command prints it. Tell the user plainly that the issued id, not the name they typed, is what every later -a takes. app init also creates site/, microservice/ and assets/, and writes the instruction files their coding assistant reads.`,
         }),
         Object.freeze({
             step: 'knowledge_base',
-            do: "Fill the app's knowledge base from git-tracked files: create the corpus manifest at the path app init names (<app localPath>/.descix/manifests/General.json) listing the source files, then `descix kb corpus sync -a <issued id> --dry-run` and READ THE PLAN before running it without --dry-run. There is no kb/General/ folder and no kb chunk/push/pull step — corpus sync is the only sync surface.",
+            do: `Fill the app's knowledge base from git-tracked files: create the corpus manifest at the path app init names (<app localPath>/.descix/manifests/General.json) listing the source files, then \`${playbookCli('kb corpus sync -a <issued id> --dry-run')}\` and READ THE PLAN before running it without --dry-run. There is no kb/General/ folder and no kb chunk/push/pull step — corpus sync is the only sync surface.`,
         }),
         Object.freeze({
             step: 'publish_site',
-            do: "If the app has a web front end, build it and publish with `descix site upload -a <issued id> -p <built output dir>`. The upload REPLACES the served site and refuses private files. Then verify what is actually served, not what was uploaded.",
+            do: `app init wrote the site manifest .descix/manifests/site.json naming site/ (sources: [{ "path": "site" }], buildCommand: null); site upload publishes what it names, each source's files at the site root, and ignores -p. If the app has a build step, set that source's path to the build output (relative to the app root) and buildCommand to the build command: site upload runs it in the app root before uploading, but not on --dry-run, which lists what is on disk now, so build first. Run \`${playbookCli('site upload -a <issued id> --dry-run')}\`, read the "Would remove" list, then run the same command without --dry-run. The upload REPLACES the served site and refuses private files. A manifest source path that does not exist is skipped without a warning, and the server files it used to supply are removed. Only a repo with no site manifest uses -p <dir>, which defaults to ./site under the current directory. Then verify what is actually served, not what was uploaded.`,
+        }),
+        Object.freeze({
+            step: 'take_site_down',
+            do: `To take a site down, upload a one-page site: the upload removes every other file and purges the edge. \`${playbookCli('site delete -c <community> -a <issued id>')}\` (--confirm skips its prompt) deletes the files but does not purge the edge, which can keep serving cached copies.`,
         }),
         Object.freeze({
             step: 'verify',
             do: "Close the loop with a real call: ask the app's own knowledge base a question it should now be able to answer (ask_question_to_app with the issued app id) and show the citations. An empty sources list means the answer did not come from their corpus — check the sync plan rather than re-asking.",
         }),
     ]),
-    discovery: "Any other verb: `descix tell-me-how \"<what you want to do>\"` from the terminal, or tell_me_how({ question }) over the connector. --help on a real command prints that command's own help; an unknown command exits non-zero naming itself.",
+    discovery: `Any other verb: \`${playbookCli('tell-me-how "<what you want to do>"')}\` from the terminal, or tell_me_how({ question }) over the connector. --help on a real command prints that command's own help; an unknown command exits non-zero naming itself.`,
     credits_note: 'Platform AI calls are metered in USD credits. A one-time welcome credit is granted when the account finishes setup (paid from a shared pool, so it can be declined when the pool is empty), and a free daily credit applies to the first metered call each day. get_credit_balance reports both — report what it says rather than quoting figures.',
+    media_note: `Media files: \`${playbookCli('app media-upload -a <issued id> -f <file>')}\`, \`app media-list\` and \`app media-delete\`. Public is the default; --private selects the app's private space, and \`${playbookCli('app media-link <ref>')}\` prints a read link for a private object, valid for 300 seconds.`,
     not_the_connector: 'Do not look for a tool that creates apps, syncs knowledge bases or uploads sites. Those are CLI acts.',
 });
 

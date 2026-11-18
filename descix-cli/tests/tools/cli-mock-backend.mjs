@@ -1,7 +1,8 @@
 /**
  * Test-only preload: `node --import ./tests/tools/cli-mock-backend.mjs bin/descix.js <verb> …`
  * runs the REAL CLI with the backend mocked — no network, no wallet. bin/descix.js's imports of
- * lib/auth-guard.js and lib/api-client.js are redirected to the stubs below: requireAuth passes, and
+ * lib/auth-guard.js and lib/api-client.js are redirected to the stubs below: requireAuth passes and
+ * prints `MOCK requireAuth` to stderr (so a test can show a refusal came before sign-in), and
  * DeSciXApiClient.invoke answers from canned data and prints `MOCK invoke <command> <files>` and
  * `MOCK scope <command> app=<app_id> community=<community_id>` to stderr, so a test reads exactly
  * which files a site upload would send and which app/community a kb verb asked about:
@@ -23,6 +24,16 @@
  *                 link, `<page>?ref=shr_mock`), `existing` (created: false), `no-share-url` (share_url null)
  *                 or `off-domain` (400 PROMOTION_TARGET_HOST). Its params are printed as
  *                 `MOCK params generate_referral_code <json>`.
+ *   app sync-assets — sync_app_assets, answered by CLI_MOCK_SYNC_ASSETS: `ok` (every asset updated;
+ *                 system_instructions lands in params.kb_name, or in the app's default KB `Corpus`
+ *                 when none is sent, as the server resolves it), `kb-missing` (system_instructions
+ *                 not updated, `KB '<name>' not found`) or `short` (no app_description result). Its params are printed as
+ *                 `MOCK params sync_app_assets <json>` with the asset bodies replaced by their keys.
+ *   app init, existing app — with CLI_MOCK_APP_INIT=adopt, get_product_context answers community
+ *                 `mock-comm` and list_knowledge_bases answers the one KB `Corpus` (the shape
+ *                 runAppInit reads); its params are printed as `MOCK params list_knowledge_bases <json>`.
+ *   chat --apps — ask_multiple_apps, answered with CLI_MOCK_ASK_MULTI set; its `apps` param is
+ *                 printed as `MOCK params ask_multiple_apps <json>`.
  * Every other command is refused loudly (a test that reaches one is wrong) — get_product_context
  * included, so a kb verb that could not name the app's community from its repo fails the test.
  */
@@ -52,7 +63,7 @@ register('data:text/javascript,' + encodeURIComponent(`
   }
   export async function load(url, context, next) {
     if (url === STUB_AUTH) {
-      return { format: 'module', shortCircuit: true, source: 'export async function requireAuth() { return { mock: true }; }\\nexport async function isAuthenticated() { return true; }' };
+      return { format: 'module', shortCircuit: true, source: 'export async function requireAuth() { process.stderr.write("MOCK requireAuth\\\\n"); return { mock: true }; }\\nexport async function isAuthenticated() { return true; }' };
     }
     if (url === STUB_API) {
       const real = ${JSON.stringify(new URL('../../lib/api-client.js', here).href)};
@@ -71,6 +82,26 @@ register('data:text/javascript,' + encodeURIComponent(`
         '    if (command === "confirm_site_deploy" && process.env.CLI_MOCK_CONFIRM === "lost") throw new Error("HTTP 504");',
         '    if (command === "get_site_manifest" && process.env.CLI_MOCK_CONFIRM === "lost") return { status: "OK", message: { exists: true, manifest: { deploy: { token_id: "t", deployed_at: "2026-10-22T00:00:00.000Z" } } } };',
         '    if (command === "confirm_site_deploy" && process.env.CLI_MOCK_CONFIRM) return { status: "OK", message: JSON.parse(process.env.CLI_MOCK_CONFIRM) };',
+        '    if (command === "sync_app_assets" && process.env.CLI_MOCK_SYNC_ASSETS) {',
+        '      const mode = process.env.CLI_MOCK_SYNC_ASSETS;',
+        '      process.stderr.write("MOCK params sync_app_assets " + JSON.stringify({ ...params, assets: Object.keys(params.assets || {}) }) + "\\\\n");',
+        '      const kb = params.kb_name || "Corpus";',
+        '      const results = {};',
+        '      const a = params.assets || {};',
+        '      if (a.system_instructions !== undefined) results.system_instructions = mode === "kb-missing" ? { updated: false, error: "KB " + String.fromCharCode(39) + kb + String.fromCharCode(39) + " not found" } : { updated: true, kb };',
+        '      if (a.app_description !== undefined && mode !== "short") results.app_description = { updated: true };',
+        '      if (a.icon_base64) results.icon = { updated: true, url: "gs://mock/icon.png" };',
+        '      return { status: "OK", message: { status: "OK", results } };',
+        '    }',
+        '    if (command === "get_product_context" && process.env.CLI_MOCK_APP_INIT === "adopt") return { status: "OK", message: { community_id: "mock-comm" } };',
+        '    if (command === "list_knowledge_bases" && process.env.CLI_MOCK_APP_INIT === "adopt") {',
+        '      process.stderr.write("MOCK params list_knowledge_bases " + JSON.stringify(params) + "\\\\n");',
+        '      return { status: "OK", message: { knowledge_bases: [{ name: "Corpus" }] } };',
+        '    }',
+        '    if (command === "ask_multiple_apps" && process.env.CLI_MOCK_ASK_MULTI) {',
+        '      process.stderr.write("MOCK params ask_multiple_apps " + JSON.stringify(params.apps) + "\\\\n");',
+        '      return { status: "OK", message: { response: "mock answer", apps_queried: params.apps.map((x) => x.app_id), sources: [] } };',
+        '    }',
         '    if (command === "list_knowledge_bases") return { status: "OK", message: { knowledgebases: [{ knowledgebase_name: "General" }] } };',
         '    if (command === "kb_list_file_ids") return { status: "OK", message: { file_ids: [], unique_count: 0, total_chunks: 0 } };',
         '    if (command === "get_kb_rag_status") return { status: "OK", message: { vectorCount: 0 } };',

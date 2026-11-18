@@ -16,6 +16,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import * as fs from 'fs/promises';
 import { diag } from '../diagnostic-log.js';
+import { refreshCommandSurfaceOrSay } from '../command-surface-cache.js';
 
 const execAsync = promisify(exec);
 const POLL_INTERVAL_MS = 3000; // 3 seconds
@@ -330,6 +331,9 @@ export async function loginDevice(options = {}) {
       diag(chalk.gray(`   ${error.message}\n`));
     }
 
+    // The help listing's admin hiding reads this cache offline (lib/command-surface-cache.js).
+    await refreshCommandSurfaceOrSay(apiClient, (line) => diag(chalk.yellow(`   ${line}`)));
+
     // DO NOT CLAIM SUCCESS ON A PARTIAL LOGIN, AND DO NOT EXIT 0.
     // Credentials are saved either way, so this is genuinely partial rather than a failed login —
     // but entitlements are what grant app access, so "you can now use all DeSciX CLI commands" is
@@ -525,6 +529,12 @@ export async function whoami() {
       }
     } catch (err) {
       // Ignore purchase fetch errors
+    }
+
+    // The help listing's admin hiding reads this cache offline (lib/command-surface-cache.js).
+    const surface = await refreshCommandSurfaceOrSay(apiClient, (line) => diag(chalk.yellow(`\n   ${line}`)));
+    if (surface) {
+      diag(chalk.gray(`\n   Help listing: command surface refreshed for ${surface.apiBase} at ${surface.fetchedAt}`));
     }
     
     diag('');

@@ -8,9 +8,9 @@
  * verb's action handler (see scripts/lib/verb-invoke-graph.mjs for the full contract and its
  * scope boundaries).
  *
- * This is the ONE generated fact the CLI's help-hiding decision reads at runtime (bin/descix.js
- * looks up a verb's invoked commands here, then asks the server's `get_command_surface` for each
- * command's visibility) — there is no committed class table anywhere in this repo.
+ * lib/command-visibility.js reads it at help time with the server's classes from the local cache
+ * (lib/command-surface-cache.js) to decide which verbs to hide; there is no committed class table
+ * anywhere in this repo.
  *
  * USAGE:
  *   node scripts/generate-verb-invokes.mjs           # regenerate and write

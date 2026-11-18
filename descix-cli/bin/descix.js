@@ -10,7 +10,7 @@
 import { Option } from 'commander';
 import { DescixCommand } from '../lib/descix-command.js';
 import chalk from 'chalk';
-import { DeSciXApiClient } from '../lib/api-client.js';
+import { DeSciXApiClient, resolveEffectiveOrigin } from '../lib/api-client.js';
 import { requireAuth } from '../lib/auth-guard.js';
 import { WorkspaceConfig, unmappedAppMessage, resolveWorkspacePath } from '../lib/workspace-config.js';
 import { CLI_VERSION } from '../lib/cli-version.js';
@@ -46,7 +46,8 @@ import { runReferralCreate } from '../lib/commands/referral-create.js';
 import { kbVectorCell, kbCountSource } from '../lib/commands/kb-list-render.js';
 import * as corpusCommands from '../lib/commands/corpus.js';
 import * as modelConfigCommands from '../lib/commands/model-config.js';
-import { isHelpInvocation, getCommandSurface, applyVisibility } from '../lib/command-visibility.js';
+import { applyVisibility } from '../lib/command-visibility.js';
+import { readCommandSurface } from '../lib/command-surface-cache.js';
 import { progress } from '../lib/output.js';
 import { runMediaUpload } from '../lib/commands/media-upload.js';
 import { runMediaList, runMediaDelete } from '../lib/commands/media-assets.js';
@@ -86,7 +87,7 @@ program
   .version(CLI_VERSION)
   .option('--env <name>', 'Target environment: dev, demo, prod (overrides API URL)')
   .option('--api-url <url>', 'Direct API URL override (e.g., https://demo.descix.net)')
-  .option('--admin', 'Show every command in --help, including admin-only ones (also: DESCIX_ADMIN=1). Hiding is a listing convenience only — a hidden command still runs; the server is the real gate.');
+  .option('--admin', 'Show every command in --help (also: DESCIX_ADMIN=1): the verbs the server classes admin-only in the command surface cached by login/whoami, and the infrastructure-admin drive verbs. Hiding is a listing convenience only — a hidden command still runs; the server is the real gate.');
 
 // ============ Global Environment Override ============
 // Maps --env flag to DESCIX_API_URL before any command runs.
@@ -104,45 +105,44 @@ const ENV_URL_MAP = Object.fromEntries(
 // the actual source. Recording it here rather than deriving it in the owner keeps one owner of
 // the fact: the only code that knows a flag was passed is the code that read the flag.
 //
-// ONE OWNER of "apply --api-url / --env to DESCIX_API_URL", called from TWO sites: the
-// `preAction` hook below (which only ever fires before an ACTION runs — never for `--help`,
-// since Commander short-circuits help before reaching any action), and the help-time admin-
-// surface bootstrap near the bottom of this file (which runs BEFORE `program.parseAsync()`, so
-// `program.opts()` is not populated yet and the two flags are read off raw argv instead). Without
-// this second call site, `descix --api-url https://X --help` silently queried the DEFAULT origin
-// for the admin-listing surface while claiming to target X — the same class of misreport
-// `resolveEffectiveOrigin` exists to end, just newly reachable through the one invocation shape
-// (`--help`) that never runs an action.
-function applyGlobalOriginOverride({ apiUrl, env }) {
-  // --api-url takes highest priority
-  if (apiUrl) {
-    process.env.DESCIX_API_URL = apiUrl;
-    recordInvocationOrigin(apiUrl, 'flagApiUrl');
-    return;
-  }
-
-  // --env maps to known URLs
+// ONE OWNER of "what --api-url / --env name" (originFromFlags). applyGlobalOriginOverride applies
+// it to DESCIX_API_URL from the `preAction` hook below, which fires only before an ACTION runs;
+// the help listing (bottom of this file) reads it without applying it.
+/**
+ * What --api-url / --env name, without acting on it: `{ url, source }`, `{ unknownEnv }`, or null
+ * when neither flag was given. --api-url wins.
+ */
+function originFromFlags({ apiUrl, env }) {
+  if (apiUrl) return { url: apiUrl, source: 'flagApiUrl' };
   if (env) {
     const envName = env.toLowerCase();
-    if (!(envName in ENV_URL_MAP)) {
-      // THE REFUSAL CARRIES THE CUSTOM-ENVIRONMENT PATH. This validator runs BEFORE any command
-      // action, so it is now the only thing a developer typing `--env staging` ever sees — the
-      // richer text inside `config init` that names `config set-env` for exactly this case can
-      // no longer be reached through the flag. A refusal that names only the three built-in
-      // names would strand every self-hosted or port-forwarded gateway with no next step, which
-      // is the same dead end as a remedy string for a command that does not run.
-      console.error(chalk.red(
-        `Unknown environment: ${env}. Known environments: ${Object.keys(ENV_URL_MAP).join(', ')}.\n\n` +
-        'For a self-hosted or port-forwarded gateway, name it with its origin instead:\n' +
-        `  descix config set-env ${envName} --url https://...`
-      ));
-      process.exit(1);
-    }
+    if (!(envName in ENV_URL_MAP)) return { unknownEnv: env, envName };
     // Every named environment resolves to a URL (including dev → cloud DEV).
     // A local backend is a URL you name, not an environment.
-    process.env.DESCIX_API_URL = ENV_URL_MAP[envName];
-    recordInvocationOrigin(ENV_URL_MAP[envName], 'flagEnv');
+    return { url: ENV_URL_MAP[envName], source: 'flagEnv' };
   }
+  return null;
+}
+
+function applyGlobalOriginOverride(flags) {
+  const flagged = originFromFlags(flags);
+  if (!flagged) return;
+  if (flagged.unknownEnv) {
+    // THE REFUSAL CARRIES THE CUSTOM-ENVIRONMENT PATH. This validator runs BEFORE any command
+    // action, so it is now the only thing a developer typing `--env staging` ever sees — the
+    // richer text inside `config init` that names `config set-env` for exactly this case can
+    // no longer be reached through the flag. A refusal that names only the three built-in
+    // names would strand every self-hosted or port-forwarded gateway with no next step, which
+    // is the same dead end as a remedy string for a command that does not run.
+    console.error(chalk.red(
+      `Unknown environment: ${flagged.unknownEnv}. Known environments: ${Object.keys(ENV_URL_MAP).join(', ')}.\n\n` +
+      'For a self-hosted or port-forwarded gateway, name it with its origin instead:\n' +
+      `  descix config set-env ${flagged.envName} --url https://...`
+    ));
+    process.exit(1);
+  }
+  process.env.DESCIX_API_URL = flagged.url;
+  recordInvocationOrigin(flagged.url, flagged.source);
 }
 
 program.hook('preAction', (thisCommand) => {
@@ -991,7 +991,7 @@ appCommand
   .option('-c, --community <id>', 'Community ID — REQUIRED to create an app that does not exist yet. The community must already be materialized in this environment.')
   .option('-s, --short <short_name>', 'SHORT id segment (no hyphens) used when creating; the app_id is composed server-side as {community}-{short}. Defaults to --app.')
   .option('--overwrite', 'When creating, overwrite an existing app record intentionally')
-  .option('--kb <name>', 'Knowledge base name', 'General')
+  .option('--kb <name>', 'Knowledge base name')
   .action(async (options) => {
     try {
       const apiClient = new DeSciXApiClient();
@@ -1386,12 +1386,11 @@ appCommand
   // sole path.
   .description('Sync local assets (system_instructions.md, app_description.md, icon.png) to platform.')
   .requiredOption('-a, --app <app_id>', 'App ID')
-  .option('-k, --kb <name>', 'Target KB for system_instructions', 'General')
+  .option('-k, --kb <name>', "Target KB for system_instructions (default: the app's default KB, resolved by the server)")
   .option('-p, --path <dir>', 'App directory (default: auto-detected)')
   .action(async (options) => {
     try {
       const apiClient = new DeSciXApiClient();
-      await requireAuth(apiClient);
       const fs = await import('fs');
       const path = await import('path');
 
@@ -1434,7 +1433,10 @@ appCommand
       // icon.png
       const iconPath = path.default.join(assetsDir, 'icon.png');
       if (fs.default.existsSync(iconPath)) {
-        assets.icon_base64 = fs.default.readFileSync(iconPath).toString('base64');
+        const icon = fs.default.readFileSync(iconPath);
+        // The server skips an empty icon without a result; refuse it here, before sign-in, by name.
+        if (icon.length === 0) throw new Error(`icon.png is empty (0 bytes): ${iconPath}. Replace it with a PNG or delete it, then re-run.`);
+        assets.icon_base64 = icon.toString('base64');
         found++;
         console.log(chalk.gray(`  Found: ${iconPath}`));
       }
@@ -1445,23 +1447,52 @@ appCommand
         return;
       }
 
+      await requireAuth(apiClient);
       console.log(chalk.gray(`\nSyncing ${found} asset(s) for ${options.app}...`));
 
+      // Which KB receives system_instructions has ONE owner: the server. With no -k the request
+      // names no KB and sync_app_assets resolves the app's default KB (App.defaultKbName), the same
+      // owner ask_question_to_app reads when `descix chat` names none. A client-side default here
+      // once wrote instructions to a KB chat never read, while both commands reported success.
+      const namedKb = options.kb || null;
       const response = await apiClient.invoke('sync_app_assets', {
         app_id: options.app,
-        kb_name: options.kb,
+        ...(namedKb ? { kb_name: namedKb } : {}),
         assets
       });
 
+      // Every result the server returns is printed under the server's own name for it, and the
+      // run succeeds only when there is one `updated` result per asset sent. The CLI keeps no copy
+      // of the server's result names: it counts what it sent against what came back.
       const result = response.message || response;
-      if (result.results) {
-        for (const [key, val] of Object.entries(result.results)) {
-          if (val.updated) {
-            console.log(chalk.green(`  ${key}: synced${val.kb ? ` (KB: ${val.kb})` : ''}`));
-          } else {
-            console.log(chalk.red(`  ${key}: failed — ${val.error || 'unknown'}`));
-          }
+      const results = Object.entries(result.results || {});
+      const sent = Object.keys(assets);
+      let failed = 0;
+      for (const [key, val] of results) {
+        if (!val?.updated) {
+          failed++;
+          console.log(chalk.red(`  ${key}: failed — ${val?.error || 'the server gave no reason'}`));
+          continue;
         }
+        // A result that names a KB is the system_instructions write; say which KB and whether it is
+        // the app's default, from what was sent (no -k: the server resolved the default).
+        const kbLine = !('kb' in val)
+          ? ''
+          : !val.kb
+            ? ' (KB: not reported by the server)'
+            : namedKb
+              ? ` (KB: ${val.kb}, named with -k; the server does not report whether it is this app's default KB)`
+              : ` (KB: ${val.kb}, this app's default KB (no -k sent; the KB descix chat reads when it names none))`;
+        console.log(chalk.green(`  ${key}: synced${kbLine}`));
+      }
+      const missing = sent.length - results.length;
+      if (failed > 0 || missing > 0) {
+        if (missing > 0) {
+          console.error(chalk.red(`  The server returned ${results.length} result(s) for ${sent.length} asset(s) sent ` +
+            `(sent: ${sent.join(', ')}; results: ${results.map(([k]) => k).join(', ') || 'none'}).`));
+        }
+        console.error(chalk.red(`\nAsset sync incomplete: ${failed + Math.max(missing, 0)} of ${sent.length} asset(s) not written.\n`));
+        process.exit(1);
       }
       console.log(chalk.green('\nAsset sync complete.\n'));
     } catch (error) {
@@ -2274,6 +2305,19 @@ siteCommand
       console.log('');
       for (const line of source.lines) console.log(chalk.gray(`  ${line}`));
 
+      // The manifest walk (lib/core/SiteWalker.js, the one owner of which files a manifest names)
+      // REFUSES a source path that does not exist or an include entry that matches nothing. When no
+      // build will run in this invocation — no buildCommand, or a dry run, which skips it — the walk
+      // runs HERE, before sign-in and before any backend call. When a build will run, its outputs
+      // do not exist yet: the walk runs after the build (below), still before the deploy token.
+      const { walkSite, describeWalkNotes } = siteManifest
+        ? await import('../lib/core/SiteWalker.js')
+        : {};
+      const buildRuns = !!(siteManifest && siteManifest.buildCommand && !options.dryRun);
+      let walkResult = (siteManifest && !buildRuns)
+        ? await walkSite(siteManifest, appRoot, { buildSkipped: !!siteManifest.buildCommand })
+        : null;
+
       await requireAuth(apiClient);
 
       // Import mime for content types
@@ -2294,8 +2338,6 @@ siteCommand
 
       if (siteManifest) {
         // ── Manifest-driven flow ──
-        const { walkSite } = await import('../lib/core/SiteWalker.js');
-
         // Get env-specific build config from backend (GTM vars + base path)
         const buildConfigResult = await apiClient.invoke('get_site_build_config', {
           app_id: appId,
@@ -2330,8 +2372,9 @@ siteCommand
           }
         }
 
-        const walkResult = await walkSite(siteManifest, appRoot);
+        if (buildRuns) walkResult = await walkSite(siteManifest, appRoot, { buildSkipped: false });
         sourceLabel = `manifest (${siteManifest._manifestPath})`;
+        for (const line of describeWalkNotes(walkResult.notes)) console.log(chalk.yellow(`  ${line}`));
 
         fileList = walkResult.files.map(f => ({
           path: f.deployPath,
@@ -2350,6 +2393,13 @@ siteCommand
         // ── Flat-directory flow: the directory resolveSiteSource chose ──
         const localPath = uploadDir;
         sourceLabel = localPath;
+
+        // The -p path itself, by lstat: a symbolic link is refused, as for a manifest source path.
+        const { sourcePathLinkTarget, describeLinkedSourcePath } = await import('../lib/core/SiteWalker.js');
+        const linkTarget = await sourcePathLinkTarget(localPath);
+        if (typeof linkTarget === 'string') {
+          throw new Error(`Site upload refused: ${describeLinkedSourcePath('-p', localPath, linkTarget)}. Nothing was uploaded.`);
+        }
 
         try {
           const stat = await fs.stat(localPath);
@@ -2389,8 +2439,9 @@ siteCommand
       console.log(chalk.gray(`\n  Found ${fileList.length} files\n`));
 
       if (fileList.length === 0) {
-        console.log(chalk.yellow('  No files found. Nothing to deploy.\n'));
-        return;
+        // The manifest walk refuses this itself (SiteNothingToDeployError); this is the -p directory.
+        const { SiteNothingToDeployError } = await import('../lib/core/SiteWalker.js');
+        throw new SiteNothingToDeployError(`the directory ${sourceLabel}`);
       }
 
       // 1b. Refuse to publish backend source, an agent's persona, credentials or workspace
@@ -3434,8 +3485,9 @@ program
       if (options.apps) {
         const appIds = options.apps.split(',').map(s => s.trim());
         const apps = appIds.map(id => {
-          const kbNames = options.kb && !options.kb.includes('General') ? options.kb : undefined;
-          return kbNames ? { app_id: id, knowledgebase_names: kbNames } : { app_id: id };
+          // A KB the caller named is sent as named; none named sends none, and the server
+          // resolves each app's own default KB.
+          return options.kb ? { app_id: id, knowledgebase_names: options.kb } : { app_id: id };
         });
 
         console.log(chalk.gray(`Asking ${appIds.join(', ')}...`));
@@ -4517,71 +4569,50 @@ registerAllRetiredVerbs({ program, kb: kbCommand, config: configCommand, microse
 
 // ============ Public-vs-admin help listing (CEO ruling, see lib/command-visibility.js) ============
 //
-// The class comes from the server (`get_command_surface`, guest-allowed) at the moment help is
-// about to render — never a committed table. Only a help-rendering invocation pays the network
-// cost: isHelpInvocation() is a fast, offline, syntactic check (no parsing, no I/O) so every
-// ordinary command keeps running at today's speed. `--admin` / `DESCIX_ADMIN=1` skip this
-// entirely, which is what "show everything" means — nothing is ever hidden unless this block
-// explicitly hides it.
-const rawArgv = process.argv.slice(2);
-const adminMode = rawArgv.includes('--admin') || process.env.DESCIX_ADMIN === '1';
+// HELP IS OFFLINE, AND ONLY HELP PAYS FOR THE LISTING. program.parseWithPreparedHelp
+// (lib/descix-command.js) holds commander's help output, and its unknown-command error, and runs
+// prepareHelpListing first, so the cache is read only when commander is about to print help or
+// name an unknown command (its "Did you mean" draws on the same visible list) — any path, any
+// depth — and never for an action or --version. The server's classes come from the local cache
+// that `descix login` and `descix whoami` write (lib/command-surface-cache.js), for this
+// invocation's API base only, taken from the PARSED --api-url / --env (an unknown --env, or any
+// base that cannot be resolved, is "no cache", never an error). With no cache only the CLI's own
+// hidden declarations apply; a cache file that exists but cannot be used prints one stderr line
+// naming it. `--admin` / `DESCIX_ADMIN=1` show everything. Hiding is listing-only: the server is
+// the gate.
 
-/** Read `--flag <value>` or `--flag=<value>` out of raw argv, pre-parse — Commander has not run yet at this point. */
-function rawFlagValue(argv, flag) {
-  const i = argv.indexOf(flag);
-  if (i !== -1) return argv[i + 1];
-  const joined = argv.find((tok) => tok.startsWith(`${flag}=`));
-  return joined === undefined ? undefined : joined.slice(flag.length + 1);
-}
-
-if (!adminMode && isHelpInvocation(program, rawArgv, { valueFlags: ['--env', '--api-url'], booleanFlags: ['--admin'] })) {
-  // Apply --api-url / --env BEFORE constructing the client. The `preAction` hook above does the
-  // same thing but only ever fires before an ACTION runs — Commander short-circuits straight to
-  // help output without one, so for a help-rendering invocation this is the only place that
-  // ever applies these flags. Without it, `descix --api-url https://X --help` silently asked
-  // the DEFAULT origin (not X) whether each command is admin.
-  applyGlobalOriginOverride({ apiUrl: rawFlagValue(rawArgv, '--api-url'), env: rawFlagValue(rawArgv, '--env') });
-
-  // BOUNDED, regardless of what the underlying HTTP client's own timeout is: "help must stay
-  // fast" is a promise about THIS invocation, not about how patient axios feels like being
-  // against an origin that accepts the TCP connection and then never answers.
-  const SURFACE_FETCH_TIMEOUT_MS = 5000;
-  let timeoutHandle;
+/** This invocation's API base, or null when it cannot be told (any failure is "no cache"). */
+async function apiBaseForThisInvocation() {
   try {
-    const apiClient = new DeSciXApiClient();
-    await apiClient.ensureInitialized();
-    const { commands } = await Promise.race([
-      getCommandSurface(apiClient.baseUrl, apiClient),
-      new Promise((_, reject) => {
-        timeoutHandle = setTimeout(
-          () => reject(new Error(`timed out after ${SURFACE_FETCH_TIMEOUT_MS}ms`)),
-          SURFACE_FETCH_TIMEOUT_MS
-        );
-        timeoutHandle.unref?.(); // never itself the reason the process stays alive
-      }),
-    ]);
-    applyVisibility(program, commands);
-  } catch (error) {
-    // FAIL LOUD ABOUT THE DEGRADATION, NEVER SILENTLY: help must still render (everything
-    // visible, the safe default) — offline, an old server without the command, or any other
-    // fetch failure is not a reason to hang or crash `--help`.
-    console.error(chalk.gray(
-      `(admin-only commands could not be filtered from this listing: ${error.message}. Showing everything. Use --admin to always see everything.)`
-    ));
-  } finally {
-    clearTimeout(timeoutHandle);
+    const flagged = originFromFlags(program.opts());
+    if (flagged?.unknownEnv) return null;
+    if (flagged) return flagged.url;
+    const workspace = await WorkspaceConfig.tryLoad();
+    return (await resolveEffectiveOrigin(workspace?.env?.apiUrl)).origin;
+  } catch {
+    return null;
   }
 }
 
-// A command that does not exist must not appear to have help (see lib/help-guard.js). This runs
-// before the parse, because Commander resolves --help before it resolves the command.
-assertKnownCommandForHelp(program, process.argv.slice(2));
-
-// Parse arguments
-await program.parseAsync(process.argv);
-
-// Show help if no command provided
-if (!rawArgv.length) {
-  program.outputHelp();
+async function prepareHelpListing() {
+  if (program.opts().admin || process.env.DESCIX_ADMIN === '1') return;
+  const apiBase = await apiBaseForThisInvocation();
+  const { surface, problem } = readCommandSurface(apiBase);
+  if (problem) console.error(problem);
+  applyVisibility(program, surface?.commands ?? {});
 }
+
+// A command that does not exist must not appear to have help (see lib/help-guard.js). Commander
+// resolves --help before it resolves the command, so the guard runs in the held step, after the
+// listing is prepared: it exits 1 before the held help prints, and the names it lists are the
+// visible ones.
+async function prepareHelpOutput() {
+  await prepareHelpListing();
+  assertKnownCommandForHelp(program, process.argv.slice(2));
+}
+
+// Parse arguments. Commander prints help itself for a bare invocation (exit 1), a bare group,
+// --help / -h and `help <cmd>`, and names an unknown command with a suggestion; the listing is
+// prepared (and the help guard run) just before it does either.
+await program.parseWithPreparedHelp(process.argv, prepareHelpOutput);
 

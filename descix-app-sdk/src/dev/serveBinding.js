@@ -227,9 +227,9 @@ const LOGGED_REFUSALS_CAP = 100;
  *
  * A malformed request authority is answered 400 naming the problem, never a binding on a
  * guessed origin, and the same message goes to the serve terminal through Vite's logger
- * (`logger.error`: the request was refused, so it is an error, not a warning) — the shell
- * treats any non-OK binding as "no binding" and boots the store, so the browser alone would
- * not say why. Each distinct message is printed once; the remembered set is cleared past
+ * (`logger.error`: the request was refused, so it is an error, not a warning) — the shell shows
+ * an error for any answer but a binding or a 404 (util/appBinding.js readAppBindingResponse), and
+ * the terminal says why. Each distinct message is printed once; the remembered set is cleared past
  * LOGGED_REFUSALS_CAP so a client sending endless distinct values cannot grow it without bound.
  *
  * @param {{appId: string, source: string, defaultView: string|null}} session - resolveServeBinding

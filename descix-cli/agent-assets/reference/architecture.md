@@ -178,7 +178,7 @@ The DeSciX CLI publishes content with one verb per plane. Each command resolves 
 |--------|-------------|
 | `-c, --community <id>` | Community ID (inferred if single) |
 | `-a, --app <id>` | App ID (inferred if single) |
-| `-k, --kb <id>` | KB name (default: General) |
+| `-k, --kb <id>` | KB name. Where it is optional, the command's help says what an omitted `-k` acts on; `descix chat` and `descix app sync-assets` send none and the server uses the app's default KB |
 | `-v, --verbose` | Show detailed output |
 
 ### Setup Command

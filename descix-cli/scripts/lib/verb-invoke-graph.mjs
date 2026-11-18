@@ -54,10 +54,6 @@ const EXCLUDED_TRAVERSAL_SUFFIXES = [
   path.join('lib', 'auth-guard.js'),
   path.join('lib', 'api-client.js'),
   path.join('lib', 'service-api-client.js'),
-  // lib/command-visibility.js calls get_command_surface as part of the BOOTSTRAP that decides
-  // what to hide (bin/descix.js's tail, before program.parseAsync) — never from inside a verb's
-  // own action handler. Same shape as api-client.js: infrastructure, not a verb's call site.
-  path.join('lib', 'command-visibility.js'),
 ];
 
 function isExcludedFile(absPath, cliRoot) {

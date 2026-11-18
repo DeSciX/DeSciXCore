@@ -26,7 +26,7 @@ import {
   VIEW_MODES, DEFAULT_VIEW, initialViewFor, seedView, resetView, setView, getView,
 } from '../src/util/appView.js';
 import { useDeSciXView } from '../src/hooks/useDeSciXView.js';
-import { APP_BINDING_CONTRACT, STANDALONE_MODE, standaloneBinding, fetchAppBinding } from '../src/util/appBinding.js';
+import { APP_BINDING_CONTRACT, STANDALONE_MODE, standaloneBinding, startAppBinding } from '../src/util/appBinding.js';
 import { resolveServeBinding, servedBinding, servedShareJsonFile, bindableApps } from '../src/dev/serveBinding.js';
 import { withV3Tree } from './support/v3Tree.js';
 
@@ -150,9 +150,9 @@ test('NEGATIVE: standaloneBinding refuses a non-view defaultView and a missing r
   assert.throws(() => standaloneBinding({ ...base, appUrl: undefined }), /appUrl is required/);
 });
 
-test('fetchAppBinding passes defaultView through as served', async () => {
+test('the binding exchange passes defaultView through as served', async () => {
   const b = { mode: 'standalone', appId: 'egpt', appUrl: 'u', source: 'edge', defaultView: 'CodeSite' };
-  assert.deepEqual(await fetchAppBinding({ fetchImpl: async () => ({ ok: true, json: async () => b }) }), b);
+  assert.deepEqual(await startAppBinding({ fetchImpl: async () => ({ status: 200, ok: true, json: async () => b }) }).result, { kind: 'binding', binding: b });
 });
 
 // ── descix serve ───────────────────────────────────────────────────────────────────────────

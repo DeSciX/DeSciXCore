@@ -39,6 +39,12 @@ export const AccountAdminRefusal = Object.freeze({
     ACCOUNT_MERGE_ALREADY_MIGRATED: 'ACCOUNT_MERGE_ALREADY_MIGRATED',
     /** The record to merge is not a legacy record: it has a passkey credential or the powch provider. */
     ACCOUNT_MERGE_SOURCE_NOT_LEGACY: 'ACCOUNT_MERGE_SOURCE_NOT_LEGACY',
+    /** A merge would put more into one of a store's documents than that store's size bound allows (named in the detail). */
+    ACCOUNT_MERGE_EXCEEDS_STORE_LIMIT: 'ACCOUNT_MERGE_EXCEEDS_STORE_LIMIT',
+    /** A merge whose record to merge or surviving account carries the delete stamp (a delete of it is under way). */
+    ACCOUNT_MERGE_DELETE_IN_PROGRESS: 'ACCOUNT_MERGE_DELETE_IN_PROGRESS',
+    /** A USERS doc whose `admin_delete` field is present but is not a stamp this tool writes ({ planHash: string, startedAt }). */
+    ACCOUNT_STAMP_MALFORMED: 'ACCOUNT_STAMP_MALFORMED',
 });
 
 const CODES = new Set(Object.values(AccountAdminRefusal));
