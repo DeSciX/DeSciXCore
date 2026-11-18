@@ -423,6 +423,9 @@ export function createAccountAdmin(args = {}) {
             blockers.push({ owner: 'user', code: R.ACCOUNT_MERGE_TARGET_NOT_PASSKEY, detail: `${intoView.accountId} is not a Powch passkey account (the powch provider and a passkey credential)` });
         }
         if (intoView.migratedTo) blockers.push({ owner: 'user', code: R.ACCOUNT_MERGE_ALREADY_MIGRATED, detail: `the surviving account ${intoView.accountId} is itself migrated to ${intoView.migratedTo}` });
+        for (const v of [fromView, intoView]) {
+            if (v.adminDelete) blockers.push({ owner: 'user', code: R.ACCOUNT_MERGE_DELETE_IN_PROGRESS, detail: `${v.accountId} carries the delete stamp of plan ${v.adminDelete.planHash.slice(0, 12)}: finish or restore that delete before merging` });
+        }
         return blockers;
     }
 
@@ -493,6 +496,7 @@ export function createAccountAdmin(args = {}) {
                 migratedTo: v.migratedTo,
                 roles: v.roles,
                 duplicatesOf: (byEmail.get(v.email) ?? []).filter((id) => id !== v.accountId),
+                ...(v.stampMalformed ? { stampMalformed: true } : {}),
             }));
         },
 

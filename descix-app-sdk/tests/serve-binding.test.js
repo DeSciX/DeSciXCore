@@ -30,7 +30,7 @@ import {
   appBindingPlugin,
   APP_BINDING_PATH,
 } from '../src/dev/serveBinding.js';
-import { APP_BINDING_PATH as BROWSER_SIDE_PATH, fetchAppBinding } from '../src/util/appBinding.js';
+import { APP_BINDING_PATH as BROWSER_SIDE_PATH } from '../src/util/appBinding.js';
 import { gatewayProductUrl } from '../src/dev/workspaceProducts.js';
 import { withV3Tree } from './support/v3Tree.js';
 
@@ -212,28 +212,7 @@ test('the plugin answers the binding path and passes everything else through', (
   assert.equal(runMiddleware(plugin, '/').nexted, true, 'the shell root must still reach the proxy');
 });
 
-// ------------------------------------------------- the browser-side reader
-
-test('fetchAppBinding returns the binding when the origin serves one', async () => {
-  const binding = { mode: 'standalone', appId: 'egpt-frqtl', appUrl: 'x' };
-  const got = await fetchAppBinding({ fetchImpl: async () => ({ ok: true, json: async () => binding }) });
-  assert.deepEqual(got, binding);
-});
-
-test('no binding served (the STORE) is null, not an error', async () => {
-  assert.equal(await fetchAppBinding({ fetchImpl: async () => ({ ok: false, status: 404 }) }), null);
-});
-
-test('a malformed binding is treated as absent, never half-applied', async () => {
-  const bad = [{ mode: 'standalone' }, { appId: 'x' }, { mode: 'store', appId: 'x' }, null];
-  for (const b of bad) {
-    assert.equal(await fetchAppBinding({ fetchImpl: async () => ({ ok: true, json: async () => b }) }), null);
-  }
-});
-
-test('a network failure degrades to the store rather than refusing to boot', async () => {
-  assert.equal(await fetchAppBinding({ fetchImpl: async () => { throw new Error('offline'); } }), null);
-});
+// The browser-side reader (startAppBinding) is covered in tests/app-binding-result.test.js.
 
 // ------------------------------------------------------------- SUPER-DRY
 

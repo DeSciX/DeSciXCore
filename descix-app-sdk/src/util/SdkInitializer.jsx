@@ -1,9 +1,11 @@
-import React, { useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useRef, useCallback, useState } from 'react';
 import { AppContextEvent, AppData } from '../util/AppData';
 import { useAppContext } from '../AppContext';
 import { DiscordSDK, patchUrlMappings } from '@discord/embedded-app-sdk';
 import ErrorBoundary from './ErrorBoundary';
-import { fetchAppBinding, appFrameUrl } from './appBinding';
+import { startAppBinding, appFrameUrl, describeAppBindingError, APP_BINDING_RESULT } from './appBinding';
+import ShellErrorState from '../components/ShellErrorState.jsx';
+import ShellFrame from '../components/ShellFrame.jsx';
 import { POWCH_APP_ID, requirePowchUrl } from '../powch/powchOrigin.js';
 import { storePendingRef } from './shareLink.js';
 
@@ -93,6 +95,12 @@ const SdkInitializer = ({ children, standalone = false, appId = null }) => {
     const { appEvent, setAppEvent, isEmbedded } = useAppContext(); // Get isEmbedded from context
     const isSdkInitialized = useRef(false);
     const isGtmInitialized = useRef(false); // Track GTM initialization specifically
+    // The app binding could not be read: the shell shows this instead of booting anything.
+    const [bindingError, setBindingError] = useState(null);
+    // The binding exchange in flight (startAppBinding's handle), so an unmount can cancel it and a
+    // second Try again cannot start a second run.
+    const bindingRun = useRef(null);
+    const unmounted = useRef(false);
 
     const initializeSdk = useCallback(async () => {
         if (isSdkInitialized.current) {
@@ -131,7 +139,23 @@ const SdkInitializer = ({ children, standalone = false, appId = null }) => {
         // self-declares" — which SHELL_EXEMPT prevents for the only live case.
         // (VISION ruling A, 2026-08-22, under window discretion; listed for CEO ratification.)
         const declaredAppId = standalone ? appId : null;
-        const servedBinding = declaredAppId ? null : await fetchAppBinding();
+        const bindingExchange = declaredAppId ? null : startAppBinding();
+        bindingRun.current = bindingExchange;
+        const bindingResult = bindingExchange ? await bindingExchange.result : null;
+        // Clear the handle only if it is still THIS run's: a remount (StrictMode) may have started a
+        // newer run while this cancelled one was waiting, and the unmount must still find that one.
+        if (bindingRun.current === bindingExchange) bindingRun.current = null;
+        // Unmounted while waiting: both requests were aborted by the cleanup; drop the result.
+        if (unmounted.current || bindingResult?.kind === 'cancelled') return;
+        // Only a 404 ('none') means "this host has no app": the store. Any other failure is shown,
+        // with a retry — booting the store there would show the user the wrong page and say nothing.
+        if (bindingResult?.kind === APP_BINDING_RESULT.ERROR) {
+            const reason = describeAppBindingError(bindingResult);
+            console.error(`[SdkInitializer] The app binding could not be read: ${reason}. Not booting the store in its place.`);
+            setBindingError(reason);
+            return;
+        }
+        const servedBinding = bindingResult?.kind === APP_BINDING_RESULT.BINDING ? bindingResult.binding : null;
 
         const standaloneAppId = servedBinding?.appId || declaredAppId;
         // An app's direct link hands its query and hash to the app (appFrameUrl).
@@ -276,6 +300,42 @@ const SdkInitializer = ({ children, standalone = false, appId = null }) => {
             initializeSdk();
         }
     }, [appEvent, initializeSdk]);
+
+    // Unmount: cancel the binding exchange (aborts both requests; the result is dropped), and let a
+    // remount (React StrictMode) start initialization again.
+    useEffect(() => {
+        unmounted.current = false;
+        return () => {
+            unmounted.current = true;
+            if (bindingRun.current) {
+                bindingRun.current.cancel();
+                bindingRun.current = null;
+                isSdkInitialized.current = false;
+            }
+        };
+    }, []);
+
+    const retryBinding = useCallback(() => {
+        // Only from the error screen, and never while a run is in flight: a double click starts one run.
+        if (!bindingError || bindingRun.current) return;
+        setBindingError(null);
+        isSdkInitialized.current = false;
+        initializeSdk();
+    }, [initializeSdk, bindingError]);
+
+    if (bindingError) {
+        // Inside the same ShellFrame the ERROR state uses (AppShell.jsx), so both look the same.
+        return (
+            <ShellFrame>
+                <ShellErrorState
+                    title="This page could not load"
+                    message="The page could not find out which app to open. Check your connection and try again."
+                    detail={bindingError}
+                    onRetry={retryBinding}
+                />
+            </ShellFrame>
+        );
+    }
 
     // Render children once initialization logic is underway or complete
     return <ErrorBoundary>{children}</ErrorBoundary>;

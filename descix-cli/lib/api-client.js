@@ -399,7 +399,8 @@ export class DeSciXApiClient {
    * Invoke a command via HTTP with automatic session management
    * @param {string} command - Command name
    * @param {Object} params - Command parameters
-   * @param {Object} options - Optional { credentials, allowGuest, skipSessionCheck }
+   * @param {Object} options - Optional { credentials, allowGuest, skipSessionCheck, noAuthRecovery }
+   *   noAuthRecovery: on an auth failure, throw instead of reconnecting or starting a device login
    * @returns {Promise<Object>} Response data
    */
   async invoke(command, params = {}, options = {}) {
@@ -469,8 +470,11 @@ export class DeSciXApiClient {
                           error.message?.includes('session') ||
                           error.message?.includes('expired');
       
-      // If auth failed and we have wallet credentials, try to refresh session once
+      // If auth failed and we have wallet credentials, try to refresh session once — unless the
+      // caller turned recovery off (options.noAuthRecovery: a background refresh that must never
+      // reconnect or start an interactive login; its refusal is just an error).
       if (isAuthError && 
+          !options.noAuthRecovery &&
           this.credentials?.walletAddress && 
           this.credentials?.signature &&
           !options._retried) {

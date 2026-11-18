@@ -39,6 +39,8 @@ export {
     normalizePasskey,
     recoveredPasskeyDifferences,
     userAccountOwner,
+    ACCOUNT_LIFECYCLE,
+    accountLifecycleOf,
     get_default_community,
     getUserEntitlements
 } from './models/index.js';

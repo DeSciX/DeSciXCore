@@ -156,6 +156,7 @@
   "login": [
     "device_check_status",
     "device_request_login",
+    "get_command_surface",
     "sync_auto_purchases"
   ],
   "logout": [],
@@ -188,6 +189,7 @@
     "device_check_status",
     "device_request_login",
     "find_communities",
+    "get_command_surface",
     "get_product_context",
     "init_git_mode_kb",
     "list_knowledge_bases",
@@ -236,6 +238,7 @@
   ],
   "whoami": [
     "fetch_my_purchases",
+    "get_command_surface",
     "validate_session"
   ]
 }

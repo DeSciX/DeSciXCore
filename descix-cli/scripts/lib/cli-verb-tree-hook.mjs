@@ -9,7 +9,8 @@
  * One entry per runnable verb (a command with an action handler), sorted by verbPath:
  *   { verbPath, description, arguments[], options[], runbookAnchor }
  * Commands the CLI registers `{ hidden: true }` (retired-surface stubs) and their subtrees are
- * omitted, as are hidden options — the list is what a developer is offered.
+ * omitted, as are hidden options — the list is what a developer is offered. With
+ * DESCIX_CLI_VERB_TREE_INCLUDE_HIDDEN=1 they are included, each entry carrying `hidden`.
  */
 import fs from 'node:fs';
 import { Command } from 'commander';
@@ -41,16 +42,19 @@ function entry(cmd, verbPath) {
   };
 }
 
+const INCLUDE_HIDDEN = process.env.DESCIX_CLI_VERB_TREE_INCLUDE_HIDDEN === '1';
+
 function collect(root) {
   const verbs = [];
-  (function visit(cmd, tokens) {
+  (function visit(cmd, tokens, underHidden) {
     for (const child of cmd.commands) {
-      if (child._hidden) continue;
+      const hidden = underHidden || !!child._hidden;
+      if (hidden && !INCLUDE_HIDDEN) continue;
       const path = [...tokens, child.name()];
-      if (child._actionHandler) verbs.push(entry(child, path.join(' ')));
-      visit(child, path);
+      if (child._actionHandler) verbs.push(INCLUDE_HIDDEN ? { ...entry(child, path.join(' ')), hidden } : entry(child, path.join(' ')));
+      visit(child, path, hidden);
     }
-  })(root, []);
+  })(root, [], false);
   return verbs.sort((a, b) => (a.verbPath < b.verbPath ? -1 : a.verbPath > b.verbPath ? 1 : 0));
 }
 

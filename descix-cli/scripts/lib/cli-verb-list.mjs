@@ -27,8 +27,12 @@ export function serializeCliVerbs(verbs) {
   return JSON.stringify(verbs, null, 2) + '\n';
 }
 
-/** @returns {{ verbPath: string, description: string, arguments: object[], options: object[], runbookAnchor: string|null }[]} */
-export function buildCliVerbList() {
+/**
+ * @param {{ includeHidden?: boolean }} [options] - includeHidden: also list the `{ hidden: true }`
+ *   registrations (the retired-verb stubs), each entry then carrying `hidden`
+ * @returns {{ verbPath: string, description: string, arguments: object[], options: object[], runbookAnchor: string|null, hidden?: boolean }[]}
+ */
+export function buildCliVerbList({ includeHidden = false } = {}) {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'descix-cli-verbs-'));
   try {
     const out = path.join(scratch, 'tree.json');
@@ -38,6 +42,7 @@ export function buildCliVerbList() {
     fs.mkdirSync(cwd);
     const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('DESCIX_')));
     Object.assign(env, { HOME: home, DESCIX_CLI_VERB_TREE_OUT: out, NO_COLOR: '1' });
+    if (includeHidden) env.DESCIX_CLI_VERB_TREE_INCLUDE_HIDDEN = '1';
     const run = spawnSync(process.execPath, ['--import', pathToFileURL(HOOK).href, BIN, '--admin'], {
       cwd, env, encoding: 'utf8', timeout: 60_000,
     });

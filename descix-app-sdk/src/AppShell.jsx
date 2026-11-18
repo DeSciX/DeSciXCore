@@ -6,13 +6,15 @@
  */
 
 import React from 'react';
-import { Box, CssBaseline, ThemeProvider, createTheme, Typography } from '@mui/material';
+import { CssBaseline, ThemeProvider, createTheme } from '@mui/material';
 import { useAppContext, AppProvider } from './AppContext.jsx';
 import { AppContextState } from './util/AppData.jsx';
 import { NetworkLoadingProvider } from './util/NetworkAPI.jsx';
 import ErrorBoundary from './util/ErrorBoundary.jsx';
 import SdkInitializer from './util/SdkInitializer.jsx';
 import LoadingWidget from './components/LoadingWidget.jsx';
+import ShellErrorState from './components/ShellErrorState.jsx';
+import ShellFrame from './components/ShellFrame.jsx';
 import WagmiProvider from './providers/WagmiProvider.jsx';
 import { PowchBridgeProvider } from './providers/PowchBridgeProvider.jsx';
 import { requirePowchUrl } from './powch/powchOrigin.js';
@@ -31,14 +33,10 @@ function ShellContent({ children }) {
   }
   if (appState === AppContextState.ERROR) {
     return (
-      <Box sx={{ padding: 3 }}>
-        <Typography variant="h4" align="center" color="error" gutterBottom>
-          An Error Occurred
-        </Typography>
-        <Typography variant="body1" align="center" gutterBottom>
-          Something went wrong with the application. Please try again later.
-        </Typography>
-      </Box>
+      <ShellErrorState
+        title="An Error Occurred"
+        message="Something went wrong with the application. Please try again later."
+      />
     );
   }
   if (appState === AppContextState.READY) {
@@ -81,9 +79,9 @@ export default function AppShell({ appId, config = {}, children, standalone = fa
       <NetworkLoadingProvider>
         <SdkInitializer standalone={standalone} appId={appId}>
           <ErrorBoundary>
-            <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', bgcolor: '#0D1117' }}>
+            <ShellFrame>
               <ShellContent>{children}</ShellContent>
-            </Box>
+            </ShellFrame>
           </ErrorBoundary>
         </SdkInitializer>
       </NetworkLoadingProvider>

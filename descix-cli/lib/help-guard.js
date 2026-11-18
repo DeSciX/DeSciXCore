@@ -11,7 +11,9 @@
  * review 2026-09-19, I2 → S5).
  *
  * This guard runs ONLY when a help flag is present, so every other path keeps Commander's own
- * behaviour (it already exits non-zero for an unknown command without `--help`).
+ * behaviour (it already exits non-zero for an unknown command without `--help`). bin/descix.js
+ * runs it in the held help step (lib/descix-command.js parseWithPreparedHelp), after the listing
+ * is prepared, so the names it lists are the visible ones.
  */
 
 const HELP_FLAGS = new Set(['-h', '--help']);
@@ -59,9 +61,13 @@ export function findUnknownCommand(program, argv) {
     return null;
 }
 
-/** The command names `parent` actually has, for the "did you mean" line. */
+/**
+ * The command names `parent` lists, for the "has:" line: the VISIBLE ones, as commander's own
+ * listing and "Did you mean" show them (a command the CLI registered hidden, or one the listing
+ * hid — lib/command-visibility.js — is not named here either).
+ */
 function nameList(parent) {
-    return parent.commands.map((c) => c.name()).sort();
+    return parent.commands.filter((c) => !c._hidden).map((c) => c.name()).sort();
 }
 
 /**

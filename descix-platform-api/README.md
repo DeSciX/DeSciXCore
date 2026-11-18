@@ -105,6 +105,20 @@ The credential name rule (`redactCredentials`, `receiptData`): a key is redacted
 the whole key or its last `_`/`-` segment is token, secret, password, passphrase, passwd, private_key,
 mnemonic, seed, signature, api_key/apikey, code or otp, or it is camelCase ending in one of those.
 
+Account lifecycle (`ACCOUNT_LIFECYCLE`, `accountLifecycleOf(userDoc)` from `@descix/platform-api`): the one
+answer to "is this account open", over a USERS doc snapshot: `'gone'` (no doc), `'closing'` (a well-formed
+`admin_delete` stamp: a delete is under way and can still be undone, so a store does nothing irreversible),
+`'live'` (no stamp). It judges the stamp with the same parser as the operator's view, `clearDeleteStamp`
+and `restoreDelete`. Three codes go with it:
+- `ACCOUNT_STAMP_MALFORMED`: an `admin_delete` value that is not `{ planHash: string, startedAt }` (`true`,
+  `{}`, `'x'`, `false`, `0`). It is thrown by `accountLifecycleOf` and by planning, committing, restoring or
+  clearing on that account; the listing (`listAccounts`) still shows the account, flagged
+  `stampMalformed: true`, so the operator can repair it by hand.
+- `ACCOUNT_MERGE_DELETE_IN_PROGRESS`: a merge blocker when the record to merge or the surviving account
+  carries the delete stamp.
+- `ACCOUNT_MERGE_EXCEEDS_STORE_LIMIT`: a merge blocker a store owner reports when a move would put more
+  into one of its documents than its size bound allows.
+
 A store owner in another repo imports the codes, `AccountAdminError`, `accountAdminBlocker`,
 `receiptData`, `encodeStoreValue`, `ACCOUNT_READ_LIMIT` and the outcome tables from here, and its own test
 runs `assertAccountStoreOwnerConforms(owner, { user, bystanders, snapshot, clientTarget, pair?,

@@ -210,6 +210,31 @@ build variables the server returns injected into its environment:
 }
 ```
 
+A deploy replaces the site, so the upload refuses, with a non-zero exit and naming every one with
+the path it resolved to:
+
+- a source `path` that does not exist;
+- a literal `include` entry (no glob characters `*`, `?`, `[...]`, `{a,b}`, extglobs) that matches no
+  file, with what to write instead where it is knowable (`assets/**` for a directory, no leading
+  `./`, `/` rather than `\` as a separator, the exact case of the file's name);
+- a source `path` (or the `-p` directory) that is itself a symbolic link: name the real directory
+  or file instead (only the last component is checked; a linked parent directory is fine);
+- a symbolic link inside a source, wherever it points, unless an `exclude` pattern matches it (an
+  `include` list does not exempt it): copy the files into the source, or add the link's target
+  directory as its own manifest source (a source may sit outside the app root, e.g. `../shared`);
+- zero files: a manifest, or a `-p` directory, that supplies no file at all (a deploy of zero files
+  would remove the whole site; the server is not changed).
+
+An `include` entry is a glob, tried against the path under the source and against the filename.
+A glob that matches nothing and a source that exists but supplies no file are allowed, and the run
+prints a line naming each: the server files they supplied before are removed. An `include` entry
+beginning with `!` is a negation and one beginning with `#` a comment (minimatch). For a site
+manifest with no `buildCommand`, and on every `--dry-run`, these checks run before sign-in and
+before any backend call; for a `-p` directory the zero-files check runs after sign-in, before any
+file list is sent. `--dry-run` does not run the build, so a source the build produces is refused there
+until you build it; a real upload runs the build first and checks after it, before any file is
+uploaded.
+
 ## Documentation
 
 For full documentation, please refer to the [DeSciX SDK Documentation](./SERVICE_README_sdk.md).

@@ -1910,10 +1910,45 @@ function usersEntryData(doc) {
 
 const PLAN_HASH = /^[0-9a-f]{64}$/;
 
-/** The delete stamp on a USERS doc, or null: { planHash, startedAt }. */
-function adminDeleteOf(doc) {
+/**
+ * THE parser of the delete stamp on a USERS doc, the one place its shape is judged (the operator's view, clear and
+ * restore, and accountLifecycleOf all read it here): null when the field is absent or null; { planHash, startedAt }
+ * when it is a stamp this tool writes (an object with a string planHash); anything else present (true, {}, 'x',
+ * false, 0) is ACCOUNT_STAMP_MALFORMED, loudly: never read as "no stamp" and never as a stamp.
+ * @throws {AccountAdminError} ACCOUNT_STAMP_MALFORMED
+ */
+function adminDeleteOf(doc, accountId = doc?.id) {
     const s = doc?.[ADMIN_DELETE_FIELD];
-    return s && typeof s === 'object' && typeof s.planHash === 'string' ? Object.freeze({ planHash: s.planHash, startedAt: typeof s.startedAt === 'string' ? s.startedAt : null }) : null;
+    if (s === undefined || s === null) return null;
+    if (typeof s === 'object' && !Array.isArray(s) && typeof s.planHash === 'string') {
+        return Object.freeze({ planHash: s.planHash, startedAt: typeof s.startedAt === 'string' ? s.startedAt : null });
+    }
+    throw new AccountAdminError(AccountAdminRefusal.ACCOUNT_STAMP_MALFORMED,
+        `account ${accountId ?? '(unknown id)'}: its USERS doc carries a malformed ${ADMIN_DELETE_FIELD} (${JSON.stringify(s)?.slice(0, 80)}): only stampDelete writes it, as { planHash, startedAt }; an operator must inspect and remove it by hand`);
+}
+
+/** An account's lifecycle as its USERS doc tells it. */
+export const ACCOUNT_LIFECYCLE = Object.freeze({ LIVE: 'live', CLOSING: 'closing', GONE: 'gone' });
+
+/**
+ * THE answer to "is this account open": a pure function over a USERS doc snapshot's data, owned here (the owner of
+ * the `admin_delete` stamp) and consulted by every store that must not credit or bind a closing account. It judges
+ * the stamp with adminDeleteOf, the one parser the operator's view and restore use too:
+ *   'gone'    the USERS doc is absent (`userDoc` null or undefined);
+ *   'closing' the doc carries a well-formed delete stamp ({ planHash: string, startedAt }): a delete is under way and
+ *             can still be undone, so nothing irreversible may happen;
+ *   'live'    no stamp (the field absent or null).
+ * @param {object|null|undefined} userDoc - the USERS doc's data
+ * @returns {'live'|'closing'|'gone'}
+ * @throws {AccountAdminError} ACCOUNT_STAMP_MALFORMED for any other admin_delete value (true, {}, 'x', false, 0)
+ * @throws {TypeError} on a value that is not a document (a string, a number, an array)
+ */
+export function accountLifecycleOf(userDoc) {
+    if (userDoc === null || userDoc === undefined) return ACCOUNT_LIFECYCLE.GONE;
+    if (typeof userDoc !== 'object' || Array.isArray(userDoc)) {
+        throw new TypeError(`accountLifecycleOf: a USERS doc's data (an object) or null is required (got ${Array.isArray(userDoc) ? 'an array' : typeof userDoc})`);
+    }
+    return adminDeleteOf(userDoc) ? ACCOUNT_LIFECYCLE.CLOSING : ACCOUNT_LIFECYCLE.LIVE;
 }
 
 function requireUserId(user, what) {
@@ -1924,8 +1959,12 @@ function requireUserId(user, what) {
     return id;
 }
 
-/** One USERS doc as the account admin lists and judges it. */
-function accountViewOf(id, snap) {
+/**
+ * One USERS doc as the account admin lists and judges it. A malformed delete stamp throws ACCOUNT_STAMP_MALFORMED
+ * (planning, committing and restoring on that account refuse), except with `{ listing: true }`: the operator's
+ * listing then shows the account flagged `stampMalformed: true`, so one malformed doc never hides the others.
+ */
+function accountViewOf(id, snap, { listing = false } = {}) {
     const doc = snap.exists ? (snap.data() || {}) : null;
     if (!doc) return Object.freeze({ accountId: id, exists: false });
     const providers = Array.isArray(doc.auth_providers) ? [...doc.auth_providers] : [];
@@ -1945,8 +1984,18 @@ function accountViewOf(id, snap) {
         walletAddress: typeof doc.wallet_address === 'string' && doc.wallet_address ? doc.wallet_address.toLowerCase() : null,
         roles: Object.keys(doc.roles && typeof doc.roles === 'object' ? doc.roles : {}).sort(),
         migratedTo: doc.migrated_to || null,
-        adminDelete: adminDeleteOf(doc),
+        ...stampOf(doc, id, listing),
     });
+}
+
+/** The view's stamp fields: { adminDelete } (or, listing only, { adminDelete: null, stampMalformed: true } for a malformed one). */
+function stampOf(doc, id, listing) {
+    try {
+        return { adminDelete: adminDeleteOf(doc, id) };
+    } catch (e) {
+        if (listing && e?.code === AccountAdminRefusal.ACCOUNT_STAMP_MALFORMED) return { adminDelete: null, stampMalformed: true };
+        throw e;
+    }
 }
 
 /** Unique, sorted. */
@@ -2260,7 +2309,7 @@ export const userAccountOwner = Object.freeze({
                 for (const d of snap.docs) byId.set(d.id, d);
             }
         }
-        return [...byId.keys()].sort().map((id) => accountViewOf(id, byId.get(id)));
+        return [...byId.keys()].sort().map((id) => accountViewOf(id, byId.get(id), { listing: true }));
     },
 
     /**
@@ -2314,8 +2363,9 @@ export const userAccountOwner = Object.freeze({
      * before its first dependent write), in ONE transaction that reads the doc and refuses, writing nothing:
      * no doc (ACCOUNT_NOT_FOUND), data other than the plan's (ACCOUNT_PLAN_STALE; the stamp itself is not part
      * of a plan's data, so a re-commit over an earlier stamp proceeds and replaces it). restoreDelete honours a
-     * receipt only while the stamp names that receipt's plan. No reader branches on the stamp: the account
-     * stays usable by its owner.
+     * receipt only while the stamp names that receipt's plan. While it stands, accountLifecycleOf reads the account
+     * as 'closing': stores that must do nothing irreversible during a delete branch on it (Cloud's DPoW accounting
+     * refuses to credit or bind the account); everything else stays usable by its owner.
      * @param {{ user_id: string }} user
      * @param {{ planHash: string, startedAt: string, expectData: Object<string, string> }} opts
      * @returns {Promise<true>}

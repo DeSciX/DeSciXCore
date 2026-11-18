@@ -150,7 +150,7 @@ export async function runGateway(options = {}) {
   });
   // The binding's MODE and the app's ROUTE are two different facts. `standalone` is the mode,
   // delivered by the binding this gateway serves at its ROOT (appBindingPlugin below; read by the
-  // shell in SdkInitializer via fetchAppBinding). APP_BINDING_PATH is served at the root and 404s
+  // shell in SdkInitializer via startAppBinding). APP_BINDING_PATH is served at the root and 404s
   // under /p/, so the route line must never read as the place the mode comes from.
   //
   // These lines are LOCAL strings for the developer at this machine. The served binding's appUrl

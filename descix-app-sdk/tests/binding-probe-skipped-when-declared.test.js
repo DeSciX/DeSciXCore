@@ -5,7 +5,7 @@
  * single load. Diagnosed 2026-08-22 — nothing was reaching across origins (appBinding.js requests
  * a RELATIVE path, so it always asks the current document's own origin); the POWCH bundle was
  * probing ITSELF, and the edge correctly declined because powch is SHELL_EXEMPT by design
- * (ZK-SSO isolation). Functionally harmless — fetchAppBinding treats non-ok as "no binding" — but
+ * (ZK-SSO isolation). Functionally harmless — a 404 is the binding exchange's "no binding" answer — but
  * a browser logs the 404 and no application code can suppress that. The only way to remove the
  * noise is to not make the request.
  *
@@ -29,7 +29,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { fetchAppBinding, APP_BINDING_PATH } from '../src/util/appBinding.js';
+import { startAppBinding, APP_BINDING_PATH } from '../src/util/appBinding.js';
 
 /** The call site's decision, isolated: probe only when the app did NOT declare itself. */
 async function resolveServedBinding({ standalone, appId, probe }) {
@@ -76,16 +76,16 @@ test('the call site really is wired this way (guards against a rewrite that re-a
     const src = readFileSync(new URL('../src/util/SdkInitializer.jsx', import.meta.url), 'utf8');
     // Order matters: declaredAppId must be computed BEFORE the probe decision, or the skip is dead code.
     const declIdx = src.indexOf('const declaredAppId =');
-    const probeIdx = src.indexOf('const servedBinding =');
+    const probeIdx = src.indexOf('const bindingExchange =');
     assert.ok(declIdx > -1 && probeIdx > -1, 'call site not found — this test has gone stale, fix it rather than deleting it');
     assert.ok(declIdx < probeIdx, 'declaredAppId must be resolved before the probe decision');
-    assert.match(src.slice(probeIdx, probeIdx + 200), /declaredAppId\s*\?\s*null\s*:\s*await fetchAppBinding\(\)/,
-        'the probe must remain conditional on declaredAppId — an unconditional fetchAppBinding() here resurrects the per-load 404');
+    assert.match(src.slice(probeIdx, probeIdx + 200), /const bindingExchange = declaredAppId\s*\?\s*null\s*:\s*startAppBinding\(\)/,
+        'the probe must remain conditional on declaredAppId — an unconditional startAppBinding() here resurrects the per-load 404');
 });
 
 test('the probe path itself is unchanged and still same-origin relative', () => {
     assert.equal(APP_BINDING_PATH, '/__descix/app-binding.json');
     assert.ok(APP_BINDING_PATH.startsWith('/') && !APP_BINDING_PATH.startsWith('//'),
         'relative-to-own-origin is why this was never a cross-origin reach into powch');
-    assert.equal(typeof fetchAppBinding, 'function');
+    assert.equal(typeof startAppBinding, 'function');
 });

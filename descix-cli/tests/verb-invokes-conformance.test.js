@@ -56,7 +56,6 @@ const EXCLUDED_FILES = new Set([
   path.join(CLI_ROOT, 'bin', 'mcp-server.js'),         // separate entry point
   path.join(CLI_ROOT, 'lib', 'api-client.js'),         // the invoke() dispatch mechanism itself
   path.join(CLI_ROOT, 'lib', 'service-api-client.js'), // ditto, packaged for external services
-  path.join(CLI_ROOT, 'lib', 'command-visibility.js'), // the get_command_surface FETCH itself (bootstrap, not a verb call site)
 ]);
 
 /**
